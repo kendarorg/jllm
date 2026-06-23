@@ -146,4 +146,9 @@ public class LLMRequest {
     topP=0.85f;
     topK=30;
   }
+
+  public LLMRequest withPrompt(String text) {
+    this.prompt = text;
+    return this;
+  }
 }
