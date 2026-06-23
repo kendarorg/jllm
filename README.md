@@ -2,7 +2,7 @@
 
 > ⚠️ **Work in progress.** This project is an exploration / demonstration, not a finished product. APIs, config formats and module layout will change.
 
-**JLLM** is a small Java framework that demonstrates how to build an **agent / tool / MCP based CLI on top of local LLMs** — without depending on any cloud provider. It talks to a locally-running model server ([Ollama](https://ollama.com)) and layers a configurable pipeline of *classifiers*, *agents* and *tools* on top of it.
+**JLLM** is a small Java framework that demonstrates how to build an **agent / tool / MCP based CLI on top of local LLMs** - without depending on any cloud provider. It talks to a locally-running model server ([Ollama](https://ollama.com)) and layers a configurable pipeline of *classifiers*, *agents* and *tools* on top of it.
 
 The goal is educational: to show, end to end, what the moving parts of an "agentic" CLI look like when you build them yourself in plain Java.
 
@@ -46,7 +46,7 @@ This is a Maven multi-module (reactor) project:
 
 ```
 jllm/
-├── pom.xml            parent reactor — org.kendar:j-llm:1.0-SNAPSHOT, Java 25
+├── pom.xml            parent reactor - org.kendar:j-llm:1.0-SNAPSHOT, Java 25
 ├── jllm-lib/          core library (clients, agents, tools, classifiers, config)
 ├── jllm-cli/          command-line front end (placeholder, in progress)
 └── default/           default .jllm configuration tree shipped with the project
@@ -93,7 +93,7 @@ LLMConfigManager.initialize(settings);
 LLMClient client = new OllamaClient(settings);
 LLMEntryPoint entryPoint = new LLMEntryPoint(client);
 
-// 4. Run a prompt — it gets classified and routed to an agent
+// 4. Run a prompt - it gets classified and routed to an agent
 String result = entryPoint.call("Write a function that reverses a string");
 System.out.println(result);
 ```
@@ -117,7 +117,7 @@ System.out.println(response.getResponse());
 
 Configuration lives under a `.jllm/` directory (created automatically if missing). Each setting directory in `LLMSettings.settingDirs` is scanned recursively.
 
-### Classifiers — JSON
+### Classifiers - JSON
 
 `.jllm/classifiers/default/scopeClassifier.json`
 
@@ -137,7 +137,7 @@ Configuration lives under a `.jllm/` directory (created automatically if missing
 
 The classifier builds a prompt from the `classification` map, asks the model to pick one of the keys, and retries up to `retries` times if the answer doesn't match a known category.
 
-### Agents — XML
+### Agents - XML
 
 `.jllm/agents/default/planning.xml`
 
@@ -201,7 +201,7 @@ public abstract class LLMClassifier {
 
 Foundational types are in place (see `THE_PROCESS.md`):
 
-- [x] Core types — Client (request/response), Tool, Classifier, exceptions
+- [x] Core types - Client (request/response), Tool, Classifier, exceptions
 - [x] Config-driven agents (XML) and classifiers (JSON)
 - [x] Ollama client
 - [x] Root agents: `oneShot`, `planning`, `code`, `research`
@@ -214,4 +214,4 @@ Foundational types are in place (see `THE_PROCESS.md`):
 
 ## License
 
-See [LICENSE](LICENSE) (Apache 2.0).
+See [LICENSE](LICENSE) (MIT).
