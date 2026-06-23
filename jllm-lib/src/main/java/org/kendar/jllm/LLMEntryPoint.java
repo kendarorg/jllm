@@ -1,9 +1,6 @@
 package org.kendar.jllm;
 
-import org.kendar.jllm.base.LLMClassifier;
-import org.kendar.jllm.base.LLMClient;
-import org.kendar.jllm.base.LLMConfigClassifier;
-import org.kendar.jllm.base.LLMConfigManager;
+import org.kendar.jllm.base.*;
 import org.kendar.jllm.commons.LLMContext;
 
 public class LLMEntryPoint {
@@ -17,10 +14,20 @@ public class LLMEntryPoint {
     this.context.setClient(client);
     this.scopeClassifier = LLMConfigManager.getClassifier("scopeClassifer");
   }
-  public void call(String prompt){
+  public String call(String prompt){
     prompt = prompt.trim();
-    var result = this.scopeClassifier.classify(context,prompt).trim();
+    var classification = this.scopeClassifier.classify(context,prompt);
+    LLMResponse response = null;
+    //Choose then what agent should it call between the standard root agents based on the scope
+    switch (classification){
+      case("plan"):
+        break;
+      case("oneShot"):
+      default:
+        response = client.call(new LLMRequest().withPrompt(prompt));
+        return response.getResponse();
+    }
 
-
+    return response == null ? null : response.getResponse();
   }
 }

@@ -1,9 +1,11 @@
 package org.kendar.jllm.base;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.dataformat.xml.XmlMapper;
 
 public class LLMObjectMapper {
   private static ObjectMapper objectMapper=null;
+  private static XmlMapper xmlMapper=null;
   private static final Object lock = new Object();
   public static ObjectMapper getObjectMapper(){
     if(objectMapper==null){
@@ -16,5 +18,15 @@ public class LLMObjectMapper {
       }
     }
     return objectMapper;
+  }
+
+  public static XmlMapper getXmlMapper(){
+    if(xmlMapper==null){
+      synchronized (lock) {
+        xmlMapper = new XmlMapper();
+        xmlMapper.disable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+      }
+    }
+    return xmlMapper;
   }
 }

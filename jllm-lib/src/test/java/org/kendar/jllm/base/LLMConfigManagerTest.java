@@ -69,6 +69,28 @@ class LLMConfigManagerTest {
   }
 
   @Test
+  void loadsDefaultAgentsFromRepoJllm() {
+    Path settingDir = settingDirWithDefaultJllm();
+
+    LLMSettings settings = new LLMSettings();
+    settings.setSettingDirs(List.of(settingDir.toString()));
+
+    LLMConfigManager.initialize(settings);
+
+    LLMAgent planning = LLMConfigManager.getAgent("planning");
+    assertNotNull(planning);
+    assertEquals("planning", planning.getName());
+    assertTrue(planning.getDescription().contains("todo list"));
+    assertTrue(planning.getOutputFormat().contains("[]"));
+
+    for (String name : List.of("research", "oneShot", "code")) {
+      LLMAgent agent = LLMConfigManager.getAgent(name);
+      assertNotNull(agent, "missing agent " + name);
+      assertEquals(name, agent.getName());
+    }
+  }
+
+  @Test
   void initializeCreatesJllmDirWhenMissing(@TempDir Path dir) {
     LLMSettings settings = new LLMSettings();
     settings.setSettingDirs(List.of(dir.toString()));

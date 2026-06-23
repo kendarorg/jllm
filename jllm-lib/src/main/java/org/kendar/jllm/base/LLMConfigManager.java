@@ -31,6 +31,31 @@ public class LLMConfigManager {
       if(classifiersDir.exists() && classifiersDir.isDirectory()){
         loadClassifiers(classifiersDir);
       }
+      var agentsDir = new File(jllmDir, "agents");
+      if(agentsDir.exists() && agentsDir.isDirectory()){
+        loadAgents(agentsDir);
+      }
+    }
+  }
+
+  private static void loadAgents(File agentsDir){
+    try(Stream<Path> paths = Files.walk(agentsDir.toPath())){
+      paths
+        .filter(Files::isRegularFile)
+        .filter(p -> p.toString().toLowerCase().endsWith(".xml"))
+        .forEach(LLMConfigManager::loadAgent);
+    } catch (IOException e) {
+      throw new LLMConfigManagerException("Unable to read agents from "+agentsDir.getAbsolutePath(), e);
+    }
+  }
+
+  private static void loadAgent(Path path){
+    try {
+      var agent = LLMObjectMapper.getXmlMapper()
+        .readValue(path.toFile(), LLMConfigAgent.class);
+      register(agent);
+    } catch (IOException e) {
+      throw new LLMConfigManagerException("Unable to load agent from "+path, e);
     }
   }
 
@@ -56,10 +81,14 @@ public class LLMConfigManager {
   }
 
   private static Map<String,LLMClassifier> classifiers = new HashMap<>();
+  private static Map<String,LLMAgent> agents = new HashMap<>();
   public static void register(Object classifier){
     if(classifier instanceof LLMClassifier){
       var lc = (LLMClassifier) classifier;
       classifiers.put(lc.getName(),lc);
+    } else if(classifier instanceof LLMAgent){
+      var la = (LLMAgent) classifier;
+      agents.put(la.getName(),la);
     }
 
   }
@@ -67,10 +96,17 @@ public class LLMConfigManager {
     if(classifiers.containsKey(name) && LLMClassifier.class.isAssignableFrom(clazz)){
       return (T)classifiers.get(name);
     }
+    if(agents.containsKey(name) && LLMAgent.class.isAssignableFrom(clazz)){
+      return (T)agents.get(name);
+    }
     throw new LLMConfigManagerException("No item found for "+name+" of type "+clazz.getSimpleName());
   }
 
   public static LLMClassifier getClassifier(String classifierName) {
     return get(classifierName,LLMClassifier.class);
+  }
+
+  public static LLMAgent getAgent(String agentName) {
+    return get(agentName,LLMAgent.class);
   }
 }

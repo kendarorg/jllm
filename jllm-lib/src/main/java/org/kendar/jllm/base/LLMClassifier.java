@@ -22,7 +22,7 @@ public abstract class LLMClassifier {
         classification = isClassified(result.getThinking());
       }
       if(classification!=null){
-        return classification;
+        return classification.trim();
       }
     }
     throw new LLMClassificationException("Unable to classify prompt "+text);
