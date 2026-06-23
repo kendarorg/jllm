@@ -34,7 +34,7 @@ class LLMConfigManagerTest {
   private static Path settingDirWithDefaultJllm() {
     Path dir = Path.of(System.getProperty("user.dir")).toAbsolutePath();
     while (dir != null) {
-      // The setting dir is the one holding .jllm/classifiers/default — check the
+      // The setting dir is the one holding .jllm/classifiers/default - check the
       // dir itself and a "default" sub-dir at each level walking up to the root.
       for (Path candidate : new Path[]{dir, dir.resolve("default")}) {
         if (Files.isDirectory(candidate.resolve(".jllm").resolve("classifiers").resolve("default"))) {
