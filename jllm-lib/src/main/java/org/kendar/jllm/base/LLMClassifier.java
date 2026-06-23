@@ -27,17 +27,18 @@ public abstract class LLMClassifier {
     }
     throw new LLMClassificationException("Unable to classify prompt "+text);
   }
-  protected String buildPrompt(){
+  public String buildPrompt(){
     return getDescription()+"\n"+
         "These are the only allowed values:\n"+
         getClassification().entrySet().stream().
-            map(e->e.getKey()+"="+e.getValue()).
-            reduce((a,b)->a+"\n"+b).orElse("")+
+            map(e->" * "+e.getKey()+": "+e.getValue()).
+            reduce((a,b)->a+"\n"+b).orElse("")+"\n"+
+        "Reply with exactly one word:"+"\n"+
+        String.join(" or ",getClassification().keySet())+"\n"+
         "Classify the following text:\n";
   }
 
   protected String isClassified(String result){
-    var count = 0;
     result = result.trim().toLowerCase();
     for(var c:getClassification().keySet()){
       if(result.equalsIgnoreCase(c))return c;

@@ -64,9 +64,13 @@ public class LLMConfigManager {
 
   }
   public static <T>  T get(String name,Class<T> clazz){
-    if(!classifiers.containsKey(name) && clazz.isAssignableFrom(LLMClassifier.class)){
+    if(classifiers.containsKey(name) && LLMClassifier.class.isAssignableFrom(clazz)){
       return (T)classifiers.get(name);
     }
     throw new LLMConfigManagerException("No item found for "+name+" of type "+clazz.getSimpleName());
+  }
+
+  public static LLMClassifier getClassifier(String classifierName) {
+    return get(classifierName,LLMClassifier.class);
   }
 }
