@@ -88,23 +88,27 @@ public class OllamaClient implements LLMClient {
   }
 
   private String buildPayload(LLMRequest request) {
-    // Build the exact /api/generate request shape:
-    // model, prompt, format, system, stream, think, keep_alive, options{temperature,top_k,top_p,num_ctx}.
+    // Build the /api/chat request shape:
+    // model, messages[], format, stream, think, keep_alive, options{temperature,top_k,top_p,num_ctx}.
     ObjectNode root = LLMObjectMapper.getObjectMapper().createObjectNode();
     root.put("model", settings.getModel());
 
-    if (request.getPrompt() != null) {
+    if (request.getPrompt() == null || request.getPrompt().isEmpty()) {
       throw new LLMClientException("No prompt provided in request", null);
     }
-    if (request.getFormat() != null && !request.getFormat().isEmpty()) {
-      request.setFormat("json");
+
+    var messages = root.putArray("messages");
+    if (request.getSystem() != null && !request.getSystem().isEmpty()) {
+      ObjectNode systemMsg = messages.addObject();
+      systemMsg.put("role", "system");
+      systemMsg.put("content", request.getSystem());
     }
-
-    root.put("prompt", request.getPrompt());
-    root.put("format", request.getFormat());
+    ObjectNode userMsg = messages.addObject();
+    userMsg.put("role", "user");
+    userMsg.put("content", request.getPrompt());
 
     if (request.getFormat() != null && !request.getFormat().isEmpty()) {
-      root.put("format", request.getSystem());
+      root.put("format", request.getFormat());
     }
 
     // Streaming is not handled here; always request a single aggregated response.
@@ -131,7 +135,7 @@ public class OllamaClient implements LLMClient {
 
   @Override
   public LLMResponse call(LLMRequest request) throws LLMClientException {
-    String url = baseUrl() + "/api/generate";
+    String url = baseUrl() + "/api/chat";
     HttpPost post = new HttpPost(url);
     post.setHeader("Content-Type", "application/json");
     post.setEntity(new StringEntity(buildPayload(request), StandardCharsets.UTF_8));

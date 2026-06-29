@@ -1,11 +1,35 @@
 package org.kendar.jllm.base;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class LLMResponse {
   private String response;
   private String thinking;
   private boolean done;
+
+  /**
+   * The /api/chat endpoint nests the assistant reply under {@code message}.
+   * Flatten it into {@link #response}/{@link #thinking} so existing callers keep working.
+   */
+  @JsonProperty("message")
+  public void setMessage(Message message) {
+    if (message == null) {
+      return;
+    }
+    this.response = message.content;
+    if (message.thinking != null) {
+      this.thinking = message.thinking;
+    }
+  }
+
+  @JsonIgnoreProperties(ignoreUnknown = true)
+  public static class Message {
+    public String role;
+    public String content;
+    public String thinking;
+  }
   @JsonProperty("done_reason")
   private String doneReason;
   @JsonProperty("eval_count")
