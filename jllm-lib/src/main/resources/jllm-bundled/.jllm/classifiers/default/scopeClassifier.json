@@ -1,0 +1,11 @@
+{
+  "name": "scopeClassifier",
+  "description": "Classify the scope of the prompt",
+  "classification": {
+    "plan": "Create a plan for the request",
+    "code": "Generate code for the request",
+    "oneShot": "Simple request",
+    "research": "Research the request"
+  },
+  "retries": 3
+}

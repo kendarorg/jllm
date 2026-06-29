@@ -2,13 +2,16 @@ package org.kendar.jllm.session;
 
 import org.kendar.jllm.base.LLMAgent;
 import org.kendar.jllm.base.LLMClient;
+import org.kendar.jllm.base.LLMConfigManager;
 import org.kendar.jllm.base.LLMMessage;
 import org.kendar.jllm.chat.ChatMessage;
 import org.kendar.jllm.chat.ChatStore;
 import org.kendar.jllm.context.ContextFileLoader;
 import org.kendar.jllm.exceptions.LLMClientException;
+import org.kendar.jllm.mcp.McpManager;
 import org.kendar.jllm.skills.SkillRegistry;
 import org.kendar.jllm.tools.LLMToolRegistry;
+import org.kendar.jllm.tools.TodoStore;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -22,31 +25,63 @@ import java.util.stream.Stream;
  * {@link #send(String)} rebuilds the message history (system prompt + stored
  * turns), runs the {@link AgenticLoop} and persists the new turns.
  */
-public class CodingSession {
+public class CodingSession implements AutoCloseable {
 
   private final Path workingDir;
   private final LLMClient client;
   private final ChatStore store;
   private final LLMToolRegistry registry;
+  private final LLMToolRegistry readOnlyRegistry;
   private final SkillRegistry skills;
   private final ContextFileLoader contextLoader;
   private final String conversationId;
   private final LLMAgent rootAgent;
   private final int maxIterations;
+  private final PlanState planState;
+  private final TodoStore todoStore;
+  private final ContextCompressor compressor;
+  private final McpManager mcpManager;
 
+  /** Backwards-compatible constructor: no plan mode, no compression, default todo store. */
   public CodingSession(Path workingDir, LLMClient client, ChatStore store,
                        LLMToolRegistry registry, SkillRegistry skills,
                        ContextFileLoader contextLoader, String conversationId,
                        LLMAgent rootAgent, int maxIterations) {
+    this(workingDir, client, store, registry, registry, skills, contextLoader, conversationId,
+        rootAgent, maxIterations, new PlanState(false), new TodoStore(), null, null);
+  }
+
+  public CodingSession(Path workingDir, LLMClient client, ChatStore store,
+                       LLMToolRegistry registry, LLMToolRegistry readOnlyRegistry,
+                       SkillRegistry skills, ContextFileLoader contextLoader, String conversationId,
+                       LLMAgent rootAgent, int maxIterations, PlanState planState,
+                       TodoStore todoStore, ContextCompressor compressor, McpManager mcpManager) {
     this.workingDir = workingDir.toAbsolutePath().normalize();
     this.client = client;
     this.store = store;
     this.registry = registry;
+    this.readOnlyRegistry = readOnlyRegistry == null ? registry : readOnlyRegistry;
     this.skills = skills;
     this.contextLoader = contextLoader;
     this.conversationId = conversationId;
     this.rootAgent = rootAgent;
     this.maxIterations = maxIterations;
+    this.planState = planState == null ? new PlanState(false) : planState;
+    this.todoStore = todoStore == null ? new TodoStore() : todoStore;
+    this.compressor = compressor;
+    this.mcpManager = mcpManager;
+  }
+
+  public boolean isPlanMode() {
+    return planState.isActive();
+  }
+
+  /** Releases external resources (MCP server processes). Safe to call repeatedly. */
+  @Override
+  public void close() {
+    if (mcpManager != null) {
+      mcpManager.close();
+    }
   }
 
   public String getConversationId() {
@@ -65,7 +100,9 @@ public class CodingSession {
       messages.add(m);
     }
 
-    AgenticLoop.LoopResult result = new AgenticLoop().run(client, messages, registry, maxIterations);
+    LLMToolRegistry activeRegistry = planState.isActive() ? readOnlyRegistry : registry;
+    AgenticLoop.LoopResult result =
+        new AgenticLoop(compressor).run(client, messages, activeRegistry, maxIterations);
 
     for (LLMMessage m : result.newMessages) {
       appendStore(m.getRole(), m.getContent(), m.getToolName(), m.getToolCallId());
@@ -113,8 +150,43 @@ public class CodingSession {
       parts.add("Available skills:\n" + catalog.trim());
     }
 
+    String agentCatalog = agentCatalog();
+    if (!agentCatalog.isBlank()) {
+      parts.add("You can delegate work to specialized sub-agents with the 'task' tool "
+          + "(arguments: agent, task). Pick the agent whose description best fits the sub-task.\n"
+          + "Available agents:\n" + agentCatalog);
+    }
+
+    if (!todoStore.isEmpty()) {
+      parts.add("Current todo list (keep it updated with 'todo_write'):\n" + todoStore.render());
+    }
+
+    if (planState.isActive()) {
+      parts.add("PLAN MODE IS ACTIVE. Research the codebase using read-only tools and produce a "
+          + "concrete implementation plan. Do NOT modify any files or run mutating commands. When "
+          + "the plan is ready, call 'exit_plan_mode' with the plan to leave plan mode.");
+    }
+
     parts.add("Tools are available; call them to inspect or modify the project.");
 
     return String.join("\n\n", parts);
+  }
+
+  /** Lists registered sub-agents (excluding the current root agent) for auto-delegation. */
+  private String agentCatalog() {
+    String rootName = rootAgent == null ? null : rootAgent.getName();
+    StringBuilder sb = new StringBuilder();
+    for (LLMAgent agent : LLMConfigManager.listAgents()) {
+      if (rootName != null && rootName.equals(agent.getName())) {
+        continue;
+      }
+      String desc = agent.getDescription();
+      sb.append("- ").append(agent.getName());
+      if (desc != null && !desc.isBlank()) {
+        sb.append(": ").append(desc.trim().replaceAll("\\s+", " "));
+      }
+      sb.append('\n');
+    }
+    return sb.toString().trim();
   }
 }

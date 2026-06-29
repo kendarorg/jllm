@@ -21,6 +21,20 @@ import java.util.Map;
  */
 public class AgenticLoop {
 
+  private final ContextCompressor compressor;
+
+  public AgenticLoop() {
+    this(null);
+  }
+
+  /**
+   * @param compressor optional context compressor applied before each model call;
+   *                   {@code null} disables compression.
+   */
+  public AgenticLoop(ContextCompressor compressor) {
+    this.compressor = compressor;
+  }
+
   /** Final text plus every message appended beyond the input (for persistence). */
   public static class LoopResult {
     public final String finalText;
@@ -38,6 +52,9 @@ public class AgenticLoop {
     String lastText = "";
 
     for (int i = 0; i < maxIterations; i++) {
+      if (compressor != null) {
+        messages = compressor.compress(messages);
+      }
       LLMRequest request = new LLMRequest();
       request.setMessages(messages);
       request.setFormat(""); // disable structured json so tool calling works

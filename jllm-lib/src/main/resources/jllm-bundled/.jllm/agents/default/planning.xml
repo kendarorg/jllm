@@ -1,0 +1,14 @@
+<agent name="planning">
+  <description><![CDATA[
+Break the request down into an ordered, actionable todo list.
+Analyze the goal, identify the concrete steps required to achieve it,
+and list them in execution order. Do not implement anything, only plan.
+]]></description>
+  <outputFormat><![CDATA[
+A todo list, even multiline, each todo line starting with '[] ' followed by a short imperative description of what to do.
+Example:
+[] Read the existing configuration
+[] Add the new field to the model
+[] Wire the field into the loader
+]]></outputFormat>
+</agent>

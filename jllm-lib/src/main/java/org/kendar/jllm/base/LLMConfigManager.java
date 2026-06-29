@@ -27,6 +27,7 @@ public class LLMConfigManager {
           throw new LLMConfigManagerException("Unable to create directory "+jllmDir.getAbsolutePath());
         }
       }
+      DefaultsSeeder.seed(new File(settingDir));
       var classifiersDir = new File(jllmDir, "classifiers");
       if(classifiersDir.exists() && classifiersDir.isDirectory()){
         loadClassifiers(classifiersDir);
@@ -108,5 +109,10 @@ public class LLMConfigManager {
 
   public static LLMAgent getAgent(String agentName) {
     return get(agentName,LLMAgent.class);
+  }
+
+  /** All registered agents, for building the auto-delegation catalog. */
+  public static java.util.Collection<LLMAgent> listAgents() {
+    return new ArrayList<>(agents.values());
   }
 }
