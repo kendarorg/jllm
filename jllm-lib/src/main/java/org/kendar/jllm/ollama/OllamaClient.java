@@ -87,25 +87,45 @@ public class OllamaClient implements LLMClient {
     return server;
   }
 
-  private String buildPayload(LLMRequest request) {
+  String buildPayload(LLMRequest request) {
     // Build the /api/chat request shape:
-    // model, messages[], format, stream, think, keep_alive, options{temperature,top_k,top_p,num_ctx}.
+    // model, messages[], tools[], format, stream, think, keep_alive, options{temperature,top_k,top_p,num_ctx}.
     ObjectNode root = LLMObjectMapper.getObjectMapper().createObjectNode();
     root.put("model", settings.getModel());
 
-    if (request.getPrompt() == null || request.getPrompt().isEmpty()) {
+    boolean hasMessages = request.getMessages() != null && !request.getMessages().isEmpty();
+    boolean hasPrompt = request.getPrompt() != null && !request.getPrompt().isEmpty();
+    if (!hasMessages && !hasPrompt) {
       throw new LLMClientException("No prompt provided in request", null);
     }
 
     var messages = root.putArray("messages");
-    if (request.getSystem() != null && !request.getSystem().isEmpty()) {
-      ObjectNode systemMsg = messages.addObject();
-      systemMsg.put("role", "system");
-      systemMsg.put("content", request.getSystem());
+    if (hasMessages) {
+      for (LLMMessage msg : request.getMessages()) {
+        ObjectNode m = messages.addObject();
+        m.put("role", msg.getRole());
+        m.put("content", msg.getContent());
+        if ("tool".equals(msg.getRole()) && msg.getToolName() != null && !msg.getToolName().isEmpty()) {
+          m.put("tool_name", msg.getToolName());
+        }
+      }
+    } else {
+      if (request.getSystem() != null && !request.getSystem().isEmpty()) {
+        ObjectNode systemMsg = messages.addObject();
+        systemMsg.put("role", "system");
+        systemMsg.put("content", request.getSystem());
+      }
+      ObjectNode userMsg = messages.addObject();
+      userMsg.put("role", "user");
+      userMsg.put("content", request.getPrompt());
     }
-    ObjectNode userMsg = messages.addObject();
-    userMsg.put("role", "user");
-    userMsg.put("content", request.getPrompt());
+
+    if (request.getTools() != null && !request.getTools().isEmpty()) {
+      var tools = root.putArray("tools");
+      for (ObjectNode tool : request.getTools()) {
+        tools.add(tool);
+      }
+    }
 
     if (request.getFormat() != null && !request.getFormat().isEmpty()) {
       root.put("format", request.getFormat());

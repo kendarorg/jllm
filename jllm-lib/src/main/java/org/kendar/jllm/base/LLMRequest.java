@@ -2,12 +2,37 @@ package org.kendar.jllm.base;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.util.ArrayList;
 import java.util.List;
 
 public class LLMRequest {
   String model;
+
+  List<LLMMessage> messages = new ArrayList<>();
+  List<ObjectNode> tools = new ArrayList<>();
+
+  public List<LLMMessage> getMessages() {
+    return messages;
+  }
+
+  public void setMessages(List<LLMMessage> messages) {
+    this.messages = messages;
+  }
+
+  public LLMRequest withMessages(List<LLMMessage> messages) {
+    this.messages = messages;
+    return this;
+  }
+
+  public List<ObjectNode> getTools() {
+    return tools;
+  }
+
+  public void setTools(List<ObjectNode> tools) {
+    this.tools = tools;
+  }
 
   public String getPrompt() {
     return prompt;

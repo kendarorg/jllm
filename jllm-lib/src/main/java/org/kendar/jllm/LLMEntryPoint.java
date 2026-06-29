@@ -12,7 +12,7 @@ public class LLMEntryPoint {
     this.client = client;
     this.context = new LLMContext();
     this.context.setClient(client);
-    this.scopeClassifier = LLMConfigManager.getClassifier("scopeClassifer");
+    this.scopeClassifier = LLMConfigManager.getClassifier("scopeClassifier");
   }
   public String call(String prompt){
     prompt = prompt.trim();
