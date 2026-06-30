@@ -157,6 +157,17 @@ public class CodingSession implements AutoCloseable {
           + "Available agents:\n" + agentCatalog);
     }
 
+    if (mcpManager != null) {
+      String resources = mcpManager.resourcesCatalog();
+      if (!resources.isBlank()) {
+        parts.add("MCP resources (read with 'read_mcp_resource'):\n" + resources);
+      }
+      String prompts = mcpManager.promptsCatalog();
+      if (!prompts.isBlank()) {
+        parts.add("MCP prompts (expand with 'get_mcp_prompt'; * marks required args):\n" + prompts);
+      }
+    }
+
     if (!todoStore.isEmpty()) {
       parts.add("Current todo list (keep it updated with 'todo_write'):\n" + todoStore.render());
     }

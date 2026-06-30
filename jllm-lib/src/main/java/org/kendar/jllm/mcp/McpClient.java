@@ -42,6 +42,7 @@ public class McpClient implements AutoCloseable {
   private OutputStream stdin;
   private Thread readerThread;
   private volatile boolean closed;
+  private JsonNode capabilities;
 
   public McpClient(McpServerConfig config) {
     this.config = config;
@@ -77,9 +78,17 @@ public class McpClient implements AutoCloseable {
     ObjectNode clientInfo = params.putObject("clientInfo");
     clientInfo.put("name", "jllm");
     clientInfo.put("version", "0.1");
-    request("initialize", params);
+    JsonNode init = request("initialize", params);
+    if (init != null) {
+      this.capabilities = init.get("capabilities");
+    }
 
     notification("notifications/initialized", mapper.createObjectNode());
+  }
+
+  /** Whether the server declared the given capability (e.g. "resources", "prompts", "tools"). */
+  public boolean supports(String capability) {
+    return capabilities != null && capabilities.has(capability);
   }
 
   private void startReader() {
@@ -234,6 +243,125 @@ public class McpClient implements AutoCloseable {
       return "Error: " + sb;
     }
     return sb.length() == 0 ? result.toString() : sb.toString();
+  }
+
+  /** Returns the resources advertised by the server. */
+  public List<McpResourceDefinition> listResources() {
+    JsonNode result = request("resources/list", mapper.createObjectNode());
+    List<McpResourceDefinition> resources = new ArrayList<>();
+    if (result == null) {
+      return resources;
+    }
+    JsonNode arr = result.get("resources");
+    if (arr != null && arr.isArray()) {
+      for (JsonNode r : arr) {
+        String uri = r.path("uri").asText(null);
+        if (uri == null) {
+          continue;
+        }
+        resources.add(new McpResourceDefinition(
+            uri,
+            r.path("name").asText(""),
+            r.path("description").asText(""),
+            r.path("mimeType").asText("")));
+      }
+    }
+    return resources;
+  }
+
+  /** Reads a resource by URI and returns its concatenated textual contents. */
+  public String readResource(String uri) {
+    ObjectNode params = mapper.createObjectNode();
+    params.put("uri", uri);
+    JsonNode result = request("resources/read", params);
+    if (result == null) {
+      return "";
+    }
+    StringBuilder sb = new StringBuilder();
+    JsonNode contents = result.get("contents");
+    if (contents != null && contents.isArray()) {
+      for (JsonNode c : contents) {
+        if (c.hasNonNull("text")) {
+          if (sb.length() > 0) {
+            sb.append('\n');
+          }
+          sb.append(c.path("text").asText(""));
+        } else if (c.hasNonNull("blob")) {
+          if (sb.length() > 0) {
+            sb.append('\n');
+          }
+          sb.append("[binary resource ").append(c.path("mimeType").asText("application/octet-stream"))
+              .append(", base64 omitted]");
+        }
+      }
+    }
+    return sb.length() == 0 ? result.toString() : sb.toString();
+  }
+
+  /** Returns the prompt templates advertised by the server. */
+  public List<McpPromptDefinition> listPrompts() {
+    JsonNode result = request("prompts/list", mapper.createObjectNode());
+    List<McpPromptDefinition> prompts = new ArrayList<>();
+    if (result == null) {
+      return prompts;
+    }
+    JsonNode arr = result.get("prompts");
+    if (arr != null && arr.isArray()) {
+      for (JsonNode p : arr) {
+        String name = p.path("name").asText(null);
+        if (name == null) {
+          continue;
+        }
+        List<McpPromptDefinition.Argument> args = new ArrayList<>();
+        JsonNode argsNode = p.get("arguments");
+        if (argsNode != null && argsNode.isArray()) {
+          for (JsonNode a : argsNode) {
+            args.add(new McpPromptDefinition.Argument(
+                a.path("name").asText(""),
+                a.path("description").asText(""),
+                a.path("required").asBoolean(false)));
+          }
+        }
+        prompts.add(new McpPromptDefinition(name, p.path("description").asText(""), args));
+      }
+    }
+    return prompts;
+  }
+
+  /** Expands a prompt template with the given arguments into a flattened message transcript. */
+  public String getPrompt(String name, Map<String, String> arguments) {
+    ObjectNode params = mapper.createObjectNode();
+    params.put("name", name);
+    ObjectNode args = params.putObject("arguments");
+    if (arguments != null) {
+      for (Map.Entry<String, String> e : arguments.entrySet()) {
+        args.put(e.getKey(), e.getValue());
+      }
+    }
+    JsonNode result = request("prompts/get", params);
+    if (result == null) {
+      return "";
+    }
+    StringBuilder sb = new StringBuilder();
+    String description = result.path("description").asText("");
+    if (!description.isBlank()) {
+      sb.append(description).append("\n\n");
+    }
+    JsonNode messages = result.get("messages");
+    if (messages != null && messages.isArray()) {
+      for (JsonNode m : messages) {
+        String role = m.path("role").asText("user");
+        JsonNode content = m.get("content");
+        String text;
+        if (content != null && content.isObject()) {
+          text = content.path("text").asText("");
+        } else {
+          text = content == null ? "" : content.asText("");
+        }
+        sb.append(role).append(": ").append(text).append("\n\n");
+      }
+    }
+    return sb.toString().trim();
   }
 
   private void failAllPending(LLMMcpException ex) {

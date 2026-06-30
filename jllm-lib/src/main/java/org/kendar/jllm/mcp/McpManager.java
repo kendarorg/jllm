@@ -9,23 +9,28 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
  * Discovers MCP servers from {@code .jllm/mcp.json}, starts each one, and
- * registers their tools into the shared {@link LLMToolRegistry}. A single
- * manager owns the spawned client processes and must be {@link #close() closed}
- * when the session ends. Failures starting an individual server are isolated:
- * the server is skipped and the rest continue.
+ * registers their tools, resources and prompts. Tools are registered directly
+ * into the shared {@link LLMToolRegistry}; resources and prompts are exposed
+ * through the {@code read_mcp_resource} and {@code get_mcp_prompt} tools plus
+ * catalogs surfaced in the system prompt. A single manager owns the spawned
+ * client processes and must be {@link #close() closed} when the session ends.
  */
 public class McpManager implements AutoCloseable {
 
-  private final List<McpClient> clients = new ArrayList<>();
+  private final Map<String, McpClient> clientsByName = new LinkedHashMap<>();
+  private final Map<String, List<McpResourceDefinition>> resourcesByServer = new LinkedHashMap<>();
+  private final Map<String, List<McpPromptDefinition>> promptsByServer = new LinkedHashMap<>();
 
   /**
    * Loads {@code <workingDir>/.jllm/mcp.json} (if present), starts the configured
-   * servers and registers their tools. Always returns a manager (possibly empty).
+   * servers and registers their tools, resources and prompts. Always returns a
+   * manager (possibly empty).
    */
   public static McpManager loadAndRegister(Path workingDir, LLMToolRegistry registry) {
     McpManager manager = new McpManager();
@@ -46,6 +51,13 @@ public class McpManager implements AutoCloseable {
       }
       manager.startServer(server, registry);
     }
+    // Resource/prompt access goes through aggregate tools, registered once.
+    if (manager.hasResources()) {
+      registry.register(new ReadMcpResourceTool(manager));
+    }
+    if (manager.hasPrompts()) {
+      registry.register(new GetMcpPromptTool(manager));
+    }
     return manager;
   }
 
@@ -57,13 +69,112 @@ public class McpManager implements AutoCloseable {
       for (McpToolDefinition def : tools) {
         registry.register(new McpTool(client, def));
       }
-      clients.add(client);
-      System.err.println("[mcp] Registered " + tools.size() + " tool(s) from server '"
-          + server.getName() + "'");
+      clientsByName.put(server.getName(), client);
+
+      int resourceCount = 0;
+      if (client.supports("resources")) {
+        List<McpResourceDefinition> resources = client.listResources();
+        resourcesByServer.put(server.getName(), resources);
+        resourceCount = resources.size();
+      }
+      int promptCount = 0;
+      if (client.supports("prompts")) {
+        List<McpPromptDefinition> prompts = client.listPrompts();
+        promptsByServer.put(server.getName(), prompts);
+        promptCount = prompts.size();
+      }
+      System.err.println("[mcp] Server '" + server.getName() + "': " + tools.size()
+          + " tool(s), " + resourceCount + " resource(s), " + promptCount + " prompt(s)");
     } catch (RuntimeException e) {
       System.err.println("[mcp] Skipping server '" + server.getName() + "': " + e.getMessage());
       client.close();
     }
+  }
+
+  public boolean hasResources() {
+    return resourcesByServer.values().stream().anyMatch(l -> !l.isEmpty());
+  }
+
+  public boolean hasPrompts() {
+    return promptsByServer.values().stream().anyMatch(l -> !l.isEmpty());
+  }
+
+  /** Resolves which client to read a resource from, by explicit server or by URI match. */
+  public McpClient resolveResourceClient(String server, String uri) {
+    if (server != null && !server.isBlank()) {
+      return clientsByName.get(server);
+    }
+    String onlyServer = null;
+    int serversWithResources = 0;
+    for (Map.Entry<String, List<McpResourceDefinition>> e : resourcesByServer.entrySet()) {
+      if (e.getValue().isEmpty()) {
+        continue;
+      }
+      serversWithResources++;
+      onlyServer = e.getKey();
+      for (McpResourceDefinition r : e.getValue()) {
+        if (r.getUri().equals(uri)) {
+          return clientsByName.get(e.getKey());
+        }
+      }
+    }
+    // No exact URI match: fall back to the sole resource-providing server, if unambiguous.
+    return serversWithResources == 1 ? clientsByName.get(onlyServer) : null;
+  }
+
+  /** Resolves which client to fetch a prompt from, by explicit server or by prompt name. */
+  public McpClient resolvePromptClient(String server, String promptName) {
+    if (server != null && !server.isBlank()) {
+      return clientsByName.get(server);
+    }
+    for (Map.Entry<String, List<McpPromptDefinition>> e : promptsByServer.entrySet()) {
+      for (McpPromptDefinition p : e.getValue()) {
+        if (p.getName().equals(promptName)) {
+          return clientsByName.get(e.getKey());
+        }
+      }
+    }
+    return null;
+  }
+
+  /** Human-readable list of resources for the system prompt; empty when none. */
+  public String resourcesCatalog() {
+    StringBuilder sb = new StringBuilder();
+    for (Map.Entry<String, List<McpResourceDefinition>> e : resourcesByServer.entrySet()) {
+      for (McpResourceDefinition r : e.getValue()) {
+        sb.append("- ").append(e.getKey()).append(": ").append(r.getUri());
+        if (r.getName() != null && !r.getName().isBlank()) {
+          sb.append(" (").append(r.getName()).append(')');
+        }
+        if (r.getDescription() != null && !r.getDescription().isBlank()) {
+          sb.append(" — ").append(r.getDescription().trim().replaceAll("\\s+", " "));
+        }
+        sb.append('\n');
+      }
+    }
+    return sb.toString().trim();
+  }
+
+  /** Human-readable list of prompts for the system prompt; empty when none. */
+  public String promptsCatalog() {
+    StringBuilder sb = new StringBuilder();
+    for (Map.Entry<String, List<McpPromptDefinition>> e : promptsByServer.entrySet()) {
+      for (McpPromptDefinition p : e.getValue()) {
+        sb.append("- ").append(e.getKey()).append('/').append(p.getName());
+        if (p.getArguments() != null && !p.getArguments().isEmpty()) {
+          List<String> names = new ArrayList<>();
+          for (McpPromptDefinition.Argument a : p.getArguments()) {
+            names.add(a.isRequired() ? a.getName() + "*" : a.getName());
+          }
+          sb.append('(').append(String.join(", ", names)).append(')');
+        }
+        if (p.getDescription() != null && !p.getDescription().isBlank()) {
+          sb.append(" — ").append(p.getDescription().trim().replaceAll("\\s+", " "));
+        }
+        sb.append('\n');
+      }
+    }
+    return sb.toString().trim();
   }
 
   static List<McpServerConfig> parse(String json) {
@@ -107,14 +218,16 @@ public class McpManager implements AutoCloseable {
   }
 
   public int serverCount() {
-    return clients.size();
+    return clientsByName.size();
   }
 
   @Override
   public void close() {
-    for (McpClient client : clients) {
+    for (McpClient client : clientsByName.values()) {
       client.close();
     }
-    clients.clear();
+    clientsByName.clear();
+    resourcesByServer.clear();
+    promptsByServer.clear();
   }
 }

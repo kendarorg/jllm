@@ -6,16 +6,16 @@ import org.kendar.jllm.base.LLMObjectMapper;
 import org.kendar.jllm.exceptions.LLMToolException;
 
 /** Small helper to build Ollama function-schema JSON without hand-concatenated strings. */
-final class ToolSchemas {
+public final class ToolSchemas {
 
   private ToolSchemas() {
   }
 
-  static Builder builder(String name, String description) {
+  public static Builder builder(String name, String description) {
     return new Builder(name, description);
   }
 
-  static final class Builder {
+  public static final class Builder {
     private final ObjectNode properties;
     private final ArrayNode required;
     private final ObjectNode root;
@@ -32,7 +32,7 @@ final class ToolSchemas {
       required = parameters.putArray("required");
     }
 
-    Builder prop(String name, String type, String description, boolean isRequired) {
+    public Builder prop(String name, String type, String description, boolean isRequired) {
       ObjectNode p = properties.putObject(name);
       p.put("type", type);
       p.put("description", description);
@@ -42,7 +42,7 @@ final class ToolSchemas {
       return this;
     }
 
-    String build() {
+    public String build() {
       try {
         return LLMObjectMapper.getObjectMapper().writeValueAsString(root);
       } catch (Exception e) {
