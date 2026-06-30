@@ -2,6 +2,7 @@ package org.kendar.jllm.session;
 
 import org.kendar.jllm.base.LLMClient;
 import org.kendar.jllm.base.LLMMessage;
+import org.kendar.jllm.base.LLMObjectMapper;
 import org.kendar.jllm.base.LLMRequest;
 import org.kendar.jllm.base.LLMResponse;
 import org.kendar.jllm.base.LLMToolCall;
@@ -88,13 +89,33 @@ public class AgenticLoop {
     Map<String, String> args = new LinkedHashMap<>();
     if (call.getArguments() != null) {
       for (Map.Entry<String, Object> e : call.getArguments().entrySet()) {
-        args.put(e.getKey(), e.getValue() == null ? null : e.getValue().toString());
+        args.put(e.getKey(), stringifyArg(e.getValue()));
       }
     }
     try {
       return tools.dispatch(call.getName(), args);
     } catch (LLMToolException e) {
       return "Error: " + e.getMessage();
+    }
+  }
+
+  /**
+   * Flattens a tool-call argument to the {@code String} tools consume. Scalars
+   * use their plain text form; objects and arrays are re-serialized to JSON so
+   * tools that re-parse a structured argument (e.g. todo_write's {@code todos})
+   * receive valid JSON rather than Java's {@code toString()} rendering.
+   */
+  private static String stringifyArg(Object value) {
+    if (value == null) {
+      return null;
+    }
+    if (value instanceof String || value instanceof Number || value instanceof Boolean) {
+      return value.toString();
+    }
+    try {
+      return LLMObjectMapper.getObjectMapper().writeValueAsString(value);
+    } catch (Exception e) {
+      return value.toString();
     }
   }
 }
