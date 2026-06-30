@@ -1,0 +1,12 @@
+<agent name="code">
+  <description><![CDATA[
+Generate the code that fulfills the request.
+Implement the requested behavior following the conventions of the
+surrounding codebase, producing complete and working source.\
+]]></description>
+  <outputFormat><![CDATA[
+The source code that satisfies the request, inside fenced code
+blocks annotated with the language and, where relevant,
+the target file path. Include a brief note of any assumptions made.
+]]></outputFormat>
+</agent>

@@ -69,6 +69,36 @@ class LLMToolRegistryTest {
     assertEquals("acted:edit:2", registry.dispatch("replace", Map.of("x", "2")));
   }
 
+  static class NameDerivingTool extends FakeTool {
+    NameDerivingTool() {
+      super("task", true);
+    }
+
+    @Override
+    public String nameDerivedArg() {
+      return "agent";
+    }
+
+    @Override
+    public String act(Map<String, String> args) {
+      return "task:agent=" + args.get("agent");
+    }
+  }
+
+  @Test
+  void dispatchDerivesArgFromAlias() {
+    LLMToolRegistry registry = new LLMToolRegistry();
+    registry.register(new NameDerivingTool());
+    registry.registerAlias("planning", "task");
+
+    // Invoked via the agent-name alias with no explicit agent -> derived from name.
+    assertEquals("task:agent=planning", registry.dispatch("planning", Map.of()));
+    // Canonical name -> nothing derived.
+    assertEquals("task:agent=null", registry.dispatch("task", Map.of()));
+    // Explicit agent wins over the alias.
+    assertEquals("task:agent=review", registry.dispatch("planning", Map.of("agent", "review")));
+  }
+
   @Test
   void dispatchUnknownThrows() {
     LLMToolRegistry registry = new LLMToolRegistry();

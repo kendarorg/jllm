@@ -22,8 +22,8 @@ class RealLlmCodingSessionIT {
 
   private static OllamaClient realClient() {
     LLMSettings settings = new LLMSettings();
-    String model = System.getenv().getOrDefault("JLLM_MODEL", "qwen2.5-coder");
-    String server = System.getenv().getOrDefault("JLLM_SERVER", "http://localhost:11434");
+    String model = System.getenv().getOrDefault("JLLM_MODEL", "danielsheep/Qwen3-Coder-30B-A3B-Instruct-1M-Unsloth:UD-Q4_K_XL");
+    String server = System.getenv().getOrDefault("JLLM_SERVER", "http://192.168.1.96:11434");
     settings.setModel(model);
     settings.setServer(server);
     return new OllamaClient(settings);

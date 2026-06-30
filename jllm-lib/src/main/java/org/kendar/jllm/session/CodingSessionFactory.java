@@ -75,8 +75,15 @@ public final class CodingSessionFactory {
     registry.registerAlias("use_skill", skillTool.name());
     registry.register(new TodoWriteTool(todoStore));
     registry.register(new ExitPlanModeTool(planState));
-    registry.register(new DelegateTool(client, workingDir, registry,
-        MAX_DELEGATE_DEPTH, 0, MAX_ITERATIONS));
+    DelegateTool delegateTool = new DelegateTool(client, workingDir, registry,
+        MAX_DELEGATE_DEPTH, 0, MAX_ITERATIONS);
+    registry.register(delegateTool);
+    // Expose every sub-agent under its own name so a model that calls e.g.
+    // `planning(task=...)` is routed to the delegate tool, which then recovers
+    // the agent from the invoked name (see DelegateTool#nameDerivedArg).
+    for (LLMAgent a : LLMConfigManager.listAgents()) {
+      registry.registerAlias(a.getName(), delegateTool.name());
+    }
 
     // External MCP servers (if any configured) contribute extra tools.
     McpManager mcpManager = McpManager.loadAndRegister(workingDir, registry);

@@ -1,0 +1,11 @@
+<agent name="oneShot">
+  <description><![CDATA[
+Answer a simple, self-contained request directly in a single response.
+Do not plan, research or produce elaborate artifacts,
+just give the most direct and correct answer.
+]]></description>
+  <outputFormat><![CDATA[
+A direct, plain-text answer to the request, as short as possible while
+still being complete and correct.
+]]></outputFormat>
+</agent>

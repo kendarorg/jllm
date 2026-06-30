@@ -54,12 +54,27 @@ public class DelegateTool implements LLMTool {
   }
 
   @Override
+  public String nameDerivedArg() {
+    return "agent";
+  }
+
+  @Override
   public String toolSchema() {
     return ToolSchemas.builder(name(),
-            "Delegate a task to a specialized sub-agent and get back its final answer.")
+            "Delegate a task to a specialized sub-agent and get back its final answer. "
+                + "You may also call a sub-agent directly by its name as the tool name. "
+                + availableAgents())
         .prop("agent", "string", "The name of the sub-agent to delegate to.", true)
         .prop("task", "string", "The task/prompt for the sub-agent.", true)
         .build();
+  }
+
+  private static String availableAgents() {
+    StringBuilder sb = new StringBuilder("Available sub-agents:");
+    for (LLMAgent a : LLMConfigManager.listAgents()) {
+      sb.append(' ').append(a.getName()).append(';');
+    }
+    return sb.toString();
   }
 
   @Override

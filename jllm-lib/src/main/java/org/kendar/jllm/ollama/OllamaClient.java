@@ -153,8 +153,29 @@ public class OllamaClient implements LLMClient {
     }
   }
 
+  /**
+   * Logs the call to stderr showing only the last added request (the most recent
+   * message, or the prompt when no message history is present) to avoid dumping the
+   * whole conversation on every call.
+   */
+  private void logCall(LLMRequest request) {
+    String role;
+    String content;
+    if (request.getMessages() != null && !request.getMessages().isEmpty()) {
+      LLMMessage last = request.getMessages().get(request.getMessages().size() - 1);
+      role = last.getRole();
+      content = last.getContent();
+    } else {
+      role = "user";
+      content = request.getPrompt();
+    }
+    System.err.println("[llm] " + settings.getModel() + " <- " + role + ": "
+        + (content == null ? "" : content));
+  }
+
   @Override
   public LLMResponse call(LLMRequest request) throws LLMClientException {
+    logCall(request);
     String url = baseUrl() + "/api/chat";
     HttpPost post = new HttpPost(url);
     post.setHeader("Content-Type", "application/json");

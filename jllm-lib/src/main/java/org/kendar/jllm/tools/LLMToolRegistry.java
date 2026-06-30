@@ -72,6 +72,21 @@ public class LLMToolRegistry {
     if (tool == null) {
       throw new LLMToolException("Unknown tool: " + name);
     }
+    // When the tool was reached through an alias (the invoked name differs from
+    // its canonical name), let it recover an argument it folds into that name —
+    // e.g. a sub-agent name routed to the single delegate tool.
+    String derivedKey = tool.nameDerivedArg();
+    if (derivedKey != null && name != null && !name.equalsIgnoreCase(tool.name())) {
+      String existing = args == null ? null : args.get(derivedKey);
+      if (existing == null || existing.isEmpty()) {
+        Map<String, String> merged = new LinkedHashMap<>();
+        if (args != null) {
+          merged.putAll(args);
+        }
+        merged.put(derivedKey, name);
+        args = merged;
+      }
+    }
     return tool.act(args);
   }
 

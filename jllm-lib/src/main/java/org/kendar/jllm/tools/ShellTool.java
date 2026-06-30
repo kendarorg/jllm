@@ -59,8 +59,7 @@ public class ShellTool implements LLMTool {
       }
     }
 
-    String[] shell = isExecutable("/bin/bash") ? new String[]{"bash", "-c", command}
-        : new String[]{"sh", "-c", command};
+    String[] shell = shellFor(command);
 
     ProcessBuilder pb = new ProcessBuilder(shell);
     pb.directory(root.toFile());
@@ -111,6 +110,59 @@ public class ShellTool implements LLMTool {
       Thread.currentThread().interrupt();
       throw new LLMToolException("Command interrupted", e);
     }
+  }
+
+  private static boolean isWindows() {
+    String os = System.getProperty("os.name");
+    return os != null && os.toLowerCase(java.util.Locale.ROOT).contains("win");
+  }
+
+  private String[] shellFor(String command) {
+    if (isWindows()) {
+      // Prefer PowerShell; fall back to cmd.exe (ComSpec) if it is not available.
+      if (isPowerShellAvailable()) {
+        return new String[]{powerShellExe, "-NoProfile", "-NonInteractive", "-Command", command};
+      }
+      String comspec = System.getenv("ComSpec");
+      String cmd = (comspec == null || comspec.isEmpty()) ? "cmd.exe" : comspec;
+      return new String[]{cmd, "/c", command};
+    }
+    return isExecutable("/bin/bash") ? new String[]{"bash", "-c", command}
+        : new String[]{"sh", "-c", command};
+  }
+
+  private String powerShellExe;
+
+  private boolean isPowerShellAvailable() {
+    if (powerShellExe != null) {
+      return !powerShellExe.isEmpty();
+    }
+    // Prefer PowerShell 7+ (pwsh), fall back to Windows PowerShell.
+    for (String exe : new String[]{"pwsh.exe", "powershell.exe"}) {
+      if (isOnPath(exe)) {
+        powerShellExe = exe;
+        return true;
+      }
+    }
+    powerShellExe = "";
+    return false;
+  }
+
+  private boolean isOnPath(String exe) {
+    String path = System.getenv("PATH");
+    if (path == null) {
+      return false;
+    }
+    for (String dir : path.split(java.io.File.pathSeparator)) {
+      if (dir.isEmpty()) {
+        continue;
+      }
+      java.io.File f = new java.io.File(dir, exe);
+      if (f.isFile() && f.canExecute()) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private boolean isExecutable(String path) {
