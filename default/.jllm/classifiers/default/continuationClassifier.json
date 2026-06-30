@@ -1,0 +1,9 @@
+{
+  "name": "continuationClassifier",
+  "description": "The assistant just produced a message but called no tool. Decide whether it intends to perform a further action (e.g. it announced a next step) or has finished the task.",
+  "classification": {
+    "continue": "The assistant announced or implied more work and should keep going",
+    "done": "The task is complete; no further action is needed"
+  },
+  "retries": 3
+}

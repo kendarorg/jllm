@@ -39,6 +39,7 @@ public abstract class LLMClassifier {
   }
 
   protected String isClassified(String result){
+    if(result==null)return null;
     result = result.trim().toLowerCase();
     for(var c:getClassification().keySet()){
       if(result.equalsIgnoreCase(c))return c;

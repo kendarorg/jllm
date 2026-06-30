@@ -121,6 +121,34 @@ class ScopeClassifierTest {
   }
 
   @Test
+  void classifyToleratesNullThinkingField() {
+    LLMConfigClassifier scope = loadDefaultScopeClassifier();
+    // Model (e.g. Qwen) returns no thinking block at all -> getThinking() is null.
+    // Previously isClassified(null) threw NPE on result.trim(); now it must just
+    // not match and let the retry/match logic carry on.
+    QueueClient client = new QueueClient()
+        .response("nonsense", null)  // attempt 1: response no match, thinking null
+        .response("code", null);     // attempt 2: match
+
+    String result = scope.classify(contextWith(client), "write a function");
+
+    assertEquals("code", result);
+    assertEquals(2, client.calls.get());
+  }
+
+  @Test
+  void classifyMatchesFromThinkingWhenResponseNull() {
+    LLMConfigClassifier scope = loadDefaultScopeClassifier();
+    // Response missing entirely, classification carried only by thinking.
+    QueueClient client = new QueueClient().response(null, "research");
+
+    String result = scope.classify(contextWith(client), "look into this");
+
+    assertEquals("research", result);
+    assertEquals(1, client.calls.get());
+  }
+
+  @Test
   void buildPromptContainsDescriptionValuesAndAllowedWords() {
     LLMConfigClassifier scope = loadDefaultScopeClassifier();
 

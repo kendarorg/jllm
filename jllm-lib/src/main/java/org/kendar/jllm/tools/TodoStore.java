@@ -58,6 +58,16 @@ public class TodoStore {
     return items.isEmpty();
   }
 
+  /** True if at least one item is not yet {@code completed} (i.e. work remains). */
+  public synchronized boolean hasIncomplete() {
+    for (Item item : items) {
+      if (!"completed".equalsIgnoreCase(item.getStatus())) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /** Human/model readable rendering, e.g. {@code [x] done step}. */
   public synchronized String render() {
     if (items.isEmpty()) {

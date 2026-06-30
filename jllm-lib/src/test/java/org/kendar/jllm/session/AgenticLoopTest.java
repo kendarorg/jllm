@@ -94,6 +94,70 @@ class AgenticLoopTest {
   }
 
   @Test
+  void resumesWhenPolicySaysContinue() throws Exception {
+    FakeTool tool = new FakeTool();
+    LLMToolRegistry registry = new LLMToolRegistry();
+    registry.register(tool);
+
+    // First turn narrates without a tool call; the policy nudges once, then the
+    // model fires the tool and finally answers.
+    StubClient client = new StubClient()
+        .text("Now let me create the model class:")
+        .toolCall("ping", Map.of())
+        .text("all done");
+
+    // Continue exactly once, then stop.
+    int[] allowed = {1};
+    ContinuationPolicy policy = last -> allowed[0]-- > 0;
+
+    List<LLMMessage> messages = new ArrayList<>();
+    messages.add(new LLMMessage("user", "go"));
+
+    AgenticLoop.LoopResult result =
+        new AgenticLoop(null, policy).run(client, messages, registry, 10);
+
+    assertEquals("all done", result.finalText);
+    assertEquals(1, tool.invocations);
+    // A nudge 'user' message was injected after the first no-tool turn.
+    assertTrue(result.newMessages.stream()
+            .anyMatch(m -> "user".equals(m.getRole()) && m.getContent().contains("next pending step")),
+        "expected a continuation nudge message");
+  }
+
+  @Test
+  void stopsAtContinuationCapWithoutInfiniteLoop() throws Exception {
+    LLMToolRegistry registry = new LLMToolRegistry();
+
+    // Model never calls a tool; policy always wants to continue.
+    StubClient client = new StubClient().text("still thinking, let me continue");
+    ContinuationPolicy policy = last -> true;
+
+    List<LLMMessage> messages = new ArrayList<>();
+    messages.add(new LLMMessage("user", "go"));
+
+    AgenticLoop.LoopResult result =
+        new AgenticLoop(null, policy).run(client, messages, registry, 50);
+
+    // Bounded by MAX_CONTINUATIONS (3 nudges) -> 4 model calls, NOT maxIterations.
+    assertEquals(4, client.calls.get());
+    assertNotNull(result.finalText);
+  }
+
+  @Test
+  void noPolicyReturnsImmediatelyOnNoToolCall() throws Exception {
+    LLMToolRegistry registry = new LLMToolRegistry();
+    StubClient client = new StubClient().text("done").text("should not be reached");
+
+    List<LLMMessage> messages = new ArrayList<>();
+    messages.add(new LLMMessage("user", "go"));
+
+    AgenticLoop.LoopResult result = new AgenticLoop().run(client, messages, registry, 10);
+
+    assertEquals("done", result.finalText);
+    assertEquals(1, client.calls.get());
+  }
+
+  @Test
   void stopsAtMaxIterationsWithoutInfiniteLoop() throws Exception {
     FakeTool tool = new FakeTool();
     LLMToolRegistry registry = new LLMToolRegistry();

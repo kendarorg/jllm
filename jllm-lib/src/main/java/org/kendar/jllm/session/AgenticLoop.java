@@ -22,10 +22,14 @@ import java.util.Map;
  */
 public class AgenticLoop {
 
+  /** Max consecutive no-tool-call turns we will nudge before giving up. */
+  private static final int MAX_CONTINUATIONS = 3;
+
   private final ContextCompressor compressor;
+  private final ContinuationPolicy continuationPolicy;
 
   public AgenticLoop() {
-    this(null);
+    this(null, null);
   }
 
   /**
@@ -33,7 +37,18 @@ public class AgenticLoop {
    *                   {@code null} disables compression.
    */
   public AgenticLoop(ContextCompressor compressor) {
+    this(compressor, null);
+  }
+
+  /**
+   * @param compressor         optional context compressor; {@code null} disables it.
+   * @param continuationPolicy optional policy that, when the model emits no tool
+   *                           call, decides whether to nudge and keep going;
+   *                           {@code null} preserves the stop-on-first-no-tool behavior.
+   */
+  public AgenticLoop(ContextCompressor compressor, ContinuationPolicy continuationPolicy) {
     this.compressor = compressor;
+    this.continuationPolicy = continuationPolicy;
   }
 
   /** Final text plus every message appended beyond the input (for persistence). */
@@ -51,6 +66,7 @@ public class AgenticLoop {
                         LLMToolRegistry tools, int maxIterations) throws LLMClientException {
     List<LLMMessage> appended = new ArrayList<>();
     String lastText = "";
+    int continuationAttempts = 0;
 
     for (int i = 0; i < maxIterations; i++) {
       if (compressor != null) {
@@ -70,9 +86,21 @@ public class AgenticLoop {
       appended.add(assistant);
 
       if (calls == null || calls.isEmpty()) {
+        if (continuationPolicy != null && continuationAttempts < MAX_CONTINUATIONS
+            && continuationPolicy.shouldContinue(lastText)) {
+          continuationAttempts++;
+          LLMMessage nudge = new LLMMessage("user",
+              "Continue with the next pending step by calling the appropriate tool. "
+                  + "If everything is complete, say so and stop.");
+          messages.add(nudge);
+          appended.add(nudge);
+          continue;
+        }
         return new LoopResult(lastText, appended);
       }
 
+      // A tool was actually called: reset the no-tool nudge counter.
+      continuationAttempts = 0;
       for (LLMToolCall call : calls) {
         String result = dispatch(tools, call);
         LLMMessage toolMsg = new LLMMessage("tool", result);

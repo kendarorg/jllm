@@ -1,9 +1,12 @@
 package org.kendar.jllm.session;
 
 import org.kendar.jllm.base.LLMAgent;
+import org.kendar.jllm.base.LLMClassifier;
 import org.kendar.jllm.base.LLMClient;
 import org.kendar.jllm.base.LLMConfigManager;
 import org.kendar.jllm.base.LLMMessage;
+import org.kendar.jllm.commons.LLMContext;
+import org.kendar.jllm.exceptions.LLMConfigManagerException;
 import org.kendar.jllm.chat.ChatMessage;
 import org.kendar.jllm.chat.ChatStore;
 import org.kendar.jllm.context.ContextFileLoader;
@@ -102,12 +105,30 @@ public class CodingSession implements AutoCloseable {
 
     LLMToolRegistry activeRegistry = planState.isActive() ? readOnlyRegistry : registry;
     AgenticLoop.LoopResult result =
-        new AgenticLoop(compressor).run(client, messages, activeRegistry, maxIterations);
+        new AgenticLoop(compressor, buildContinuationPolicy())
+            .run(client, messages, activeRegistry, maxIterations);
 
     for (LLMMessage m : result.newMessages) {
       appendStore(m.getRole(), m.getContent(), m.getToolName(), m.getToolCallId());
     }
     return result.finalText;
+  }
+
+  /**
+   * Builds the policy that keeps the agentic loop going when a weak model
+   * narrates a next step without firing a tool. Deterministic on pending todos,
+   * with an optional {@code continuationClassifier} fallback when it is configured.
+   */
+  private ContinuationPolicy buildContinuationPolicy() {
+    LLMClassifier classifier;
+    try {
+      classifier = LLMConfigManager.getClassifier("continuationClassifier");
+    } catch (LLMConfigManagerException e) {
+      classifier = null; // optional: no continuation classifier configured
+    }
+    LLMContext context = new LLMContext();
+    context.setClient(client);
+    return new TodoContinuationPolicy(todoStore, classifier, context);
   }
 
   private void appendStore(String role, String content, String toolName, String toolCallId) {
