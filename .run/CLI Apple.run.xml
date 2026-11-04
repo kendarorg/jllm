@@ -1,0 +1,11 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="CLI Apple" type="Application" factoryName="Application">
+    <option name="MAIN_CLASS_NAME" value="org.kendar.llm.cli.Main" />
+    <module name="jllm-cli" />
+    <option name="PROGRAM_PARAMETERS" value="--context-strategy compaction --small-model --provider llamacpp --base-url http://localhost:11434/v1 --model qwen3:8b --context-budget 6000 --mode default" />
+    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/jllm-cli/tmp" />
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>

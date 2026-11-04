@@ -1,0 +1,141 @@
+package org.kendar.llm.harness.permission;
+
+import org.kendar.llm.harness.util.Uuids;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.TimeoutException;
+import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
+
+/** Holds approvals the agent loop is blocked on, per chat. Used for tool calls and context rewrites alike. */
+public class ApprovalService {
+
+    /** @param type "tool" or "context"; @param preview what to show (diff/old); @param proposed editable new content */
+    public record PendingApproval(String id, String chatId, String type, String title,
+                                  String preview, String proposed) {
+    }
+
+    /**
+     * @param edited   user-edited replacement for {@code proposed}, or null
+     * @param remember allow this tool for the rest of the chat (only meaningful when approved)
+     */
+    public record ApprovalDecision(boolean approved, String edited, boolean remember) {
+        public static final ApprovalDecision REJECTED = new ApprovalDecision(false, null, false);
+
+        public ApprovalDecision(boolean approved, String edited) {
+            this(approved, edited, false);
+        }
+    }
+
+    private final int timeoutSeconds;
+    private final Map<String, Map<String, Pending>> pending = new ConcurrentHashMap<>();
+    /** One open dialog per chat: the others wait here, fairly, and are not shown until it is answered. */
+    private final Map<String, ReentrantLock> dialogs = new ConcurrentHashMap<>();
+    /** Tools the user allowed for a whole chat; runtime state only, never part of the context. */
+    private final Map<String, Set<String>> grants = new ConcurrentHashMap<>();
+
+    private record Pending(PendingApproval approval, CompletableFuture<ApprovalDecision> future) {
+    }
+
+    public ApprovalService(int timeoutSeconds) {
+        this.timeoutSeconds = timeoutSeconds;
+    }
+
+    /**
+     * Blocks until resolved, timed out (→ rejected) or cancelled (→ rejected). Dialogs of one chat are shown one at a
+     * time; the timeout starts when the dialog is shown, and a cancel frees a caller still waiting for its turn.
+     */
+    public ApprovalDecision await(String chatId, String type, String title, String preview, String proposed,
+                                  Consumer<PendingApproval> onCreated, BooleanSupplier cancelled) {
+        ReentrantLock lock = dialogs.computeIfAbsent(chatId, k -> new ReentrantLock(true));
+        try {
+            while (!lock.tryLock(500, TimeUnit.MILLISECONDS)) {
+                if (cancelled != null && cancelled.getAsBoolean()) return ApprovalDecision.REJECTED;
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return ApprovalDecision.REJECTED;
+        }
+        try {
+            if (cancelled != null && cancelled.getAsBoolean()) return ApprovalDecision.REJECTED;
+            return show(chatId, type, title, preview, proposed, onCreated, cancelled);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private ApprovalDecision show(String chatId, String type, String title, String preview, String proposed,
+                                  Consumer<PendingApproval> onCreated, BooleanSupplier cancelled) {
+        PendingApproval approval = new PendingApproval(Uuids.v7String(), chatId, type, title, preview, proposed);
+        Pending p = new Pending(approval, new CompletableFuture<>());
+        pending.computeIfAbsent(chatId, k -> new ConcurrentHashMap<>()).put(approval.id(), p);
+        try {
+            if (onCreated != null) onCreated.accept(approval);
+            long deadline = System.currentTimeMillis() + timeoutSeconds * 1000L;
+            while (System.currentTimeMillis() < deadline) {
+                if (cancelled != null && cancelled.getAsBoolean()) return ApprovalDecision.REJECTED;
+                try {
+                    return p.future().get(500, TimeUnit.MILLISECONDS);
+                } catch (TimeoutException ignored) {
+                    // poll again
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return ApprovalDecision.REJECTED;
+                } catch (Exception e) {
+                    return ApprovalDecision.REJECTED;
+                }
+            }
+            return ApprovalDecision.REJECTED;
+        } finally {
+            Map<String, Pending> m = pending.get(chatId);
+            if (m != null) m.remove(approval.id());
+        }
+    }
+
+    /** @return false when the approval no longer exists (already resolved, timed out or wrong chat) */
+    public boolean resolve(String chatId, String approvalId, boolean approved, String edited) {
+        return resolve(chatId, approvalId, approved, edited, false);
+    }
+
+    /** @param remember allow the tool for the rest of the chat (parent and sub-agents) */
+    public boolean resolve(String chatId, String approvalId, boolean approved, String edited, boolean remember) {
+        Map<String, Pending> m = pending.get(chatId);
+        Pending p = m == null ? null : m.get(approvalId);
+        if (p == null) return false;
+        return p.future().complete(new ApprovalDecision(approved, edited, remember));
+    }
+
+    public void grant(String chatId, String tool) {
+        grants.computeIfAbsent(chatId, k -> ConcurrentHashMap.newKeySet()).add(tool);
+    }
+
+    public boolean granted(String chatId, String tool) {
+        Set<String> g = grants.get(chatId);
+        return g != null && g.contains(tool);
+    }
+
+    /** Drops the grants of a deleted chat. */
+    public void forget(String chatId) {
+        grants.remove(chatId);
+        dialogs.remove(chatId);
+    }
+
+    public List<PendingApproval> pending(String chatId) {
+        List<PendingApproval> out = new ArrayList<>();
+        Map<String, Pending> m = pending.get(chatId);
+        if (m != null) m.values().forEach(p -> out.add(p.approval()));
+        return out;
+    }
+
+    public void cancelAll(String chatId) {
+        Map<String, Pending> m = pending.get(chatId);
+        if (m != null) m.values().forEach(p -> p.future().complete(ApprovalDecision.REJECTED));
+    }
+}

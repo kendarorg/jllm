@@ -1,217 +1,146 @@
-# JLLM
+# jllm
 
-> ⚠️ **Work in progress.** This project is an exploration / demonstration, not a finished product. APIs, config formats and module layout will change.
+An agent harness you embed directly in a Java application. Add one library, give it a model, and your application
+gets a tool-using agent that can call **your own Java code**, **MCP servers** and **REST APIs** under a permission
+system you control. Java 21, Maven multi-module.
 
-**JLLM** is a small Java framework that demonstrates how to build an **agent / tool / MCP based CLI on top of local LLMs** - without depending on any cloud provider. It talks to a locally-running model server ([Ollama](https://ollama.com)) and layers a configurable pipeline of *classifiers*, *agents* and *tools* on top of it.
+The terminal chat (`jllm-cli`) and the browser chat (`jllm-web`) are two ready-made front ends built on that library.
+They are also the reference for how to embed it.
 
-The goal is educational: to show, end to end, what the moving parts of an "agentic" CLI look like when you build them yourself in plain Java.
+| Module | What | Doc |
+|---|---|---|
+| [jllm-harness](jllm-harness) | the library: framework-free (no Spring, JPA or Micrometer), Jackson, JDK `HttpClient`, jsoup | [README](jllm-harness/README.md) |
+| [jllm-cli](jllm-cli) | terminal front end, one shaded runnable jar | [README](jllm-cli/README.md) |
+| [jllm-web](jllm-web) | Spring Boot REST + SSE API with a no-build Vue 3 chat UI | [README](jllm-web/README.md) |
 
----
+What is still missing:
 
-## Concepts
+* Oauth & Tokens on MCP/API calls
+* Authentication & authorization on WebUI (it's just a demonstration :) )
 
-JLLM is built from a few small, composable pieces:
+## The idea
 
-| Piece | Role |
-|-------|------|
-| **Client** (`LLMClient`) | Talks to the local model server. The only implementation today is `OllamaClient`. |
-| **Classifier** (`LLMClassifier`) | Asks the LLM to bucket an incoming prompt into one of a set of named categories (e.g. *plan / code / oneShot / research*). Used to route a request to the right agent. |
-| **Agent** (`LLMAgent`) | A named "persona" with a description and an expected output format (e.g. a *planning* agent that turns a request into a todo list). |
-| **Tool** (`LLMTool`) | A callable capability the model can invoke, with a JSON schema, an `available()` / `requiresApproval()` gate, and an `act(args)` method. |
-| **Config Manager** (`LLMConfigManager`) | Loads classifiers (JSON) and agents (XML) from a `.jllm/` directory tree and registers them by name. |
-| **Entry Point** (`LLMEntryPoint`) | Wires it together: classify the prompt, pick an agent, call the model. |
-
-The flow for a single request looks like:
-
-```
-prompt ──► scopeClassifier ──► (plan | code | oneShot | research) ──► agent ──► LLMClient ──► local model
-```
-
----
-
-## Requirements
-
-- **Java 25**
-- **Maven 3.x**
-- **[Ollama](https://ollama.com)** running locally (default `http://localhost:11434`) with at least one model pulled, e.g.:
-  ```bash
-  ollama pull llama3
-  ```
-
----
-
-## Project layout
-
-This is a Maven multi-module (reactor) project:
-
-```
-jllm/
-├── pom.xml            parent reactor - org.kendar:j-llm:1.0-SNAPSHOT, Java 25
-├── jllm-lib/          core library (clients, agents, tools, classifiers, config)
-├── jllm-cli/          command-line front end (placeholder, in progress)
-└── default/           default .jllm configuration tree shipped with the project
-    └── .jllm/
-        ├── classifiers/default/scopeClassifier.json
-        └── agents/default/*.xml
-```
-
-**Key dependencies:** Apache HttpClient 5 (HTTP), Jackson (JSON/XML), JUnit 5 (tests).
-
----
-
-## Build
-
-```bash
-mvn clean install
-```
-
-This builds and installs both modules. Coordinates for the core library:
-
-```xml
-<dependency>
-  <groupId>org.kendar</groupId>
-  <artifactId>jllm-lib</artifactId>
-  <version>1.0-SNAPSHOT</version>
-</dependency>
-```
-
----
-
-## Quick start (library)
+You have an application with data, services and rules. You want a model to work with them, not just to chat. The
+harness runs the agent loop (model call, tool calls, results, repeat) inside your process and lets you decide what the
+agent can touch and what needs a human's approval.
 
 ```java
-// 1. Point the client at your local Ollama server and model
-LLMSettings settings = new LLMSettings();
-settings.setModel("llama3");
-settings.setServer("http://localhost:11434"); // default
+AgentHarness h = AgentHarness.builder()
+    .modelClient(ModelClients.anthropic(AnthropicSettings.defaults(System.getenv("ANTHROPIC_API_KEY")), mapper))
+    .tools(List.of(myTool))                      // your Java code as tools
+    .settings(Path.of("harness.json"))           // MCP servers and REST APIs
+    .approvalPolicy(ToolApprovalPolicy.byKind()) // who may do what without asking
+    .systemPrompt("You work on the billing system. Never refund over 100 EUR without asking.")
+    .build();
 
-// 2. Load agents + classifiers from the .jllm/ config tree
-settings.setSettingDirs(List.of("default"));
-LLMConfigManager.initialize(settings);
-
-// 3. Create a client and the entry point
-LLMClient client = new OllamaClient(settings);
-LLMEntryPoint entryPoint = new LLMEntryPoint(client);
-
-// 4. Run a prompt - it gets classified and routed to an agent
-String result = entryPoint.call("Write a function that reverses a string");
-System.out.println(result);
+String chatId = h.sessions().create(null).chatId();
+h.subscribe(chatId, 0, ev -> push(ev));          // text, tool_call, approval_request, ...
+h.start(chatId, "Why was invoice 4711 charged twice?");
 ```
 
-Talking to the client directly:
+`start` returns at once; the run happens on a virtual thread and reports through events, so any front end (a web
+socket, a desktop UI, a message queue) can follow it, answer approvals and cancel.
+
+### Three ways to give the agent tools
+
+| Source | You write | The agent sees |
+|---|---|---|
+| **Your Java code** | a `HarnessTool` (or `SimpleTool` with a lambda): name, description, JSON schema, group, kind | `db_query`, `create_ticket`, ... whatever you register |
+| **MCP servers** | a `mcpServers` entry in the settings file: URL and headers | `mcp__<server>__<tool>`, discovered at startup from the server's `tools/list` |
+| **REST APIs** | a `restApis` entry: OpenAPI URL, base URL, `allowedPaths` | `<api>__<operationId>`, one tool per allowed operation |
+
+Your own tool, in a few lines:
 
 ```java
-LLMClient client = new OllamaClient(settings);
-
-LLMRequest request = new LLMRequest()
-        .withPrompt("Hello there");
-request.setSystem("You are a helpful assistant");
-
-LLMResponse response = client.call(request);
-System.out.println(response.getResponse());
+HarnessTool sql = new SimpleTool("db_query",
+    "Run a read-only SQL query against the reporting database. Returns CSV, at most 500 rows.",
+    SimpleTool.schema("sql", "SELECT statement", "limit:integer?", "Row limit (default 100)"),
+    "Db", ToolKind.READ_ONLY,
+    (ctx, in) -> reporting.query(in.path("sql").asText(), in.path("limit").asInt(100)));
 ```
 
----
-
-## Configuration
-
-Configuration lives under a `.jllm/` directory (created automatically if missing). Each setting directory in `LLMSettings.settingDirs` is scanned recursively.
-
-### Classifiers - JSON
-
-`.jllm/classifiers/default/scopeClassifier.json`
+MCP servers and REST APIs need no code, only configuration:
 
 ```json
 {
-  "name": "scopeClassifier",
-  "description": "Classify the scope of the prompt",
-  "classification": {
-    "plan": "Create a plan for the request",
-    "code": "Generate code for the request",
-    "oneShot": "Simple request",
-    "research": "Research the request"
-  },
-  "retries": 3
+  "mcpServers": [{"name": "docs", "url": "https://h/mcp",
+                  "headers": {"Authorization": "Bearer ${DOCS_TOKEN}"}, "readOnly": true}],
+  "restApis":   [{"name": "pets", "openApiUrl": "https://h/openapi.yaml", "baseUrl": "https://h/api",
+                  "allowedPaths": ["GET /pets", "/pets/{id}"]}]
 }
 ```
 
-The classifier builds a prompt from the `classification` map, asks the model to pick one of the keys, and retries up to `retries` times if the answer doesn't match a known category.
+- **MCP**: streamable-HTTP servers, static headers (`${ENV_VAR}` expanded), tools listed at startup. A server that is
+  down does not stop the harness. No OAuth.
+- **REST**: the OpenAPI 3 spec is parsed and each operation matching `allowedPaths` becomes a tool whose input schema
+  comes from the spec. Nothing outside the allowlist is reachable. GET/HEAD are read-only, other methods need approval.
+- **Built-in tools** are also there: files (confined to the working directory), shell, web search and fetch, sub-agents
+  (`task`), skills.
+- All sources can be switched on and off at runtime (`/tools`, `/mcp`, `/apis` in any front end, or the `tools()` and
+  `sources()` facade methods). Tools are sorted once and fixed per chat, so the provider's prompt cache stays valid.
 
-### Agents - XML
+### Control
 
-`.jllm/agents/default/planning.xml`
+- **Tool kind** (`READ_ONLY`, `FILE_EDIT`, `OTHER`) drives approval. Read-only tools never ask. Mark your own tools
+  honestly: the kind is a promise, and read-only sub-agents only get `READ_ONLY` tools.
+- **Modes** `default`, `plan`, `edit`, `auto` set what runs without asking; deny rules apply in every mode.
+- **Approvals** arrive as `approval_request` events with a preview. Your UI answers with `resolveApproval(...)`, can
+  grant a tool for the rest of the chat, and can edit a proposed context rewrite.
+- **Hooks** around agents, model calls and tool calls can observe, deny or rewrite a tool input (audit, policy,
+  redaction). **Plugins** bundle tools, hooks and slash commands.
+- **Ports** for your infrastructure: `ChatSessionStore`, `SubAgentRunLog`, `ToolApprovalPolicy`, `HarnessMetrics`,
+  `SandboxExecutor`. The defaults are in memory.
+- **Isolation**: the default sandbox has none. For untrusted input set `sandbox.backend` to `docker` (CLI
+  `--sandbox docker`, optionally `--docker-mode daemon`) or use your own `SandboxExecutor`.
 
-```xml
-<agent name="planning">
-  <description><![CDATA[
-Break the request down into an ordered, actionable todo list.
-Analyze the goal, identify the concrete steps required to achieve it,
-and list them in execution order. Do not implement anything, only plan.
-]]></description>
-  <outputFormat><![CDATA[
-A todo list, each line starting with '[] ' followed by a short imperative description.
-Example:
-[] Read the existing configuration
-[] Add the new field to the model
-[] Wire the field into the loader
-]]></outputFormat>
-</agent>
+Details: [harness README](jllm-harness/README.md), [EXTENDING](docs/EXTENDING.md) (custom tools, hooks, policies,
+providers, stores), [MCP and REST](docs/MCP.md), [TOOLS](docs/TOOLS.md).
+
+## Models
+
+Anthropic (prompt caching, thinking, citations) and any OpenAI-compatible endpoint (OpenAI, Qwen, llama.cpp, vLLM,
+Ollama), selectable by name from a settings `providers` list and switchable with `/model`. An optional fast model handles summaries, tool-group selection and the `auto`-mode classifier. A stricter
+prompt for small local models is available. Two context strategies for long chats: `compaction` (default) and
+`mnemonic` (never rewrites the log).
+
+## Quick start
+
+```sh
+# terminal
+mvn -pl jllm-cli -am package -DskipTests
+java -jar jllm-cli/target/jllm-cli-1.0-SNAPSHOT.jar --provider anthropic --mode edit
+
+# browser, http://localhost:8080
+mvn -pl jllm-web -am package -DskipTests
+java -jar jllm-web/target/jllm-web-1.0-SNAPSHOT.jar --provider anthropic
 ```
 
-The default tree ships four agents: `oneShot`, `planning`, `code`, `research`.
+Set `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`, `QWEN_API_KEY`) first. Embedding the library is shown above and in the
+[harness README](jllm-harness/README.md#embedding).
 
----
+## Documentation
 
-## Core API
+| Document | Content |
+|---|---|
+| [jllm-harness](jllm-harness/README.md) | embedding, settings file, hooks, plugins, modes, context strategies, fast model |
+| [jllm-cli](jllm-cli/README.md) | flags, directories, interactive session, slash commands, local models |
+| [jllm-pdf](docs/TOOLS.md#document-readers) / [jllm-docs](docs/TOOLS.md#document-readers) | optional `read_file` readers for pdf and docx (plugins, depend only on the harness) |
+| [jllm-web](jllm-web/README.md) | `jllm.*` properties, REST and SSE API, frontend structure |
+| [USAGE](docs/USAGE.md) | harness build, permission modes, settings file, embedding, events |
+| [TOOLS](docs/TOOLS.md) | built-in tools, kinds, path jail, per-chat tool set, tool-call pipeline |
+| [SANDBOX](docs/SANDBOX.md) | the four sandbox executors: directories, isolation, Docker settings |
+| [MCP](docs/MCP.md) | MCP servers and OpenAPI REST APIs as tools |
+| [SKILLS](docs/SKILLS.md) | skills, instruction files, agent prompts |
+| [EXTENDING](docs/EXTENDING.md) | custom tools, hooks, plugins, policies, providers, agent types, context strategies, stores, sandbox, tests |
+| [CACHES](docs/CACHES.md) | prompt-cache layout, compaction and mnemonic algorithms |
+| [INTERNALS](docs/INTERNALS.md) | architecture, run lifecycle, loop, approvals, sub-agents, concurrency, persistence |
+| [FLOW](docs/FLOW.md) | step-by-step diagrams of every pipeline |
+| [SAMPLES](docs/SAMPLES.md) | prompts and generated projects used to compare setups |
+| [HISTORY](HISTORY.md) | how the harness evolved |
 
-```java
-public interface LLMClient {
-    LLMResponse call(LLMRequest request) throws LLMClientException;
-}
+## Credits
 
-public interface LLMAgent {
-    String getName();
-    String getDescription();
-    String getOutputFormat();
-}
-
-public interface LLMTool {
-    boolean available();
-    boolean requiresApproval();
-    String name();
-    String toolSchema();                                 // JSON schema
-    String act(Map<String, String> args) throws LLMToolException;
-}
-
-public abstract class LLMClassifier {
-    public abstract String getName();
-    public abstract String getDescription();
-    public abstract Map<String, String> getClassification();
-    public abstract int getRetries();
-
-    public String classify(LLMContext context, String text);
-}
-```
-
-`LLMRequest` exposes the usual generation knobs with sensible defaults: `model`, `prompt`, `system`, `temperature` (0.4), `topP` (0.9), `topK` (30), `numCtx` (128k), `format` (`json`), `keepAlive` (`5m`), `stream` (false), `think`.
-
----
-
-## Status & roadmap
-
-Foundational types are in place (see `THE_PROCESS.md`):
-
-- [x] Core types - Client (request/response), Tool, Classifier, exceptions
-- [x] Config-driven agents (XML) and classifiers (JSON)
-- [x] Ollama client
-- [x] Root agents: `oneShot`, `planning`, `code`, `research`
-- [ ] CLI front end (`jllm-cli` is currently a placeholder)
-- [ ] Tool invocation loop wired into the entry point
-- [ ] MCP (Model Context Protocol) support
-- [ ] Additional local backends (llama.cpp, etc.)
-
----
-
-## License
-
-See [LICENSE](LICENSE) (MIT).
+- [mnemonic-proxy](https://github.com/lastreload/mnemonic-proxy): the alternative `mnemonic` context strategy.
+- [building-a-coding-agent-from-scratch-course](https://github.com/decodingai-magazine/building-a-coding-agent-from-scratch-course):
+  the structure of the harness.
+- [opencode](https://github.com/sst/opencode): the inspiration.
