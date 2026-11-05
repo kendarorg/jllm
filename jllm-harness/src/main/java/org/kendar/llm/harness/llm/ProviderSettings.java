@@ -12,13 +12,23 @@ import java.util.Locale;
  * @param contextTokens  context window of the model; used by the fit check when switching models
  * @param smallModel     the model is small: the system prompt gets the stricter small-model rules
  * @param temperature    sampling temperature (0 to 2; above 1 is ignored for Anthropic); null = not sent
+ * @param thinking       default reasoning effort (minimal | low | medium | high); null = the client's own default
  * @param order          fallback order: when a provider fails, the providers with a higher order are tried in
  *                       ascending order; null = never used as a fallback
  */
 public record ProviderSettings(String name, String type, String baseUrl, String apiKey, String model,
                                Integer maxTokens, Integer maxRetries, Integer timeoutSeconds,
                                Boolean requireApiKey, Boolean useMaxCompletionTokens, Integer contextTokens,
-                               Boolean smallModel, Double temperature, Integer order) {
+                               Boolean smallModel, Double temperature, Integer order, ThinkingLevel thinking) {
+
+    /** Legacy constructor without a thinking level. */
+    public ProviderSettings(String name, String type, String baseUrl, String apiKey, String model,
+                            Integer maxTokens, Integer maxRetries, Integer timeoutSeconds,
+                            Boolean requireApiKey, Boolean useMaxCompletionTokens, Integer contextTokens,
+                            Boolean smallModel, Double temperature, Integer order) {
+        this(name, type, baseUrl, apiKey, model, maxTokens, maxRetries, timeoutSeconds, requireApiKey,
+                useMaxCompletionTokens, contextTokens, smallModel, temperature, order, null);
+    }
 
     /** Legacy constructor without a fallback order. */
     public ProviderSettings(String name, String type, String baseUrl, String apiKey, String model,

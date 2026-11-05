@@ -86,7 +86,7 @@ public class AnthropicModelClient implements ModelClient {
         ObjectNode body = mapper.createObjectNode();
         body.put("model", props.model());
 
-        int thinking = props.thinkingBudget();
+        int thinking = req.thinkingLevel() != null ? req.thinkingLevel().anthropicBudget() : props.thinkingBudget();
         int maxTokens = req.maxTokens() > 0 ? req.maxTokens() : props.maxTokens();
         if (thinking >= 1024) {
             maxTokens = Math.max(maxTokens, thinking + 1024);

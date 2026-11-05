@@ -269,6 +269,9 @@ public class AgentLoop {
         if (agentType != null && agentType.temperature() != null) {
             client = new org.kendar.llm.harness.llm.TemperatureModelClient(client, agentType.temperature());
         }
+        if (agentType != null && agentType.thinking() != null) {
+            client = new org.kendar.llm.harness.llm.ThinkingModelClient(client, agentType.thinking());
+        }
 
         boolean readOnly = agentType != null && agentType.readOnly();
         PermissionMode mode = readOnly ? PermissionMode.PLAN : (parentMode == null ? PermissionMode.DEFAULT : parentMode);

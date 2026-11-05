@@ -120,7 +120,7 @@ ignored.
 
 `providers` is a list of named model definitions (`name`, `type` = `anthropic` | `openai` | `qwen` | `llamacpp` |
 `ollama`, `baseUrl`, `apiKey`, `model`, `maxTokens`, `maxRetries`, `timeoutSeconds`, `requireApiKey`,
-`useMaxCompletionTokens`, `contextTokens`, `smallModel`, `temperature`, `order`). The old names `anthropic`, `openai`, `qwen`,
+`useMaxCompletionTokens`, `contextTokens`, `smallModel`, `temperature`, `order`, `thinking`). The old names `anthropic`, `openai`, `qwen`,
 `llamacpp`, `ollama` stay valid without a definition.
 
 - CLI: `--provider <name>` picks one; `--model`, `--base-url`, `--api-key` override it for the session only. With an
@@ -134,11 +134,19 @@ ignored.
   providers with a higher `order` are tried in ascending order; one without `order` is never a fallback. A request
   refused as too long, and a cancellation, are not passed on to another provider. A fallback that cannot be built
   (for example a missing key) is skipped.
-- An agent type may set `"provider": "<name>"` (wins over an inline `model`) and `"temperature"`.
+- An agent type may set `"provider": "<name>"` (wins over an inline `model`), `"temperature"` and `"thinking"`.
 - `temperature` (0 to 2) is resolved agent type, then provider, then unset; unset means nothing is sent.
   `explore` uses 0.2 and `plan` 0.3. OpenAI-compatible clients send it, and retry once without it if the server
   rejects it. **The Anthropic client never sends it:** current Claude models and the current API version reject
   `temperature`, so a value set on an Anthropic provider is ignored.
+- `thinking` (`minimal` | `low` | `medium` | `high`) sets the reasoning effort, on a provider and on an agent type.
+  Resolved request, then agent type, then provider, then unset; unset leaves the client's own default (Anthropic:
+  no thinking, OpenAI-compatible: nothing sent).
+  - Anthropic: extended-thinking budget of 2048 (`low`), 8192 (`medium`) or 16384 (`high`) tokens; `minimal` turns
+    thinking off. `max_tokens` is raised to fit the budget, and a forced `toolChoice` is ignored while thinking is on.
+  - OpenAI-compatible (openai, qwen, llamacpp, ollama): sent as `reasoning_effort`; `minimal` is `minimal`, or `none`
+    on Ollama. A server that rejects it gets a retry: `minimal`/`none` steps down to `low`, anything else is
+    dropped, and a warning is logged. The run continues.
 
 ### Permission rules
 

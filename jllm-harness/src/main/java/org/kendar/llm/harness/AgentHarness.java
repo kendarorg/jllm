@@ -644,7 +644,7 @@ public final class AgentHarness {
                 if (own != null && maxParallel > 0) own = new LimitedModelClient(own, maxParallel);
                 defs.add(new AgentDefinition(a.name(), a.description() == null ? "" : a.description(), a.tools(),
                         prompt, Boolean.TRUE.equals(a.inheritContext()), own, Boolean.TRUE.equals(a.readOnly()),
-                        a.temperature()));
+                        a.temperature(), a.thinking()));
             }
             return new AgentCatalog(defs);
         }

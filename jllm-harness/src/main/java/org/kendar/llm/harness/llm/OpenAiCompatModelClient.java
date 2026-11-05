@@ -52,18 +52,40 @@ public class OpenAiCompatModelClient implements ModelClient {
             throw new ModelException("API key for LLM provider '" + cfg.name() + "' is not configured");
         }
         ObjectNode body = buildBody(req);
-        try {
-            return parseResponse(send(body, cancel));
-        } catch (ModelException e) {
-            // a model that rejects the parameter gets one retry without it
-            if (body.has("temperature") && e.getMessage() != null && e.getMessage().contains("API error 400")
-                    && e.getMessage().toLowerCase().contains("temperature")) {
-                log.warn("{} rejected temperature; retrying without it", cfg.name());
-                body.remove("temperature");
+        for (int attempt = 0; ; attempt++) {
+            try {
                 return parseResponse(send(body, cancel));
+            } catch (ModelException e) {
+                if (attempt < 3 && adaptToRejection(body, e)) continue;
+                throw e;
             }
-            throw e;
         }
+    }
+
+    /**
+     * A model that rejects an optional parameter gets a retry without it; a rejected "minimal"/"none" reasoning
+     * effort first steps down to "low". Returns true when the body was changed.
+     */
+    private boolean adaptToRejection(ObjectNode body, ModelException e) {
+        if (e.getMessage() == null || !e.getMessage().contains("API error 400")) return false;
+        String msg = e.getMessage().toLowerCase();
+        if (body.has("temperature") && msg.contains("temperature")) {
+            log.warn("{} rejected temperature; retrying without it", cfg.name());
+            body.remove("temperature");
+            return true;
+        }
+        if (body.has("reasoning_effort") && msg.contains("reasoning")) {
+            String effort = body.path("reasoning_effort").asText();
+            if ("minimal".equals(effort) || "none".equals(effort)) {
+                log.warn("{} rejected reasoning_effort '{}'; stepping down to 'low'", cfg.name(), effort);
+                body.put("reasoning_effort", "low");
+            } else {
+                log.warn("{} rejected reasoning_effort '{}'; retrying without it", cfg.name(), effort);
+                body.remove("reasoning_effort");
+            }
+            return true;
+        }
+        return false;
     }
 
     @Override
@@ -95,6 +117,9 @@ public class OpenAiCompatModelClient implements ModelClient {
         body.put(cfg.useMaxCompletionTokens() ? "max_completion_tokens" : "max_tokens", maxTokens);
         if (req.temperature() != null && req.temperature() >= 0 && req.temperature() <= 2) {
             body.put("temperature", req.temperature());
+        }
+        if (req.thinkingLevel() != null) {
+            body.put("reasoning_effort", req.thinkingLevel().reasoningEffort(cfg.name()));
         }
 
         ArrayNode out = body.putArray("messages");

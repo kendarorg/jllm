@@ -61,7 +61,7 @@ public final class ProviderCatalog {
                 settings.model(), settings.maxTokens() != null ? settings.maxTokens() : defaultMaxTokens,
                 settings.maxRetries(), settings.timeoutSeconds(), settings.requireApiKey(),
                 settings.useMaxCompletionTokens(), settings.contextTokens(), settings.smallModel(),
-                settings.temperature(), settings.order());
+                settings.temperature(), settings.order(), settings.thinking());
         return CUSTOM;
     }
 
@@ -98,6 +98,7 @@ public final class ProviderCatalog {
         if (p.temperature() != null && !p.effectiveType().equals("anthropic")) {
             c = new TemperatureModelClient(c, p.temperature());
         }
+        if (p.thinking() != null) c = new ThinkingModelClient(c, p.thinking());
         return c;
     }
 }
