@@ -102,7 +102,7 @@ AgentHarness h = AgentHarness.builder()
                   "requireApiKey": false, "contextTokens": 32000, "order": 1}],
   "defaultProvider": "local-qwen",
   "permissions": {"deny": ["bash(rm -rf .*)"], "ask": ["bash(.*curl.*)"], "allow": ["bash(mvn .*)"]},
-  "execution":  {"serializeModelCalls": true},
+  "execution":  {"maxParallel": 1},
   "sandbox":    {"tempDir": "/var/tmp/harness", "timeoutSeconds": 120, "backend": "docker",
                  "docker": {"image": "maven:3-eclipse-temurin-21", "network": "none"}},
   "context":    {"maxTokens": 100000, "auto": true, "keepTokens": 15000, "buffer": null, "keepRecentTurns": 6,
@@ -119,14 +119,14 @@ AgentHarness h = AgentHarness.builder()
 - `${ENV_VAR}` is expanded in every string; a missing variable fails the load. OAuth is not supported (static headers).
 - A REST operation becomes a tool only if it matches `allowedPaths` (`METHOD /path`, method optional, `*` wildcard).
   Tools are named `<api>__<operationId>`; GET/HEAD are read-only. MCP tools are `mcp__<server>__<tool>`.
-- `execution.serializeModelCalls` (default `true`, made for a local LLM; set `false` to allow parallel model calls): one model call at a time, depth-first. The main agent calls the
+- `execution.maxParallel` (default `1`, made for a local LLM; `N` allows N model calls and chat runs at once, `-1` is unlimited). With `1`: one model call at a time, depth-first. The main agent calls the
   model; when it uses `task`, each sub-agent runs to its end (one after the other, even across several `task` calls)
   before control returns to the agent and then to main. This applies to every model call (chats, compaction, tool
   selection), so a local server with one small GPU never sees two requests. Plain tool execution that does not call
   the model still runs concurrently.
 
   ```json
-  {"execution": {"serializeModelCalls": false}}
+  {"execution": {"maxParallel": 4}}
   ```
 - Hook points, in order for one turn: `beforeAgent` (`PRE_AGENT`), then per model call `beforeLlmCall` /
   `afterLlmCall` (`PRE_LLM` / `POST_LLM`), per tool call `beforeToolCall` / `afterToolCall` (`PRE_TOOL` / `POST_TOOL`),

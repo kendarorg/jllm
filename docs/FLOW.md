@@ -48,7 +48,7 @@ flowchart TB
 
     subgraph LLM["LLM layer"]
         MC["ModelClient"]
-        LMC["LimitedModelClient<br/>(serializeModelCalls)"]
+        LMC["LimitedModelClient<br/>(maxParallel)"]
         ANT["AnthropicModelClient"]
         OAI["OpenAiCompatModelClient<br/>openai qwen llamacpp vLLM ollama"]
         FAST["fast ModelClient (optional)"]
@@ -79,7 +79,7 @@ The fast model is optional. If none is configured, `ContextManager` and `ToolSel
 
 ```mermaid
 flowchart TD
-    A["settings.applyTo(config)"] --> B{"serializeModelCalls?"}
+    A["settings.applyTo(config)"] --> B{"maxParallel != -1?"}
     B -->|yes, default| C["wrap modelClient in LimitedModelClient(1)"]
     B -->|no| D
     C --> D["sandbox = given or LocalDirSandboxExecutor"]
@@ -366,7 +366,7 @@ flowchart LR
     end
     C1 & C2 --> MAIN["main ModelClient<br/>(or sub-agent type.model)"]
     C3 & C4 & C5 --> FASTQ["fast ModelClient if set, else main"]
-    MAIN & FASTQ --> LMC["LimitedModelClient<br/>fair semaphore, 1 slot when serializeModelCalls"]
+    MAIN & FASTQ --> LMC["LimitedModelClient<br/>fair semaphore, maxParallel slots (default 1)"]
     LMC --> P{"provider"}
     P --> ANT["AnthropicModelClient<br/>POST /v1/messages (non-streaming)"]
     P --> OAI["OpenAiCompatModelClient<br/>POST /chat/completions<br/>retry on 429 / 5xx with backoff or retry-after"]

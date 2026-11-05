@@ -138,7 +138,7 @@ java -jar jllm-cli.jar --provider llamacpp --base-url http://localhost:8080/v1 -
 
 Ollama's OpenAI endpoint cannot set the context size per request. Raise it on the Ollama side
 (`OLLAMA_CONTEXT_LENGTH` or `num_ctx` in a Modelfile) and keep `--context-tokens` below it. Model calls are serialized
-by default (`execution.serializeModelCalls`), which suits one local GPU. `--small-model` is described in the
+by default (`execution.maxParallel`), which suits one local GPU. `--small-model` is described in the
 [harness README](../jllm-harness/README.md#embedding).
 
 ## Wiring

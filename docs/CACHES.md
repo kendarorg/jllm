@@ -72,7 +72,7 @@ otherwise a plain text request goes to the fast model.
 
 ### Model-call serialization
 
-With `execution.serializeModelCalls` (default) every model client is wrapped in `LimitedModelClient(…, 1)`: one call
+With `execution.maxParallel` (default 1) every model client is wrapped in `LimitedModelClient(…, maxParallel)`; with 1, one call
 in flight for the whole harness, sub-agents run one at a time, depth-first. A local server with one KV cache slot then
 never has its cache evicted by a concurrent request.
 

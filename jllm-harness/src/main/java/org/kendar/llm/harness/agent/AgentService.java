@@ -55,10 +55,17 @@ public class AgentService {
     private final Map<String, ChatRun> runs = new ConcurrentHashMap<>();
 
     private final boolean serializeRuns;
-    private final Semaphore runSlot = new Semaphore(1, true);
+    private final Semaphore runSlot;
 
     public AgentService(AgentLoop loop, ChatSessionService sessions, ApprovalService approvals, ObjectMapper mapper,
                         HarnessConfig config) {
+        this(loop, sessions, approvals, mapper, config, 1);
+    }
+
+    /** @param maxParallel chat runs allowed at once while {@code serializeRuns} is on ({@code -1} unlimited, 0 means 1) */
+    public AgentService(AgentLoop loop, ChatSessionService sessions, ApprovalService approvals, ObjectMapper mapper,
+                        HarnessConfig config, int maxParallel) {
+        this.runSlot = new Semaphore(maxParallel < 0 ? Integer.MAX_VALUE : Math.max(1, maxParallel), true);
         this.loop = loop;
         this.sessions = sessions;
         this.approvals = approvals;

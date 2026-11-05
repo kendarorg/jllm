@@ -82,7 +82,7 @@ public final class AgentHarness {
     private final HarnessPricing pricing;
     private org.kendar.llm.harness.llm.ProviderCatalog providers;
     private org.kendar.llm.harness.llm.ModelSwitch modelSwitch;
-    private boolean serializeModelCalls;
+    private int maxParallel;
     private org.kendar.llm.harness.tools.Checkpoints checkpoints;
     private final SlashCommands commands = new SlashCommands(this);
 
@@ -233,7 +233,7 @@ public final class AgentHarness {
             }
         }
         ModelClient next = providers.client(p);
-        if (serializeModelCalls) next = new LimitedModelClient(next, 1);
+        if (maxParallel > 0) next = new LimitedModelClient(next, maxParallel);
         modelSwitch.switchTo(next, providerName, window);
         return new SwitchResult(SwitchStatus.SWITCHED, "Model: " + providerName + " (" + p.toLlmSettings().model() + ")");
     }
@@ -556,8 +556,8 @@ public final class AgentHarness {
             org.kendar.llm.harness.llm.ModelSwitch modelSwitch = new org.kendar.llm.harness.llm.ModelSwitch(
                     modelClient, activeProvider, active == null ? null : active.contextTokens());
             modelClient = modelSwitch;
-            boolean serializeModelCalls = settings.serializeModelCalls();
-            if (serializeModelCalls) modelClient = new LimitedModelClient(modelClient, 1);
+            int maxParallel = settings.maxParallel();
+            if (maxParallel > 0) modelClient = new LimitedModelClient(modelClient, maxParallel);
             SandboxExecutor box = sandbox != null ? sandbox : new LocalDirSandboxExecutor(config);
 
             org.kendar.llm.harness.tools.Checkpoints harnessCheckpoints = new org.kendar.llm.harness.tools.Checkpoints();
@@ -585,8 +585,8 @@ public final class AgentHarness {
             ToolSelector selector = new ToolSelector(config, fast != null ? fast : modelClient, mapper);
             RequestToolGroupTool requestToolGroup = new RequestToolGroupTool(registry, sessions, mapper);
             AgentLoop[] ref = new AgentLoop[1];
-            SubAgentTool subAgentTool = new SubAgentTool(() -> ref[0], mapper, agentCatalog(settings, mapper, serializeModelCalls, providers),
-                    !serializeModelCalls);
+            SubAgentTool subAgentTool = new SubAgentTool(() -> ref[0], mapper, agentCatalog(settings, mapper, maxParallel, providers),
+                    maxParallel != 1);
             String instructions = InstructionLoader.load(settings.instructionFiles());
             String prompt = basePrompt()
                     + (smallModel || settings.isSmallModel() ? "\n\n" + Prompts.load("small-model.md") : "")
@@ -600,14 +600,14 @@ public final class AgentHarness {
                     requestToolGroup, subAgentRunLog, mapper, metrics, prompt, hooks,
                     fast == null ? null : new ToolClassifier(fast, mapper));
             ref[0] = loop;
-            AgentService service = new AgentService(loop, sessions, approvals, mapper, config);
+            AgentService service = new AgentService(loop, sessions, approvals, mapper, config, maxParallel);
             AgentHarness harness = new AgentHarness(service, sessions, registry, sources, skills, box,
                     subAgentRunLog, context, config, pricing);
             harness.permissionRules = permissionRules;
             harness.providers = providers;
             harness.checkpoints = harnessCheckpoints;
             harness.modelSwitch = modelSwitch;
-            harness.serializeModelCalls = serializeModelCalls;
+            harness.maxParallel = maxParallel;
             commands.forEach(c -> harness.commands().register(c.name(), c.description(), c.command()));
             return harness;
         }
@@ -627,7 +627,7 @@ public final class AgentHarness {
             };
         }
 
-        private static AgentCatalog agentCatalog(HarnessSettings settings, ObjectMapper mapper, boolean serialize,
+        private static AgentCatalog agentCatalog(HarnessSettings settings, ObjectMapper mapper, int maxParallel,
                                                   org.kendar.llm.harness.llm.ProviderCatalog providers) {
             List<AgentDefinition> defs = new ArrayList<>();
             for (AgentSettings a : settings.agents()) {
@@ -641,7 +641,7 @@ public final class AgentHarness {
                 }
                 ModelClient own = a.provider() != null ? providers.client(a.provider())
                         : a.model() == null ? null : ModelClients.from(a.model(), mapper);
-                if (own != null && serialize) own = new LimitedModelClient(own, 1);
+                if (own != null && maxParallel > 0) own = new LimitedModelClient(own, maxParallel);
                 defs.add(new AgentDefinition(a.name(), a.description() == null ? "" : a.description(), a.tools(),
                         prompt, Boolean.TRUE.equals(a.inheritContext()), own, Boolean.TRUE.equals(a.readOnly()),
                         a.temperature()));

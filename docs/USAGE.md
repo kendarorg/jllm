@@ -88,7 +88,7 @@ ignored.
   "defaultProvider": "claude-sonnet",
   "permissions": {"deny": ["bash(rm -rf .*)", "write_file(.*\\.env)", "web_fetch"],
                   "ask": ["bash(.*curl.*)"], "allow": ["bash(mvn .*)"]},
-  "execution":  {"serializeModelCalls": true},
+  "execution":  {"maxParallel": 1},
   "sandbox":    {"tempDir": "/var/tmp/harness", "timeoutSeconds": 120, "backend": "docker",
                  "docker": {"image": "maven:3-eclipse-temurin-21", "network": "none"}},
   "context":    {"maxTokens": 100000, "auto": true, "keepTokens": 15000, "buffer": null, "keepRecentTurns": 6,
@@ -108,7 +108,7 @@ ignored.
 | `providers`, `defaultProvider` | named model providers, see [Providers](#providers-and-temperature) |
 | `permissions` | regex deny/ask/allow rules, see [Permission rules](#permission-rules) |
 | `fastModel` | small model for compaction summaries, tool-group selection and the `auto` classifier |
-| `execution.serializeModelCalls` | default `true`: one model call in flight for the whole harness, sub-agents run depth-first |
+| `execution.maxParallel` | default `1`: one model call in flight, sub-agents run depth-first. `N`: at most N model calls and N chat runs at once (chat runs need `serializeRuns`); `N != 1` lets read-only sub-agents run in parallel. `-1`: unlimited |
 | `smallModel` | default `false`: append the small-model rules (`prompts/small-model.md`) to the system prompt; `--small-model` sets it |
 | `sandbox.tempDir`, `sandbox.timeoutSeconds` | scratch root; default shell timeout (the tool caps it at 600 s) |
 | `sandbox.backend`, `sandbox.localFallback`, `sandbox.docker.*` | `local` (default) or `docker`; fall back to local when docker is missing (default `true`); `binary`, `image`, `memory`, `cpus`, `pidsLimit`, `user`, `network`, `mode` (`oneshot` or `daemon`, a long-running container), `remote`, `remoteHost` (docker on another machine). See [SANDBOX](SANDBOX.md). CLI and web: `--sandbox`, `--docker-image`, `--docker-mode`, `--docker-remote`, `--docker-remote-host` |

@@ -68,10 +68,11 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
     private static final Pattern ENV = Pattern.compile("\\$\\{([A-Za-z_][A-Za-z0-9_]*)}");
 
     /**
-     * @param serializeModelCalls one model call at a time, depth-first: main, agent, each sub-agent to its end, back to
-     *                            the agent, back to main (default true: made for a local LLM)
+     * @param maxParallel maximum model calls in flight, and chat runs / sub-agents running at once. Default {@code 1}:
+     *                    one model call at a time, depth-first (made for a local LLM). {@code -1} = unlimited;
+     *                    {@code 0} is treated as {@code 1}
      */
-    public record Execution(Boolean serializeModelCalls) {
+    public record Execution(Integer maxParallel) {
     }
 
     /**
@@ -293,8 +294,11 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
                 fastModel, output, small, permissions, providers, defaultProvider);
     }
 
-    public boolean serializeModelCalls() {
-        return execution == null || execution.serializeModelCalls() == null || execution.serializeModelCalls();
+    /** Concurrency limit: {@code 1} serialized (default), {@code N} bounded, {@code -1} unlimited. */
+    public int maxParallel() {
+        if (execution == null || execution.maxParallel() == null) return 1;
+        int n = execution.maxParallel();
+        return n < 0 ? -1 : Math.max(1, n);
     }
 
     public boolean isSmallModel() {

@@ -36,11 +36,12 @@ class HarnessSettingsTest {
     }
 
     @Test
-    void executionSettingIsRead() throws Exception {
-        assertTrue(HarnessSettings.load(write("{}"), k -> null).serializeModelCalls());
-        assertTrue(HarnessSettings.load(write("{\"execution\":{}}"), k -> null).serializeModelCalls());
-        assertEquals(false, HarnessSettings.load(write("{\"execution\":{\"serializeModelCalls\":false}}"), k -> null)
-                .serializeModelCalls());
+    void maxParallelIsRead() throws Exception {
+        assertEquals(1, HarnessSettings.load(write("{}"), k -> null).maxParallel());
+        assertEquals(1, HarnessSettings.load(write("{\"execution\":{}}"), k -> null).maxParallel());
+        assertEquals(3, HarnessSettings.load(write("{\"execution\":{\"maxParallel\":3}}"), k -> null).maxParallel());
+        assertEquals(1, HarnessSettings.load(write("{\"execution\":{\"maxParallel\":0}}"), k -> null).maxParallel());
+        assertEquals(-1, HarnessSettings.load(write("{\"execution\":{\"maxParallel\":-1}}"), k -> null).maxParallel());
     }
 
     @Test

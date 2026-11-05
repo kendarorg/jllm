@@ -57,7 +57,7 @@ disabled by `/tools`, are never seen by sub-agents, and never clash with registr
 
 ```mermaid
 flowchart TD
-    A["settings.applyTo(config)"] --> B{"serializeModelCalls (default true)"}
+    A["settings.applyTo(config)"] --> B{"maxParallel (default 1)"}
     B -->|yes| B1["main client = LimitedModelClient(client, 1)"]
     B --> C["sandbox = given or LocalDirSandboxExecutor"]
     B1 --> C
@@ -237,7 +237,7 @@ it. Answer: JSON `{verdict, confidence}`; below 0.8 confidence, unparseable, err
 A model error inside a sub-agent becomes `status: failed` for that prompt, never an empty `ok`. Cancel of the parent
 run cancels the sub-agents (same token).
 
-Parallelism: prompts run concurrently unless `serializeModelCalls` is on, or the type is writable and the mode is
+Parallelism: prompts run concurrently unless `maxParallel` is 1, or the type is writable and the mode is
 `edit`/`auto` (writers would race on the same files). Serial runs share one global fair lock, so a sub-agent finishes
 before any other starts, across `task` calls too.
 
@@ -248,7 +248,7 @@ before any other starts, across `task` calls too.
 | runs | one virtual thread per run; `serializeRuns` semaphore (1, fair) across chats |
 | tool calls of one response | virtual-thread executor; results joined in order; cancel interrupts the futures |
 | sub-agent prompts | virtual threads, or a single-thread executor + global lock when serial |
-| model calls | `LimitedModelClient` fair semaphore (1) when `serializeModelCalls`; waiting is cancellable |
+| model calls | `LimitedModelClient` fair semaphore (`maxParallel` slots, none when -1); waiting is cancellable |
 | approvals | per-chat fair lock in `ApprovalService` |
 | sessions | `ChatSessionService` write methods are `synchronized` |
 | registry | immutable snapshots, `volatile` swap; source changes `synchronized` |

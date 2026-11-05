@@ -254,7 +254,7 @@ not a cancellation). `FallbackModelClient.onFallback(listener)` reports the prov
 inside each client (`maxRetries`).
 
 `fastModelClient(...)` (or settings `fastModel`) adds a small model for tool-group selection, compaction summaries and
-the `auto` classifier. With `serializeModelCalls` both are wrapped in `LimitedModelClient(…, 1)`.
+the `auto` classifier. Unless `maxParallel` is -1 both are wrapped in `LimitedModelClient(…, maxParallel)`.
 
 ## 6. Sub-agent types
 
@@ -289,7 +289,7 @@ sequenceDiagram
     participant S as runSubAgent
     participant U as user
     M->>T: {subagent_type, prompts (max 8)}
-    alt parallel allowed (serializeModelCalls=false, and read-only type or mode default/plan)
+    alt parallel allowed (maxParallel != 1, and read-only type or mode default/plan)
         T->>S: all prompts concurrently
     else
         T->>S: one after the other (global lock)
