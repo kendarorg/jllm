@@ -8,7 +8,8 @@ Two problems, solved together:
 2. **Context window**: the conversation grows until it no longer fits. A *context strategy* decides what the next
    request carries.
 
-Classes: `context.ContextStrategy` (interface), `context.compaction.*` (default), `context.mnemonic.*`.
+Classes: `context.ContextStrategy` (interface), `context.compaction.*` (default), `context.mnemonic.*`,
+`context.scope.*`.
 
 ## 1. Prompt cache layout
 
@@ -361,17 +362,74 @@ id=…` are denied with a message telling the model to recall the original first
 `null` means derived: trigger 60%, target 30%, minBatch 20% of the ceiling; keepRecent = `context.keepTokens`;
 tailMax 25% of the window.
 
-## 5. Choosing
+## 5. Scope strategy
 
-| | Compaction | Mnemonic |
-|---|---|---|
-| Log on disk | rewritten (summaries replace history) | verbatim forever |
-| Information loss | summaries are lossy; cleared results are gone | none: everything recallable |
-| Extra model calls | a summary per tier-2/3 compaction | handoff notes per segment switch |
-| User interaction | tier 3 may ask for approval | never |
-| Cache behavior | each compaction rewrites the prefix of the history | breaks only at the first newly masked message; rare, batched |
-| Best for | short chats, hosted models | long agentic sessions, local servers with prefix KV cache |
-| `/compact` | yes | no-op |
+`context.scope.ScopeStrategy`, selected with `context.strategy: scope`. It reuses the summarizer of `ContextManager`
+and adds a whole-request budget, offloading, a pinned first message and a task list.
+
+**Budget.** `window - reserve - safety - fixed`, in tokens (chars / 4):
+
+| Part | Value |
+|---|---|
+| `window` | `contextBudgetTokens` |
+| `reserve` | `min(window / 8, reserveCap, maxTokens)`, room for the answer (`reserveCap` 4096) |
+| `safety` | `safetyPercent` of the window (2) |
+| `fixed` | pinned system block, per-turn note and tool schemas of the request |
+
+Nothing happens while the messages fit (and with `compaction.auto` off, nothing happens at all).
+
+**Trim order**, each step only while the request is still over budget:
+
+1. **Offload.** A `tool_result` longer than `offloadChars` (20000) is written in full to
+   `<scratch>/offload/<tool_use_id>.txt` and replaced in the log by
+   `[Output offloaded to <path> (N chars); read it with read_file if you need more.]` plus `previewChars` (1500) of head and
+   tail. First outside the latest turn, then everywhere. The agent's own scratch directory is readable by the file
+   tools in every mode. If the write fails the original stays.
+2. **Clear.** Tool results older than `keepRecentTurns` turns are blanked; an offload pointer is cut back to its first
+   line, so the path survives.
+3. **Summarize.** `ContextManager.compactNow` on the log without its first message: everything but the latest turn
+   becomes `[Summary of the earlier conversation]`.
+
+If it still does not fit a `warning` event says so and the request is sent; the provider may then refuse it. There is no
+user-approved rewrite tier.
+
+**Pinned first message.** The first user message of the chat is never summarized or cleared. After the first summary the
+log is `[first user message] [assistant "Understood."] [summary] [recent turns]`; the next compaction leaves the first two
+alone and merges the old summary into the new one. A log that does not start with a plain user message (for example one
+that came from `compaction`) has no pin.
+
+**Todos.** `todo_write` replaces the whole list (`id`, `content`, `status` of `pending`, `in_progress`, `completed`; at
+most one `in_progress`; a rejected write keeps the old list); `todo_read` returns it. Both are `READ_ONLY`, so they need
+no approval and work in plan mode. The list lives in the `StateStore` under `todos-<agent>`, per chat and agent. Each
+request gets it appended as a `<todo_list>` block to the last user message, on a copy: the stored log never contains
+it, so no compaction can lose or duplicate it, and the cached prefix does not change. A `todos` event is emitted on every
+write.
+
+**Overflow.** `onOverflow` runs one forced pass: offload at `overflowOffloadChars` (2000), clear all but the latest turn,
+summarize. `/compact` clears and summarizes with an optional focus.
+
+### Settings
+
+```json
+"context": {"strategy": "scope",
+            "scope": {"offloadChars": 20000, "overflowOffloadChars": 2000, "previewChars": 1500,
+                      "safetyPercent": 2, "reserveCap": 4096}}
+```
+
+Unset values keep these defaults. Code: `builder.scopeOptions(new ScopeStrategy.Options(...))`; the settings file wins.
+
+## 6. Choosing
+
+| | Compaction | Mnemonic | Scope |
+|---|---|---|---|
+| Log on disk | rewritten (summaries replace history) | verbatim forever | rewritten; large outputs kept as files |
+| Information loss | summaries are lossy; cleared results are gone | none: everything recallable | summaries are lossy; offloaded outputs stay on disk |
+| Extra model calls | a summary per tier-2/3 compaction | handoff notes per segment switch | a summary per compaction |
+| User interaction | tier 3 may ask for approval | never | never |
+| Cache behavior | each compaction rewrites the prefix of the history | breaks only at the first newly masked message; rare, batched | like compaction; the todo block is at the end |
+| Pinned | none | first user message per segment | first user message, todo list |
+| Best for | short chats, hosted models | long agentic sessions, local servers with prefix KV cache | long task-driven sessions with large tool outputs |
+| `/compact` | yes | no-op | yes |
 
 Select with `context.strategy`, `--context-strategy`, `HarnessConfig.withContextStrategy(...)`, or a custom
 implementation through `builder.contextStrategy(factory)` ([EXTENDING §7](EXTENDING.md#7-context-strategy)).

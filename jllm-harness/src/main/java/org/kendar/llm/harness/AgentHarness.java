@@ -319,6 +319,9 @@ public final class AgentHarness {
         private final List<CommandSpec> commands = new ArrayList<>();
         private ContextStrategyFactory contextStrategy;
         private MnemonicStore mnemonicStore = new InMemoryMnemonicStore();
+        private org.kendar.llm.harness.context.scope.ScopeStrategy.Options scopeOptions =
+                org.kendar.llm.harness.context.scope.ScopeStrategy.Options.defaults();
+        private org.kendar.llm.harness.state.StateStore stateStore = new org.kendar.llm.harness.state.InMemoryStateStore();
         private String activeProvider;
         private org.kendar.llm.harness.llm.ProviderSettings sessionProvider;
         private final org.kendar.llm.harness.tools.DocumentReaders documentReaders =
@@ -508,7 +511,7 @@ public final class AgentHarness {
 
         /**
          * A custom context strategy; it replaces the one chosen by {@code config.contextStrategy()} (settings
-         * {@code context.strategy}: compaction or mnemonic).
+         * {@code context.strategy}: compaction, mnemonic or scope).
          */
         public Builder contextStrategy(ContextStrategyFactory factory) {
             this.contextStrategy = factory;
@@ -516,6 +519,18 @@ public final class AgentHarness {
         }
 
         /** Where the mnemonic strategy keeps its decisions; default in memory. */
+        /** Thresholds of the {@code scope} context strategy. */
+        public Builder scopeOptions(org.kendar.llm.harness.context.scope.ScopeStrategy.Options options) {
+            this.scopeOptions = options;
+            return this;
+        }
+
+        /** Where tool grants and todo lists are kept; default in memory (lost on restart). */
+        public Builder stateStore(org.kendar.llm.harness.state.StateStore store) {
+            this.stateStore = store;
+            return this;
+        }
+
         public Builder mnemonicStore(MnemonicStore store) {
             this.mnemonicStore = store;
             return this;
@@ -561,11 +576,11 @@ public final class AgentHarness {
             ExternalSources sources = new ExternalSources(registry, settings, HttpClient.newHttpClient(), mapper);
 
             ChatSessionService sessions = new ChatSessionService(sessionStore, config.agentId(), mapper);
-            ApprovalService approvals = new ApprovalService(config.approvalTimeoutSeconds());
+            ApprovalService approvals = new ApprovalService(config.approvalTimeoutSeconds(), stateStore);
             ModelClient fast = fastClient != null ? fastClient
                     : settings.fastModel() != null ? ModelClients.from(settings.fastModel(), mapper) : null;
             ContextStrategy context = contextStrategy(new ContextStrategyFactory.Deps(config, modelClient,
-                    fast != null ? fast : modelClient, approvals, mapper, metrics, subAgentRunLog));
+                    fast != null ? fast : modelClient, approvals, mapper, metrics, subAgentRunLog), box);
             context.install(hooks);
             ToolSelector selector = new ToolSelector(config, fast != null ? fast : modelClient, mapper);
             RequestToolGroupTool requestToolGroup = new RequestToolGroupTool(registry, sessions, mapper);
@@ -577,7 +592,9 @@ public final class AgentHarness {
                     + (smallModel || settings.isSmallModel() ? "\n\n" + Prompts.load("small-model.md") : "")
                     + (systemPrompt.isBlank() ? "" : "\n\n" + systemPrompt)
                     + (instructions.isBlank() ? "" : "\n\n" + instructions)
-                    + (context.kind() == ContextStrategyKind.MNEMONIC ? "\n\n" + MnemonicStrategy.systemAddendum() : "");
+                    + (context.kind() == ContextStrategyKind.MNEMONIC ? "\n\n" + MnemonicStrategy.systemAddendum() : "")
+                    + (context.kind() == ContextStrategyKind.SCOPE
+                    ? "\n\n" + org.kendar.llm.harness.context.scope.ScopeStrategy.systemAddendum() : "");
             AgentLoop loop = new AgentLoop(config, modelClient, context, selector,
                     new PermissionGate(approvalPolicy, permissionRules), approvals, sessions, box, registry, subAgentTool,
                     requestToolGroup, subAgentRunLog, mapper, metrics, prompt, hooks,
@@ -595,11 +612,16 @@ public final class AgentHarness {
             return harness;
         }
 
-        private ContextStrategy contextStrategy(ContextStrategyFactory.Deps deps) {
+        private ContextStrategy contextStrategy(ContextStrategyFactory.Deps deps, SandboxExecutor box) {
             if (contextStrategy != null) return contextStrategy.create(deps);
             return switch (deps.config().contextStrategy()) {
                 case MNEMONIC -> new MnemonicStrategy(deps.config(), deps.mapper(), deps.metrics(), mnemonicStore,
                         deps.subAgentRuns());
+                case SCOPE -> new org.kendar.llm.harness.context.scope.ScopeStrategy(deps.config(),
+                        new ContextManager(deps.config(), deps.summaryModel(), deps.approvals(), deps.mapper(),
+                                deps.metrics()), deps.mapper(),
+                        new org.kendar.llm.harness.context.scope.TodoStore(stateStore, deps.mapper()), settings.scopeOptions(scopeOptions),
+                        (chat, agent) -> box.scratchDir(chat, AgentLoop.scratchId(agent)), box::displayPath);
                 case COMPACTION, CUSTOM -> new CompactionStrategy(new ContextManager(deps.config(), deps.summaryModel(),
                         deps.approvals(), deps.mapper(), deps.metrics()), deps.config(), deps.mapper());
             };

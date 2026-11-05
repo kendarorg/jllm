@@ -14,13 +14,16 @@ Micrometer. Java 21, Jackson, JDK `HttpClient`, jsoup, swagger-parser, slf4j-api
 - **Permissions**: `plan` / `edit` / `auto` modes, deny rules, approval policy, per-chat grants, fast-model
   classifier in `auto`.
 - **Sandbox**: current directory (CLI), per-chat directory or Docker; a writable scratch directory per chat and agent.
-- **Context**: two strategies. `compaction` (default) clears old tool results, then summarizes, then proposes a
+- **Context**: three strategies. `compaction` (default) clears old tool results, then summarizes, then proposes a
   rewrite for approval. `mnemonic` never rewrites the log: it masks old content behind receipts, switches segments
-  with handoff notes and offers `history_recall`.
+  with handoff notes and offers `history_recall`. `scope` measures the whole request, offloads large tool results to
+  disk, never compacts the first user message and keeps a `todo_write` task list outside the transcript.
 - **Sub-agents**: `task` tool with `general`, `explore`, `plan` and custom types; they inherit the caller's mode.
 - **Extensions**: settings file, hooks around agents, model calls and tool calls, plugins, skills, `KENDAR.md`
   instruction files, slash commands and numbered menus.
-- **Persistence**: in memory or as files under `.kendhar/history`; ports for your own stores.
+- **Persistence**: in memory or as files under `.kendhar/history`; ports for your own stores. Tool grants and todo
+  lists go through the `StateStore` port (`<history>/<chat>/state/*.json` in the CLI and web).
+- **Resilience**: `order` on a provider chains fallbacks; hooks report duration and token usage for tracing.
 
 
 Front ends: [jllm-cli](../jllm-cli/README.md) (terminal) and [jllm-web](../jllm-web/README.md) (browser). Reference docs are in [docs](../docs).
@@ -96,14 +99,14 @@ AgentHarness h = AgentHarness.builder()
   "instructionFiles": ["KENDAR.md", "~/KENDAR.md"],
   "agents":     [{"name": "scout", "description": "Looks around", "tools": ["read_file", "grep"], "readOnly": true, "prompt": "..."}],
   "providers":  [{"name": "local-qwen", "type": "openai", "baseUrl": "http://localhost:8080/v1", "model": "local",
-                  "requireApiKey": false, "contextTokens": 32000}],
+                  "requireApiKey": false, "contextTokens": 32000, "order": 1}],
   "defaultProvider": "local-qwen",
   "permissions": {"deny": ["bash(rm -rf .*)"], "ask": ["bash(.*curl.*)"], "allow": ["bash(mvn .*)"]},
   "execution":  {"serializeModelCalls": true},
   "sandbox":    {"tempDir": "/var/tmp/harness", "timeoutSeconds": 120, "backend": "docker",
                  "docker": {"image": "maven:3-eclipse-temurin-21", "network": "none"}},
   "context":    {"maxTokens": 100000, "auto": true, "keepTokens": 15000, "buffer": null, "keepRecentTurns": 6,
-                 "strategy": "compaction"},
+                 "strategy": "compaction", "scope": {"offloadChars": 20000, "safetyPercent": 2}},
   "output":     {"toolMaxChars": 30000, "eventMaxChars": 2000},
   "smallModel": false
 }
@@ -190,12 +193,13 @@ Sub-agents compact on their own.
 
 ### Choosing the context strategy
 
-Two strategies, in separate packages behind `context.ContextStrategy`:
+Three strategies, in separate packages behind `context.ContextStrategy`:
 
 | Strategy | Package | Log | How space is freed |
 |---|---|---|---|
 | `compaction` (default) | `context.compaction` | rewritten and saved | clear old tool results, summarize, then a rewrite the user approves |
 | `mnemonic` | `context.mnemonic` | never rewritten | sticky receipts, segment handoffs, `history_recall` |
+| `scope` | `context.scope` | rewritten and saved | whole-request budget: offload large tool results, clear, summarize; first message and todos pinned |
 
 Select it with settings `"context": {"strategy": "mnemonic"}`, the CLI flag `--context-strategy mnemonic` (wins over
 the settings), `config.withContextStrategy(ContextStrategyKind.MNEMONIC)`, or a custom implementation with
@@ -226,6 +230,26 @@ always gives the same bytes, so the prompt cache stays valid up to the first new
             "mnemonic": {"maskTrigger": null, "maskTarget": null, "minBatchTokens": null, "minMaskTokens": 300,
                          "keepRecentTokens": null, "minAgeTurns": 2, "tailMaxTokens": null, "notesMaxTokens": 2000,
                          "indexMaxTokens": 1500, "recallMaxChars": 12000, "dropOldThinking": true}}
+```
+
+### The scope strategy
+
+`"context": {"strategy": "scope"}` (CLI `--context-strategy scope`). The request is measured as a whole: window minus
+the answer reserve (`min(window/8, reserveCap, maxTokens)`), minus `safetyPercent` of the window, minus the system
+prompt and tool schemas. While it is over budget, in this order: tool results longer than `offloadChars` are written
+to `<scratch>/offload/<tool_use_id>.txt` and replaced by the path plus `previewChars` of head and tail (the agent reads
+the file with `read_file`); old tool results are cleared; older turns are summarized. A request the provider still
+refuses gets one forced pass (`overflowOffloadChars`, one turn kept). The first user message and the todo list are
+never compacted; see [CACHES §5](../docs/CACHES.md#5-scope-strategy).
+
+The strategy offers `todo_write` (the complete list, at most one `in_progress`) and `todo_read`; both are `READ_ONLY`.
+The list is kept per chat and agent in the `StateStore`, added to the last user message of every request (never to the
+stored log) and sent to front ends as the `todos` event.
+
+```json
+"context": {"strategy": "scope",
+            "scope": {"offloadChars": 20000, "overflowOffloadChars": 2000, "previewChars": 1500,
+                      "safetyPercent": 2, "reserveCap": 4096}}
 ```
 
 ## Fast model and the auto-mode classifier

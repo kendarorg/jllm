@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import org.kendar.llm.harness.HarnessConfig;
 import org.kendar.llm.harness.context.ContextStrategyKind;
+import org.kendar.llm.harness.context.scope.ScopeStrategy;
 import org.kendar.llm.harness.llm.LlmSettings;
 import org.kendar.llm.harness.llm.ProviderSettings;
 import org.kendar.llm.harness.permission.PermissionRules;
@@ -189,11 +190,34 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
      * @param mnemonic        settings of the mnemonic strategy
      */
     public record Context(Integer maxTokens, Integer keepRecentTurns, Boolean auto, Integer keepTokens,
-                          Integer buffer, String strategy, Mnemonic mnemonic) {
+                          Integer buffer, String strategy, Mnemonic mnemonic, Scope scope) {
 
         public Context(Integer maxTokens, Integer keepRecentTurns, Boolean auto, Integer keepTokens, Integer buffer) {
-            this(maxTokens, keepRecentTurns, auto, keepTokens, buffer, null, null);
+            this(maxTokens, keepRecentTurns, auto, keepTokens, buffer, null, null, null);
         }
+
+        public Context(Integer maxTokens, Integer keepRecentTurns, Boolean auto, Integer keepTokens, Integer buffer,
+                       String strategy, Mnemonic mnemonic) {
+            this(maxTokens, keepRecentTurns, auto, keepTokens, buffer, strategy, mnemonic, null);
+        }
+    }
+
+    /** Thresholds of the {@code scope} context strategy; unset values keep the defaults. */
+    public record Scope(Integer offloadChars, Integer overflowOffloadChars, Integer previewChars,
+                        Integer safetyPercent, Integer reserveCap) {
+
+        public ScopeStrategy.Options over(ScopeStrategy.Options d) {
+            return new ScopeStrategy.Options(offloadChars != null ? offloadChars : d.offloadChars(),
+                    overflowOffloadChars != null ? overflowOffloadChars : d.overflowOffloadChars(),
+                    previewChars != null ? previewChars : d.previewChars(),
+                    safetyPercent != null ? safetyPercent : d.safetyPercent(),
+                    reserveCap != null ? reserveCap : d.reserveCap());
+        }
+    }
+
+    /** The scope strategy options: {@code defaults} with the {@code context.scope} settings on top. */
+    public ScopeStrategy.Options scopeOptions(ScopeStrategy.Options defaults) {
+        return context == null || context.scope() == null ? defaults : context.scope().over(defaults);
     }
 
     /** Same names and meaning as {@link HarnessConfig.Mnemonic}; unset values keep the defaults. */
@@ -251,7 +275,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
         Context c = context == null ? new Context(null, null, null, null, null) : context;
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox,
                 new Context(maxTokens, c.keepRecentTurns(), c.auto(), c.keepTokens(), c.buffer(), c.strategy(),
-                        c.mnemonic()), fastModel, output, smallModel, permissions, providers, defaultProvider);
+                        c.mnemonic(), c.scope()), fastModel, output, smallModel, permissions, providers, defaultProvider);
     }
 
     /** Same settings with {@code context.strategy} replaced (e.g. by a command line flag). */
@@ -260,7 +284,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
         Context c = context == null ? new Context(null, null, null, null, null) : context;
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox,
                 new Context(c.maxTokens(), c.keepRecentTurns(), c.auto(), c.keepTokens(), c.buffer(), strategy,
-                        c.mnemonic()), fastModel, output, smallModel, permissions, providers, defaultProvider);
+                        c.mnemonic(), c.scope()), fastModel, output, smallModel, permissions, providers, defaultProvider);
     }
 
     /** Same settings with {@code smallModel} replaced (e.g. by a command line flag). */

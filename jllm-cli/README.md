@@ -19,7 +19,7 @@ The API key comes from `--api-key` or the `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`
 Main [--provider anthropic|openai|qwen|llamacpp|ollama] [--model M] [--base-url U] [--api-key K]
      [--mode default|plan|edit|auto] [--workdir DIR] [--prompt TEXT] [--settings FILE] [--system-prompt TEXT]
      [--max-turns N] [--context-tokens TOKENS] [--max-tokens TOKENS]
-     [--context-strategy compaction|mnemonic] [--search-api-key BRAVE_KEY] [--small-model]
+     [--context-strategy compaction|mnemonic|scope] [--search-api-key BRAVE_KEY] [--small-model]
      [--sandbox local|docker] [--docker-image IMAGE] [--docker-mode oneshot|daemon]
      [--docker-remote] [--docker-remote-host ADDRESS]
      [--sandbox-clean] [--sandbox-clean-all]
@@ -39,7 +39,7 @@ Main [--provider anthropic|openai|qwen|llamacpp|ollama] [--model M] [--base-url 
 | `--max-turns` | 40 | model calls per user turn |
 | `--context-tokens` | 100000 | the model's context window; wins over `context.maxTokens` |
 | `--max-tokens` | 32000 | output limit of one response, not the window |
-| `--context-strategy` | `compaction` | `compaction` or `mnemonic`; wins over `context.strategy` |
+| `--context-strategy` | `compaction` | `compaction`, `mnemonic` or `scope`; wins over `context.strategy` |
 | `--search-api-key` | `BRAVE_API_KEY` env var | Brave key for `web_search`; without it DuckDuckGo is scraped |
 | `--small-model` | off | no value; adds the small-model rules to the system prompt |
 | `--sandbox` | `local` | `local` (no isolation) or `docker`: `bash` runs in a container with the project directory mounted ([SANDBOX](../docs/SANDBOX.md)); wins over `sandbox.backend` |

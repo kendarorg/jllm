@@ -1,5 +1,9 @@
 package org.kendar.llm.harness.permission;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.kendar.llm.harness.state.InMemoryStateStore;
+import org.kendar.llm.harness.state.StateStore;
 import org.kendar.llm.harness.util.Uuids;
 
 import java.util.ArrayList;
@@ -38,14 +42,23 @@ public class ApprovalService {
     private final Map<String, Map<String, Pending>> pending = new ConcurrentHashMap<>();
     /** One open dialog per chat: the others wait here, fairly, and are not shown until it is answered. */
     private final Map<String, ReentrantLock> dialogs = new ConcurrentHashMap<>();
-    /** Tools the user allowed for a whole chat; runtime state only, never part of the context. */
+    /** Tools the user allowed for a whole chat; never part of the context, persisted in the state store. */
     private final Map<String, Set<String>> grants = new ConcurrentHashMap<>();
+    private final StateStore state;
+    private static final String GRANTS = "grants";
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private record Pending(PendingApproval approval, CompletableFuture<ApprovalDecision> future) {
     }
 
     public ApprovalService(int timeoutSeconds) {
+        this(timeoutSeconds, new InMemoryStateStore());
+    }
+
+    /** @param state where the grants survive a restart */
+    public ApprovalService(int timeoutSeconds, StateStore state) {
         this.timeoutSeconds = timeoutSeconds;
+        this.state = state;
     }
 
     /**
@@ -113,17 +126,31 @@ public class ApprovalService {
     }
 
     public void grant(String chatId, String tool) {
-        grants.computeIfAbsent(chatId, k -> ConcurrentHashMap.newKeySet()).add(tool);
+        Set<String> g = grantsOf(chatId);
+        if (g.add(tool)) {
+            com.fasterxml.jackson.databind.node.ArrayNode a = MAPPER.createArrayNode();
+            new java.util.TreeSet<>(g).forEach(a::add);
+            state.save(chatId, GRANTS, a);
+        }
     }
 
     public boolean granted(String chatId, String tool) {
-        Set<String> g = grants.get(chatId);
-        return g != null && g.contains(tool);
+        return grantsOf(chatId).contains(tool);
+    }
+
+    private Set<String> grantsOf(String chatId) {
+        return grants.computeIfAbsent(chatId, k -> {
+            Set<String> set = ConcurrentHashMap.newKeySet();
+            JsonNode n = state.load(k, GRANTS);
+            if (n != null && n.isArray()) n.forEach(t -> set.add(t.asText()));
+            return set;
+        });
     }
 
     /** Drops the grants of a deleted chat. */
     public void forget(String chatId) {
         grants.remove(chatId);
+        state.delete(chatId);
         dialogs.remove(chatId);
     }
 

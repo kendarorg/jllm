@@ -183,7 +183,7 @@ The order of checks for one tool call is in [TOOLS §5](TOOLS.md#5-one-tool-call
 | `PermissionGate` | mode × kind → `ALLOW`/`ASK` via the policy | none |
 | `ToolApprovalPolicy` | what asks in default mode (default: not `READ_ONLY`) | none |
 | `ToolClassifier` | in `auto`, `SAFE`/`UNSAFE`/`UNSURE` | none |
-| `ApprovalService` | pending dialogs, grants | per chat, in memory |
+| `ApprovalService` | pending dialogs, grants | pending: per chat, in memory; grants: also saved in the `StateStore` |
 
 ### `ApprovalService`
 
@@ -270,7 +270,9 @@ strategy reports `logChanged`. The CLI's `FileHistory*` stores mirror chats and 
 
 | Item | Where it lives |
 |---|---|
-| approval grants, declined tier-3 sizes | `ApprovalService`, `ContextManager`, memory only |
+| approval grants | `ApprovalService`, saved in the `StateStore` (`grants`), survive a restart |
+| declined tier-3 sizes | `ContextManager`, memory only |
+| todo list (`scope` strategy) | `StateStore` (`todos-<agent>`); added to each request on a copy, not to the log |
 | chat title, mode name changes | session row (the mode sentence is in the per-turn note, not the pinned block) |
 | sub-agent transcripts | `SubAgentRunLog` (the parent gets only the answer; mnemonic `history_recall` can read them) |
 | tool output beyond `toolMaxChars` | dropped (`[truncated N chars]`) |

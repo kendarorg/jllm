@@ -438,7 +438,8 @@ Event types: `run_started`, `run_queued`, `text`, `usage`, `tool_call`, `tool_re
 - `ChatSessionData` holds messages (JSON lines), mode, tool groups, usage counters, title, `agentId`.
 - `AgentLoop` saves the message log after the user message, after every assistant response, and after every tool-result message. A model call that fails or is denied appends nothing, so the log always stays valid for the next call.
 - Stores: `InMemoryChatSessionStore` (default), `FileHistoryChatSessionStore` (mirrors to `messages.jsonl`, CLI). Sub-agent runs: `InMemorySubAgentRunLog`, `FileHistorySubAgentRunLog`.
-- Grants (`approve always`) and declined-rewrite markers are runtime state only, never in the context.
+- Grants (`approve always`) are saved through the `StateStore` (`<history>/<chat>/state/grants.json` in the CLI and web), so they survive a restart; with the default in-memory store they last for the run. Declined-rewrite markers are runtime state only. None of them is in the context.
+- The `StateStore` also holds the todo lists of the `scope` strategy (`todos-<agent>`). The plan mode is the session `mode`; plan files are in the scratch directory.
 
 ## 12. Sandbox
 

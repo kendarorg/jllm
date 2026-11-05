@@ -476,9 +476,11 @@ public class AgentLoop {
                 resp = client.complete(new ModelRequest(pinned, turnExtra, view.messages(), tools, config.maxTokens(),
                         null, !config.parallelToolUse()), token);
                 metrics.modelCall(java.time.Duration.ofNanos(System.nanoTime() - modelStart), "ok");
-                hooks.run(HookContext.after(HookEvent.POST_LLM, chatId, agent, responseText(resp), false));
+                hooks.run(HookContext.afterLlm(chatId, agent, responseText(resp), false,
+                        (System.nanoTime() - modelStart) / 1_000_000L, resp.usage()));
             } catch (RuntimeException e) {
-                hooks.run(HookContext.after(HookEvent.POST_LLM, chatId, agent, String.valueOf(e.getMessage()), true));
+                hooks.run(HookContext.afterLlm(chatId, agent, String.valueOf(e.getMessage()), true,
+                        (System.nanoTime() - modelStart) / 1_000_000L, null));
                 if (e instanceof ModelCancelledException || cancelled.getAsBoolean()) {
                     // nothing was appended for this turn, so the message log stays consistent
                     metrics.modelCall(java.time.Duration.ofNanos(System.nanoTime() - modelStart), "cancelled");
@@ -737,7 +739,8 @@ public class AgentLoop {
                 }
                 result = withHookContext(result, pre.addedContext(),
                         hooks.run(HookContext.postTool(ctx.chatId(), name, input, result.path("content").asText(""),
-                                result.path("is_error").asBoolean(false))).addedContext());
+                                result.path("is_error").asBoolean(false),
+                                (System.nanoTime() - toolStart) / 1_000_000L)).addedContext());
             }
         }
 

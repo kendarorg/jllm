@@ -41,7 +41,7 @@ public final class Hooks {
             HookResult r;
             try {
                 r = h.run(new HookContext(ctx.event(), ctx.chatId(), ctx.text(), ctx.tool(), input, ctx.output(),
-                        ctx.isError(), ctx.agent()));
+                        ctx.isError(), ctx.agent(), ctx.durationMs(), ctx.usage()));
             } catch (Exception e) {
                 log.warn("Hook for {} failed and was ignored: {}", ctx.event(), e.toString());
                 continue;

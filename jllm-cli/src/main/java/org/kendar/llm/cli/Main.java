@@ -39,7 +39,7 @@ import java.util.concurrent.TimeUnit;
  * java -cp ... org.kendar.llm.harness.Main [--provider anthropic|openai|qwen|llamacpp|ollama] [--model M]
  *     [--base-url U] [--api-key K] [--mode plan|edit|auto] [--workdir DIR] [--prompt TEXT]
  *     [--settings FILE] [--system-prompt TEXT] [--max-turns N] [--context-tokens TOKENS]
- *     [--search-api-key BRAVE_KEY] [--context-strategy compaction|mnemonic] [--max-tokens TOKENS] [--small-model]
+ *     [--search-api-key BRAVE_KEY] [--context-strategy compaction|mnemonic|scope] [--max-tokens TOKENS] [--small-model]
  * </pre>
  * {@code --max-tokens} is the output limit of one model response (default 32000);
  * {@code --context-tokens} the window. {@code --small-model} (no value) adds the stricter small-model rules to the
@@ -67,7 +67,7 @@ public final class Main {
             System.out.println("Usage: Main [--provider anthropic|openai|qwen|llamacpp|ollama] [--model M] [--base-url U] "
                     + "[--api-key K] [--mode plan|edit|auto] [--workdir DIR] [--prompt TEXT] "
                     + "[--system-prompt TEXT] [--max-turns N] [--context-tokens TOKENS] [--search-api-key BRAVE_KEY] "
-                    + "[--settings FILE] [--context-strategy compaction|mnemonic] [--max-tokens TOKENS] [--small-model] "
+                    + "[--settings FILE] [--context-strategy compaction|mnemonic|scope] [--max-tokens TOKENS] [--small-model] "
                     + "[--sandbox local|docker] [--docker-image IMAGE] [--docker-mode oneshot|daemon] "
                     + "[--docker-remote] [--docker-remote-host ADDRESS] [--sandbox-clean] [--sandbox-clean-all]");
             return;
@@ -124,6 +124,7 @@ public final class Main {
                 .sessionStore(new FileHistoryChatSessionStore(new InMemoryChatSessionStore(), cwdSandbox.historyRoot()))
                 .subAgentRunLog(new FileHistorySubAgentRunLog(new InMemorySubAgentRunLog(), cwdSandbox.historyRoot()))
                 .mnemonicStore(new FileMnemonicStore(cwdSandbox.historyRoot()))
+                .stateStore(new org.kendar.llm.harness.state.FileStateStore(cwdSandbox.historyRoot()))
                 .settings(settings)
                 .objectMapper(mapper)
                 .discoverPlugins()
@@ -178,7 +179,8 @@ public final class Main {
      */
     private static String askToken() throws IOException {
         java.io.Console console = System.console();
-        if (console != null && console.isTerminal()) {
+        // up to JDK 21 System.console() is null unless stdin and stdout are a terminal (isTerminal() needs JDK 22)
+        if (console != null) {
             char[] key = console.readPassword("API key: ");
             return key == null ? "" : new String(key).strip();
         }

@@ -82,9 +82,9 @@ ignored.
   "fastModel":  {"name": "ollama", "baseUrl": "http://localhost:11434/v1", "apiKey": "", "model": "qwen3:4b",
                  "maxTokens": 4096, "maxRetries": 2, "timeoutSeconds": 600,
                  "requireApiKey": false, "useMaxCompletionTokens": false},
-  "providers":  [{"name": "claude-sonnet", "type": "anthropic", "model": "claude-sonnet-5-5", "apiKey": "${ANTHROPIC_API_KEY}"},
+  "providers":  [{"name": "claude-sonnet", "type": "anthropic", "model": "claude-sonnet-5-5", "apiKey": "${ANTHROPIC_API_KEY}", "order": 1},
                  {"name": "local-qwen", "type": "openai", "baseUrl": "http://localhost:8080/v1", "model": "local",
-                  "requireApiKey": false, "contextTokens": 32000, "smallModel": true, "temperature": 0.2}],
+                  "requireApiKey": false, "contextTokens": 32000, "smallModel": true, "temperature": 0.2, "order": 2}],
   "defaultProvider": "claude-sonnet",
   "permissions": {"deny": ["bash(rm -rf .*)", "write_file(.*\\.env)", "web_fetch"],
                   "ask": ["bash(.*curl.*)"], "allow": ["bash(mvn .*)"]},
@@ -92,7 +92,9 @@ ignored.
   "sandbox":    {"tempDir": "/var/tmp/harness", "timeoutSeconds": 120, "backend": "docker",
                  "docker": {"image": "maven:3-eclipse-temurin-21", "network": "none"}},
   "context":    {"maxTokens": 100000, "auto": true, "keepTokens": 15000, "buffer": null, "keepRecentTurns": 6,
-                 "strategy": "compaction", "mnemonic": {"maskTrigger": null}},
+                 "strategy": "compaction", "mnemonic": {"maskTrigger": null},
+                 "scope": {"offloadChars": 20000, "overflowOffloadChars": 2000, "previewChars": 1500,
+                           "safetyPercent": 2, "reserveCap": 4096}},
   "output":     {"toolMaxChars": 30000, "eventMaxChars": 2000},
   "smallModel": false
 }
@@ -110,7 +112,7 @@ ignored.
 | `smallModel` | default `false`: append the small-model rules (`prompts/small-model.md`) to the system prompt; `--small-model` sets it |
 | `sandbox.tempDir`, `sandbox.timeoutSeconds` | scratch root; default shell timeout (the tool caps it at 600 s) |
 | `sandbox.backend`, `sandbox.localFallback`, `sandbox.docker.*` | `local` (default) or `docker`; fall back to local when docker is missing (default `true`); `binary`, `image`, `memory`, `cpus`, `pidsLimit`, `user`, `network`, `mode` (`oneshot` or `daemon`, a long-running container), `remote`, `remoteHost` (docker on another machine). See [SANDBOX](SANDBOX.md). CLI and web: `--sandbox`, `--docker-image`, `--docker-mode`, `--docker-remote`, `--docker-remote-host` |
-| `context.*` | [CACHES](CACHES.md) |
+| `context.*` | [CACHES](CACHES.md); `context.strategy` is `compaction`, `mnemonic` or `scope`; `context.scope.*` are the thresholds of `scope` ([CACHES §5](CACHES.md#5-scope-strategy)) |
 | `output.toolMaxChars` | tool output kept in the context; the rest is cut with `[truncated N chars]` (the head is kept, the tail for `bash`) |
 | `output.eventMaxChars` | tool output carried by the `tool_result` event to the front end |
 
@@ -118,7 +120,7 @@ ignored.
 
 `providers` is a list of named model definitions (`name`, `type` = `anthropic` | `openai` | `qwen` | `llamacpp` |
 `ollama`, `baseUrl`, `apiKey`, `model`, `maxTokens`, `maxRetries`, `timeoutSeconds`, `requireApiKey`,
-`useMaxCompletionTokens`, `contextTokens`, `smallModel`, `temperature`). The old names `anthropic`, `openai`, `qwen`,
+`useMaxCompletionTokens`, `contextTokens`, `smallModel`, `temperature`, `order`). The old names `anthropic`, `openai`, `qwen`,
 `llamacpp`, `ollama` stay valid without a definition.
 
 - CLI: `--provider <name>` picks one; `--model`, `--base-url`, `--api-key` override it for the session only. With an
@@ -127,6 +129,11 @@ ignored.
   runs use the new model; the prompt cache restarts once. If the conversation does not fit the new `contextTokens`,
   you are asked whether to compact first; if you decline, or the strategy cannot compact (`mnemonic`), the switch is
   refused and the model stays.
+- **Retry and fallback.** Each client retries a 429/5xx answer `maxRetries` times (default 5 remote, 2 local) with
+  backoff. `order` (optional integer) chains the providers: when a provider still fails after its retries, the
+  providers with a higher `order` are tried in ascending order; one without `order` is never a fallback. A request
+  refused as too long, and a cancellation, are not passed on to another provider. A fallback that cannot be built
+  (for example a missing key) is skipped.
 - An agent type may set `"provider": "<name>"` (wins over an inline `model`) and `"temperature"`.
 - `temperature` (0 to 2) is resolved agent type, then provider, then unset; unset means nothing is sent.
   `explore` uses 0.2 and `plan` 0.3. OpenAI-compatible clients send it, and retry once without it if the server
@@ -233,7 +240,8 @@ sequenceDiagram
 | `tool_result` | `id`, `name`, `isError`, `output` (cut at `eventMaxChars`) |
 | `approval_request` | `id`, `chatId`, `type` (`tool` or `context`), `title`, `preview`, `proposed`, `agent` |
 | `classifier` | `tool`, `verdict` |
-| `compaction` | compaction: `tier`, `cleared`/`estimatedTokens`; mnemonic: `kind`, `masked`, `savedTokens`, `estimatedTokens` |
+| `compaction` | compaction: `tier`, `cleared`/`estimatedTokens`; mnemonic: `kind`, `masked`, `savedTokens`, `estimatedTokens`; scope: `strategy`, `estimatedTokens` |
+| `todos` | `todos`: the complete list written by `todo_write` (`id`, `content`, `status`) |
 | `warning`, `error` | `message` |
 | `cancelled` | — |
 | `plan_ready` | `message` |
@@ -256,5 +264,6 @@ user's edited text as `edited`.
 | `cost(session)` | estimated USD with `builder.pricing(new HarnessPricing(in, out, cacheRead, cacheWrite))` (per million tokens) |
 | `tools()`, `sources()`, `skills()` | runtime toggles of tools, MCP/REST sources, skills |
 | `workDir(chatId)`, `scratchDir(chatId)`, `sandbox()` | directories |
+| `builder.stateStore(...)` | where tool grants and todo lists are kept (default in memory; the CLI and web use files) |
 | `subAgentRuns()` | audit log of sub-agent runs |
 | `pendingApprovals(chatId)`, `lastSeq(chatId)`, `isRunning(chatId)` | state for UIs |

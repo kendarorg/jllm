@@ -61,7 +61,7 @@ public final class ProviderCatalog {
                 settings.model(), settings.maxTokens() != null ? settings.maxTokens() : defaultMaxTokens,
                 settings.maxRetries(), settings.timeoutSeconds(), settings.requireApiKey(),
                 settings.useMaxCompletionTokens(), settings.contextTokens(), settings.smallModel(),
-                settings.temperature());
+                settings.temperature(), settings.order());
         return CUSTOM;
     }
 
@@ -75,7 +75,24 @@ public final class ProviderCatalog {
         return client(p);
     }
 
+    /** The client of the provider, falling back to the providers with a higher {@code order} when it fails. */
     public ModelClient client(ProviderSettings p) {
+        ModelClient primary = single(p);
+        List<ProviderSettings> next = new ArrayList<>();
+        for (ProviderSettings c : configured.values()) {
+            if (c.order() != null && !c.name().equals(p.name()) && (p.order() == null || c.order() > p.order())) {
+                next.add(c);
+            }
+        }
+        if (next.isEmpty()) return primary;
+        next.sort(java.util.Comparator.comparingInt(ProviderSettings::order));
+        List<FallbackModelClient.Candidate> chain = new ArrayList<>();
+        chain.add(new FallbackModelClient.Candidate(p.name(), () -> primary));
+        for (ProviderSettings n : next) chain.add(new FallbackModelClient.Candidate(n.name(), () -> single(n)));
+        return new FallbackModelClient(chain);
+    }
+
+    private ModelClient single(ProviderSettings p) {
         ModelClient c = ModelClients.from(p.toLlmSettings(), mapper);
         // Anthropic never receives a temperature: Claude 5 models and the current API version reject it
         if (p.temperature() != null && !p.effectiveType().equals("anthropic")) {

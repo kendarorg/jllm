@@ -71,6 +71,7 @@ public class HarnessConfiguration {
                 .sessionStore(new FileHistoryChatSessionStore(new InMemoryChatSessionStore(), sandbox::historyRoot))
                 .subAgentRunLog(new FileHistorySubAgentRunLog(new InMemorySubAgentRunLog(), sandbox::historyRoot))
                 .mnemonicStore(new FileMnemonicStore(sandbox::historyRoot))
+                .stateStore(new org.kendar.llm.harness.state.FileStateStore(sandbox::historyRoot))
                 .settings(settings)
                 .pricing(pricing)
                 .objectMapper(mapper)

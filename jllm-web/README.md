@@ -31,7 +31,7 @@ flags as the CLI, without the prefix: `--provider openai`, `--sandbox docker`, `
 | `jllm.max-turns` | harness default (40) | model calls per user turn |
 | `jllm.workdir` | current directory | project directory the agent works in |
 | `jllm.settings-file` (flag `--settings`) | none | harness [settings file](../docs/USAGE.md#5-settings-file) (MCP, REST, skills, agents) |
-| `jllm.context-strategy` | `compaction` | `compaction` or `mnemonic`; wins over the settings file |
+| `jllm.context-strategy` | `compaction` | `compaction`, `mnemonic` or `scope`; wins over the settings file |
 | `jllm.small-model` | `false` | append the small-model rules to the system prompt |
 | `jllm.sandbox` | `local` | `local` or `docker` (`bash` in a container, chat directory mounted; see [SANDBOX](../docs/SANDBOX.md)); wins over the settings file |
 | `jllm.docker-image` | `python:3.12-slim` | image of the docker sandbox; wins over the settings file |
