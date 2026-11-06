@@ -207,9 +207,18 @@ public final class HarnessTestSupport {
         }
 
         public Rig(Path baseDir, HarnessMetrics metrics) {
+            this(baseDir, metrics, new InMemoryChatSessionStore());
+        }
+
+        /** Chats kept in {@code store}, e.g. a file store shared by two rigs to simulate a restart. */
+        public Rig(Path baseDir, org.kendar.llm.harness.session.ChatSessionStore store) {
+            this(baseDir, HarnessMetrics.noop(), store);
+        }
+
+        private Rig(Path baseDir, HarnessMetrics metrics, org.kendar.llm.harness.session.ChatSessionStore store) {
             this.metrics = metrics;
             this.config = config(baseDir);
-            sessions = new ChatSessionService(new InMemoryChatSessionStore(), config.agentId(), MAPPER);
+            sessions = new ChatSessionService(store, config.agentId(), MAPPER);
             wire();
         }
 

@@ -363,9 +363,10 @@ flowchart LR
         C3["ContextManager.summarizeSpan fallback<br/>simpleComplete, 3000 tokens"]
         C4["ToolSelector.chooseGroups<br/>simpleComplete, 256 tokens"]
         C5["ToolClassifier.classify<br/>simpleComplete, 60 tokens, 20 s timeout"]
+        C6["NoiseQualifier.decide<br/>simpleComplete, temperature 0, 8 tokens, 4 s timeout, command text only"]
     end
     C1 & C2 --> MAIN["main ModelClient<br/>(or sub-agent type.model)"]
-    C3 & C4 & C5 --> FASTQ["fast ModelClient if set, else main"]
+    C3 & C4 & C5 & C6 --> FASTQ["fast ModelClient if set, else main"]
     MAIN & FASTQ --> LMC["LimitedModelClient<br/>fair semaphore, maxParallel slots (default 1)"]
     LMC --> P{"provider"}
     P --> ANT["AnthropicModelClient<br/>POST /v1/messages (non-streaming)"]
@@ -437,7 +438,7 @@ Event types: `run_started`, `run_queued`, `text`, `usage`, `tool_call`, `tool_re
 
 - `ChatSessionData` holds messages (JSON lines), mode, tool groups, usage counters, title, `agentId`.
 - `AgentLoop` saves the message log after the user message, after every assistant response, and after every tool-result message. A model call that fails or is denied appends nothing, so the log always stays valid for the next call.
-- Stores: `InMemoryChatSessionStore` (default), `FileHistoryChatSessionStore` (mirrors to `messages.jsonl`, CLI). Sub-agent runs: `InMemorySubAgentRunLog`, `FileHistorySubAgentRunLog`.
+- Stores: `InMemoryChatSessionStore` (default), `FileChatSessionStore` (`session.json` + `messages.jsonl`, read back on restart, CLI and web). Sub-agent runs: `InMemorySubAgentRunLog`, `FileHistorySubAgentRunLog`.
 - Grants (`approve always`) are saved through the `StateStore` (`<history>/<chat>/state/grants.json` in the CLI and web), so they survive a restart; with the default in-memory store they last for the run. Declined-rewrite markers are runtime state only. None of them is in the context.
 - The `StateStore` also holds the todo lists of the `scope` strategy (`todos-<agent>`). The plan mode is the session `mode`; plan files are in the scratch directory.
 

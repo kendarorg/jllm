@@ -27,7 +27,7 @@ This jar is the library only. The front ends are separate modules:
 Flags, startup directories, the interactive session and the approval prompt are in the
 [CLI README](../jllm-cli/README.md); `jllm.*` properties and the REST/SSE API are in the
 [web README](../jllm-web/README.md). Both build the same `AgentHarness`, with `CwdSandboxExecutor` and the
-`FileHistory*` stores, and have **no isolation**: shell commands run as the current user.
+`FileChatSessionStore` and `FileHistory*` stores, and have **no isolation**: shell commands run as the current user.
 
 ## 3. Slash commands
 
@@ -35,6 +35,29 @@ Handled by `SlashCommands` without calling the model (except `/compact`). Shared
 web `POST /api/chat/{id}/messages` endpoint both route through it. The full table is in the
 [CLI README](../jllm-cli/README.md#slash-commands). Menu toggles (`/tools`, `/mcp`, `/apis`, `/skills`) live in memory
 only; the settings file is the startup default.
+
+### Saved chats and restarting
+
+Chats are saved under `<history root>/<chatId>/` (`session.json` row, `<agentId>/messages.jsonl` log, plus the context
+state files) and survive a restart. Nothing is restored silently:
+
+- **CLI**, at startup. No saved chat: a new chat. One saved chat: `Continue it? [Y/n]`. Several: the newest is offered
+  with `[Y/n/l]` (`l` = numbered list, `n` = new chat). The last 6 messages are printed on resume.
+- `--resume prompt|no|<id>`: `prompt` (default) asks as above; `no` always starts a new chat; `<id>` (unique prefix
+  accepted) opens that chat, an unknown id fails. `--prompt` runs and piped stdin never ask.
+- `/chats` lists id, title, message count and last update (current marked); `/resume <id|prefix>` switches;
+  `/chats delete <id|prefix>` deletes one (not the current); `/chats clean [days]` (default 30) lists the chats not
+  updated for that long and deletes them after `/chats clean confirm`.
+- **Web**: `GET /api/chat` lists the saved chats (`chatId`, `title`, `messageCount`, `updatedAt`), `GET /api/chat/{id}`
+  loads one. The UI shows the chat id in the header and, short, in each list row (full id in the tooltip, copy
+  button). If the browser remembers the chat it had open (`localStorage`), it offers "Continue <title> (<id>)?
+  [Continue] [New chat]" instead of opening it. A chat whose run was cut off shows an "interrupted" notice.
+- Settings `chatRetentionLimit` (integer, default unlimited): at startup the oldest chats beyond the limit are deleted,
+  never the one being opened.
+- One process per history root: `<root>/.lock` is held while it runs; a second process fails at startup.
+- A run killed mid-turn leaves an assistant tool call without result; on load a `tool_result` "interrupted: process
+  stopped" is appended (and saved) so the next request is valid. A pending approval, the steer/follow-up queues and a
+  declined-rewrite marker are not restored.
 
 ## 4. Permission modes
 
@@ -109,9 +132,11 @@ ignored.
 | `permissions` | regex deny/ask/allow rules, see [Permission rules](#permission-rules) |
 | `fastModel` | small model for compaction summaries, tool-group selection and the `auto` classifier |
 | `execution.maxParallel` | default `1`: one model call in flight, sub-agents run depth-first. `N`: at most N model calls and N chat runs at once (chat runs need `serializeRuns`); `N != 1` lets read-only sub-agents run in parallel. `-1`: unlimited |
+| `chatRetentionLimit` | default unlimited: keep at most this many saved chats, deleting the oldest at startup (never the opened one) |
 | `smallModel` | default `false`: append the small-model rules (`prompts/small-model.md`) to the system prompt; `--small-model` sets it |
 | `sandbox.tempDir`, `sandbox.timeoutSeconds` | scratch root; default shell timeout (the tool caps it at 600 s) |
 | `sandbox.backend`, `sandbox.localFallback`, `sandbox.docker.*` | `local` (default) or `docker`; fall back to local when docker is missing (default `true`); `binary`, `image`, `memory`, `cpus`, `pidsLimit`, `user`, `network`, `mode` (`oneshot` or `daemon`, a long-running container), `remote`, `remoteHost` (docker on another machine). See [SANDBOX](SANDBOX.md). CLI and web: `--sandbox`, `--docker-image`, `--docker-mode`, `--docker-remote`, `--docker-remote-host` |
+| `context.noiseCommands` | default `true`: after a run, shell commands that add no information (`mkdir`, `rm`, `cd`, ...) are replaced in the context by a stub, see [INTERNALS §9](INTERNALS.md#noise-commands). `false` turns it off |
 | `context.*` | [CACHES](CACHES.md); `context.strategy` is `compaction`, `mnemonic` or `scope`; `context.scope.*` are the thresholds of `scope` ([CACHES §5](CACHES.md#5-scope-strategy)) |
 | `output.toolMaxChars` | tool output kept in the context; the rest is cut with `[truncated N chars]` (the head is kept, the tail for `bash`) |
 | `output.eventMaxChars` | tool output carried by the `tool_result` event to the front end |

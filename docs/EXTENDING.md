@@ -225,6 +225,9 @@ public interface ModelClient {
     default ModelResponse complete(ModelRequest request, CancelToken cancel) { return complete(request); }
     String simpleComplete(String system, String user, int maxTokens);
     default String simpleComplete(String system, String user, int maxTokens, Consumer<Usage> usageSink) { … }
+    /** explicit sampling temperature for yes/no decisions; a client that cannot send one (Anthropic) ignores it */
+    default String simpleComplete(String system, String user, int maxTokens, Double temperature,
+                                  Consumer<Usage> usageSink) { … }
 }
 ```
 
@@ -345,7 +348,7 @@ Contract:
 
 | Port | Default | CLI | Holds |
 |---|---|---|---|
-| `ChatSessionStore` | `InMemoryChatSessionStore` | `FileHistoryChatSessionStore` | `ChatSessionData`: messages (JSON lines), mode, tool groups, usage, title, agent id |
+| `ChatSessionStore` | `InMemoryChatSessionStore` | `FileChatSessionStore` | `ChatSessionData`: messages (JSON lines), mode, tool groups, usage, title, agent id, message count |
 | `SubAgentRunLog` | `InMemorySubAgentRunLog` | `FileHistorySubAgentRunLog` | sub-agent prompt, transcript, answer, status, usage |
 | `MnemonicStore` | `InMemoryMnemonicStore` | `FileMnemonicStore` | mnemonic decisions per chat and agent |
 | `StateStore` | `InMemoryStateStore` | `FileStateStore` | small JSON documents per chat: tool grants (`grants`), todo lists (`todos-<agent>`); `<history>/<chat>/state/<name>.json` |

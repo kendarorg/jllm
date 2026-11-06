@@ -34,12 +34,15 @@ import java.util.regex.Pattern;
  * @param fastModel        optional small model for the auto-mode classifier, summaries and tool-group selection
  * @param smallModel       the main model is small: the system prompt gets the stricter small-model rules
  *                         (default false)
+ * @param chatRetentionLimit maximum number of saved chats; at startup the oldest beyond it are deleted. Null or
+ *                         absent = unlimited (default)
  */
 public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSettings> restApis,
                               List<SkillSettings> skills, List<String> instructionFiles,
                               List<AgentSettings> agents, Execution execution, Sandbox sandbox, Context context,
                               LlmSettings fastModel, Output output, Boolean smallModel, Permissions permissions,
-                              List<ProviderSettings> providers, String defaultProvider) {
+                              List<ProviderSettings> providers, String defaultProvider,
+                              Integer chatRetentionLimit) {
 
     /** Regex rules, see {@link PermissionRules}. Evaluated deny, ask, allow; settings only. */
     public record Permissions(List<String> deny, List<String> ask, List<String> allow) {
@@ -56,7 +59,17 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
                            List<AgentSettings> agents, Execution execution, Sandbox sandbox, Context context,
                            LlmSettings fastModel, Output output, Boolean smallModel) {
         this(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context, fastModel, output,
-                smallModel, null, null, null);
+                smallModel, null, null, null, null);
+    }
+
+    /** The 14 components before {@code chatRetentionLimit}: unlimited chats. */
+    public HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSettings> restApis,
+                           List<SkillSettings> skills, List<String> instructionFiles,
+                           List<AgentSettings> agents, Execution execution, Sandbox sandbox, Context context,
+                           LlmSettings fastModel, Output output, Boolean smallModel, Permissions permissions,
+                           List<ProviderSettings> providers, String defaultProvider) {
+        this(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context, fastModel, output,
+                smallModel, permissions, providers, defaultProvider, null);
     }
 
     /** The compiled permission rules. @throws IllegalArgumentException for an invalid regex */
@@ -128,7 +141,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
         Sandbox s = sandbox == null ? new Sandbox(null, null) : sandbox;
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution,
                 new Sandbox(s.tempDir(), s.timeoutSeconds(), backend.toLowerCase(), s.localFallback(), s.docker()),
-                context, fastModel, output, smallModel, permissions, providers, defaultProvider);
+                context, fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit);
     }
 
     /** Same settings with {@code sandbox.docker.image} replaced (e.g. by a command line flag). */
@@ -139,7 +152,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
                 new Sandbox(s.tempDir(), s.timeoutSeconds(), s.backend(), s.localFallback(),
                         new Docker(d.binary(), image, d.memory(), d.cpus(), d.pidsLimit(), d.user(), d.network(),
                                 d.mode(), d.remote(), d.remoteHost())),
-                context, fastModel, output, smallModel, permissions, providers, defaultProvider);
+                context, fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit);
     }
 
     /** Same settings with {@code sandbox.docker.mode} replaced (e.g. by a command line flag). */
@@ -153,7 +166,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
                 new Sandbox(s.tempDir(), s.timeoutSeconds(), s.backend(), s.localFallback(),
                         new Docker(d.binary(), d.image(), d.memory(), d.cpus(), d.pidsLimit(), d.user(), d.network(),
                                 mode.toLowerCase(), d.remote(), d.remoteHost())),
-                context, fastModel, output, smallModel, permissions, providers, defaultProvider);
+                context, fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit);
     }
 
     /** Same settings with {@code sandbox.docker.remote} and {@code remoteHost} replaced (command line flags). */
@@ -165,7 +178,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
                         new Docker(d.binary(), d.image(), d.memory(), d.cpus(), d.pidsLimit(), d.user(), d.network(),
                                 d.mode(), remote != null ? remote : d.remote(),
                                 remoteHost != null ? remoteHost : d.remoteHost())),
-                context, fastModel, output, smallModel, permissions, providers, defaultProvider);
+                context, fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit);
     }
 
     /** True when the docker backend runs in daemon mode (long-running container). */
@@ -193,9 +206,16 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
      * @param buffer          tokens kept free below maxTokens; default max(15%, 16k)
      * @param strategy        {@code compaction} (default) or {@code mnemonic}
      * @param mnemonic        settings of the mnemonic strategy
+     * @param noiseCommands   remove shell commands that add no information (mkdir, rm, cd, ...) from the context
+     *                        after their turn, see {@code NoiseCommandPruner} (default true)
      */
     public record Context(Integer maxTokens, Integer keepRecentTurns, Boolean auto, Integer keepTokens,
-                          Integer buffer, String strategy, Mnemonic mnemonic, Scope scope) {
+                          Integer buffer, String strategy, Mnemonic mnemonic, Scope scope, Boolean noiseCommands) {
+
+        public Context(Integer maxTokens, Integer keepRecentTurns, Boolean auto, Integer keepTokens,
+                       Integer buffer, String strategy, Mnemonic mnemonic, Scope scope) {
+            this(maxTokens, keepRecentTurns, auto, keepTokens, buffer, strategy, mnemonic, scope, null);
+        }
 
         public Context(Integer maxTokens, Integer keepRecentTurns, Boolean auto, Integer keepTokens, Integer buffer) {
             this(maxTokens, keepRecentTurns, auto, keepTokens, buffer, null, null, null);
@@ -283,7 +303,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
         Context c = context == null ? new Context(null, null, null, null, null) : context;
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox,
                 new Context(maxTokens, c.keepRecentTurns(), c.auto(), c.keepTokens(), c.buffer(), c.strategy(),
-                        c.mnemonic(), c.scope()), fastModel, output, smallModel, permissions, providers, defaultProvider);
+                        c.mnemonic(), c.scope(), c.noiseCommands()), fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit);
     }
 
     /** Same settings with {@code context.strategy} replaced (e.g. by a command line flag). */
@@ -292,13 +312,24 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
         Context c = context == null ? new Context(null, null, null, null, null) : context;
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox,
                 new Context(c.maxTokens(), c.keepRecentTurns(), c.auto(), c.keepTokens(), c.buffer(), strategy,
-                        c.mnemonic(), c.scope()), fastModel, output, smallModel, permissions, providers, defaultProvider);
+                        c.mnemonic(), c.scope(), c.noiseCommands()), fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit);
+    }
+
+    /** False when {@code context.noiseCommands} is set to false. */
+    public boolean noiseCommands() {
+        return context == null || !Boolean.FALSE.equals(context.noiseCommands());
     }
 
     /** Same settings with {@code smallModel} replaced (e.g. by a command line flag). */
     public HarnessSettings withSmallModel(boolean small) {
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context,
-                fastModel, output, small, permissions, providers, defaultProvider);
+                fastModel, output, small, permissions, providers, defaultProvider, chatRetentionLimit);
+    }
+
+    /** Same settings with {@code chatRetentionLimit} replaced. */
+    public HarnessSettings withChatRetentionLimit(Integer limit) {
+        return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context,
+                fastModel, output, smallModel, permissions, providers, defaultProvider, limit);
     }
 
     /** Concurrency limit: {@code 1} serialized (default), {@code N} bounded, {@code -1} unlimited. */

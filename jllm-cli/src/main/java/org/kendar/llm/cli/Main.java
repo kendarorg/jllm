@@ -12,9 +12,9 @@ import org.kendar.llm.harness.llm.ProviderCatalog;
 import org.kendar.llm.harness.llm.ProviderSettings;
 import org.kendar.llm.harness.permission.PermissionMode;
 import org.kendar.llm.harness.sandbox.CwdSandboxExecutor;
-import org.kendar.llm.harness.session.FileHistoryChatSessionStore;
+import org.kendar.llm.harness.session.FileChatSessionStore;
 import org.kendar.llm.harness.session.FileHistorySubAgentRunLog;
-import org.kendar.llm.harness.session.InMemoryChatSessionStore;
+import org.kendar.llm.harness.session.HistoryRootLock;
 import org.kendar.llm.harness.session.InMemorySubAgentRunLog;
 import org.kendar.llm.harness.settings.HarnessSettings;
 
@@ -38,6 +38,7 @@ import java.util.concurrent.TimeUnit;
  *     [--base-url U] [--api-key K] [--mode plan|edit|auto] [--workdir DIR] [--prompt TEXT]
  *     [--settings FILE] [--system-prompt TEXT] [--max-turns N] [--context-tokens TOKENS]
  *     [--search-api-key BRAVE_KEY] [--context-strategy compaction|mnemonic|scope] [--max-tokens TOKENS] [--small-model]
+ *     [--resume prompt|no|CHAT_ID]
  * </pre>
  * {@code --max-tokens} is the output limit of one model response (default 32000);
  * {@code --context-tokens} the window. {@code --small-model} (no value) adds the stricter small-model rules to the
@@ -66,6 +67,7 @@ public final class Main {
                     + "[--api-key K] [--mode plan|edit|auto] [--workdir DIR] [--prompt TEXT] "
                     + "[--system-prompt TEXT] [--max-turns N] [--context-tokens TOKENS] [--search-api-key BRAVE_KEY] "
                     + "[--settings FILE] [--context-strategy compaction|mnemonic|scope] [--max-tokens TOKENS] [--small-model] "
+                    + "[--resume prompt|no|CHAT_ID] "
                     + "[--sandbox local|docker] [--docker-image IMAGE] [--docker-mode oneshot|daemon] "
                     + "[--docker-remote] [--docker-remote-host ADDRESS] [--sandbox-clean] [--sandbox-clean-all]");
             return;
@@ -104,6 +106,7 @@ public final class Main {
             return;
         }
         CwdSandboxExecutor cwdSandbox = new CwdSandboxExecutor(config, projectDir);
+        HistoryRootLock historyLock = HistoryRootLock.acquire(cwdSandbox.historyRoot()); // held until the process ends
         var dockerRunner = new org.kendar.llm.harness.sandbox.ProcessDockerCommandRunner();
         org.kendar.llm.harness.sandbox.SandboxExecutor sandbox = !settings.dockerSandbox() ? cwdSandbox
                 : settings.dockerDaemon()
@@ -119,7 +122,7 @@ public final class Main {
                 .config(config)
                 .systemPrompt(a.get("system-prompt"))
                 .sandbox(sandbox)
-                .sessionStore(new FileHistoryChatSessionStore(new InMemoryChatSessionStore(), cwdSandbox.historyRoot()))
+                .sessionStore(new FileChatSessionStore(cwdSandbox.historyRoot(), mapper))
                 .subAgentRunLog(new FileHistorySubAgentRunLog(new InMemorySubAgentRunLog(), cwdSandbox.historyRoot()))
                 .mnemonicStore(new FileMnemonicStore(cwdSandbox.historyRoot()))
                 .stateStore(new org.kendar.llm.harness.state.FileStateStore(cwdSandbox.historyRoot()))
@@ -136,11 +139,30 @@ public final class Main {
         PermissionMode initialMode = PermissionMode.parse(a.get("mode"));
         BlockingQueue<AgentEvent> events = new LinkedBlockingQueue<>();
         Chat chat = new Chat();
-        switchTo(harness, chat, harness.sessions().create(null).chatId(), initialMode, events);
+        // piped input is the script, not an answer: ask only when nothing is waiting on stdin
+        boolean interactive = !a.containsKey("prompt") && System.in.available() == 0;
         BlockingQueue<String> in = stdin();
+        String resumeId = ResumeChooser.choose(harness, a.get("resume"), interactive, () -> {
+            try {
+                String l = in.take();
+                return l == EOF ? null : l;
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return null;
+            }
+        }, System.out);
+        String openId = resumeId != null ? resumeId : harness.sessions().create(null).chatId();
+        int deleted = harness.enforceChatRetention(settings.chatRetentionLimit(), openId);
+        if (deleted > 0) System.out.println("chatRetentionLimit: deleted " + deleted + " old chat(s)");
+        switchTo(harness, chat, openId, resumeId == null || a.containsKey("mode") ? initialMode : null, events);
+        if (resumeId != null) {
+            System.out.println("resumed chat " + openId);
+            ResumeChooser.replay(harness, openId, System.out);
+        }
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             harness.cancel(chat.id);
             harness.close();
+            historyLock.close();
         }));
 
         if (a.containsKey("prompt")) {

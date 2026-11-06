@@ -8,9 +8,9 @@ import org.kendar.llm.harness.context.mnemonic.FileMnemonicStore;
 import org.kendar.llm.harness.llm.ModelClient;
 import org.kendar.llm.harness.llm.ModelClientFactory;
 import org.kendar.llm.harness.sandbox.ChatDirSandboxExecutor;
-import org.kendar.llm.harness.session.FileHistoryChatSessionStore;
+import org.kendar.llm.harness.session.FileChatSessionStore;
+import org.kendar.llm.harness.session.HistoryRootLock;
 import org.kendar.llm.harness.session.FileHistorySubAgentRunLog;
-import org.kendar.llm.harness.session.InMemoryChatSessionStore;
 import org.kendar.llm.harness.session.InMemorySubAgentRunLog;
 import org.kendar.llm.harness.settings.HarnessSettings;
 import org.springframework.context.annotation.Bean;
@@ -63,12 +63,13 @@ public class HarnessConfiguration {
 
         Path projectDir = Path.of(p.workdir() == null ? "" : p.workdir()).toAbsolutePath().normalize();
         ChatDirSandboxExecutor sandbox = new ChatDirSandboxExecutor(config, projectDir);
-        return AgentHarness.builder()
+        HistoryRootLock.acquire(sandbox.location()); // one process per base directory; held until the process ends
+        AgentHarness harness = AgentHarness.builder()
                 .modelClient(modelClient)
                 .config(config)
                 .systemPrompt(JllmProperties.blankToNull(p.systemPrompt()))
                 .sandbox(executor(settings, config, sandbox, projectDir))
-                .sessionStore(new FileHistoryChatSessionStore(new InMemoryChatSessionStore(), sandbox::historyRoot))
+                .sessionStore(new FileChatSessionStore(sandbox::historyRoot, () -> chatHistoryRoots(sandbox), mapper))
                 .subAgentRunLog(new FileHistorySubAgentRunLog(new InMemorySubAgentRunLog(), sandbox::historyRoot))
                 .mnemonicStore(new FileMnemonicStore(sandbox::historyRoot))
                 .stateStore(new org.kendar.llm.harness.state.FileStateStore(sandbox::historyRoot))
@@ -77,6 +78,21 @@ public class HarnessConfiguration {
                 .objectMapper(mapper)
                 .discoverPlugins()
                 .build();
+        harness.enforceChatRetention(settings.chatRetentionLimit(), null);
+        return harness;
+    }
+
+    /** {@code <base>/<chatId>/.kendhar/history} of every chat directory below the base. */
+    private static java.util.List<Path> chatHistoryRoots(ChatDirSandboxExecutor sandbox) {
+        Path base = sandbox.location();
+        if (!java.nio.file.Files.isDirectory(base)) return java.util.List.of();
+        try (var s = java.nio.file.Files.list(base)) {
+            return s.filter(java.nio.file.Files::isDirectory)
+                    .map(d -> sandbox.historyRoot(d.getFileName().toString()))
+                    .filter(java.nio.file.Files::isDirectory).toList();
+        } catch (java.io.IOException e) {
+            throw new java.io.UncheckedIOException(e);
+        }
     }
 
     /** Local, docker one command per container, or docker daemon mode (one long-running container per chat). */

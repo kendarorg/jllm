@@ -133,6 +133,42 @@ public final class AgentHarness {
         return service.isRunning(chatId);
     }
 
+    /** Deletes a chat with everything kept for it: log, context-strategy state, sub-agent runs. */
+    public void deleteChat(String chatId) {
+        service.cancel(chatId);
+        context.forget(chatId);
+        subAgentRuns.deleteChat(chatId);
+        sessions.delete(chatId);
+    }
+
+    /** Chats not updated for {@code days} days, oldest first, never {@code keepChatId}. */
+    public List<ChatSessionData> staleChats(int days, String keepChatId) {
+        java.time.Instant limit = java.time.Instant.now().minus(java.time.Duration.ofDays(days));
+        List<ChatSessionData> out = new ArrayList<>();
+        for (ChatSessionData s : sessions.list()) {
+            if (!s.chatId().equals(keepChatId) && s.updatedAt().isBefore(limit)) out.add(s);
+        }
+        java.util.Collections.reverse(out); // list() is newest first
+        return out;
+    }
+
+    /**
+     * Deletes the oldest chats beyond {@code limit}, never {@code keepChatId} (which counts toward the limit).
+     *
+     * @return the number of deleted chats
+     */
+    public int enforceChatRetention(Integer limit, String keepChatId) {
+        if (limit == null || limit < 1) return 0;
+        List<ChatSessionData> all = sessions.list(); // newest first
+        int deleted = 0;
+        for (int i = all.size() - 1; i >= 0 && all.size() - deleted > limit; i--) {
+            if (all.get(i).chatId().equals(keepChatId)) continue;
+            deleteChat(all.get(i).chatId());
+            deleted++;
+        }
+        return deleted;
+    }
+
     public long lastSeq(String chatId) {
         return service.lastSeq(chatId);
     }
@@ -586,6 +622,11 @@ public final class AgentHarness {
                     requestToolGroup, subAgentRunLog, mapper, metrics, prompt, hooks,
                     fast == null ? null : new ToolClassifier(fast, mapper));
             ref[0] = loop;
+            if (settings.noiseCommands()) {
+                loop.noisePruner(new org.kendar.llm.harness.context.noise.NoiseCommandPruner(sessions,
+                        new org.kendar.llm.harness.context.noise.NoiseQualifier(fast != null ? fast : modelClient),
+                        mapper));
+            }
             AgentService service = new AgentService(loop, sessions, approvals, mapper, config, maxParallel);
             AgentHarness harness = new AgentHarness(service, sessions, registry, sources, skills, box,
                     subAgentRunLog, context, config, pricing);

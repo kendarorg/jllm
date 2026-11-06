@@ -262,9 +262,60 @@ before any other starts, across `task` calls too.
 mode, `toolGroups` (`*` = all, or a comma list), messages as JSON lines, token counters (input, output, cache read,
 cache creation), timestamps.
 
+`ChatSessionData` also carries `messageCount`, so listing chats never reads the logs.
+
 Saves happen after the user message, after each assistant message, after each tool-result message, and when a context
-strategy reports `logChanged`. The CLI's `FileHistory*` stores mirror chats and sub-agent runs under
-`.kendhar/history/<chatId>/<agentId>/`.
+strategy reports `logChanged`. The CLI and web use `FileChatSessionStore` (chats) and `FileHistorySubAgentRunLog`
+(sub-agent runs), under `.kendhar/history/` (web: `<chatId>/.kendhar/history/`):
+
+```
+<root>/.lock                              held by the running process
+<root>/<chatId>/session.json              chat row without messages (atomic write: temp file + move)
+<root>/<chatId>/<agentId>/messages.jsonl  message log: appended when the new log extends the old one, else rewritten
+<root>/<chatId>/<agentId>/mnemonic.json   mnemonic decisions
+<root>/<chatId>/state/<name>.json         grants, todos
+<root>/<chatId>/subagent-<runId>/         messages.jsonl, result.txt, run.json
+```
+
+`find` reads the log lazily; `list()` scans the chat directories for `session.json` (no index file) and caches the rows.
+The log is written before the row, so a crash leaves a row at most one turn behind. A corrupt row is skipped with a
+warning. `InterruptedTurnRepair` completes an unanswered `tool_use` at the end of a loaded log. Restoring needs no
+extra step: the mnemonic, state and tool-group data are keyed by chat and agent id, which the row keeps, so the next
+request is the one the chat would have sent without the restart (`RestartRestoreTest`). Old `messages.jsonl` files
+without `session.json` are not read.
+
+### Noise commands
+
+`NoiseCommandPruner` (`context/noise/`, called by `AgentLoop` after a main-agent run, never by sub-agents) shrinks the
+context by replacing shell commands that add no information. All of these must hold, else the call stays as it is:
+a `bash` call with a command under 512 characters, a result starting with `exit code: 0` (no timeout, not an error)
+and under 200 characters, and the turn that issued it has ended. A failing command is never qualified.
+
+`NoiseQualifier` decides `keep` or `drop`:
+
+- a regex allow-list of state-changing commands (a chain of simple `mkdir`, `rm`, `cd`, `mv`, `cp`, `touch`, `chmod`,
+  ... with no pipe, redirect or substitution) is `drop` without a model call; a regex list of informative commands
+  (`cat`, `ls`, `git log`, `grep`, builds, test runs, ...) is `keep` without a model call;
+- otherwise one plain request to the fast model (the main model when none is set) with **temperature 0**
+  (`ModelClient.simpleComplete(..., temperature, ...)`; Anthropic ignores a temperature), a 4 s timeout and one retry.
+  Input: the command text and the exit code, never the output (untrusted). Answer: one word. An error, a timeout, an
+  unparsable answer or a rate limit is `keep`; the loop is never blocked for long. Its tokens go to
+  `qualifierInputTokens` / `qualifierOutputTokens` of the chat row and show as a separate line of `/cost`.
+
+A `drop` is applied in a batch (see [CACHES](CACHES.md#noise-commands-any-strategy)). The call and its result become a
+stub (`tool_use.input.command` cut to 80 characters, result `ok (exit 0)`), so the pairing stays valid for every
+provider. The originals follow the stub in `messages.jsonl` as a reference line:
+
+```
+{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"bash","input":{"command":"mkdir -p build"}}]}
+{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok (exit 0)"}]}
+{"ignore":true,"replaces":"t1","original":{"tool_use":{...},"tool_result":{...}}}
+```
+
+`ChatSessionService.messages()` skips `ignore` lines, so the context, the message indexes of the strategies and every
+provider request never see them; `references(chatId)` (web: `GET /api/chat/{id}/references`) returns them for audit.
+`saveMessages` keeps each reference after the message holding the result it replaces, and drops it when that message
+is gone (compaction, `/clear`). The model cannot recall them (`history_recall` does not read them).
 
 ## 10. What never reaches the model's context
 

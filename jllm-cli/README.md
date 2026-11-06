@@ -65,7 +65,7 @@ On startup the CLI prints three directories:
 | history dir | `<project>/.kendhar/history/<chatId>/<agentId>/` | `messages.jsonl`, sub-agent runs, `mnemonic.json` |
 
 When the project directory is not writable, scratch and history go under `sandbox.tempDir`
-(default `${java.io.tmpdir}/agent-harness`). Chats persist there, so `/chats` and `/resume <id>` work across runs.
+(default `${java.io.tmpdir}/agent-harness`). Chats persist there. At startup the CLI offers to continue the newest saved chat (`--resume prompt|no|<id>`, default `prompt`; `--prompt` and piped input never ask), see [USAGE](../docs/USAGE.md#saved-chats-and-restarting).
 
 The CLI has **no isolation**: shell commands run as the current user, and plan mode cannot stop a shell command from
 writing to the project directory.
@@ -124,7 +124,8 @@ included.
 | `/cost` | tokens (input, output, cache read, cache write) and estimated cost |
 | `/where` | working and scratch directory |
 | `/status` | context strategy, estimated context size against the window, usage, chat count |
-| `/chats` `/resume <id>` `/title <text>` | list, switch, rename chats |
+| `/chats` `/resume <id\|prefix>` `/title <text>` | list, switch, rename chats |
+| `/chats delete <id>` `/chats clean [days]` | delete one chat; list chats older than `days` (default 30), `/chats clean confirm` deletes them |
 | `/exit` `/quit` | leave the CLI |
 
 Menu toggles live in memory only; the settings file is the startup default.
@@ -143,7 +144,7 @@ by default (`execution.maxParallel`), which suits one local GPU. `--small-model`
 
 ## Wiring
 
-`Main` builds the harness with `CwdSandboxExecutor` (rooted at the project dir), `FileHistoryChatSessionStore`,
+`Main` builds the harness with `CwdSandboxExecutor` (rooted at the project dir), `FileChatSessionStore`,
 `FileHistorySubAgentRunLog` and `FileMnemonicStore`, then subscribes to the chat's events. Precedence for the same
 setting: flag, then settings file, then default. See [USAGE](../docs/USAGE.md) for the settings file and the event
 contract.

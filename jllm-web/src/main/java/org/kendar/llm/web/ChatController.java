@@ -70,6 +70,13 @@ public class ChatController {
         }).orElse(ResponseEntity.notFound().build());
     }
 
+    /** Originals of the shell calls that were replaced by stubs in the context (audit; never sent to the model). */
+    @GetMapping("/api/chat/{id}/references")
+    public ResponseEntity<List<com.fasterxml.jackson.databind.JsonNode>> references(@PathVariable String id) {
+        if (sessions.find(id).isEmpty()) return ResponseEntity.notFound().build();
+        return ResponseEntity.ok(sessions.references(id));
+    }
+
     @DeleteMapping("/api/chat/{id}")
     public ResponseEntity<Void> delete(@PathVariable String id) {
         if (sessions.find(id).isEmpty()) return ResponseEntity.notFound().build();
@@ -278,6 +285,8 @@ public class ChatController {
         m.put("mode", s.mode());
         m.put("running", agentService.isRunning(s.chatId()));
         m.put("updatedAt", String.valueOf(s.updatedAt()));
+        m.put("createdAt", String.valueOf(s.createdAt()));
+        m.put("messageCount", s.messageCount());
         m.put("usage", usageOf(s));
         return m;
     }
@@ -288,6 +297,8 @@ public class ChatController {
         u.put("outputTokens", s.outputTokens());
         u.put("cacheReadTokens", s.cacheReadTokens());
         u.put("cacheCreationTokens", s.cacheCreationTokens());
+        u.put("qualifierInputTokens", s.qualifierInputTokens());
+        u.put("qualifierOutputTokens", s.qualifierOutputTokens());
         u.put("estimatedCostUsd", pricing.estimate(s.inputTokens(), s.outputTokens(),
                 s.cacheReadTokens(), s.cacheCreationTokens()));
         return u;

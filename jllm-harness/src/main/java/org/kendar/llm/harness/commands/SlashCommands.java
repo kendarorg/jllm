@@ -64,8 +64,8 @@ public final class SlashCommands {
             new Info("/where", "Show the working directory and the scratch directory"),
             new Info("/sandbox", "Docker daemon mode: /sandbox clean removes the sandbox container (project files stay), /sandbox backup copies a remote container back"),
             new Info("/status", "Context usage, cost and chat count"),
-            new Info("/chats", "List the chats"),
-            new Info("/resume", "Switch to another chat: /resume <id>"),
+            new Info("/chats", "List the chats; /chats delete <id>, /chats clean [days]"),
+            new Info("/resume", "Switch to another chat: /resume <id or prefix>"),
             new Info("/title", "Rename this chat: /title <text>"),
             new Info("/exit", "Close the chat (command line only; does nothing elsewhere)"));
 
@@ -201,10 +201,10 @@ public final class SlashCommands {
                     yield Result.text(cleaned == null ? "This sandbox has no container to clean" : cleaned);
                 }
                 case "/status" -> Result.text(status(chatId));
-                case "/chats" -> Result.text(chats(chatId));
+                case "/chats" -> Result.text(chatsCommand(chatId, arg));
                 case "/resume" -> {
-                    if (arg.isEmpty()) yield Result.text("usage: /resume <id>");
-                    ChatSessionData s = sessions.get(arg);
+                    if (arg.isEmpty()) yield Result.text("usage: /resume <id or unique prefix>");
+                    ChatSessionData s = sessions.resolve(arg);
                     yield new Result("chat " + s.chatId() + " " + s.title(), s.chatId(), true);
                 }
                 case "/title" -> {
@@ -230,7 +230,9 @@ public final class SlashCommands {
 
     private String usage(ChatSessionData s) {
         return "input " + s.inputTokens() + ", output " + s.outputTokens() + ", cache read " + s.cacheReadTokens()
-                + ", cache write " + s.cacheCreationTokens() + String.format(", cost $%.4f", harness.cost(s));
+                + ", cache write " + s.cacheCreationTokens() + String.format(", cost $%.4f", harness.cost(s))
+                + (s.qualifierInputTokens() + s.qualifierOutputTokens() == 0 ? ""
+                : "\nnoise qualifier: input " + s.qualifierInputTokens() + ", output " + s.qualifierOutputTokens());
     }
 
     private String status(String chatId) {
@@ -265,11 +267,60 @@ public final class SlashCommands {
         return Result.text(menus.scripted(target, p[0], p.length > 1 ? p[1] : null));
     }
 
+    private final Map<String, List<String>> pendingClean = new ConcurrentHashMap<>();
+
+    /** {@code /chats}, {@code /chats delete <id>}, {@code /chats clean [days]} then {@code /chats clean confirm}. */
+    private String chatsCommand(String current, String arg) {
+        if (arg.isEmpty()) return chats(current);
+        String[] p = arg.split("\\s+", 2);
+        switch (p[0]) {
+            case "delete" -> {
+                if (p.length < 2) return "usage: /chats delete <id or unique prefix>";
+                ChatSessionData s = harness.sessions().resolve(p[1]);
+                if (s.chatId().equals(current)) return "Cannot delete the current chat";
+                harness.deleteChat(s.chatId());
+                return "Deleted chat " + s.chatId() + " \"" + s.title() + "\"";
+            }
+            case "clean" -> {
+                String a = p.length > 1 ? p[1].strip() : "";
+                if (a.equals("confirm")) {
+                    List<String> ids = pendingClean.remove(current);
+                    if (ids == null) return "Nothing to confirm: run /chats clean [days] first";
+                    int n = 0;
+                    for (String id : ids) {
+                        if (id.equals(current) || harness.sessions().find(id).isEmpty()) continue;
+                        harness.deleteChat(id);
+                        n++;
+                    }
+                    return "Deleted " + n + " chat(s)";
+                }
+                int days = a.isEmpty() ? 30 : a.matches("\\d+") ? Integer.parseInt(a) : -1;
+                if (days < 0) return "usage: /chats clean [days]";
+                List<ChatSessionData> stale = harness.staleChats(days, current);
+                if (stale.isEmpty()) return "No chat older than " + days + " days";
+                pendingClean.put(current, stale.stream().map(ChatSessionData::chatId).toList());
+                StringBuilder sb = new StringBuilder(stale.size() + " chat(s) not updated for " + days
+                        + " days will be deleted:\n");
+                for (ChatSessionData s : stale) sb.append("  ").append(chatLine(s)).append('\n');
+                return sb.append("Type /chats clean confirm to delete them").toString();
+            }
+            default -> {
+                return "usage: /chats | /chats delete <id> | /chats clean [days]";
+            }
+        }
+    }
+
+    /** {@code id  "title"  (N messages, updated <time>)} */
+    public static String chatLine(ChatSessionData s) {
+        return s.chatId() + "  \"" + s.title() + "\"  (" + s.messageCount() + " messages, updated "
+                + java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+                .format(s.updatedAt().atZone(java.time.ZoneId.systemDefault())) + ")";
+    }
+
     private String chats(String current) {
         StringBuilder sb = new StringBuilder();
         for (ChatSessionData s : harness.sessions().list()) {
-            sb.append(s.chatId().equals(current) ? "* " : "  ").append(s.chatId()).append("  ").append(s.title())
-                    .append('\n');
+            sb.append(s.chatId().equals(current) ? "* " : "  ").append(chatLine(s)).append('\n');
         }
         return sb.toString().stripTrailing();
     }

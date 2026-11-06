@@ -143,6 +143,21 @@ gaps that fit the small-footprint design:
 Left out on purpose: a filesystem abstraction behind the file tools, per-call user and session identity,
 distributed state, multi-tenancy, sandbox snapshots.
 
+## 7. Restoring chats
+
+Chats lived in memory; only a write-only copy of the log went to disk, so a restart lost every chat and left the
+mnemonic and state files orphaned. `FileChatSessionStore` replaced the mirror: a `session.json` row per chat, the log
+read back lazily, append-only writes while the log grows. Because the context state was already keyed by chat and agent
+id, restoring the row and the log restores the context too, and the next request is the same as without the restart.
+Decisions: the chat id is always shown and the user chooses (startup question or menu, `--resume`), never a silent
+restore; chats are kept until deleted (`/chats delete|clean`, optional `chatRetentionLimit`); enumeration is a directory
+scan, no index; one process per history root (lock file); an interrupted tool call is closed with a synthetic result.
+No backward compatibility with the old `messages.jsonl`-only layout. The web UI shows the id, offers to continue the
+remembered chat and marks an interrupted run. Shell commands that add no information (`mkdir`, `rm`, `cd`, ...) are
+replaced in the context by a stub after their turn, in batches because the rewrite is a cache miss; the originals
+stay in the log as `ignore` reference lines. The qualifier asks the cheap model at temperature 0, with the command
+only. Not done on purpose: restoring the last `/model`.
+
 ## Overall direction
 - **Where it lives:** an embedded component, then a standalone library with a CLI, then a web front end.
 - **Model target:** Anthropic, then local llama.cpp/Qwen, then small models.
