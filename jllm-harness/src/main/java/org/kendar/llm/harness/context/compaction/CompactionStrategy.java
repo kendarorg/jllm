@@ -3,11 +3,7 @@ package org.kendar.llm.harness.context.compaction;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import org.kendar.llm.harness.HarnessConfig;
-import org.kendar.llm.harness.context.CompactResult;
-import org.kendar.llm.harness.context.ContextStrategy;
-import org.kendar.llm.harness.context.ContextStrategyKind;
-import org.kendar.llm.harness.context.ContextTurn;
-import org.kendar.llm.harness.context.ContextView;
+import org.kendar.llm.harness.context.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

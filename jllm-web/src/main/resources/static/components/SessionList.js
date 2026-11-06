@@ -1,4 +1,4 @@
-import { store, newChat, openChat, deleteChat } from '../store.js';
+import {deleteChat, newChat, openChat, store} from '../store.js';
 
 export default {
   setup() {

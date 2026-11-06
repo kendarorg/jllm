@@ -1,5 +1,5 @@
-import { computed, ref, watch, nextTick, onMounted, onUnmounted } from 'vue';
-import { store, resolveApproval } from '../store.js';
+import {computed, nextTick, onMounted, onUnmounted, ref, watch} from 'vue';
+import {resolveApproval, store} from '../store.js';
 
 export default {
   setup() {

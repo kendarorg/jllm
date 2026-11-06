@@ -5,8 +5,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.kendar.llm.harness.HarnessTestSupport.Events;
-import org.kendar.llm.harness.HarnessTestSupport.Rig;
+import org.kendar.llm.harness.HarnessTestSupport.*;
 import org.kendar.llm.harness.llm.ModelResponse;
 import org.kendar.llm.harness.llm.PartialToolCall;
 import org.kendar.llm.harness.llm.Usage;
@@ -22,7 +21,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.kendar.llm.harness.HarnessTestSupport.*;
-import static org.mockito.Mockito.when;
 
 class AgentLoopTest {
 

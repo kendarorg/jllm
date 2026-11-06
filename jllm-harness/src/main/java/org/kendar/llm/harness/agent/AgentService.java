@@ -1,9 +1,9 @@
 package org.kendar.llm.harness.agent;
 
-import org.kendar.llm.harness.HarnessConfig;
-import org.kendar.llm.harness.context.CompactResult;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.kendar.llm.harness.HarnessConfig;
+import org.kendar.llm.harness.context.CompactResult;
 import org.kendar.llm.harness.llm.CancelToken;
 import org.kendar.llm.harness.permission.ApprovalService;
 import org.kendar.llm.harness.session.ChatSessionData;
@@ -14,12 +14,7 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Semaphore;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.function.Consumer;
 
 /** Owns one run per chat at a time, buffers its events (replayable by seq) and supports cancellation. */

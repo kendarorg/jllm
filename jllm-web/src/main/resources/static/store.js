@@ -1,6 +1,6 @@
-import { api, post } from './api.js';
+import {api, post} from './api.js';
 
-import { reactive } from 'vue';
+import {reactive} from 'vue';
 
 const EVENTS = ['run_started', 'text', 'tool_call', 'tool_result', 'approval_request', 'usage', 'compaction',
   'warning', 'error', 'cancelled', 'run_finished', 'plan_ready'];

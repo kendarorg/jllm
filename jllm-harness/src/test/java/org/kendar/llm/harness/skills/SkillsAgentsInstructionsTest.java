@@ -8,7 +8,6 @@ import org.kendar.llm.harness.agent.AgentDefinition;
 import org.kendar.llm.harness.agent.AgentLoop;
 import org.kendar.llm.harness.agent.SubAgentTool;
 import org.kendar.llm.harness.instructions.InstructionLoader;
-import org.kendar.llm.harness.settings.AgentSettings;
 import org.kendar.llm.harness.settings.HarnessSettings;
 import org.kendar.llm.harness.settings.SkillSettings;
 import org.kendar.llm.harness.tools.HarnessTool;
@@ -19,22 +18,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.kendar.llm.harness.HarnessTestSupport.MAPPER;
-import static org.kendar.llm.harness.HarnessTestSupport.Rig;
-import static org.kendar.llm.harness.HarnessTestSupport.ScriptedModel;
-import static org.kendar.llm.harness.HarnessTestSupport.config;
-import static org.kendar.llm.harness.HarnessTestSupport.json;
-import static org.kendar.llm.harness.HarnessTestSupport.text;
-import static org.kendar.llm.harness.HarnessTestSupport.tool;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.kendar.llm.harness.HarnessTestSupport.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 class SkillsAgentsInstructionsTest {
 

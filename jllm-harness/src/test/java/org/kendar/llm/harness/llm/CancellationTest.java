@@ -7,28 +7,18 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.kendar.llm.harness.HarnessTestSupport.Events;
-import org.kendar.llm.harness.HarnessTestSupport.Rig;
+import org.kendar.llm.harness.HarnessTestSupport.*;
 import org.kendar.llm.harness.agent.AgentLoop;
-import org.kendar.llm.harness.agent.SubAgentTool;
-import org.kendar.llm.harness.tools.HarnessToolRegistry;
 import org.kendar.llm.harness.tools.ToolKind;
 
 import java.net.InetSocketAddress;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.kendar.llm.harness.HarnessTestSupport.*;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 class CancellationTest {
 

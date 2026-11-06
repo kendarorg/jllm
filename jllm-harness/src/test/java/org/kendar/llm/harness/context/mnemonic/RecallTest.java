@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import org.junit.jupiter.api.Test;
 import org.kendar.llm.harness.HarnessMetrics;
-import org.kendar.llm.harness.HarnessTestSupport.ScriptedModel;
+import org.kendar.llm.harness.HarnessTestSupport.*;
 import org.kendar.llm.harness.hooks.HookContext;
 import org.kendar.llm.harness.hooks.HookEvent;
 import org.kendar.llm.harness.hooks.Hooks;
@@ -16,10 +16,9 @@ import java.time.Instant;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.kendar.llm.harness.HarnessTestSupport.MAPPER;
-import static org.kendar.llm.harness.HarnessTestSupport.json;
-import static org.kendar.llm.harness.HarnessTestSupport.text;
+import static org.kendar.llm.harness.HarnessTestSupport.*;
 import static org.kendar.llm.harness.context.mnemonic.MnemonicTestSupport.*;
+import static org.kendar.llm.harness.context.mnemonic.MnemonicTestSupport.config;
 
 class RecallTest {
 

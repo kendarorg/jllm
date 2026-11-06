@@ -1,7 +1,6 @@
 package org.kendar.llm.harness;
 
 import com.fasterxml.jackson.databind.node.ArrayNode;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.context.compaction.ContextManager;
@@ -18,15 +17,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.kendar.llm.harness.HarnessTestSupport.Events;
-import static org.kendar.llm.harness.HarnessTestSupport.MAPPER;
-import static org.kendar.llm.harness.HarnessTestSupport.ScriptedModel;
-import static org.kendar.llm.harness.HarnessTestSupport.config;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.kendar.llm.harness.HarnessTestSupport.*;
 
 class ModesScratchContextTest {
 

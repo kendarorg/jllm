@@ -7,12 +7,7 @@ import org.kendar.llm.harness.llm.Usage;
 import org.kendar.llm.harness.permission.PermissionMode;
 import org.kendar.llm.harness.util.Uuids;
 
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.List;
-import java.util.Optional;
-import java.util.Set;
-import java.util.TreeSet;
+import java.util.*;
 
 /** Session rows are scoped strictly by chatId; nothing here reads across chats. */
 public class ChatSessionService {

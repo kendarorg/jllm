@@ -1,5 +1,5 @@
-import { computed } from 'vue';
-import { store, setMode, cancelRun } from '../store.js';
+import {computed} from 'vue';
+import {cancelRun, setMode, store} from '../store.js';
 
 export default {
   setup() {

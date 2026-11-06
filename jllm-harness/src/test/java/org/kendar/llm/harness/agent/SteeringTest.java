@@ -5,8 +5,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.kendar.llm.harness.HarnessTestSupport.Events;
-import org.kendar.llm.harness.HarnessTestSupport.Rig;
+import org.kendar.llm.harness.HarnessTestSupport.*;
 import org.kendar.llm.harness.tools.ToolKind;
 
 import java.nio.file.Path;
@@ -15,7 +14,8 @@ import java.util.Deque;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.kendar.llm.harness.HarnessTestSupport.*;
 
 class SteeringTest {

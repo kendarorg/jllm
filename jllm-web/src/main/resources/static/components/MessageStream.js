@@ -1,5 +1,5 @@
-import { ref, watch, nextTick, onMounted } from 'vue';
-import { store } from '../store.js';
+import {nextTick, onMounted, ref, watch} from 'vue';
+import {store} from '../store.js';
 
 export default {
   setup() {

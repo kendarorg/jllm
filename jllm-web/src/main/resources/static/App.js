@@ -1,5 +1,5 @@
-import { onMounted } from 'vue';
-import { store, init } from './store.js';
+import {onMounted} from 'vue';
+import {init, store} from './store.js';
 import SessionList from './components/SessionList.js';
 import ChatToolbar from './components/ChatToolbar.js';
 import MessageStream from './components/MessageStream.js';

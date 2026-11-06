@@ -6,11 +6,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.node.TextNode;
 import org.kendar.llm.harness.context.mnemonic.MnemonicState.Mask;
 
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 /** Level 1: chooses the content blocks a masking batch replaces with receipts, oldest first. */
 final class MaskPlanner {

@@ -2,19 +2,18 @@ package org.kendar.llm.harness.agent;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.HarnessConfig;
-import org.kendar.llm.harness.HarnessTestSupport.Events;
-import org.kendar.llm.harness.HarnessTestSupport.Rig;
+import org.kendar.llm.harness.HarnessTestSupport.*;
 import org.kendar.llm.harness.tools.ToolKind;
 
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.kendar.llm.harness.HarnessTestSupport.*;
 
 class ToolOutputSafetyTest {

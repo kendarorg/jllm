@@ -15,7 +15,6 @@ import java.util.function.BiFunction;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.kendar.llm.harness.HarnessTestSupport.config;
-import static org.mockito.Mockito.when;
 
 class DockerSandboxExecutorTest {
 

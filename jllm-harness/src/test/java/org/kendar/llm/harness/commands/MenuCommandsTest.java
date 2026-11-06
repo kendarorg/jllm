@@ -21,14 +21,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.kendar.llm.harness.HarnessTestSupport.MAPPER;
-import static org.kendar.llm.harness.HarnessTestSupport.ScriptedModel;
-import static org.kendar.llm.harness.HarnessTestSupport.config;
-import static org.kendar.llm.harness.HarnessTestSupport.tool;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.kendar.llm.harness.HarnessTestSupport.*;
 
 class MenuCommandsTest {
 

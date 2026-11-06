@@ -1,25 +1,17 @@
 package org.kendar.llm.harness.permission;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.kendar.llm.harness.HarnessTestSupport.Events;
-import org.kendar.llm.harness.HarnessTestSupport.Rig;
-import org.kendar.llm.harness.HarnessTestSupport.ScriptedModel;
+import org.kendar.llm.harness.HarnessTestSupport.*;
 import org.kendar.llm.harness.permission.ToolClassifier.Verdict;
 import org.kendar.llm.harness.tools.ToolKind;
 
 import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.kendar.llm.harness.HarnessTestSupport.MAPPER;
-import static org.kendar.llm.harness.HarnessTestSupport.text;
-import static org.kendar.llm.harness.HarnessTestSupport.tool;
-import static org.kendar.llm.harness.HarnessTestSupport.toolUse;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.kendar.llm.harness.HarnessTestSupport.*;
 
 class ToolClassifierTest {
 

@@ -1,11 +1,10 @@
 package org.kendar.llm.harness.context.compaction;
 
-import org.kendar.llm.harness.context.CompactResult;
-import org.kendar.llm.harness.context.RequestPrefix;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import org.junit.jupiter.api.Test;
 import org.kendar.llm.harness.HarnessConfig;
-import org.kendar.llm.harness.HarnessTestSupport.ScriptedModel;
+import org.kendar.llm.harness.HarnessTestSupport.*;
+import org.kendar.llm.harness.context.RequestPrefix;
 import org.kendar.llm.harness.llm.ModelException;
 import org.kendar.llm.harness.permission.ApprovalService;
 
@@ -13,12 +12,8 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.kendar.llm.harness.HarnessTestSupport.MAPPER;
-import static org.kendar.llm.harness.HarnessTestSupport.config;
-import static org.kendar.llm.harness.HarnessTestSupport.text;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.kendar.llm.harness.HarnessTestSupport.*;
 
 class CompactionPrefixTest {
 

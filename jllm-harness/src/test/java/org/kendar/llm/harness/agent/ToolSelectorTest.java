@@ -3,17 +3,17 @@ package org.kendar.llm.harness.agent;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.kendar.llm.harness.HarnessConfig;
-import org.kendar.llm.harness.tools.HarnessToolRegistry;
 import org.kendar.llm.harness.HarnessTestSupport.ScriptedModel;
 import org.kendar.llm.harness.tools.HarnessTool;
+import org.kendar.llm.harness.tools.HarnessToolRegistry;
 import org.kendar.llm.harness.tools.ToolKind;
 
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.kendar.llm.harness.HarnessTestSupport.*;
+import static org.kendar.llm.harness.HarnessTestSupport.MAPPER;
+import static org.kendar.llm.harness.HarnessTestSupport.tool;
 
 class ToolSelectorTest {
 

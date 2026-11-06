@@ -1,6 +1,6 @@
-import { ref, reactive, computed, watch, onMounted } from 'vue';
-import { api } from '../api.js';
-import { store, toast } from '../store.js';
+import {computed, onMounted, reactive, ref, watch} from 'vue';
+import {api} from '../api.js';
+import {store, toast} from '../store.js';
 
 const ICON = { agent: '🤖', turn: '💬', text: '✎', tool: '⚙', sub: '🧩', note: '·' };
 

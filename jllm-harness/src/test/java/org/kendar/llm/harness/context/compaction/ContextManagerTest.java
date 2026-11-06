@@ -7,7 +7,8 @@ import org.kendar.llm.harness.HarnessConfig;
 import org.kendar.llm.harness.llm.ModelClient;
 import org.kendar.llm.harness.permission.ApprovalService;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
 class ContextManagerTest {
