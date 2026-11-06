@@ -50,7 +50,7 @@ public class FileSystemAgentTools implements HarnessToolSet {
 
     @Override
     public List<HarnessTool> tools() {
-        return List.of(readFile(), writeFile(), editFile(), glob(), grep());
+        return List.of(readFile(), writeFile(), editFile(), glob(), grep(), grepCode());
     }
 
     /** Resolves a path for reading: inside the work dir, or an absolute path inside the scratch dir. */
@@ -316,6 +316,78 @@ public class FileSystemAgentTools implements HarnessToolSet {
                 }
             }
             return String.join("\n", hits);
+        });
+    }
+
+    private static final int CODE_MAX_FILES = 80;
+    private static final int CODE_MAX_PER_FILE = 60;
+    private static final int CODE_MAX_CHARS = 40_000;
+    private static final java.util.Set<String> CODE_SKIP_DIRS = java.util.Set.of(
+            ".git", "target", "build", "node_modules", ".idea", ".gradle", "dist", "out", "__pycache__", "vendor");
+    /**
+     * Language-neutral guess at a definition: a shallow line that opens a block ({, :, =>) and does not start with a
+     * control-flow word. Deliberately not a list of languages: pass pattern when it misses.
+     */
+    private static final Pattern BLOCK_OPENER = Pattern.compile(
+            "^(?!\\s*(?:if|else|elif|for|foreach|while|do|switch|case|default|try|catch|finally|except|with|return|"
+                    + "when|match|synchronized|lock|using|unless|until|loop)\\b)\\s{0,8}[^\\s/*#@].*(?:\\{|:|=>)\\s*$");
+
+    private HarnessTool grepCode() {
+        return new SimpleTool("grep_code",
+                "Find what files DEFINE, grouped per file with its line count and numbered lines: use it to learn what "
+                        + "a module or directory contains instead of reading the first lines of each file. Without "
+                        + "pattern it lists shallow lines that open a block (types, functions, methods) in any "
+                        + "language; when that is too thin or noisy for the language or question, pass a pattern for "
+                        + "the definitions you care about. Skips build, vendor and binary files.",
+                SimpleTool.schema(
+                        "path?", "File or directory relative to the work dir (default: the work dir)",
+                        "glob?", "Only files matching this glob, e.g. src/main/**/*.go",
+                        "pattern?", "Java regex for the definition lines (default: language-neutral block openers)"),
+                GROUP, ToolKind.READ_ONLY, (ctx, in) -> {
+            if (ctx.files() != null) return "grep_code is not available on a remote work dir; use glob, grep and read_file";
+            Path root = ctx.workDir().toAbsolutePath().normalize();
+            Path start = in.hasNonNull("path") ? jail(ctx, in.path("path").asText()) : root;
+            PathMatcher matcher = in.hasNonNull("glob") ? globMatcher(in.path("glob").asText()) : null;
+            Pattern pattern = in.hasNonNull("pattern") ? Pattern.compile(in.path("pattern").asText()) : null;
+            StringBuilder sb = new StringBuilder();
+            int files = 0;
+            boolean more = false;
+            try (Stream<Path> s = Files.walk(start)) {
+                for (Path f : (Iterable<Path>) s.filter(Files::isRegularFile).sorted()::iterator) {
+                    Path rel = root.relativize(f);
+                    boolean skipped = false;
+                    for (Path seg : rel) if (CODE_SKIP_DIRS.contains(seg.toString())) skipped = true;
+                    if (skipped || BINARY_EXTENSIONS.contains(extension(f))) continue;
+                    if (matcher != null && !matcher.matches(rel)) continue;
+                    List<String> lines;
+                    try {
+                        if (Files.size(f) > MAX_READ_BYTES) continue;
+                        lines = Files.readAllLines(f, StandardCharsets.UTF_8);
+                    } catch (IOException e) {
+                        continue; // binary / unreadable
+                    }
+                    StringBuilder one = new StringBuilder("## " + rel.toString().replace('\\', '/') + " ("
+                            + lines.size() + " lines)\n");
+                    int hits = 0;
+                    for (int i = 0; i < lines.size(); i++) {
+                        String l = lines.get(i);
+                        if (!(pattern != null ? pattern.matcher(l).find() : BLOCK_OPENER.matcher(l).matches())) continue;
+                        if (++hits > CODE_MAX_PER_FILE) continue;
+                        String t = l.strip();
+                        one.append("  L").append(i + 1).append(' ')
+                                .append(t.length() > 140 ? t.substring(0, 140) + "…" : t).append('\n');
+                    }
+                    if (hits > CODE_MAX_PER_FILE) one.append("  ... ").append(hits - CODE_MAX_PER_FILE).append(" more\n");
+                    if (files >= CODE_MAX_FILES || (sb.length() + one.length() > CODE_MAX_CHARS && files > 0)) {
+                        more = true;
+                        break;
+                    }
+                    sb.append(one);
+                    files++;
+                }
+            }
+            if (more) sb.append("[output limited: narrow path or glob to see the remaining files]\n");
+            return sb.length() == 0 ? "No files" : sb.toString();
         });
     }
 
