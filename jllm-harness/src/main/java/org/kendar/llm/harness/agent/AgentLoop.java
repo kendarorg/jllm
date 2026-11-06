@@ -30,6 +30,7 @@ import org.kendar.llm.harness.permission.PermissionGate;
 import org.kendar.llm.harness.permission.PermissionRules;
 import org.kendar.llm.harness.permission.PermissionMode;
 import org.kendar.llm.harness.permission.ToolClassifier;
+import org.kendar.llm.harness.safety.ToolOutputSanitizer;
 import org.kendar.llm.harness.sandbox.SandboxExecutor;
 import org.kendar.llm.harness.session.ChatSessionData;
 import org.kendar.llm.harness.session.ChatSessionService;
@@ -84,6 +85,9 @@ public class AgentLoop {
     private final Hooks hooks;
     private final ToolClassifier classifier;
     private final AtomicInteger subAgentSeq = new AtomicInteger();
+    private final ToolOutputSanitizer sanitizer;
+    /** Chats whose current run has read untrusted tool output. */
+    private final java.util.Set<String> tainted = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     /**
      * @param requestToolGroup on-demand tool groups; null disables them
@@ -135,6 +139,8 @@ public class AgentLoop {
         this.subAgentRunLog = subAgentRunLog;
         this.mapper = mapper;
         this.systemPrompt = systemPrompt == null ? "" : systemPrompt;
+        this.sanitizer = new ToolOutputSanitizer(ToolOutputSanitizer.Mode.parse(config.output().sanitize()),
+                config.output().extraPatterns());
     }
 
     /** Runs one user turn of a persisted chat to completion. */
@@ -156,6 +162,7 @@ public class AgentLoop {
     }
 
     public void run(String chatId, String userText, EventSink sink, BooleanSupplier cancelled, Inbox inbox) {
+        tainted.remove(chatId);
         HookResult prompt = hooks.run(HookContext.prompt(chatId, userText));
         if (prompt.denied()) {
             sink.emit("warning", mapper.createObjectNode()
@@ -725,6 +732,13 @@ public class AgentLoop {
                     && mode != PermissionMode.AUTO) {
                 decision = Decision.ALLOW;
             }
+            // outside content was read in this run: side effects need an explicit yes, even over grants and allow rules
+            if (decision == Decision.ALLOW && tool.kind() != ToolKind.READ_ONLY && tainted.contains(ctx.chatId())
+                    && (rule == null || rule.kind() != PermissionRules.Kind.DENY)) {
+                decision = Decision.ASK;
+                sink.emit("warning", mapper.createObjectNode().put("message", "Confirming '" + name
+                        + "': this run read untrusted tool output that could contain injected instructions"));
+            }
             if (decision == Decision.ASK && !interactive) decision = Decision.DENY;
             if (pre.denied()) {
                 result = toolResult(id, "Denied by a hook: " + pre.denyReason(), true);
@@ -834,13 +848,30 @@ public class AgentLoop {
                         ? "…[truncated " + (out.length() - max) + " chars]\n" + out.substring(out.length() - max)
                         : out.substring(0, max) + "\n…[truncated " + (out.length() - max) + " chars]";
             }
-            return toolResult(id, out, false);
+            return toolResult(id, sanitizeOutput(tool, ctx, out), false);
         } catch (SandboxUnavailableException e) {
             throw e;
         } catch (Exception e) {
             String m = e instanceof java.io.IOException ? e.getClass().getSimpleName() + ": " + e.getMessage() : e.getMessage();
             return toolResult(id, "Error: " + m, true);
         }
+    }
+
+    /** Tool groups whose output is produced by the harness or the user's own skills, not by outside content. */
+    private static final java.util.Set<String> INTERNAL_GROUPS = java.util.Set.of("Agents", "Skills", "Memory");
+    private static final java.util.Set<String> LOCAL_GROUPS = java.util.Set.of("Files", "Shell");
+
+    /** Cleans and wraps the output of a tool; marks the chat tainted when it may carry outside instructions. */
+    private String sanitizeOutput(HarnessTool tool, ToolContext ctx, String out) {
+        if (sanitizer.mode() == ToolOutputSanitizer.Mode.OFF || INTERNAL_GROUPS.contains(tool.group())) return out;
+        ToolOutputSanitizer.Trust trust = LOCAL_GROUPS.contains(tool.group())
+                ? ToolOutputSanitizer.Trust.LOW : ToolOutputSanitizer.Trust.UNTRUSTED;
+        ToolOutputSanitizer.Result r = sanitizer.sanitize(tool.name(), trust, out);
+        if (r.tainted() && config.output().taintGating()) tainted.add(ctx.chatId());
+        if (r.flagged()) {
+            log.warn("Tool '{}' output flagged as possible prompt injection: {}", tool.name(), r.findings());
+        }
+        return r.text();
     }
 
     private ObjectNode toolResult(String id, String content, boolean isError) {

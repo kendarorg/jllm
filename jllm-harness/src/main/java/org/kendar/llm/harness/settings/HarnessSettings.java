@@ -178,7 +178,11 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
      * @param toolMaxChars  tool output kept in the context (default 30000)
      * @param eventMaxChars tool output carried by the {@code tool_result} event (default 2000)
      */
-    public record Output(Integer toolMaxChars, Integer eventMaxChars) {
+    public record Output(Integer toolMaxChars, Integer eventMaxChars, String sanitize, Boolean taintGating,
+                         java.util.List<String> extraPatterns) {
+        public Output(Integer toolMaxChars, Integer eventMaxChars) {
+            this(toolMaxChars, eventMaxChars, null, null, null);
+        }
     }
 
     /**
@@ -266,7 +270,10 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
             HarnessConfig.Output o = c.output();
             c = c.withOutput(new HarnessConfig.Output(
                     output.toolMaxChars() != null ? output.toolMaxChars() : o.toolMaxChars(),
-                    output.eventMaxChars() != null ? output.eventMaxChars() : o.eventMaxChars()));
+                    output.eventMaxChars() != null ? output.eventMaxChars() : o.eventMaxChars(),
+                    output.sanitize() != null ? output.sanitize() : o.sanitize(),
+                    output.taintGating() != null ? output.taintGating() : o.taintGating(),
+                    output.extraPatterns() != null ? output.extraPatterns() : o.extraPatterns()));
         }
         return c;
     }

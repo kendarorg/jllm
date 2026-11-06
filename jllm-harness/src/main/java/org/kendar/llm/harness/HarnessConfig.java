@@ -79,7 +79,17 @@ public record HarnessConfig(String agentId, int maxTurns, int maxTokens, boolean
      * @param toolMaxChars  tool output kept in the context; the rest is cut with a "[truncated N chars]" note
      * @param eventMaxChars tool output carried by the {@code tool_result} event sent to the front end
      */
-    public record Output(int toolMaxChars, int eventMaxChars) {
+    public record Output(int toolMaxChars, int eventMaxChars, String sanitize, boolean taintGating,
+                         java.util.List<String> extraPatterns) {
+        public Output {
+            if (sanitize == null || sanitize.isBlank()) sanitize = "wrap";
+            extraPatterns = extraPatterns == null ? java.util.List.of() : java.util.List.copyOf(extraPatterns);
+        }
+
+        public Output(int toolMaxChars, int eventMaxChars) {
+            this(toolMaxChars, eventMaxChars, "wrap", true, java.util.List.of());
+        }
+
         public static Output defaults() {
             return new Output(30_000, 2_000);
         }

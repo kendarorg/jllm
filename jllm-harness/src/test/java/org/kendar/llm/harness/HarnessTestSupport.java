@@ -149,7 +149,9 @@ public final class HarnessTestSupport {
     public static HarnessConfig config(Path baseDir) {
         return HarnessConfig.defaults().withAgentId("jllm").withLocalDirSandboxAllowed(false).withMaxTokens(1024).withApprovalTimeoutSeconds(5)
                 .withContextBudgetTokens(150_000).withSandboxBaseDir(baseDir.toString())
-                .withSandboxTimeoutSeconds(10);
+                .withSandboxTimeoutSeconds(10)
+                // sanitization has its own tests; other tests assert on the raw tool output
+                .withOutput(new HarnessConfig.Output(30_000, 2_000, "off", true, java.util.List.of()));
     }
 
     public static SimpleTool tool(String name, String group, ToolKind kind, SimpleTool.Body body) {
