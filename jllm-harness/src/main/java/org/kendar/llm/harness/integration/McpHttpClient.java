@@ -16,7 +16,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
 /** Minimal MCP client over streamable HTTP: initialize, tools/list and tools/call. */
-public final class McpHttpClient {
+public final class McpHttpClient implements McpClient {
 
     private static final String PROTOCOL_VERSION = "2025-03-26";
 
@@ -35,6 +35,7 @@ public final class McpHttpClient {
         this.headers = headers;
     }
 
+    @Override
     public synchronized void initialize() throws IOException, InterruptedException {
         if (initialized) return;
         ObjectNode params = mapper.createObjectNode();
@@ -48,7 +49,7 @@ public final class McpHttpClient {
         initialized = true;
     }
 
-    /** @return the entries of tools/list, following pagination */
+    @Override
     public List<JsonNode> listTools() throws IOException, InterruptedException {
         initialize();
         List<JsonNode> tools = new ArrayList<>();
@@ -63,7 +64,7 @@ public final class McpHttpClient {
         return tools;
     }
 
-    /** @return the result object of tools/call */
+    @Override
     public JsonNode callTool(String name, JsonNode arguments) throws IOException, InterruptedException {
         initialize();
         ObjectNode params = mapper.createObjectNode();

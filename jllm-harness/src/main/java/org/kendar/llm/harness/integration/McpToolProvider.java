@@ -34,11 +34,23 @@ public final class McpToolProvider {
         }
     }
 
-    /** Connects to the server and lists its tools. */
+    /** A client for the server's transport, not yet connected. */
+    public static McpClient connect(McpServerSettings server, HttpClient http, ObjectMapper mapper) {
+        return server.isStdio()
+                ? new McpStdioClient(mapper, server.name(), server.command(), server.args(), server.env())
+                : new McpHttpClient(http, mapper, server.url(), server.headers());
+    }
+
+    /** Connects to the server and lists its tools. The tools keep the client, so it stays open. */
     public static List<HarnessTool> discover(McpServerSettings server, HttpClient http, ObjectMapper mapper)
             throws IOException, InterruptedException {
+        return tools(server, connect(server, http, mapper), mapper);
+    }
+
+    /** The tools of a connected client, named {@code mcp__<server>__<tool>}; calls go through the client. */
+    public static List<HarnessTool> tools(McpServerSettings server, McpClient client, ObjectMapper mapper)
+            throws IOException, InterruptedException {
         List<HarnessTool> out = new ArrayList<>();
-        McpHttpClient client = new McpHttpClient(http, mapper, server.url(), server.headers());
         for (JsonNode t : client.listTools()) {
             String remote = t.path("name").asText();
             JsonNode schema = t.has("inputSchema") ? t.get("inputSchema")

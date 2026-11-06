@@ -70,7 +70,7 @@ MCP servers and REST APIs need no code, only configuration:
 }
 ```
 
-- **MCP**: streamable-HTTP servers, static headers (`${ENV_VAR}` expanded), tools listed at startup. A server that is
+- **MCP**: streamable-HTTP servers or stdio child processes (`command`/`args`/`env`), static headers (`${ENV_VAR}` expanded), tools listed at startup. A server that is
   down does not stop the harness. No OAuth.
 - **REST**: the OpenAPI 3 spec is parsed and each operation matching `allowedPaths` becomes a tool whose input schema
   comes from the spec. Nothing outside the allowlist is reachable. GET/HEAD are read-only, other methods need approval.

@@ -4,7 +4,7 @@ External tools come from two kinds of sources, both declared in the settings fil
 
 | Source | Settings key | Tool name | Group (default) | Kind |
 |---|---|---|---|---|
-| MCP server (streamable HTTP) | `mcpServers` | `mcp__<server>__<tool>` | `Mcp/<server>` | READ_ONLY if `"readOnly": true`, else OTHER |
+| MCP server (streamable HTTP or stdio) | `mcpServers` | `mcp__<server>__<tool>` | `Mcp/<server>` | READ_ONLY if `"readOnly": true`, else OTHER |
 | REST API (OpenAPI 3) | `restApis` | `<api>__<operationId>` | `Rest/<api>` | READ_ONLY for GET/HEAD, else OTHER |
 
 Names are sanitized to `[a-zA-Z0-9_-]` and cut to 64 characters. A clash with another tool name makes the source fail
@@ -59,7 +59,10 @@ sequenceDiagram
 | Field | Default | Meaning |
 |---|---|---|
 | `name` | required | used in the tool names and in `/mcp` |
-| `url` | required | streamable-HTTP endpoint |
+| `url` | one of `url` / `command` | streamable-HTTP endpoint |
+| `command` | one of `url` / `command` | executable of a stdio server, started as a child process |
+| `args` | `[]` | arguments of `command` |
+| `env` | none | environment added to the child process; `${ENV}` expanded |
 | `headers` | none | sent on every request; `${ENV}` expanded |
 | `group` | `Mcp/<name>` | tool group (selection, `/tools`, `request_tool_group`) |
 | `readOnly` | `false` | `true`: the tools never ask for approval |
@@ -92,7 +95,23 @@ sequenceDiagram
   there is no content; `isError: true` prefixes `Error: `.
 - The tool's `inputSchema` is passed to the model unchanged (default `{"type":"object"}`).
 
-Not supported: stdio servers, OAuth (use static headers), resources, prompts, sampling, server notifications.
+### stdio servers
+
+```json
+"mcpServers": [
+  {"name": "adexpert", "command": "/opt/adexpert/.venv/bin/python3", "args": ["/opt/adexpert/mcp_server.py"],
+   "env": {"ADEXPERT_SERVER_URL": "http://localhost:8180"}, "readOnly": true}
+]
+```
+
+- `McpStdioClient` starts the command on the first connection and talks newline-delimited JSON-RPC on its stdin and
+  stdout, with the same methods as the HTTP client. Its stderr goes to the debug log.
+- The process lives as long as the source is enabled: `/mcp disable` and a re-enable stop and restart it. The JVM exit
+  closes the pipe, which ends a well-behaved server.
+- A `check` starts a separate process and stops it again.
+- A server that writes requests of its own (sampling, roots) gets no answer; its messages are ignored.
+
+Not supported: OAuth (use static headers), resources, prompts, sampling, server notifications.
 
 ## 3. REST APIs (OpenAPI)
 
