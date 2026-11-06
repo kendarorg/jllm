@@ -271,13 +271,16 @@ public final class Main {
             throws InterruptedException {
         System.out.println("[approval] " + d.path("type").asText() + " " + d.path("title").asText());
         System.out.println(d.path("preview").asText());
-        System.out.print("Allow? [y/N/a=allow for this chat] ");
+        String writeDir = d.path("writeDir").asText("");
+        System.out.print("Allow? [y/N/a=allow for this chat"
+                + (writeDir.isEmpty() ? "" : "/d=allow writes in " + writeDir + "/ and subfolders") + "] ");
         System.out.flush();
         String answer = in.take();
         String a = answer == EOF ? "" : answer.strip().toLowerCase();
         boolean remember = a.startsWith("a");
-        boolean ok = remember || a.startsWith("y");
-        harness.resolveApproval(chatId, d.path("id").asText(), ok, null, remember);
+        boolean rememberDir = !writeDir.isEmpty() && a.startsWith("d");
+        boolean ok = remember || rememberDir || a.startsWith("y");
+        harness.resolveApproval(chatId, d.path("id").asText(), ok, null, remember, rememberDir);
     }
 
     private static String abbreviate(String s) {

@@ -216,7 +216,8 @@ public class ChatController {
         boolean approved = Boolean.TRUE.equals(body.get("approved"));
         String edited = body.get("editedText") instanceof String s ? s : null;
         boolean remember = Boolean.TRUE.equals(body.get("remember"));
-        if (!agentService.resolveApproval(id, approvalId, approved, edited, remember)) {
+        boolean rememberDir = Boolean.TRUE.equals(body.get("rememberDir"));
+        if (!agentService.resolveApproval(id, approvalId, approved, edited, remember, rememberDir)) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Approval no longer pending"));
         }
         return ResponseEntity.ok(Map.of("resolved", true));

@@ -727,7 +727,9 @@ public class AgentLoop {
                 decision = Decision.ASK;
             }
             // a grant only replaces the question; deny rules, hooks and plan confinement stay as they are
-            if (decision == Decision.ASK && approvals.granted(ctx.chatId(), name)) decision = Decision.ALLOW;
+            if (decision == Decision.ASK && (approvals.granted(ctx.chatId(), name)
+                    || approvals.commandGranted(ctx.chatId(), name, commandOf(name, input))
+                    || approvals.dirGranted(ctx.chatId(), writeDirOf(tool, input, ctx)))) decision = Decision.ALLOW;
             if (rule != null && rule.kind() == PermissionRules.Kind.ALLOW && decision == Decision.ASK
                     && mode != PermissionMode.AUTO) {
                 decision = Decision.ALLOW;
@@ -749,6 +751,7 @@ public class AgentLoop {
             } else if (decision == Decision.ASK && !approve(tool, input, ctx, sink, cancelled, label)) {
                 result = toolResult(id, "The user rejected this tool call", true);
             } else {
+                if (decision == Decision.ASK) approvals.grantCommand(ctx.chatId(), name, commandOf(name, input));
                 try {
                     result = runTool(tool, input, ctx.withToolUseId(id), id);
                 } catch (SandboxUnavailableException e) {
@@ -775,6 +778,18 @@ public class AgentLoop {
         return result;
     }
 
+    /** The shell command line of a bash call, else null: only commands are granted verbatim. */
+    /** The work-dir-relative directory a file-writing call targets, or null when none can be offered or granted. */
+    private static String writeDirOf(HarnessTool tool, JsonNode input, ToolContext ctx) {
+        if (tool.kind() != ToolKind.FILE_EDIT || ctx.readOnlyWork() || ctx.files() != null || input == null) return null;
+        return ApprovalService.writeDirOf(ctx.workDir(), input.path("path").asText(null));
+    }
+
+    private static String commandOf(String toolName, JsonNode input) {
+        return "bash".equals(toolName) && input != null && input.hasNonNull("command")
+                ? input.get("command").asText() : null;
+    }
+
     private boolean approve(HarnessTool tool, JsonNode input, ToolContext ctx, EventSink sink,
                             BooleanSupplier cancelled, String label) {
         String preview;
@@ -784,13 +799,16 @@ public class AgentLoop {
             preview = input.toString();
         }
         String title = label == null ? tool.name() : "[" + label + "] " + tool.name();
+        String writeDir = writeDirOf(tool, input, ctx);
         ApprovalService.ApprovalDecision d = approvals.await(ctx.chatId(), "tool", title, preview, null, a -> {
             ObjectNode ev = mapper.valueToTree(a);
             if (label != null) ev.put("agent", label);
+            if (writeDir != null) ev.put("writeDir", writeDir);
             sink.emit("approval_request", ev);
         }, cancelled);
         boolean ok = d.approved();
         if (ok && d.remember()) approvals.grant(ctx.chatId(), tool.name());
+        if (ok && d.rememberDir()) approvals.grantDir(ctx.chatId(), writeDir);
         metrics.approval("tool", ok);
         return ok;
     }

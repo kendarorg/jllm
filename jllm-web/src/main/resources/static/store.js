@@ -244,10 +244,10 @@ function enqueueApproval(a) {
   if (!store.approvals.some(x => x.id === a.id)) store.approvals.push(a);
 }
 
-export async function resolveApproval(a, approved, editedText, remember = false) {
+export async function resolveApproval(a, approved, editedText, remember = false, rememberDir = false) {
   try {
     await post(`/api/chat/${store.chatId}/approvals/${a.id}`, { approved, editedText: approved ? editedText ?? null : null,
-      remember: approved && remember });
+      remember: approved && remember, rememberDir: approved && rememberDir });
   } catch (e) { toast(e.message, 'error'); }
   store.approvals = store.approvals.filter(x => x.id !== a.id);
 }

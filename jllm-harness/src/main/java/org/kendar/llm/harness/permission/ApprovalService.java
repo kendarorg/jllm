@@ -30,11 +30,15 @@ public class ApprovalService {
      * @param edited   user-edited replacement for {@code proposed}, or null
      * @param remember allow this tool for the rest of the chat (only meaningful when approved)
      */
-    public record ApprovalDecision(boolean approved, String edited, boolean remember) {
-        public static final ApprovalDecision REJECTED = new ApprovalDecision(false, null, false);
+    public record ApprovalDecision(boolean approved, String edited, boolean remember, boolean rememberDir) {
+        public static final ApprovalDecision REJECTED = new ApprovalDecision(false, null, false, false);
 
         public ApprovalDecision(boolean approved, String edited) {
-            this(approved, edited, false);
+            this(approved, edited, false, false);
+        }
+
+        public ApprovalDecision(boolean approved, String edited, boolean remember) {
+            this(approved, edited, remember, false);
         }
     }
 
@@ -119,10 +123,52 @@ public class ApprovalService {
 
     /** @param remember allow the tool for the rest of the chat (parent and sub-agents) */
     public boolean resolve(String chatId, String approvalId, boolean approved, String edited, boolean remember) {
+        return resolve(chatId, approvalId, approved, edited, remember, false);
+    }
+
+    /** @param rememberDir allow file writes in the directory of this call and its subdirectories, for this chat */
+    public boolean resolve(String chatId, String approvalId, boolean approved, String edited, boolean remember,
+                           boolean rememberDir) {
         Map<String, Pending> m = pending.get(chatId);
         Pending p = m == null ? null : m.get(approvalId);
         if (p == null) return false;
-        return p.future().complete(new ApprovalDecision(approved, edited, remember));
+        return p.future().complete(new ApprovalDecision(approved, edited, remember, rememberDir));
+    }
+
+    private static final String DIR = "dir:";
+
+    /**
+     * The directory (relative to the work dir, '/'-separated, "." for the root) a file write belongs to, or null when
+     * it cannot be granted: outside the work dir, or inside a {@code .git} directory (hooks there run code).
+     */
+    public static String writeDirOf(java.nio.file.Path workDir, String path) {
+        if (workDir == null || path == null || path.isBlank()) return null;
+        try {
+            java.nio.file.Path root = workDir.toAbsolutePath().normalize();
+            java.nio.file.Path p = root.resolve(path).normalize();
+            if (!p.startsWith(root)) return null;
+            java.nio.file.Path dir = root.relativize(p).getParent();
+            if (dir == null) return ".";
+            for (java.nio.file.Path seg : dir) if (seg.toString().equalsIgnoreCase(".git")) return null;
+            return dir.toString().replace('\\', '/');
+        } catch (java.nio.file.InvalidPathException e) {
+            return null;
+        }
+    }
+
+    public void grantDir(String chatId, String dir) {
+        if (dir != null) grant(chatId, DIR + dir);
+    }
+
+    /** True when {@code dir} is a granted directory or lies below one. */
+    public boolean dirGranted(String chatId, String dir) {
+        if (dir == null) return false;
+        for (String g : grantsOf(chatId)) {
+            if (!g.startsWith(DIR)) continue;
+            String base = g.substring(DIR.length());
+            if (base.equals(".") || dir.equals(base) || dir.startsWith(base + "/")) return true;
+        }
+        return false;
     }
 
     public void grant(String chatId, String tool) {
@@ -136,6 +182,24 @@ public class ApprovalService {
 
     public boolean granted(String chatId, String tool) {
         return grantsOf(chatId).contains(tool);
+    }
+
+    /** Longest command text stored as an exact-match grant. */
+    public static final int MAX_COMMAND_GRANT = 512;
+
+    private static String commandKey(String tool, String command) {
+        return "cmd:" + tool + ":" + command;
+    }
+
+    /** Stores an approved command verbatim so the same command is not asked again; ignored at 512 chars or more. */
+    public void grantCommand(String chatId, String tool, String command) {
+        if (command == null || command.isEmpty() || command.length() >= MAX_COMMAND_GRANT) return;
+        grant(chatId, commandKey(tool, command));
+    }
+
+    public boolean commandGranted(String chatId, String tool, String command) {
+        if (command == null || command.length() >= MAX_COMMAND_GRANT) return false;
+        return granted(chatId, commandKey(tool, command));
     }
 
     private Set<String> grantsOf(String chatId) {

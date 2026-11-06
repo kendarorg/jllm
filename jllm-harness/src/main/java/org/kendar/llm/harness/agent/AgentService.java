@@ -293,4 +293,10 @@ public class AgentService {
                                    boolean remember) {
         return approvals.resolve(chatId, approvalId, approved, edited, remember);
     }
+
+    /** @param rememberDir allow file writes in the call's directory and below, for this chat */
+    public boolean resolveApproval(String chatId, String approvalId, boolean approved, String edited,
+                                   boolean remember, boolean rememberDir) {
+        return approvals.resolve(chatId, approvalId, approved, edited, remember, rememberDir);
+    }
 }
