@@ -362,6 +362,16 @@ id=…` are denied with a message telling the model to recall the original first
 `null` means derived: trigger 60%, target 30%, minBatch 20% of the ceiling; keepRecent = `context.keepTokens`;
 tailMax 25% of the window.
 
+### Noise commands (any strategy)
+
+After a main-agent run, `NoiseCommandPruner` removes shell calls that add no information (`mkdir`, `rm`, `cd`, `mv`,
+`cp`, `touch`, `chmod`, ...) from the context. It rewrites the call and its result **in place** to a stub, so the
+prompt changes from that message on: a cache miss for the rest of the prompt, the same as a mnemonic frontier move.
+That is why drops are batched: the calls are collected after each turn and rewritten together once they save at least
+1000 tokens (estimated). The stub is stored in the log, so after a restart the prompt is byte-identical and nothing is
+qualified twice. See [INTERNALS §9](INTERNALS.md#9-sessions-and-persistence). `context.noiseCommands: false` turns it
+off.
+
 ## 5. Scope strategy
 
 `context.scope.ScopeStrategy`, selected with `context.strategy: scope`. It reuses the summarizer of `ContextManager`

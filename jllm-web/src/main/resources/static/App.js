@@ -1,5 +1,5 @@
 import {onMounted} from 'vue';
-import {init, store} from './store.js';
+import {continueOffer, dismissOffer, init, newChat, shortId, store} from './store.js';
 import SessionList from './components/SessionList.js';
 import ChatToolbar from './components/ChatToolbar.js';
 import MessageStream from './components/MessageStream.js';
@@ -21,7 +21,7 @@ export default {
       store.tab = TABS[(n + TABS.length) % TABS.length][0];
       e.preventDefault();
     }
-    return { store, TABS, onKey };
+    return { store, TABS, onKey, continueOffer, dismissOffer, newChat, shortId };
   },
   template: `
   <header>
@@ -30,7 +30,13 @@ export default {
   <div class="chat-layout">
     <SessionList />
     <section class="chat-main" aria-label="Workspace">
-      <div v-if="!store.chatId" class="empty">Create or select a chat to begin.</div>
+      <div v-if="!store.chatId && store.resumeOffer" class="resume-banner" role="alert">
+        Continue <b>{{ store.resumeOffer.title }}</b>
+        (<code :title="store.resumeOffer.chatId">{{ shortId(store.resumeOffer.chatId) }}</code>)?
+        <button class="btn-primary" @click="continueOffer()">Continue</button>
+        <button class="btn-sm" @click="dismissOffer(); newChat()">New chat</button>
+      </div>
+      <div v-else-if="!store.chatId" class="empty">Create or select a chat to begin.</div>
       <template v-else>
         <div class="tabs" role="tablist" aria-label="Chat views" @keydown="onKey">
           <button v-for="t in TABS" :key="t[0]" role="tab" class="tab" :class="{ active: store.tab === t[0] }"

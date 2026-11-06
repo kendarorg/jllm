@@ -185,6 +185,15 @@ public class AgentLoop {
                     "Plan ready. Type /edit to let the agent change files, or /auto to run without asking."));
         }
         hooks.run(HookContext.stop(chatId, answer));
+        if (noisePruner != null) noisePruner.afterTurn(chatId);
+    }
+
+    private org.kendar.llm.harness.context.noise.NoiseCommandPruner noisePruner;
+
+    /** Removes no-information shell commands from the context after each main-agent run; null = off. */
+    public AgentLoop noisePruner(org.kendar.llm.harness.context.noise.NoiseCommandPruner pruner) {
+        this.noisePruner = pruner;
+        return this;
     }
 
     /**

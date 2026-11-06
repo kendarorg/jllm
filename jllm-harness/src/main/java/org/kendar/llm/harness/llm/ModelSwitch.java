@@ -45,6 +45,12 @@ public final class ModelSwitch implements ModelClient {
     }
 
     @Override
+    public String simpleComplete(String system, String user, int maxTokens, Double temperature,
+                                 java.util.function.Consumer<Usage> usageSink) {
+        return current.simpleComplete(system, user, maxTokens, temperature, usageSink);
+    }
+
+    @Override
     public String simpleComplete(String system, String user, int maxTokens,
                                  java.util.function.Consumer<Usage> usageSink) {
         return current.simpleComplete(system, user, maxTokens, usageSink);

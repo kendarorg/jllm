@@ -32,6 +32,12 @@ public final class TemperatureModelClient implements ModelClient {
     }
 
     @Override
+    public String simpleComplete(String system, String user, int maxTokens, Double temperature,
+                                 java.util.function.Consumer<Usage> usageSink) {
+        return delegate.simpleComplete(system, user, maxTokens, temperature, usageSink); // the explicit value wins
+    }
+
+    @Override
     public String simpleComplete(String system, String user, int maxTokens,
                                  java.util.function.Consumer<Usage> usageSink) {
         return delegate.simpleComplete(system, user, maxTokens, usageSink);

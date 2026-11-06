@@ -35,6 +35,12 @@ public final class LimitedModelClient implements ModelClient {
     }
 
     @Override
+    public String simpleComplete(String system, String user, int maxTokens, Double temperature,
+                                 Consumer<Usage> usageSink) {
+        return limited(CancelToken.NONE, () -> delegate.simpleComplete(system, user, maxTokens, temperature, usageSink));
+    }
+
+    @Override
     public String simpleComplete(String system, String user, int maxTokens, Consumer<Usage> usageSink) {
         return limited(CancelToken.NONE, () -> delegate.simpleComplete(system, user, maxTokens, usageSink));
     }

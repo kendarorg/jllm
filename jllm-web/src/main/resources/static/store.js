@@ -27,7 +27,30 @@ export const store = reactive({
   get tab() { return (this.chatId && this.tabs[this.chatId]) || 'chat'; },
   set tab(v) { if (this.chatId) this.tabs[this.chatId] = v; },
   focusTurn: null,      // turn index the History tab asked the Chat tab to scroll to
+  resumeOffer: null,    // {chatId, title}: the chat this browser had open last time, offered instead of opened
 });
+
+const LAST_CHAT = 'jllm.lastChat';
+function remember(id) {
+  try { if (id) localStorage.setItem(LAST_CHAT, id); else localStorage.removeItem(LAST_CHAT); } catch (e) { /* private mode */ }
+}
+function remembered() {
+  try { return localStorage.getItem(LAST_CHAT); } catch (e) { return null; }
+}
+
+export async function copyId(id) {
+  try { await navigator.clipboard.writeText(id); toast('Chat id copied'); } catch (e) { toast(id); }
+}
+
+/** Short form of a chat id for lists; the full id is in the tooltip and in the header. */
+export const shortId = id => (id || '').slice(0, 8);
+
+export const continueOffer = guard(async () => {
+  const o = store.resumeOffer; store.resumeOffer = null;
+  if (o) await openChat(o.chatId);
+});
+
+export const dismissOffer = () => { store.resumeOffer = null; };
 
 let es = null;
 let group = null;       // current tool group item, ended by any non-tool message
@@ -65,7 +88,11 @@ function findTool(id) {
   return null;
 }
 
+/** The text a repaired log carries for a tool call that never finished (see InterruptedTurnRepair). */
+const INTERRUPTED = 'interrupted: process stopped';
+
 function renderHistory(messages) {
+  let interrupted = false;
   const results = {};
   messages.forEach(m => (Array.isArray(m.content) ? m.content : []).forEach(b => {
     if (b.type === 'tool_result') results[b.tool_use_id] = b;
@@ -77,10 +104,12 @@ function renderHistory(messages) {
       else if (b.type === 'tool_use') {
         const r = results[b.id];
         const out = r ? (typeof r.content === 'string' ? r.content : JSON.stringify(r.content)) : '';
+        if (out === INTERRUPTED) interrupted = true;
         addTool(b.id, b.name, b.input, r && r.is_error ? 'err' : 'ok', out);
       }
     });
   });
+  if (interrupted) addMsg('notice', 'This run was interrupted: the process stopped before it finished. Send a message to go on.');
 }
 
 // ── sessions ────────────────────────────────────────────────────────────────
@@ -88,6 +117,7 @@ export const loadSessions = guard(async () => { store.sessions = await api('/api
 
 export function closeChat() {
   if (es) es.close();
+  remember(null);
   delete store.tabs[store.chatId];
   store.chatId = null; store.items = []; store.usage = null; group = null;
 }
@@ -106,7 +136,8 @@ export const deleteChat = guard(async id => {
 export async function openChat(id) {
   if (es) es.close();
   if (!store.tabs[id]) store.tabs[id] = 'chat';   // never opened before: start on Chat; otherwise keep its own tab
-  store.chatId = id; store.approvals = []; group = null; store.items = [];
+  store.chatId = id; store.approvals = []; group = null; store.items = []; store.resumeOffer = null;
+  remember(id);
   const s = await api('/api/chat/' + id);
   // idle chat: history is complete, so skip replaying buffered events (they would show twice)
   store.lastSeq = s.running ? 0 : (s.lastSeq || 0);
@@ -198,6 +229,9 @@ async function poll() {
 export async function init() {
   try { store.commands = await api('/api/chat/commands'); } catch (e) { /* optional */ }
   await loadSessions();   // no chat is opened until the user picks one
+  const last = remembered();
+  const known = last && store.sessions.find(s => s.chatId === last);
+  if (known) store.resumeOffer = { chatId: known.chatId, title: known.title || 'Chat' };
   setInterval(poll, 5000);
 }
 

@@ -95,11 +95,18 @@ public class OpenAiCompatModelClient implements ModelClient {
 
     @Override
     public String simpleComplete(String system, String user, int maxTokens, java.util.function.Consumer<Usage> usageSink) {
+        return simpleComplete(system, user, maxTokens, null, usageSink);
+    }
+
+    @Override
+    public String simpleComplete(String system, String user, int maxTokens, Double temperature,
+                                 java.util.function.Consumer<Usage> usageSink) {
         ArrayNode messages = mapper.createArrayNode();
         ObjectNode m = messages.addObject();
         m.put("role", "user");
         m.put("content", user);
-        ModelResponse r = complete(new ModelRequest(system, "", messages, java.util.List.of(), maxTokens));
+        ModelRequest request = new ModelRequest(system, "", messages, java.util.List.of(), maxTokens);
+        ModelResponse r = complete(temperature == null ? request : request.withTemperature(temperature));
         if (usageSink != null && r.usage() != null) usageSink.accept(r.usage());
         StringBuilder sb = new StringBuilder();
         for (JsonNode b : r.content()) {

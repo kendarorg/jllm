@@ -1,5 +1,5 @@
 import {computed} from 'vue';
-import {cancelRun, setMode, store} from '../store.js';
+import {cancelRun, copyId, setMode, store} from '../store.js';
 
 export default {
   setup() {
@@ -7,10 +7,12 @@ export default {
     const mode = computed({ get: () => store.mode, set: v => setMode(v) });
     const u = computed(() => store.usage);
     const cost = computed(() => (u.value?.estimatedCostUsd || 0).toFixed(4));
-    return { store, fmt, mode, u, cost, cancelRun };
+    return { store, fmt, mode, u, cost, cancelRun, copyId };
   },
   template: `
   <div class="toolbar">
+    <span class="chat-id" :title="'Chat id ' + store.chatId">chat <code>{{ store.chatId }}</code></span>
+    <button class="btn-sm" aria-label="Copy the chat id" @click="copyId(store.chatId)">Copy id</button>
     <label for="mode">Mode</label>
     <select id="mode" v-model="mode" :disabled="!store.chatId" aria-label="Permission mode">
       <option value="DEFAULT">Default (ask)</option>
