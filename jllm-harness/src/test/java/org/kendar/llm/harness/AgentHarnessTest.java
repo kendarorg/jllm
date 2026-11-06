@@ -34,8 +34,8 @@ class AgentHarnessTest {
 
         List<String> names = h.tools().all().stream().map(HarnessTool::name).toList();
 
-        assertEquals(9, names.size());
-        assertTrue(names.containsAll(List.of("read_file", "write_file", "edit_file", "glob", "grep", "bash",
+        assertEquals(10, names.size());
+        assertTrue(names.containsAll(List.of("read_file", "write_file", "edit_file", "glob", "grep", "grep_code", "bash",
                 "web_fetch", "web_search", "wikipedia_search")));
     }
 
