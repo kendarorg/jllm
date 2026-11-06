@@ -271,6 +271,15 @@ public final class Main {
             throws InterruptedException {
         System.out.println("[approval] " + d.path("type").asText() + " " + d.path("title").asText());
         System.out.println(d.path("preview").asText());
+        if ("continue".equals(d.path("type").asText())) {
+            System.out.print("Turns to allow [" + d.path("proposed").asText() + ", n = stop] ");
+            System.out.flush();
+            String t = in.take();
+            String v = t == EOF ? "n" : t.strip();
+            boolean stop = v.toLowerCase().startsWith("n");
+            harness.resolveApproval(chatId, d.path("id").asText(), !stop, v.isEmpty() ? null : v, false, false);
+            return;
+        }
         String writeDir = d.path("writeDir").asText("");
         System.out.print("Allow? [y/N/a=allow for this chat"
                 + (writeDir.isEmpty() ? "" : "/d=allow writes in " + writeDir + "/ and subfolders") + "] ");

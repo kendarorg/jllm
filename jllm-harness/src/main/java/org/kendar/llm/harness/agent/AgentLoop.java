@@ -456,7 +456,9 @@ public class AgentLoop {
         Usage last = null;
         String finalText = "";
 
-        for (int turn = 0; turn < config.maxTurns(); turn++) {
+        int[] turnLimit = {config.maxTurns()};
+        for (int turn = 0; turn < turnLimit[0]
+                || continueAfterLimit(turnLimit, turn, chatId, interactive, sink, cancelled, label); turn++) {
             if (cancelled.getAsBoolean()) {
                 sink.emit("cancelled", mapper.createObjectNode());
                 return finalText;
@@ -641,6 +643,37 @@ public class AgentLoop {
         }
         sink.emit("warning", mapper.createObjectNode().put("message", "Stopped after " + config.maxTurns() + " turns."));
         return finalText;
+    }
+
+    /**
+     * The turn limit was reached: asks the user whether to go on for another {@code maxTurns}. Only an interactive run
+     * asks; no answer (timeout, cancel, reject) stops the run as before.
+     */
+    private boolean continueAfterLimit(int[] turnLimit, int turn, String chatId, boolean interactive, EventSink sink,
+                                       BooleanSupplier cancelled, String label) {
+        if (!interactive || cancelled.getAsBoolean()) return false;
+        String title = (label == null ? "" : "[" + label + "] ") + "Reached " + turn + " turns";
+        String preview = "The agent has made " + turn + " model calls without finishing. How many more turns to allow?";
+        ApprovalService.ApprovalDecision d = approvals.await(chatId, "continue", title, preview,
+                String.valueOf(config.maxTurns()), a -> {
+            ObjectNode ev = mapper.valueToTree(a);
+            if (label != null) ev.put("agent", label);
+            sink.emit("approval_request", ev);
+        }, cancelled);
+        metrics.approval("continue", d.approved());
+        if (!d.approved()) return false;
+        turnLimit[0] += turnsAllowed(d.edited());
+        return true;
+    }
+
+    /** The turns the user typed for the continue question; the default {@code maxTurns} when empty or invalid. */
+    private int turnsAllowed(String edited) {
+        try {
+            int n = Integer.parseInt(edited == null ? "" : edited.strip());
+            return n > 0 ? Math.min(n, 10_000) : config.maxTurns();
+        } catch (NumberFormatException e) {
+            return config.maxTurns();
+        }
     }
 
     /**

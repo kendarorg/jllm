@@ -155,7 +155,7 @@ sequenceDiagram
 | other model error | `error` event, return |
 | cancel (`ModelCancelledException` or token) | `cancelled` event, return; nothing was appended for the turn |
 | `PRE_LLM` denied | `error` event, return; nothing appended |
-| `maxTurns` reached | warning `Stopped after N turns` |
+| `maxTurns` reached | interactive run: approval of type `continue` (approve = another `maxTurns`); otherwise, or when rejected, warning `Stopped after N turns` |
 
 **Log invariant**: the message log is valid for the next request at every save. A failed or denied model call
 appends nothing; every `tool_use` gets a `tool_result` (cancelled, unknown, denied, failed or truncated calls get an

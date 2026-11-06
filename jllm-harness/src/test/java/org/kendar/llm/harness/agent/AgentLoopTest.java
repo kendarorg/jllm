@@ -179,10 +179,37 @@ class AgentLoopTest {
         rig.register(tool("echo", "Misc", ToolKind.READ_ONLY, (c, in) -> "r"));
         rig.model.handler = r -> toolUse("t" + r.messages().size(), "echo", "{}");
 
-        Events ev = run("loop forever");
+        Events ev = new Events();
+        ev.also = (type, data) -> {
+            if ("approval_request".equals(type)) rig.approvals.resolve(chatId, data.get("id").asText(), false, null);
+        };
+        rig.loop.run(chatId, "loop forever", ev, () -> false);
 
         assertEquals(3, rig.model.requests.size());
+        assertEquals(1, ev.ofType("approval_request").size());
+        assertEquals("continue", ev.ofType("approval_request").get(0).get("type").asText());
         assertEquals(1, ev.ofType("warning").size());
+        assertTrue(ev.ofType("warning").get(0).get("message").asText().contains("Stopped after 3 turns"));
+    }
+
+    @Test
+    void approvingTheQuestionAtTheLimitRunsAnotherBatchOfTurns() {
+        rig.configure(c -> c.withMaxTurns(3));
+        rig.register(tool("echo", "Misc", ToolKind.READ_ONLY, (c, in) -> "r"));
+        rig.model.handler = r -> toolUse("t" + r.messages().size(), "echo", "{}");
+        AtomicInteger asked = new AtomicInteger();
+        Events ev = new Events();
+        ev.also = (type, data) -> {
+            if ("approval_request".equals(type)) {
+                assertEquals("3", data.get("proposed").asText(), "default is maxTurns");
+                rig.approvals.resolve(chatId, data.get("id").asText(), asked.incrementAndGet() == 1, "2");
+            }
+        };
+
+        rig.loop.run(chatId, "loop forever", ev, () -> false);
+
+        assertEquals(5, rig.model.requests.size()); // 3 turns, then the 2 the user typed
+        assertEquals(2, ev.ofType("approval_request").size());
         assertTrue(ev.ofType("warning").get(0).get("message").asText().contains("Stopped after 3 turns"));
     }
 

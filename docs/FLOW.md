@@ -162,7 +162,7 @@ sequenceDiagram
 | `refusal`, `model_context_window_exceeded` | warning; return |
 | context-overflow error | `compactNow` once, retry same turn (`turn--`); second failure is an `error` event |
 | cancel | `cancelled` event, return |
-| `maxTurns` reached | warning "Stopped after N turns" |
+| `maxTurns` reached | interactive run: approval of type `continue` (approve = another `maxTurns`); otherwise, or when rejected, warning "Stopped after N turns" |
 
 ## 4. Tool call pipeline (`AgentLoop.executeTool`)
 

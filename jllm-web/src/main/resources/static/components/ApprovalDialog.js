@@ -18,7 +18,7 @@ export default {
     })));
 
     const approve = (remember = false, rememberDir = false) =>
-      resolveApproval(a.value, true, a.value.type === 'context' ? edited.value : null, remember, rememberDir);
+      resolveApproval(a.value, true, ['context', 'continue'].includes(a.value.type) ? edited.value : null, remember, rememberDir);
     const reject = () => resolveApproval(a.value, false);
 
     const onEsc = e => { if (e.key === 'Escape' && a.value) reject(); };
@@ -36,12 +36,16 @@ export default {
           <div><h3>Proposed (new) — editable</h3>
             <textarea v-model="edited" aria-label="Proposed replacement context"></textarea></div>
         </div>
+        <div v-else-if="a.type === 'continue'">
+          <p>{{ a.preview }}</p>
+          <label>Turns to allow <input type="number" min="1" v-model="edited" aria-label="Turns to allow"></label>
+        </div>
         <div v-else class="diff"><div v-for="(l, i) in diffLines" :key="i" :class="l.cls">{{ l.text }}</div></div>
       </div>
       <div class="dialog-foot">
         <button class="btn-danger" @click="reject">Reject</button>
         <button class="btn-sm" v-if="a.writeDir" @click="approve(false, true)">Allow writes in {{ a.writeDir }}/ and subfolders</button>
-        <button class="btn-sm" v-if="a.type !== 'context'" @click="approve(true)">Allow for this chat</button>
+        <button class="btn-sm" v-if="a.type === 'tool'" @click="approve(true)">Allow for this chat</button>
         <button class="btn-primary" ref="approveBtn" @click="approve(false)">Approve</button>
       </div>
     </div>
