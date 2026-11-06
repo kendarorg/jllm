@@ -51,7 +51,7 @@ state files) and survive a restart. Nothing is restored silently:
 - **Web**: `GET /api/chat` lists the saved chats (`chatId`, `title`, `messageCount`, `updatedAt`), `GET /api/chat/{id}`
   loads one. The UI shows the chat id in the header and, short, in each list row (full id in the tooltip, copy
   button). If the browser remembers the chat it had open (`localStorage`), it offers "Continue <title> (<id>)?
-  [Continue] [New chat]" instead of opening it. A chat whose run was cut off shows an "interrupted" notice.
+  [Continue] [New chat]" instead of opening it. A chat whose run was cut off shows an "interrupted" notice. A shell call that was replaced by a stub in the context is shown in the chat with its original command and output, marked "not in context".
 - Settings `chatRetentionLimit` (integer, default unlimited): at startup the oldest chats beyond the limit are deleted,
   never the one being opened.
 - One process per history root: `<root>/.lock` is held while it runs; a second process fails at startup.

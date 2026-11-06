@@ -39,6 +39,7 @@ export default {
         <div class="group-body">
           <details v-for="t in it.tools" :key="t.id" class="tool">
             <summary><span :class="'status-' + t.status">{{ SYMBOL[t.status] }}</span> {{ t.name }}
+              <span v-if="t.dropped" class="dropped" title="Replaced by a stub in the model's context; shown here for reference">not in context</span>
               <span style="color:var(--text-muted)">{{ brief(t) }}</span></summary>
             <pre class="tin">{{ pretty(t) }}</pre>
             <pre class="tout">{{ t.output }}</pre>

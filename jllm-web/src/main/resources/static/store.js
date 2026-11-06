@@ -70,13 +70,13 @@ export function addMsg(role, text, cls) {
   store.items.push({ key: nextKey(), kind: 'msg', role, text, cls: cls || role });
 }
 
-function addTool(id, name, input, status, output) {
+function addTool(id, name, input, status, output, dropped) {
   if (!group) {
     group = { key: nextKey(), kind: 'tools', tools: [] };
     store.items.push(group);
     group = store.items[store.items.length - 1]; // reactive proxy
   }
-  group.tools.push({ id, name, input: input || {}, status, output: output || '' });
+  group.tools.push({ id, name, input: input || {}, status, output: output || '', dropped: !!dropped });
 }
 
 function findTool(id) {
@@ -91,8 +91,11 @@ function findTool(id) {
 /** The text a repaired log carries for a tool call that never finished (see InterruptedTurnRepair). */
 const INTERRUPTED = 'interrupted: process stopped';
 
-function renderHistory(messages) {
+/** refs: the originals of calls replaced by a stub in the context; the chat shows the original, marked as dropped. */
+function renderHistory(messages, refs) {
   let interrupted = false;
+  const original = {};
+  (refs || []).forEach(r => { original[r.replaces] = r.original || {}; });
   const results = {};
   messages.forEach(m => (Array.isArray(m.content) ? m.content : []).forEach(b => {
     if (b.type === 'tool_result') results[b.tool_use_id] = b;
@@ -103,9 +106,11 @@ function renderHistory(messages) {
       if (b.type === 'text') addMsg(m.role, b.text);
       else if (b.type === 'tool_use') {
         const r = results[b.id];
-        const out = r ? (typeof r.content === 'string' ? r.content : JSON.stringify(r.content)) : '';
+        const o = original[b.id];
+        const shown = o && o.tool_result ? o.tool_result : r;
+        const out = shown ? (typeof shown.content === 'string' ? shown.content : JSON.stringify(shown.content)) : '';
         if (out === INTERRUPTED) interrupted = true;
-        addTool(b.id, b.name, b.input, r && r.is_error ? 'err' : 'ok', out);
+        addTool(b.id, b.name, o && o.tool_use ? o.tool_use.input : b.input, shown && shown.is_error ? 'err' : 'ok', out, !!o);
       }
     });
   });
@@ -139,11 +144,13 @@ export async function openChat(id) {
   store.chatId = id; store.approvals = []; group = null; store.items = []; store.resumeOffer = null;
   remember(id);
   const s = await api('/api/chat/' + id);
+  let refs = [];
+  try { refs = await api('/api/chat/' + id + '/references'); } catch (e) { /* optional */ }
   // idle chat: history is complete, so skip replaying buffered events (they would show twice)
   store.lastSeq = s.running ? 0 : (s.lastSeq || 0);
   store.msgCount = s.messages.length;
   store.mode = s.mode;
-  renderHistory(s.messages);
+  renderHistory(s.messages, refs);
   store.usage = s.usage;
   store.running = s.running;
   (s.pendingApprovals || []).forEach(enqueueApproval);

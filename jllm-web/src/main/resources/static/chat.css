@@ -91,3 +91,5 @@ body { height: 100vh; overflow: hidden; }
   .session-item .copy:hover, .session-item .copy:focus { color: var(--accent); }
   .toolbar .chat-id { color: var(--text-muted); font-size: 0.72rem; max-width: 22rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .resume-banner { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin: 1rem; padding: 0.75rem 1rem; border: 1px solid var(--accent); border-radius: var(--radius); }
+
+  .tool .dropped { color: var(--text-muted); border: 1px dashed var(--border); border-radius: 3px; padding: 0 0.3rem; font-size: 0.68rem; margin: 0 0.3rem; }
