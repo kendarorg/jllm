@@ -120,8 +120,47 @@ public class AnthropicModelClient implements ModelClient {
             cacheControl(lastTool);
             applyToolChoice(body, req, thinking >= 1024);
         }
-        body.set("messages", props.citations() ? withSearchResults(req.messages()) : req.messages());
+        ArrayNode msgs = withoutFinishedThinking(req.messages());
+        body.set("messages", props.citations() ? withSearchResults(msgs) : msgs);
         return body;
+    }
+
+    /**
+     * Copy of the messages without the thinking blocks of finished turns. The API ignores them there anyway, and a
+     * signature is bound to the content before it: once that was rewritten (compaction, masking, a resumed chat saved
+     * before a rewrite) the block is rejected with a 400. The turn in progress keeps its blocks.
+     */
+    ArrayNode withoutFinishedThinking(ArrayNode messages) {
+        int cut = 0;
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            if (plainUserText(messages.get(i))) {
+                cut = i;
+                break;
+            }
+        }
+        ArrayNode out = null;
+        for (int i = 0; i < cut; i++) {
+            JsonNode m = messages.get(i);
+            if (!"assistant".equals(m.path("role").asText()) || !m.path("content").isArray()) continue;
+            ArrayNode kept = mapper.createArrayNode();
+            for (JsonNode b : m.get("content")) {
+                String t = b.path("type").asText();
+                if (!"thinking".equals(t) && !"redacted_thinking".equals(t)) kept.add(b);
+            }
+            if (kept.size() == m.get("content").size() || kept.isEmpty()) continue;
+            if (out == null) out = messages.deepCopy();
+            ((ObjectNode) out.get(i)).set("content", kept);
+        }
+        return out != null ? out : messages;
+    }
+
+    private static boolean plainUserText(JsonNode msg) {
+        if (!"user".equals(msg.path("role").asText())) return false;
+        JsonNode c = msg.path("content");
+        if (c.isTextual()) return true;
+        if (!c.isArray() || c.isEmpty()) return false;
+        for (JsonNode b : c) if (!"text".equals(b.path("type").asText())) return false;
+        return true;
     }
 
     private void applyToolChoice(ObjectNode body, ModelRequest req, boolean thinkingOn) {

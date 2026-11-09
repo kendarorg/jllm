@@ -208,13 +208,22 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
      * @param mnemonic        settings of the mnemonic strategy
      * @param noiseCommands   remove shell commands that add no information (mkdir, rm, cd, ...) from the context
      *                        after their turn, see {@code NoiseCommandPruner} (default true)
+     * @param deferCompactionOnThinkingOverflow Anthropic: do not compact while the turn in progress holds thinking
+     *                        blocks (default false: compact and switch thinking off for the rest of the turn). true keeps
+     *                        thinking but the prompt may exceed the budget until the turn ends: can increase charges
      */
     public record Context(Integer maxTokens, Integer keepRecentTurns, Boolean auto, Integer keepTokens,
-                          Integer buffer, String strategy, Mnemonic mnemonic, Scope scope, Boolean noiseCommands) {
+                          Integer buffer, String strategy, Mnemonic mnemonic, Scope scope, Boolean noiseCommands,
+                          Boolean deferCompactionOnThinkingOverflow) {
+
+        public Context(Integer maxTokens, Integer keepRecentTurns, Boolean auto, Integer keepTokens,
+                       Integer buffer, String strategy, Mnemonic mnemonic, Scope scope, Boolean noiseCommands) {
+            this(maxTokens, keepRecentTurns, auto, keepTokens, buffer, strategy, mnemonic, scope, noiseCommands, null);
+        }
 
         public Context(Integer maxTokens, Integer keepRecentTurns, Boolean auto, Integer keepTokens,
                        Integer buffer, String strategy, Mnemonic mnemonic, Scope scope) {
-            this(maxTokens, keepRecentTurns, auto, keepTokens, buffer, strategy, mnemonic, scope, null);
+            this(maxTokens, keepRecentTurns, auto, keepTokens, buffer, strategy, mnemonic, scope, null, null);
         }
 
         public Context(Integer maxTokens, Integer keepRecentTurns, Boolean auto, Integer keepTokens, Integer buffer) {
@@ -280,7 +289,9 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
             HarnessConfig.Compaction k = c.compaction();
             c = c.withCompaction(new HarnessConfig.Compaction(context.auto() != null ? context.auto() : k.auto(),
                     context.keepTokens() != null ? context.keepTokens() : k.keepTokens(),
-                    context.buffer() != null ? context.buffer() : k.buffer()));
+                    context.buffer() != null ? context.buffer() : k.buffer(),
+                    context.deferCompactionOnThinkingOverflow() != null
+                            ? context.deferCompactionOnThinkingOverflow() : k.deferOnThinkingOverflow()));
             if (context.strategy() != null && !context.strategy().isBlank()) {
                 c = c.withContextStrategy(ContextStrategyKind.parse(context.strategy()));
             }
@@ -303,7 +314,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
         Context c = context == null ? new Context(null, null, null, null, null) : context;
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox,
                 new Context(maxTokens, c.keepRecentTurns(), c.auto(), c.keepTokens(), c.buffer(), c.strategy(),
-                        c.mnemonic(), c.scope(), c.noiseCommands()), fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit);
+                        c.mnemonic(), c.scope(), c.noiseCommands(), c.deferCompactionOnThinkingOverflow()), fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit);
     }
 
     /** Same settings with {@code context.strategy} replaced (e.g. by a command line flag). */
@@ -312,7 +323,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
         Context c = context == null ? new Context(null, null, null, null, null) : context;
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox,
                 new Context(c.maxTokens(), c.keepRecentTurns(), c.auto(), c.keepTokens(), c.buffer(), strategy,
-                        c.mnemonic(), c.scope(), c.noiseCommands()), fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit);
+                        c.mnemonic(), c.scope(), c.noiseCommands(), c.deferCompactionOnThinkingOverflow()), fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit);
     }
 
     /** False when {@code context.noiseCommands} is set to false. */

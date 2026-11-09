@@ -450,6 +450,8 @@ public class AgentLoop {
         Usage last = null;
         String finalText = "";
 
+        boolean turnHadThinking = false; // a thinking block of this turn is in the log
+        boolean thinkingOff = false;     // history was rewritten mid-turn: their signatures are void, stop thinking
         int[] turnLimit = {config.maxTurns()};
         for (int turn = 0; turn < turnLimit[0]
                 || continueAfterLimit(turnLimit, turn, chatId, interactive, sink, cancelled, label); turn++) {
@@ -467,6 +469,12 @@ public class AgentLoop {
                     sink, cancelled, spent, persist));
             if (view.logChanged() && persist) sessions.saveMessages(chatId, messages);
             if (view.changed()) last = null;
+            if (turnHadThinking && !thinkingOff && !org.kendar.llm.harness.context.compaction.ContextManager
+                    .currentTurnHasThinking(messages)) {
+                thinkingOff = true;
+                sink.emit("warning", mapper.createObjectNode().put("message",
+                        "Context compacted mid-turn: thinking is off for the rest of this turn"));
+            }
 
             metrics.turn();
             ModelResponse resp;
@@ -479,8 +487,10 @@ public class AgentLoop {
                 return finalText;
             }
             try {
-                resp = client.complete(new ModelRequest(pinned, turnExtra, view.messages(), tools, config.maxTokens(),
-                        null, !config.parallelToolUse()), token);
+                ModelRequest request = new ModelRequest(pinned, turnExtra, view.messages(), tools, config.maxTokens(),
+                        null, !config.parallelToolUse());
+                if (thinkingOff) request = request.withThinkingLevel(org.kendar.llm.harness.llm.ThinkingLevel.MINIMAL);
+                resp = client.complete(request, token);
                 metrics.modelCall(java.time.Duration.ofNanos(System.nanoTime() - modelStart), "ok");
                 hooks.run(HookContext.afterLlm(chatId, agent, responseText(resp), false,
                         (System.nanoTime() - modelStart) / 1_000_000L, resp.usage()));
@@ -524,7 +534,9 @@ public class AgentLoop {
             List<JsonNode> toolUses = new ArrayList<>();
             for (JsonNode b : resp.content()) {
                 String type = b.path("type").asText();
-                if ("text".equals(type)) {
+                if ("thinking".equals(type) || "redacted_thinking".equals(type)) {
+                    turnHadThinking = true;
+                } else if ("text".equals(type)) {
                     text.append(b.path("text").asText());
                     sink.emit("text", mapper.createObjectNode().put("text", b.path("text").asText()));
                 } else if ("tool_use".equals(type)) {

@@ -60,10 +60,18 @@ public record HarnessConfig(String agentId, int maxTurns, int maxTokens, boolean
      * @param auto       compact when the prompt nears the ceiling, and on a too-long rejection; off = only /compact
      * @param keepTokens newest tokens of the conversation that stay verbatim next to the summary
      * @param buffer     tokens kept free below the context window; null = max(15% of the window, 16k)
+     * @param deferOnThinkingOverflow Anthropic: never compact while the turn in progress holds thinking blocks (their
+     *                   signatures break when history is rewritten). false (default) = compact anyway and switch
+     *                   thinking off for the rest of that turn; true keeps thinking but the prompt may exceed the
+     *                   budget until the turn ends, which can cost more
      */
-    public record Compaction(boolean auto, int keepTokens, Integer buffer) {
+    public record Compaction(boolean auto, int keepTokens, Integer buffer, boolean deferOnThinkingOverflow) {
+        public Compaction(boolean auto, int keepTokens, Integer buffer) {
+            this(auto, keepTokens, buffer, false);
+        }
+
         public static Compaction defaults() {
-            return new Compaction(true, 15_000, null);
+            return new Compaction(true, 15_000, null, false);
         }
 
         /** Prompt size at which compaction starts for a context window of {@code window} tokens. */
