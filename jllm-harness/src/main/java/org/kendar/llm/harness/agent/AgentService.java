@@ -223,6 +223,14 @@ public class AgentService {
         }
     }
 
+    public org.kendar.llm.harness.tools.ValidationMode validationMode(String chatId) {
+        return loop.validationMode(chatId);
+    }
+
+    public void validationMode(String chatId, org.kendar.llm.harness.tools.ValidationMode mode) {
+        loop.validationMode(chatId, mode);
+    }
+
     public void cancel(String chatId) {
         ChatRun run = runs.get(chatId);
         if (run == null || !run.running) return;

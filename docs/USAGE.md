@@ -125,7 +125,7 @@ ignored.
                  "strategy": "compaction", "mnemonic": {"maskTrigger": null},
                  "scope": {"offloadChars": 20000, "overflowOffloadChars": 2000, "previewChars": 1500,
                            "safetyPercent": 2, "reserveCap": 4096}},
-  "output":     {"toolMaxChars": 30000, "eventMaxChars": 2000},
+  "output":     {"toolMaxChars": 30000, "eventMaxChars": 2000, "validation": "lenient"},
   "smallModel": false
 }
 ```
@@ -148,6 +148,7 @@ ignored.
 | `context.*` | [CACHES](CACHES.md); `context.strategy` is `compaction`, `mnemonic` or `scope`; `context.scope.*` are the thresholds of `scope` ([CACHES §5](CACHES.md#5-scope-strategy)) |
 | `output.toolMaxChars` | tool output kept in the context; the rest is cut with `[truncated N chars]` (the head is kept, the tail for `bash`) |
 | `output.eventMaxChars` | tool output carried by the `tool_result` event to the front end |
+| `output.validation` | check of tool-call arguments against the tool schema: `off`, `lenient` (default, repairs `"5"` for 5 and `null` for optional fields) or `strict`; `/validation` overrides it per chat, see [TOOLS §5](TOOLS.md#5-one-tool-call) |
 
 ### System prompt files
 

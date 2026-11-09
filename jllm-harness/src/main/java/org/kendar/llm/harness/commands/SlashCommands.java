@@ -58,6 +58,7 @@ public final class SlashCommands {
             new Info("/mcp", "Menu: enable, disable or check MCP servers"),
             new Info("/apis", "Menu: enable, disable or check REST APIs"),
             new Info("/skills", "Menu: enable or disable skills"),
+            new Info("/validation", "Tool argument check: /validation shows it, /validation off|lenient|strict sets it for this chat"),
             new Info("/permissions", "List the permission rules from the settings (read-only)"),
             new Info("/back", "Go back one level in an open menu (Esc in a terminal)"),
             new Info("/cost", "Token usage and estimated cost of this chat"),
@@ -182,6 +183,14 @@ public final class SlashCommands {
                 case "/mcp" -> menuCommand(chatId, MenuController.Target.MCP, arg);
                 case "/apis" -> menuCommand(chatId, MenuController.Target.API, arg);
                 case "/skills" -> menuCommand(chatId, MenuController.Target.SKILL, arg);
+                case "/validation" -> {
+                    if (arg.isEmpty()) {
+                        yield Result.text("Tool argument validation: " + harness.toolValidation(chatId).name().toLowerCase());
+                    }
+                    var m = org.kendar.llm.harness.tools.ValidationMode.parse(arg);
+                    harness.setToolValidation(chatId, m);
+                    yield Result.text("Tool argument validation: " + m.name().toLowerCase());
+                }
                 case "/permissions" -> {
                     var rules = harness.permissionRules().describe();
                     yield Result.text(rules.isEmpty() ? "No permission rules" : String.join("\n", rules));

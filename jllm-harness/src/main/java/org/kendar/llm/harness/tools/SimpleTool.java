@@ -70,6 +70,7 @@ public final class SimpleTool implements HarnessTool {
             p.put("description", namesAndDescriptions[i + 1]);
             if (!optional) required.add(n);
         }
+        if (required.isEmpty()) root.remove("required");
         return root;
     }
 

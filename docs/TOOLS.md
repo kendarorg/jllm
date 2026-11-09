@@ -112,7 +112,9 @@ and every `tool_use` always gets a `tool_result`.
 flowchart TD
     U["tool_use"] --> K{"in this turn's tool list?"}
     K -->|no| R1["error: Unknown tool"]
-    K -->|yes| PRE["PRE_TOOL hooks<br/>deny / rewrite input / add context"]
+    K -->|yes| VAL["validate arguments (off / lenient / strict)"]
+    VAL -->|invalid| R0["error: Invalid arguments"]
+    VAL -->|valid| PRE["PRE_TOOL hooks<br/>deny / rewrite input / add context"]
     PRE --> G["PermissionGate: ALLOW or ASK"]
     G --> AU{"AUTO + classifier + not READ_ONLY?"}
     AU -->|yes| CL["ToolClassifier"] -->|not SAFE| ASK["ASK"]
@@ -130,6 +132,22 @@ flowchart TD
     HD -->|no, ALLOW| RUN["execute; cut at toolMaxChars"]
     RUN --> POST["POST_TOOL hooks: add context"]
 ```
+
+The arguments are checked first, before hooks, permissions and approval, so the user is never asked about a malformed
+call. An invalid call returns `Invalid arguments for '<tool>': <problems>. Expected input schema: <schema>` and the
+model corrects it on its next turn. Modes (`output.validation` in the settings, default `lenient`; `/validation
+[off|lenient|strict]` overrides it for the chat):
+
+| Mode | Behaviour |
+|---|---|
+| `off` | no check |
+| `lenient` | repairs `"5"` for an integer or number, `"true"` for a boolean, and `null` for an optional field; rejects the rest |
+| `strict` | the input must match the schema exactly |
+
+The default check is JSON Schema (draft 7) on `inputSchema()`; a schema the library cannot compile is skipped with a
+warning. Replace it with `AgentHarness.builder().toolInputValidator(v)`, or add a further check after it with
+`addToolInputValidator(v)`. A `ToolInputValidator` returns the input to use and the list of problems; chained
+validators see the input as repaired by the previous one.
 
 An exception from `execute` becomes an error result (`Error: …`); the loop goes on. A sub-agent's approval
 requests go to the user through the parent's event sink, titled `[<type> #n] <tool>`; dialogs of one chat are shown

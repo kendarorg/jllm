@@ -117,6 +117,7 @@ included.
 | `/steer <text>` `/followup <text>` | queue a message for the running agent (see above) |
 | `/model` | menu: choose the model for new runs; `/model <provider>` sets it directly |
 | `/undo [n]` | restore files changed by `write_file`/`edit_file` in the last n turns (not shell changes) |
+| `/validation [off\|lenient\|strict]` | show or set the check of tool-call arguments for this chat |
 | `/permissions` | list the permission rules from the settings (read-only) |
 | `/tools` | menu: enable/disable tools and groups; `/tools enable\|disable <tool\|group>` |
 | `/mcp` | menu: MCP servers; `/mcp enable\|disable\|check <name>` |

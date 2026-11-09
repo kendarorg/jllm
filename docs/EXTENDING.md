@@ -89,6 +89,10 @@ Rules the loop applies around it:
 - The tool must be in a group the chat has. With more than `toolBatchThreshold` (12) tools the selector picks groups
   on the first message; `coreGroups` (`Files`, `Shell`) are always included. Add your group with
   `config.withCoreGroups(Set.of("Files", "Shell", "Db"))` if it must always be there.
+- The input is checked against `inputSchema()` before `execute` runs (see [TOOLS §5](TOOLS.md#5-one-tool-call)), so
+  declare `required` and types accurately. Add a rule of your own (a path allow-list, a value range) with
+  `builder.addToolInputValidator((tool, input, mode) -> ...)`, or swap the whole check with `toolInputValidator(...)`.
+  The validator returns the input to use and a list of problems; it must not modify the input it receives.
 
 ## 2. Hooks
 

@@ -82,6 +82,27 @@ public class AgentLoop {
                 .sorted(java.util.Comparator.comparingLong(ActiveSubAgent::startedAtMillis)).toList();
     }
     private final ToolOutputSanitizer sanitizer;
+    private volatile org.kendar.llm.harness.tools.ToolInputValidator inputValidator =
+            new org.kendar.llm.harness.tools.JsonSchemaToolInputValidator();
+    /** Per-chat override of {@code output.validation}, set by {@code /validation}. */
+    private final java.util.Map<String, org.kendar.llm.harness.tools.ValidationMode> validationModes =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Replaces the validator of tool-call arguments. */
+    public void inputValidator(org.kendar.llm.harness.tools.ToolInputValidator v) {
+        this.inputValidator = java.util.Objects.requireNonNull(v);
+    }
+
+    /** The validation mode of the chat: its {@code /validation} override, else the configured one. */
+    public org.kendar.llm.harness.tools.ValidationMode validationMode(String chatId) {
+        org.kendar.llm.harness.tools.ValidationMode m = validationModes.get(chatId);
+        return m != null ? m : org.kendar.llm.harness.tools.ValidationMode.parse(config.output().validation());
+    }
+
+    public void validationMode(String chatId, org.kendar.llm.harness.tools.ValidationMode mode) {
+        validationModes.put(chatId, mode);
+    }
+
     /** Chats whose current run has read untrusted tool output. */
     private final java.util.Set<String> tainted = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
@@ -762,11 +783,16 @@ public class AgentLoop {
         ObjectNode result;
         long toolStart = System.nanoTime();
         HarnessTool tool = byName.get(name);
+        org.kendar.llm.harness.tools.ToolInputValidator.Outcome check = tool == null ? null : checkInput(tool, input, ctx);
         if (tool == null) {
             result = toolResult(id, "Unknown tool '" + name + "'", true);
         } else if (cancelled.getAsBoolean()) {
             result = toolResult(id, "Cancelled by user", true);
+        } else if (!check.valid()) {
+            result = toolResult(id, "Invalid arguments for '" + name + "': " + String.join("; ", check.errors())
+                    + ". Expected input schema: " + tool.inputSchema(), true);
         } else {
+            input = check.input();
             HookResult pre = hooks.run(HookContext.preTool(ctx.chatId(), name, input));
             if (pre.modifiedInput() != null) input = pre.modifiedInput();
             Decision decision = gate.check(mode, tool);
@@ -832,6 +858,17 @@ public class AgentLoop {
         ev.put("output", out.length() > eventMax ? out.substring(0, eventMax) + "…" : out);
         sink.emit("tool_result", ev);
         return result;
+    }
+
+    /** Validates (and in lenient mode repairs) the arguments; a failing validator never blocks the call. */
+    private org.kendar.llm.harness.tools.ToolInputValidator.Outcome checkInput(HarnessTool tool, JsonNode input,
+                                                                              ToolContext ctx) {
+        try {
+            var o = inputValidator.validate(tool, input, validationMode(ctx.chatId()));
+            return o.input() == null ? new org.kendar.llm.harness.tools.ToolInputValidator.Outcome(input, o.errors()) : o;
+        } catch (RuntimeException e) {
+            return org.kendar.llm.harness.tools.ToolInputValidator.Outcome.ok(input);
+        }
     }
 
     /** The shell command line of a bash call, else null: only commands are granted verbatim. */

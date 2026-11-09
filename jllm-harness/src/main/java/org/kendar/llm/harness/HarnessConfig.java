@@ -86,16 +86,24 @@ public record HarnessConfig(String agentId, int maxTurns, int maxTokens, boolean
     /**
      * @param toolMaxChars  tool output kept in the context; the rest is cut with a "[truncated N chars]" note
      * @param eventMaxChars tool output carried by the {@code tool_result} event sent to the front end
+     * @param validation    check of tool-call arguments against the tool schema: {@code off}, {@code lenient}
+     *                      (default: repairs "5" for 5 and the like) or {@code strict}; {@code /validation} overrides it per chat
      */
     public record Output(int toolMaxChars, int eventMaxChars, String sanitize, boolean taintGating,
-                         java.util.List<String> extraPatterns) {
+                         java.util.List<String> extraPatterns, String validation) {
         public Output {
             if (sanitize == null || sanitize.isBlank()) sanitize = "wrap";
             extraPatterns = extraPatterns == null ? java.util.List.of() : java.util.List.copyOf(extraPatterns);
+            if (validation == null || validation.isBlank()) validation = "lenient";
+        }
+
+        public Output(int toolMaxChars, int eventMaxChars, String sanitize, boolean taintGating,
+                      java.util.List<String> extraPatterns) {
+            this(toolMaxChars, eventMaxChars, sanitize, taintGating, extraPatterns, "lenient");
         }
 
         public Output(int toolMaxChars, int eventMaxChars) {
-            this(toolMaxChars, eventMaxChars, "wrap", true, java.util.List.of());
+            this(toolMaxChars, eventMaxChars, "wrap", true, java.util.List.of(), "lenient");
         }
 
         public static Output defaults() {

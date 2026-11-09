@@ -208,6 +208,15 @@ public final class AgentHarness {
         return service.compact(chatId, focus);
     }
 
+    /** How the arguments of tool calls are checked in this chat: the {@code /validation} choice, else the config. */
+    public org.kendar.llm.harness.tools.ValidationMode toolValidation(String chatId) {
+        return service.validationMode(chatId);
+    }
+
+    public void setToolValidation(String chatId, org.kendar.llm.harness.tools.ValidationMode mode) {
+        service.validationMode(chatId, mode);
+    }
+
     /** Estimated size of the conversation of a chat, in tokens. */
     public long contextTokens(String chatId) {
         ChatSessionData s = sessions.get(chatId);
@@ -363,6 +372,8 @@ public final class AgentHarness {
                 org.kendar.llm.harness.context.scope.ScopeStrategy.Options.defaults();
         private org.kendar.llm.harness.state.StateStore stateStore = new org.kendar.llm.harness.state.InMemoryStateStore();
         private String activeProvider;
+        private final List<org.kendar.llm.harness.tools.ToolInputValidator> inputValidators = new ArrayList<>();
+        private boolean defaultInputValidator = true;
         private org.kendar.llm.harness.llm.ProviderSettings sessionProvider;
         private final org.kendar.llm.harness.tools.DocumentReaders documentReaders =
                 new org.kendar.llm.harness.tools.DocumentReaders();
@@ -399,6 +410,23 @@ public final class AgentHarness {
         /** Tools added to the standard ones. May be called more than once. */
         public Builder tools(List<? extends HarnessTool> tools) {
             this.tools.addAll(tools);
+            return this;
+        }
+
+        /**
+         * Replaces the default (JSON Schema) check of tool-call arguments, and any validator added before.
+         * It decides what each {@link org.kendar.llm.harness.tools.ValidationMode} means for it.
+         */
+        public Builder toolInputValidator(org.kendar.llm.harness.tools.ToolInputValidator validator) {
+            this.inputValidators.clear();
+            this.inputValidators.add(java.util.Objects.requireNonNull(validator));
+            this.defaultInputValidator = false;
+            return this;
+        }
+
+        /** Adds a check that runs after the default one and sees the input as repaired by it. */
+        public Builder addToolInputValidator(org.kendar.llm.harness.tools.ToolInputValidator validator) {
+            this.inputValidators.add(java.util.Objects.requireNonNull(validator));
             return this;
         }
 
@@ -649,6 +677,12 @@ public final class AgentHarness {
                     requestToolGroup, subAgentRunLog, mapper, metrics, prompt, hooks,
                     fast == null ? null : new ToolClassifier(fast, mapper));
             ref[0] = loop;
+            if (!inputValidators.isEmpty() || !defaultInputValidator) {
+                List<org.kendar.llm.harness.tools.ToolInputValidator> chain = new ArrayList<>();
+                if (defaultInputValidator) chain.add(new org.kendar.llm.harness.tools.JsonSchemaToolInputValidator());
+                chain.addAll(inputValidators);
+                loop.inputValidator(org.kendar.llm.harness.tools.ToolInputValidator.chain(chain));
+            }
             if (settings.noiseCommands()) {
                 loop.noisePruner(new org.kendar.llm.harness.context.noise.NoiseCommandPruner(sessions,
                         new org.kendar.llm.harness.context.noise.NoiseQualifier(fast != null ? fast : modelClient),

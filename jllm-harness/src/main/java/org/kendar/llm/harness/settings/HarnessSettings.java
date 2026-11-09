@@ -190,11 +190,17 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
     /**
      * @param toolMaxChars  tool output kept in the context (default 30000)
      * @param eventMaxChars tool output carried by the {@code tool_result} event (default 2000)
+     * @param validation    tool-call argument check: {@code off}, {@code lenient} (default) or {@code strict}
      */
     public record Output(Integer toolMaxChars, Integer eventMaxChars, String sanitize, Boolean taintGating,
-                         java.util.List<String> extraPatterns) {
+                         java.util.List<String> extraPatterns, String validation) {
+        public Output(Integer toolMaxChars, Integer eventMaxChars, String sanitize, Boolean taintGating,
+                      java.util.List<String> extraPatterns) {
+            this(toolMaxChars, eventMaxChars, sanitize, taintGating, extraPatterns, null);
+        }
+
         public Output(Integer toolMaxChars, Integer eventMaxChars) {
-            this(toolMaxChars, eventMaxChars, null, null, null);
+            this(toolMaxChars, eventMaxChars, null, null, null, null);
         }
     }
 
@@ -304,7 +310,8 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
                     output.eventMaxChars() != null ? output.eventMaxChars() : o.eventMaxChars(),
                     output.sanitize() != null ? output.sanitize() : o.sanitize(),
                     output.taintGating() != null ? output.taintGating() : o.taintGating(),
-                    output.extraPatterns() != null ? output.extraPatterns() : o.extraPatterns()));
+                    output.extraPatterns() != null ? output.extraPatterns() : o.extraPatterns(),
+                    output.validation() != null ? output.validation() : o.validation()));
         }
         return c;
     }
