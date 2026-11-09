@@ -7,39 +7,25 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.kendar.llm.harness.HarnessConfig;
 import org.kendar.llm.harness.HarnessMetrics;
 import org.kendar.llm.harness.Prompts;
-import org.kendar.llm.harness.context.CompactResult;
-import org.kendar.llm.harness.context.ContextStrategy;
-import org.kendar.llm.harness.context.ContextTurn;
-import org.kendar.llm.harness.context.ContextView;
-import org.kendar.llm.harness.context.RequestPrefix;
+import org.kendar.llm.harness.context.*;
 import org.kendar.llm.harness.hooks.HookContext;
 import org.kendar.llm.harness.hooks.HookEvent;
 import org.kendar.llm.harness.hooks.HookResult;
 import org.kendar.llm.harness.hooks.Hooks;
-import org.kendar.llm.harness.llm.CancelToken;
-import org.kendar.llm.harness.llm.ModelCancelledException;
-import org.kendar.llm.harness.llm.ModelException;
-import org.kendar.llm.harness.llm.ModelClient;
-import org.kendar.llm.harness.llm.ModelRequest;
-import org.kendar.llm.harness.llm.ModelResponse;
-import org.kendar.llm.harness.llm.Usage;
-import org.kendar.llm.harness.permission.ApprovalService;
-import org.kendar.llm.harness.sandbox.SandboxUnavailableException;
-import org.kendar.llm.harness.permission.Decision;
-import org.kendar.llm.harness.permission.PermissionGate;
-import org.kendar.llm.harness.permission.PermissionRules;
-import org.kendar.llm.harness.permission.PermissionMode;
-import org.kendar.llm.harness.permission.ToolClassifier;
+import org.kendar.llm.harness.llm.*;
+import org.kendar.llm.harness.permission.*;
+import org.kendar.llm.harness.safety.ToolOutputSanitizer;
 import org.kendar.llm.harness.sandbox.SandboxExecutor;
+import org.kendar.llm.harness.sandbox.SandboxUnavailableException;
 import org.kendar.llm.harness.session.ChatSessionData;
 import org.kendar.llm.harness.session.ChatSessionService;
 import org.kendar.llm.harness.session.SubAgentRunData;
 import org.kendar.llm.harness.session.SubAgentRunLog;
-import org.kendar.llm.harness.util.Uuids;
 import org.kendar.llm.harness.tools.HarnessTool;
 import org.kendar.llm.harness.tools.HarnessToolRegistry;
 import org.kendar.llm.harness.tools.ToolContext;
 import org.kendar.llm.harness.tools.ToolKind;
+import org.kendar.llm.harness.util.Uuids;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -49,10 +35,10 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 
@@ -84,6 +70,20 @@ public class AgentLoop {
     private final Hooks hooks;
     private final ToolClassifier classifier;
     private final AtomicInteger subAgentSeq = new AtomicInteger();
+    private final java.util.Map<String, ActiveSubAgent> activeSubAgents = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** A sub-agent that is running now. */
+    public record ActiveSubAgent(String label, String chatId, String prompt, long startedAtMillis) {
+    }
+
+    /** The sub-agents running for the chat, oldest first. */
+    public List<ActiveSubAgent> activeSubAgents(String chatId) {
+        return activeSubAgents.values().stream().filter(a -> a.chatId().equals(chatId))
+                .sorted(java.util.Comparator.comparingLong(ActiveSubAgent::startedAtMillis)).toList();
+    }
+    private final ToolOutputSanitizer sanitizer;
+    /** Chats whose current run has read untrusted tool output. */
+    private final java.util.Set<String> tainted = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     /**
      * @param requestToolGroup on-demand tool groups; null disables them
@@ -135,6 +135,8 @@ public class AgentLoop {
         this.subAgentRunLog = subAgentRunLog;
         this.mapper = mapper;
         this.systemPrompt = systemPrompt == null ? "" : systemPrompt;
+        this.sanitizer = new ToolOutputSanitizer(ToolOutputSanitizer.Mode.parse(config.output().sanitize()),
+                config.output().extraPatterns());
     }
 
     /** Runs one user turn of a persisted chat to completion. */
@@ -156,6 +158,7 @@ public class AgentLoop {
     }
 
     public void run(String chatId, String userText, EventSink sink, BooleanSupplier cancelled, Inbox inbox) {
+        tainted.remove(chatId);
         HookResult prompt = hooks.run(HookContext.prompt(chatId, userText));
         if (prompt.denied()) {
             sink.emit("warning", mapper.createObjectNode()
@@ -193,6 +196,15 @@ public class AgentLoop {
                     "Plan ready. Type /edit to let the agent change files, or /auto to run without asking."));
         }
         hooks.run(HookContext.stop(chatId, answer));
+        if (noisePruner != null) noisePruner.afterTurn(chatId);
+    }
+
+    private org.kendar.llm.harness.context.noise.NoiseCommandPruner noisePruner;
+
+    /** Removes no-information shell commands from the context after each main-agent run; null = off. */
+    public AgentLoop noisePruner(org.kendar.llm.harness.context.noise.NoiseCommandPruner pruner) {
+        this.noisePruner = pruner;
+        return this;
     }
 
     /**
@@ -269,6 +281,9 @@ public class AgentLoop {
         if (agentType != null && agentType.temperature() != null) {
             client = new org.kendar.llm.harness.llm.TemperatureModelClient(client, agentType.temperature());
         }
+        if (agentType != null && agentType.thinking() != null) {
+            client = new org.kendar.llm.harness.llm.ThinkingModelClient(client, agentType.thinking());
+        }
 
         boolean readOnly = agentType != null && agentType.readOnly();
         PermissionMode mode = readOnly ? PermissionMode.PLAN : (parentMode == null ? PermissionMode.DEFAULT : parentMode);
@@ -300,6 +315,7 @@ public class AgentLoop {
         String label = agentName + " #" + subAgentSeq.incrementAndGet();
         HookResult entering = hooks.run(HookContext.before(HookEvent.PRE_AGENT, chatId, agentName, prompt));
         if (entering.denied()) throw new IllegalStateException("Sub-agent blocked by a hook: " + entering.denyReason());
+        activeSubAgents.put(label, new ActiveSubAgent(label, chatId, prompt, System.currentTimeMillis()));
         try {
             answer = loop(chatId, messages, () -> tools, "chatId=" + chatId + "; subagent", extra,
                     mode, errors, cancelled, false, true, agentName, client, inherited, label);
@@ -307,6 +323,7 @@ public class AgentLoop {
             if (failure[0] == null) failure[0] = String.valueOf(e.getMessage());
             throw e;
         } finally {
+            activeSubAgents.remove(label);
             hooks.run(HookContext.after(HookEvent.POST_AGENT, chatId, agentName,
                     failure[0] != null ? failure[0] : answer, failure[0] != null));
             sessions.addUsage(chatId, used[0]);
@@ -446,7 +463,11 @@ public class AgentLoop {
         Usage last = null;
         String finalText = "";
 
-        for (int turn = 0; turn < config.maxTurns(); turn++) {
+        boolean turnHadThinking = false; // a thinking block of this turn is in the log
+        boolean thinkingOff = false;     // history was rewritten mid-turn: their signatures are void, stop thinking
+        int[] turnLimit = {config.maxTurns()};
+        for (int turn = 0; turn < turnLimit[0]
+                || continueAfterLimit(turnLimit, turn, chatId, interactive, sink, cancelled, label); turn++) {
             if (cancelled.getAsBoolean()) {
                 sink.emit("cancelled", mapper.createObjectNode());
                 return finalText;
@@ -461,6 +482,12 @@ public class AgentLoop {
                     sink, cancelled, spent, persist));
             if (view.logChanged() && persist) sessions.saveMessages(chatId, messages);
             if (view.changed()) last = null;
+            if (turnHadThinking && !thinkingOff && !org.kendar.llm.harness.context.compaction.ContextManager
+                    .currentTurnHasThinking(messages)) {
+                thinkingOff = true;
+                sink.emit("warning", mapper.createObjectNode().put("message",
+                        "Context compacted mid-turn: thinking is off for the rest of this turn"));
+            }
 
             metrics.turn();
             ModelResponse resp;
@@ -473,12 +500,20 @@ public class AgentLoop {
                 return finalText;
             }
             try {
-                resp = client.complete(new ModelRequest(pinned, turnExtra, view.messages(), tools, config.maxTokens(),
-                        null, !config.parallelToolUse()), token);
+                ModelRequest request = new ModelRequest(pinned, turnExtra, view.messages(), tools, config.maxTokens(),
+                        null, !config.parallelToolUse());
+                if (thinkingOff) request = request.withThinkingLevel(org.kendar.llm.harness.llm.ThinkingLevel.MINIMAL);
+                token.onRetry((status, attempt, max, delayMs) -> sink.emit("retry", mapper.createObjectNode()
+                        .put("status", status).put("attempt", attempt).put("max", max).put("delayMs", delayMs)
+                        .put("message", "Model call failed" + (status > 0 ? " (HTTP " + status + ")" : "")
+                                + ", retry " + attempt + "/" + max + " in " + Math.max(1, delayMs / 1000) + " s")));
+                resp = client.complete(request, token);
                 metrics.modelCall(java.time.Duration.ofNanos(System.nanoTime() - modelStart), "ok");
-                hooks.run(HookContext.after(HookEvent.POST_LLM, chatId, agent, responseText(resp), false));
+                hooks.run(HookContext.afterLlm(chatId, agent, responseText(resp), false,
+                        (System.nanoTime() - modelStart) / 1_000_000L, resp.usage()));
             } catch (RuntimeException e) {
-                hooks.run(HookContext.after(HookEvent.POST_LLM, chatId, agent, String.valueOf(e.getMessage()), true));
+                hooks.run(HookContext.afterLlm(chatId, agent, String.valueOf(e.getMessage()), true,
+                        (System.nanoTime() - modelStart) / 1_000_000L, null));
                 if (e instanceof ModelCancelledException || cancelled.getAsBoolean()) {
                     // nothing was appended for this turn, so the message log stays consistent
                     metrics.modelCall(java.time.Duration.ofNanos(System.nanoTime() - modelStart), "cancelled");
@@ -516,7 +551,9 @@ public class AgentLoop {
             List<JsonNode> toolUses = new ArrayList<>();
             for (JsonNode b : resp.content()) {
                 String type = b.path("type").asText();
-                if ("text".equals(type)) {
+                if ("thinking".equals(type) || "redacted_thinking".equals(type)) {
+                    turnHadThinking = true;
+                } else if ("text".equals(type)) {
                     text.append(b.path("text").asText());
                     sink.emit("text", mapper.createObjectNode().put("text", b.path("text").asText()));
                 } else if ("tool_use".equals(type)) {
@@ -632,6 +669,37 @@ public class AgentLoop {
     }
 
     /**
+     * The turn limit was reached: asks the user whether to go on for another {@code maxTurns}. Only an interactive run
+     * asks; no answer (timeout, cancel, reject) stops the run as before.
+     */
+    private boolean continueAfterLimit(int[] turnLimit, int turn, String chatId, boolean interactive, EventSink sink,
+                                       BooleanSupplier cancelled, String label) {
+        if (!interactive || cancelled.getAsBoolean()) return false;
+        String title = (label == null ? "" : "[" + label + "] ") + "Reached " + turn + " turns";
+        String preview = "The agent has made " + turn + " model calls without finishing. How many more turns to allow?";
+        ApprovalService.ApprovalDecision d = approvals.await(chatId, "continue", title, preview,
+                String.valueOf(config.maxTurns()), a -> {
+            ObjectNode ev = mapper.valueToTree(a);
+            if (label != null) ev.put("agent", label);
+            sink.emit("approval_request", ev);
+        }, cancelled);
+        metrics.approval("continue", d.approved());
+        if (!d.approved()) return false;
+        turnLimit[0] += turnsAllowed(d.edited());
+        return true;
+    }
+
+    /** The turns the user typed for the continue question; the default {@code maxTurns} when empty or invalid. */
+    private int turnsAllowed(String edited) {
+        try {
+            int n = Integer.parseInt(edited == null ? "" : edited.strip());
+            return n > 0 ? Math.min(n, 10_000) : config.maxTurns();
+        } catch (NumberFormatException e) {
+            return config.maxTurns();
+        }
+    }
+
+    /**
      * A max_tokens stop well below the output limit: the server ran out of context window (llama.cpp reports both as
      * "length"). Unknown when the server reports no output tokens.
      */
@@ -715,10 +783,19 @@ public class AgentLoop {
                 decision = Decision.ASK;
             }
             // a grant only replaces the question; deny rules, hooks and plan confinement stay as they are
-            if (decision == Decision.ASK && approvals.granted(ctx.chatId(), name)) decision = Decision.ALLOW;
+            if (decision == Decision.ASK && (approvals.granted(ctx.chatId(), name)
+                    || approvals.commandGranted(ctx.chatId(), name, commandOf(name, input))
+                    || approvals.dirGranted(ctx.chatId(), writeDirOf(tool, input, ctx)))) decision = Decision.ALLOW;
             if (rule != null && rule.kind() == PermissionRules.Kind.ALLOW && decision == Decision.ASK
                     && mode != PermissionMode.AUTO) {
                 decision = Decision.ALLOW;
+            }
+            // outside content was read in this run: side effects need an explicit yes, even over grants and allow rules
+            if (decision == Decision.ALLOW && tool.kind() != ToolKind.READ_ONLY && tainted.contains(ctx.chatId())
+                    && (rule == null || rule.kind() != PermissionRules.Kind.DENY)) {
+                decision = Decision.ASK;
+                sink.emit("warning", mapper.createObjectNode().put("message", "Confirming '" + name
+                        + "': this run read untrusted tool output that could contain injected instructions"));
             }
             if (decision == Decision.ASK && !interactive) decision = Decision.DENY;
             if (pre.denied()) {
@@ -730,6 +807,7 @@ public class AgentLoop {
             } else if (decision == Decision.ASK && !approve(tool, input, ctx, sink, cancelled, label)) {
                 result = toolResult(id, "The user rejected this tool call", true);
             } else {
+                if (decision == Decision.ASK) approvals.grantCommand(ctx.chatId(), name, commandOf(name, input));
                 try {
                     result = runTool(tool, input, ctx.withToolUseId(id), id);
                 } catch (SandboxUnavailableException e) {
@@ -737,7 +815,8 @@ public class AgentLoop {
                 }
                 result = withHookContext(result, pre.addedContext(),
                         hooks.run(HookContext.postTool(ctx.chatId(), name, input, result.path("content").asText(""),
-                                result.path("is_error").asBoolean(false))).addedContext());
+                                result.path("is_error").asBoolean(false),
+                                (System.nanoTime() - toolStart) / 1_000_000L)).addedContext());
             }
         }
 
@@ -755,6 +834,18 @@ public class AgentLoop {
         return result;
     }
 
+    /** The shell command line of a bash call, else null: only commands are granted verbatim. */
+    /** The work-dir-relative directory a file-writing call targets, or null when none can be offered or granted. */
+    private static String writeDirOf(HarnessTool tool, JsonNode input, ToolContext ctx) {
+        if (tool.kind() != ToolKind.FILE_EDIT || ctx.readOnlyWork() || ctx.files() != null || input == null) return null;
+        return ApprovalService.writeDirOf(ctx.workDir(), input.path("path").asText(null));
+    }
+
+    private static String commandOf(String toolName, JsonNode input) {
+        return "bash".equals(toolName) && input != null && input.hasNonNull("command")
+                ? input.get("command").asText() : null;
+    }
+
     private boolean approve(HarnessTool tool, JsonNode input, ToolContext ctx, EventSink sink,
                             BooleanSupplier cancelled, String label) {
         String preview;
@@ -764,13 +855,21 @@ public class AgentLoop {
             preview = input.toString();
         }
         String title = label == null ? tool.name() : "[" + label + "] " + tool.name();
+        String writeDir = writeDirOf(tool, input, ctx);
         ApprovalService.ApprovalDecision d = approvals.await(ctx.chatId(), "tool", title, preview, null, a -> {
             ObjectNode ev = mapper.valueToTree(a);
             if (label != null) ev.put("agent", label);
+            if (writeDir != null) ev.put("writeDir", writeDir);
             sink.emit("approval_request", ev);
-        }, cancelled);
+        }, cancelled, () -> !tainted.contains(ctx.chatId()) && (approvals.granted(ctx.chatId(), tool.name())
+                || approvals.dirGranted(ctx.chatId(), writeDir)));
         boolean ok = d.approved();
         if (ok && d.remember()) approvals.grant(ctx.chatId(), tool.name());
+        if (ok && d.rememberDir()) {
+            // A typed path (carried in "edited") replaces the offered directory; an invalid one grants nothing
+            boolean typed = d.edited() != null && !d.edited().isBlank();
+            approvals.grantDir(ctx.chatId(), typed ? ApprovalService.grantDirOf(ctx.workDir(), d.edited()) : writeDir);
+        }
         metrics.approval("tool", ok);
         return ok;
     }
@@ -828,13 +927,30 @@ public class AgentLoop {
                         ? "…[truncated " + (out.length() - max) + " chars]\n" + out.substring(out.length() - max)
                         : out.substring(0, max) + "\n…[truncated " + (out.length() - max) + " chars]";
             }
-            return toolResult(id, out, false);
+            return toolResult(id, sanitizeOutput(tool, ctx, out), false);
         } catch (SandboxUnavailableException e) {
             throw e;
         } catch (Exception e) {
             String m = e instanceof java.io.IOException ? e.getClass().getSimpleName() + ": " + e.getMessage() : e.getMessage();
             return toolResult(id, "Error: " + m, true);
         }
+    }
+
+    /** Tool groups whose output is produced by the harness or the user's own skills, not by outside content. */
+    private static final java.util.Set<String> INTERNAL_GROUPS = java.util.Set.of("Agents", "Skills", "Memory");
+    private static final java.util.Set<String> LOCAL_GROUPS = java.util.Set.of("Files", "Shell");
+
+    /** Cleans and wraps the output of a tool; marks the chat tainted when it may carry outside instructions. */
+    private String sanitizeOutput(HarnessTool tool, ToolContext ctx, String out) {
+        if (sanitizer.mode() == ToolOutputSanitizer.Mode.OFF || INTERNAL_GROUPS.contains(tool.group())) return out;
+        ToolOutputSanitizer.Trust trust = LOCAL_GROUPS.contains(tool.group())
+                ? ToolOutputSanitizer.Trust.LOW : ToolOutputSanitizer.Trust.UNTRUSTED;
+        ToolOutputSanitizer.Result r = sanitizer.sanitize(tool.name(), trust, out);
+        if (r.tainted() && config.output().taintGating()) tainted.add(ctx.chatId());
+        if (r.flagged()) {
+            log.warn("Tool '{}' output flagged as possible prompt injection: {}", tool.name(), r.findings());
+        }
+        return r.text();
     }
 
     private ObjectNode toolResult(String id, String content, boolean isError) {

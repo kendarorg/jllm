@@ -2,10 +2,10 @@ package org.kendar.llm.harness.permission;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 

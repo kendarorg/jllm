@@ -1,5 +1,9 @@
 package org.kendar.llm.harness.permission;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.kendar.llm.harness.state.InMemoryStateStore;
+import org.kendar.llm.harness.state.StateStore;
 import org.kendar.llm.harness.util.Uuids;
 
 import java.util.ArrayList;
@@ -9,8 +13,8 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
@@ -26,11 +30,15 @@ public class ApprovalService {
      * @param edited   user-edited replacement for {@code proposed}, or null
      * @param remember allow this tool for the rest of the chat (only meaningful when approved)
      */
-    public record ApprovalDecision(boolean approved, String edited, boolean remember) {
-        public static final ApprovalDecision REJECTED = new ApprovalDecision(false, null, false);
+    public record ApprovalDecision(boolean approved, String edited, boolean remember, boolean rememberDir) {
+        public static final ApprovalDecision REJECTED = new ApprovalDecision(false, null, false, false);
 
         public ApprovalDecision(boolean approved, String edited) {
-            this(approved, edited, false);
+            this(approved, edited, false, false);
+        }
+
+        public ApprovalDecision(boolean approved, String edited, boolean remember) {
+            this(approved, edited, remember, false);
         }
     }
 
@@ -38,14 +46,23 @@ public class ApprovalService {
     private final Map<String, Map<String, Pending>> pending = new ConcurrentHashMap<>();
     /** One open dialog per chat: the others wait here, fairly, and are not shown until it is answered. */
     private final Map<String, ReentrantLock> dialogs = new ConcurrentHashMap<>();
-    /** Tools the user allowed for a whole chat; runtime state only, never part of the context. */
+    /** Tools the user allowed for a whole chat; never part of the context, persisted in the state store. */
     private final Map<String, Set<String>> grants = new ConcurrentHashMap<>();
+    private final StateStore state;
+    private static final String GRANTS = "grants";
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private record Pending(PendingApproval approval, CompletableFuture<ApprovalDecision> future) {
     }
 
     public ApprovalService(int timeoutSeconds) {
+        this(timeoutSeconds, new InMemoryStateStore());
+    }
+
+    /** @param state where the grants survive a restart */
+    public ApprovalService(int timeoutSeconds, StateStore state) {
         this.timeoutSeconds = timeoutSeconds;
+        this.state = state;
     }
 
     /**
@@ -54,6 +71,16 @@ public class ApprovalService {
      */
     public ApprovalDecision await(String chatId, String type, String title, String preview, String proposed,
                                   Consumer<PendingApproval> onCreated, BooleanSupplier cancelled) {
+        return await(chatId, type, title, preview, proposed, onCreated, cancelled, null);
+    }
+
+    /**
+     * As above; {@code alreadyAllowed} is re-checked once this call's turn comes, so a grant given to an earlier
+     * dialog of the same chat (e.g. "allow writes in this folder") covers the calls queued behind it.
+     */
+    public ApprovalDecision await(String chatId, String type, String title, String preview, String proposed,
+                                  Consumer<PendingApproval> onCreated, BooleanSupplier cancelled,
+                                  BooleanSupplier alreadyAllowed) {
         ReentrantLock lock = dialogs.computeIfAbsent(chatId, k -> new ReentrantLock(true));
         try {
             while (!lock.tryLock(500, TimeUnit.MILLISECONDS)) {
@@ -65,6 +92,9 @@ public class ApprovalService {
         }
         try {
             if (cancelled != null && cancelled.getAsBoolean()) return ApprovalDecision.REJECTED;
+            if (alreadyAllowed != null && alreadyAllowed.getAsBoolean()) {
+                return new ApprovalDecision(true, null, false, false);
+            }
             return show(chatId, type, title, preview, proposed, onCreated, cancelled);
         } finally {
             lock.unlock();
@@ -106,24 +136,121 @@ public class ApprovalService {
 
     /** @param remember allow the tool for the rest of the chat (parent and sub-agents) */
     public boolean resolve(String chatId, String approvalId, boolean approved, String edited, boolean remember) {
+        return resolve(chatId, approvalId, approved, edited, remember, false);
+    }
+
+    /** @param rememberDir allow file writes in the directory of this call and its subdirectories, for this chat */
+    public boolean resolve(String chatId, String approvalId, boolean approved, String edited, boolean remember,
+                           boolean rememberDir) {
         Map<String, Pending> m = pending.get(chatId);
         Pending p = m == null ? null : m.get(approvalId);
         if (p == null) return false;
-        return p.future().complete(new ApprovalDecision(approved, edited, remember));
+        return p.future().complete(new ApprovalDecision(approved, edited, remember, rememberDir));
+    }
+
+    private static final String DIR = "dir:";
+
+    /**
+     * The directory (relative to the work dir, '/'-separated, "." for the root) a file write belongs to, or null when
+     * it cannot be granted: outside the work dir, or inside a {@code .git} directory (hooks there run code).
+     */
+    public static String writeDirOf(java.nio.file.Path workDir, String path) {
+        if (workDir == null || path == null || path.isBlank()) return null;
+        try {
+            java.nio.file.Path root = workDir.toAbsolutePath().normalize();
+            java.nio.file.Path p = root.resolve(path).normalize();
+            if (!p.startsWith(root)) return null;
+            java.nio.file.Path dir = root.relativize(p).getParent();
+            if (dir == null) return ".";
+            for (java.nio.file.Path seg : dir) if (seg.toString().equalsIgnoreCase(".git")) return null;
+            return dir.toString().replace('\\', '/');
+        } catch (java.nio.file.InvalidPathException e) {
+            return null;
+        }
+    }
+
+    /**
+     * A user-typed directory to grant, relative to the work dir ('/'-separated, "." for the root), or null when it is
+     * not acceptable: blank, absolute, containing a {@code ..} segment, or inside a {@code .git} directory.
+     */
+    public static String grantDirOf(java.nio.file.Path workDir, String typed) {
+        if (workDir == null || typed == null) return null;
+        String t = typed.strip().replace('\\', '/');
+        if (t.isEmpty() || t.startsWith("/") || t.matches("^[A-Za-z]:.*")) return null;
+        for (String seg : t.split("/")) {
+            if (seg.equals("..")) return null;
+            if (seg.equalsIgnoreCase(".git")) return null;
+        }
+        try {
+            java.nio.file.Path root = workDir.toAbsolutePath().normalize();
+            java.nio.file.Path p = root.resolve(t).normalize();
+            if (!p.startsWith(root)) return null;
+            java.nio.file.Path rel = root.relativize(p);
+            return rel.toString().isEmpty() ? "." : rel.toString().replace('\\', '/');
+        } catch (java.nio.file.InvalidPathException e) {
+            return null;
+        }
+    }
+
+    public void grantDir(String chatId, String dir) {
+        if (dir != null) grant(chatId, DIR + dir);
+    }
+
+    /** True when {@code dir} is a granted directory or lies below one. */
+    public boolean dirGranted(String chatId, String dir) {
+        if (dir == null) return false;
+        for (String g : grantsOf(chatId)) {
+            if (!g.startsWith(DIR)) continue;
+            String base = g.substring(DIR.length());
+            if (base.equals(".") || dir.equals(base) || dir.startsWith(base + "/")) return true;
+        }
+        return false;
     }
 
     public void grant(String chatId, String tool) {
-        grants.computeIfAbsent(chatId, k -> ConcurrentHashMap.newKeySet()).add(tool);
+        Set<String> g = grantsOf(chatId);
+        if (g.add(tool)) {
+            com.fasterxml.jackson.databind.node.ArrayNode a = MAPPER.createArrayNode();
+            new java.util.TreeSet<>(g).forEach(a::add);
+            state.save(chatId, GRANTS, a);
+        }
     }
 
     public boolean granted(String chatId, String tool) {
-        Set<String> g = grants.get(chatId);
-        return g != null && g.contains(tool);
+        return grantsOf(chatId).contains(tool);
+    }
+
+    /** Longest command text stored as an exact-match grant. */
+    public static final int MAX_COMMAND_GRANT = 512;
+
+    private static String commandKey(String tool, String command) {
+        return "cmd:" + tool + ":" + command;
+    }
+
+    /** Stores an approved command verbatim so the same command is not asked again; ignored at 512 chars or more. */
+    public void grantCommand(String chatId, String tool, String command) {
+        if (command == null || command.isEmpty() || command.length() >= MAX_COMMAND_GRANT) return;
+        grant(chatId, commandKey(tool, command));
+    }
+
+    public boolean commandGranted(String chatId, String tool, String command) {
+        if (command == null || command.length() >= MAX_COMMAND_GRANT) return false;
+        return granted(chatId, commandKey(tool, command));
+    }
+
+    private Set<String> grantsOf(String chatId) {
+        return grants.computeIfAbsent(chatId, k -> {
+            Set<String> set = ConcurrentHashMap.newKeySet();
+            JsonNode n = state.load(k, GRANTS);
+            if (n != null && n.isArray()) n.forEach(t -> set.add(t.asText()));
+            return set;
+        });
     }
 
     /** Drops the grants of a deleted chat. */
     public void forget(String chatId) {
         grants.remove(chatId);
+        state.delete(chatId);
         dialogs.remove(chatId);
     }
 

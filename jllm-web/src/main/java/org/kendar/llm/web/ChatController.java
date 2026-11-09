@@ -14,7 +14,6 @@ import org.kendar.llm.harness.tools.HarnessTool;
 import org.kendar.llm.harness.tools.HarnessToolRegistry;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -69,6 +68,13 @@ public class ChatController {
             m.put("lastSeq", agentService.lastSeq(id));
             return ResponseEntity.ok(m);
         }).orElse(ResponseEntity.notFound().build());
+    }
+
+    /** Originals of the shell calls that were replaced by stubs in the context (audit; never sent to the model). */
+    @GetMapping("/api/chat/{id}/references")
+    public ResponseEntity<List<com.fasterxml.jackson.databind.JsonNode>> references(@PathVariable String id) {
+        if (sessions.find(id).isEmpty()) return ResponseEntity.notFound().build();
+        return ResponseEntity.ok(sessions.references(id));
     }
 
     @DeleteMapping("/api/chat/{id}")
@@ -216,7 +222,8 @@ public class ChatController {
         boolean approved = Boolean.TRUE.equals(body.get("approved"));
         String edited = body.get("editedText") instanceof String s ? s : null;
         boolean remember = Boolean.TRUE.equals(body.get("remember"));
-        if (!agentService.resolveApproval(id, approvalId, approved, edited, remember)) {
+        boolean rememberDir = Boolean.TRUE.equals(body.get("rememberDir"));
+        if (!agentService.resolveApproval(id, approvalId, approved, edited, remember, rememberDir)) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Approval no longer pending"));
         }
         return ResponseEntity.ok(Map.of("resolved", true));
@@ -278,6 +285,8 @@ public class ChatController {
         m.put("mode", s.mode());
         m.put("running", agentService.isRunning(s.chatId()));
         m.put("updatedAt", String.valueOf(s.updatedAt()));
+        m.put("createdAt", String.valueOf(s.createdAt()));
+        m.put("messageCount", s.messageCount());
         m.put("usage", usageOf(s));
         return m;
     }
@@ -288,6 +297,8 @@ public class ChatController {
         u.put("outputTokens", s.outputTokens());
         u.put("cacheReadTokens", s.cacheReadTokens());
         u.put("cacheCreationTokens", s.cacheCreationTokens());
+        u.put("qualifierInputTokens", s.qualifierInputTokens());
+        u.put("qualifierOutputTokens", s.qualifierOutputTokens());
         u.put("estimatedCostUsd", pricing.estimate(s.inputTokens(), s.outputTokens(),
                 s.cacheReadTokens(), s.cacheCreationTokens()));
         return u;

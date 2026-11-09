@@ -4,11 +4,14 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.AgentHarness;
 import org.kendar.llm.harness.HarnessPricing;
 import org.kendar.llm.harness.llm.ModelClient;
 import org.kendar.llm.harness.llm.ModelRequest;
 import org.kendar.llm.harness.llm.ModelResponse;
+import org.kendar.llm.harness.session.ChatSessionData;
+import org.kendar.llm.harness.session.FileChatSessionStore;
 import org.kendar.llm.harness.session.InMemoryChatSessionStore;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
@@ -68,5 +71,41 @@ class ChatControllerTest {
         JsonNode cmds = mapper.readTree(mvc.perform(get("/api/chat/commands")).andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString());
         assertTrue(cmds.size() > 0);
+    }
+
+    @Test
+    void listsAndLoadsChatsOfAPrePopulatedRoot(@TempDir java.nio.file.Path root) throws Exception {
+        String use = "{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"bash\",\"input\":{}}]}";
+        new FileChatSessionStore(root, mapper).save(ChatSessionData.create("c1", "agent-c1", "Fix login")
+                .withMessagesJson("{\"role\":\"user\",\"content\":\"hi\"}\n" + use));
+
+        ModelClient unused = new ModelClient() {
+            @Override
+            public ModelResponse complete(ModelRequest request) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public String simpleComplete(String system, String user, int maxTokens) {
+                return "";
+            }
+        };
+        AgentHarness harness = AgentHarness.builder().modelClient(unused)
+                .sessionStore(new FileChatSessionStore(root, mapper)).objectMapper(mapper).build();
+        MockMvc restarted = MockMvcBuilders.standaloneSetup(
+                new ChatController(harness, mapper, new HarnessPricing(0, 0, 0, 0))).build();
+
+        JsonNode list = mapper.readTree(restarted.perform(get("/api/chat")).andReturn().getResponse().getContentAsString());
+        assertEquals(1, list.size());
+        assertEquals("c1", list.get(0).path("chatId").asText());
+        assertEquals("Fix login", list.get(0).path("title").asText());
+        assertEquals(2, list.get(0).path("messageCount").asInt());
+
+        JsonNode chat = mapper.readTree(restarted.perform(get("/api/chat/c1")).andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString());
+        assertEquals(3, chat.path("messages").size(), "the interrupted call got its synthetic result");
+        assertTrue(chat.path("messages").get(2).toString().contains("interrupted: process stopped"));
+        restarted.perform(get("/api/chat/c1/references")).andExpect(status().isOk());
+        restarted.perform(get("/api/chat/none/references")).andExpect(status().isNotFound());
     }
 }

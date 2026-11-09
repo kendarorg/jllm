@@ -8,6 +8,8 @@ public enum ContextStrategyKind {
     COMPACTION,
     /** Sticky masking of old content into receipts, segment handoffs and lexical recall. The log stays verbatim. */
     MNEMONIC,
+    /** Whole-request budget: offload large tool results, clear, summarize; first message and todos pinned. */
+    SCOPE,
     /** A strategy supplied through the builder. */
     CUSTOM;
 
@@ -17,8 +19,9 @@ public enum ContextStrategyKind {
         return switch (s.strip().toLowerCase(Locale.ROOT)) {
             case "compaction", "old", "default" -> COMPACTION;
             case "mnemonic" -> MNEMONIC;
+            case "scope" -> SCOPE;
             default -> throw new IllegalArgumentException("Unknown context strategy '" + s
-                    + "' (use compaction or mnemonic)");
+                    + "' (use compaction, mnemonic or scope)");
         };
     }
 }

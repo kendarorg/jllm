@@ -125,8 +125,8 @@ class FileSystemAgentToolsJailTest {
         List<HarnessTool> tools = fs.tools();
         assertEquals(ToolKind.FILE_EDIT, tool("write_file").kind());
         assertEquals(ToolKind.FILE_EDIT, tool("edit_file").kind());
-        for (String ro : List.of("read_file", "glob", "grep")) assertEquals(ToolKind.READ_ONLY, tool(ro).kind());
-        assertEquals(5, tools.size());
+        for (String ro : List.of("read_file", "glob", "ls", "grep", "grep_code")) assertEquals(ToolKind.READ_ONLY, tool(ro).kind());
+        assertEquals(7, tools.size());
     }
 
     private static String readQuietly(Path p) {

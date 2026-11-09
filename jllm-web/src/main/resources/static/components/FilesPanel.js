@@ -1,5 +1,5 @@
-import { ref, computed, onMounted, watch } from 'vue';
-import { store, toast } from '../store.js';
+import {computed, onMounted, ref, watch} from 'vue';
+import {store, toast} from '../store.js';
 
 async function call(path, opts = {}) {
   const r = await fetch(path, opts);

@@ -91,6 +91,22 @@ class AnthropicModelClientTest {
     }
 
     @Test
+    void finishedTurnsLoseThinkingBlocksButTheCurrentTurnKeepsThem() throws Exception {
+        ArrayNode m = msgs("[{\"role\":\"user\",\"content\":\"a\"},"
+                + "{\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"t\",\"signature\":\"s\"},"
+                + "{\"type\":\"tool_use\",\"id\":\"1\",\"name\":\"x\",\"input\":{}}]},"
+                + "{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"1\",\"content\":\"r\"}]},"
+                + "{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"done\"}]},"
+                + "{\"role\":\"user\",\"content\":\"b\"},"
+                + "{\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"t\",\"signature\":\"s\"},"
+                + "{\"type\":\"tool_use\",\"id\":\"2\",\"name\":\"x\",\"input\":{}}]}]");
+        ArrayNode out = client(0, false, 0).withoutFinishedThinking(m);
+        assertEquals("tool_use", out.get(1).get("content").get(0).get("type").asText());
+        assertEquals("thinking", out.get(5).get("content").get(0).get("type").asText());
+        assertEquals("thinking", m.get(1).get("content").get(0).get("type").asText());
+    }
+
+    @Test
     void parsesResponseAndSendsHeadersAndCacheControl() throws Exception {
         ModelResponse r = client(0, true, 0).complete(req(null, false));
         assertEquals("end_turn", r.stopReason());

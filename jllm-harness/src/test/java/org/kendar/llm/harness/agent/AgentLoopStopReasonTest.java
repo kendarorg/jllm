@@ -11,8 +11,10 @@ import org.kendar.llm.harness.llm.Usage;
 
 import java.nio.file.Path;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.kendar.llm.harness.HarnessTestSupport.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.kendar.llm.harness.HarnessTestSupport.resp;
+import static org.kendar.llm.harness.HarnessTestSupport.text;
 
 class AgentLoopStopReasonTest {
 

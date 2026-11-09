@@ -1,7 +1,5 @@
 package org.kendar.llm.harness.context.compaction;
 
-import org.kendar.llm.harness.context.CompactResult;
-import org.kendar.llm.harness.context.RequestPrefix;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import org.junit.jupiter.api.BeforeEach;
@@ -9,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import org.kendar.llm.harness.HarnessConfig;
 import org.kendar.llm.harness.HarnessTestSupport.Events;
 import org.kendar.llm.harness.HarnessTestSupport.ScriptedModel;
+import org.kendar.llm.harness.context.CompactResult;
 import org.kendar.llm.harness.llm.Usage;
 import org.kendar.llm.harness.permission.ApprovalService;
 
@@ -16,8 +15,8 @@ import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.kendar.llm.harness.HarnessTestSupport.*;
-import static org.mockito.Mockito.when;
+import static org.kendar.llm.harness.HarnessTestSupport.MAPPER;
+import static org.kendar.llm.harness.HarnessTestSupport.config;
 
 /** Tiered compaction: 1 microcompact (no LLM) -> 2 summarize (LLM) -> 3 proposal that waits for the user. */
 class ContextManagerCompactionTest {

@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import org.kendar.llm.harness.HarnessConfig;
 import org.kendar.llm.harness.context.ContextStrategyKind;
+import org.kendar.llm.harness.context.scope.ScopeStrategy;
 import org.kendar.llm.harness.llm.LlmSettings;
 import org.kendar.llm.harness.llm.ProviderSettings;
 import org.kendar.llm.harness.permission.PermissionRules;
@@ -33,12 +34,15 @@ import java.util.regex.Pattern;
  * @param fastModel        optional small model for the auto-mode classifier, summaries and tool-group selection
  * @param smallModel       the main model is small: the system prompt gets the stricter small-model rules
  *                         (default false)
+ * @param chatRetentionLimit maximum number of saved chats; at startup the oldest beyond it are deleted. Null or
+ *                         absent = unlimited (default)
  */
 public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSettings> restApis,
                               List<SkillSettings> skills, List<String> instructionFiles,
                               List<AgentSettings> agents, Execution execution, Sandbox sandbox, Context context,
                               LlmSettings fastModel, Output output, Boolean smallModel, Permissions permissions,
-                              List<ProviderSettings> providers, String defaultProvider) {
+                              List<ProviderSettings> providers, String defaultProvider,
+                              Integer chatRetentionLimit) {
 
     /** Regex rules, see {@link PermissionRules}. Evaluated deny, ask, allow; settings only. */
     public record Permissions(List<String> deny, List<String> ask, List<String> allow) {
@@ -55,7 +59,17 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
                            List<AgentSettings> agents, Execution execution, Sandbox sandbox, Context context,
                            LlmSettings fastModel, Output output, Boolean smallModel) {
         this(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context, fastModel, output,
-                smallModel, null, null, null);
+                smallModel, null, null, null, null);
+    }
+
+    /** The 14 components before {@code chatRetentionLimit}: unlimited chats. */
+    public HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSettings> restApis,
+                           List<SkillSettings> skills, List<String> instructionFiles,
+                           List<AgentSettings> agents, Execution execution, Sandbox sandbox, Context context,
+                           LlmSettings fastModel, Output output, Boolean smallModel, Permissions permissions,
+                           List<ProviderSettings> providers, String defaultProvider) {
+        this(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context, fastModel, output,
+                smallModel, permissions, providers, defaultProvider, null);
     }
 
     /** The compiled permission rules. @throws IllegalArgumentException for an invalid regex */
@@ -67,10 +81,11 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
     private static final Pattern ENV = Pattern.compile("\\$\\{([A-Za-z_][A-Za-z0-9_]*)}");
 
     /**
-     * @param serializeModelCalls one model call at a time, depth-first: main, agent, each sub-agent to its end, back to
-     *                            the agent, back to main (default true: made for a local LLM)
+     * @param maxParallel maximum model calls in flight, and chat runs / sub-agents running at once. Default {@code 1}:
+     *                    one model call at a time, depth-first (made for a local LLM). {@code -1} = unlimited;
+     *                    {@code 0} is treated as {@code 1}
      */
-    public record Execution(Boolean serializeModelCalls) {
+    public record Execution(Integer maxParallel) {
     }
 
     /**
@@ -126,7 +141,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
         Sandbox s = sandbox == null ? new Sandbox(null, null) : sandbox;
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution,
                 new Sandbox(s.tempDir(), s.timeoutSeconds(), backend.toLowerCase(), s.localFallback(), s.docker()),
-                context, fastModel, output, smallModel, permissions, providers, defaultProvider);
+                context, fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit);
     }
 
     /** Same settings with {@code sandbox.docker.image} replaced (e.g. by a command line flag). */
@@ -137,7 +152,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
                 new Sandbox(s.tempDir(), s.timeoutSeconds(), s.backend(), s.localFallback(),
                         new Docker(d.binary(), image, d.memory(), d.cpus(), d.pidsLimit(), d.user(), d.network(),
                                 d.mode(), d.remote(), d.remoteHost())),
-                context, fastModel, output, smallModel, permissions, providers, defaultProvider);
+                context, fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit);
     }
 
     /** Same settings with {@code sandbox.docker.mode} replaced (e.g. by a command line flag). */
@@ -151,7 +166,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
                 new Sandbox(s.tempDir(), s.timeoutSeconds(), s.backend(), s.localFallback(),
                         new Docker(d.binary(), d.image(), d.memory(), d.cpus(), d.pidsLimit(), d.user(), d.network(),
                                 mode.toLowerCase(), d.remote(), d.remoteHost())),
-                context, fastModel, output, smallModel, permissions, providers, defaultProvider);
+                context, fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit);
     }
 
     /** Same settings with {@code sandbox.docker.remote} and {@code remoteHost} replaced (command line flags). */
@@ -163,7 +178,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
                         new Docker(d.binary(), d.image(), d.memory(), d.cpus(), d.pidsLimit(), d.user(), d.network(),
                                 d.mode(), remote != null ? remote : d.remote(),
                                 remoteHost != null ? remoteHost : d.remoteHost())),
-                context, fastModel, output, smallModel, permissions, providers, defaultProvider);
+                context, fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit);
     }
 
     /** True when the docker backend runs in daemon mode (long-running container). */
@@ -176,7 +191,11 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
      * @param toolMaxChars  tool output kept in the context (default 30000)
      * @param eventMaxChars tool output carried by the {@code tool_result} event (default 2000)
      */
-    public record Output(Integer toolMaxChars, Integer eventMaxChars) {
+    public record Output(Integer toolMaxChars, Integer eventMaxChars, String sanitize, Boolean taintGating,
+                         java.util.List<String> extraPatterns) {
+        public Output(Integer toolMaxChars, Integer eventMaxChars) {
+            this(toolMaxChars, eventMaxChars, null, null, null);
+        }
     }
 
     /**
@@ -187,13 +206,52 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
      * @param buffer          tokens kept free below maxTokens; default max(15%, 16k)
      * @param strategy        {@code compaction} (default) or {@code mnemonic}
      * @param mnemonic        settings of the mnemonic strategy
+     * @param noiseCommands   remove shell commands that add no information (mkdir, rm, cd, ...) from the context
+     *                        after their turn, see {@code NoiseCommandPruner} (default true)
+     * @param deferCompactionOnThinkingOverflow Anthropic: do not compact while the turn in progress holds thinking
+     *                        blocks (default false: compact and switch thinking off for the rest of the turn). true keeps
+     *                        thinking but the prompt may exceed the budget until the turn ends: can increase charges
      */
     public record Context(Integer maxTokens, Integer keepRecentTurns, Boolean auto, Integer keepTokens,
-                          Integer buffer, String strategy, Mnemonic mnemonic) {
+                          Integer buffer, String strategy, Mnemonic mnemonic, Scope scope, Boolean noiseCommands,
+                          Boolean deferCompactionOnThinkingOverflow) {
+
+        public Context(Integer maxTokens, Integer keepRecentTurns, Boolean auto, Integer keepTokens,
+                       Integer buffer, String strategy, Mnemonic mnemonic, Scope scope, Boolean noiseCommands) {
+            this(maxTokens, keepRecentTurns, auto, keepTokens, buffer, strategy, mnemonic, scope, noiseCommands, null);
+        }
+
+        public Context(Integer maxTokens, Integer keepRecentTurns, Boolean auto, Integer keepTokens,
+                       Integer buffer, String strategy, Mnemonic mnemonic, Scope scope) {
+            this(maxTokens, keepRecentTurns, auto, keepTokens, buffer, strategy, mnemonic, scope, null, null);
+        }
 
         public Context(Integer maxTokens, Integer keepRecentTurns, Boolean auto, Integer keepTokens, Integer buffer) {
-            this(maxTokens, keepRecentTurns, auto, keepTokens, buffer, null, null);
+            this(maxTokens, keepRecentTurns, auto, keepTokens, buffer, null, null, null);
         }
+
+        public Context(Integer maxTokens, Integer keepRecentTurns, Boolean auto, Integer keepTokens, Integer buffer,
+                       String strategy, Mnemonic mnemonic) {
+            this(maxTokens, keepRecentTurns, auto, keepTokens, buffer, strategy, mnemonic, null);
+        }
+    }
+
+    /** Thresholds of the {@code scope} context strategy; unset values keep the defaults. */
+    public record Scope(Integer offloadChars, Integer overflowOffloadChars, Integer previewChars,
+                        Integer safetyPercent, Integer reserveCap) {
+
+        public ScopeStrategy.Options over(ScopeStrategy.Options d) {
+            return new ScopeStrategy.Options(offloadChars != null ? offloadChars : d.offloadChars(),
+                    overflowOffloadChars != null ? overflowOffloadChars : d.overflowOffloadChars(),
+                    previewChars != null ? previewChars : d.previewChars(),
+                    safetyPercent != null ? safetyPercent : d.safetyPercent(),
+                    reserveCap != null ? reserveCap : d.reserveCap());
+        }
+    }
+
+    /** The scope strategy options: {@code defaults} with the {@code context.scope} settings on top. */
+    public ScopeStrategy.Options scopeOptions(ScopeStrategy.Options defaults) {
+        return context == null || context.scope() == null ? defaults : context.scope().over(defaults);
     }
 
     /** Same names and meaning as {@link HarnessConfig.Mnemonic}; unset values keep the defaults. */
@@ -231,7 +289,9 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
             HarnessConfig.Compaction k = c.compaction();
             c = c.withCompaction(new HarnessConfig.Compaction(context.auto() != null ? context.auto() : k.auto(),
                     context.keepTokens() != null ? context.keepTokens() : k.keepTokens(),
-                    context.buffer() != null ? context.buffer() : k.buffer()));
+                    context.buffer() != null ? context.buffer() : k.buffer(),
+                    context.deferCompactionOnThinkingOverflow() != null
+                            ? context.deferCompactionOnThinkingOverflow() : k.deferOnThinkingOverflow()));
             if (context.strategy() != null && !context.strategy().isBlank()) {
                 c = c.withContextStrategy(ContextStrategyKind.parse(context.strategy()));
             }
@@ -241,7 +301,10 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
             HarnessConfig.Output o = c.output();
             c = c.withOutput(new HarnessConfig.Output(
                     output.toolMaxChars() != null ? output.toolMaxChars() : o.toolMaxChars(),
-                    output.eventMaxChars() != null ? output.eventMaxChars() : o.eventMaxChars()));
+                    output.eventMaxChars() != null ? output.eventMaxChars() : o.eventMaxChars(),
+                    output.sanitize() != null ? output.sanitize() : o.sanitize(),
+                    output.taintGating() != null ? output.taintGating() : o.taintGating(),
+                    output.extraPatterns() != null ? output.extraPatterns() : o.extraPatterns()));
         }
         return c;
     }
@@ -251,7 +314,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
         Context c = context == null ? new Context(null, null, null, null, null) : context;
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox,
                 new Context(maxTokens, c.keepRecentTurns(), c.auto(), c.keepTokens(), c.buffer(), c.strategy(),
-                        c.mnemonic()), fastModel, output, smallModel, permissions, providers, defaultProvider);
+                        c.mnemonic(), c.scope(), c.noiseCommands(), c.deferCompactionOnThinkingOverflow()), fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit);
     }
 
     /** Same settings with {@code context.strategy} replaced (e.g. by a command line flag). */
@@ -260,17 +323,31 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
         Context c = context == null ? new Context(null, null, null, null, null) : context;
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox,
                 new Context(c.maxTokens(), c.keepRecentTurns(), c.auto(), c.keepTokens(), c.buffer(), strategy,
-                        c.mnemonic()), fastModel, output, smallModel, permissions, providers, defaultProvider);
+                        c.mnemonic(), c.scope(), c.noiseCommands(), c.deferCompactionOnThinkingOverflow()), fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit);
+    }
+
+    /** False when {@code context.noiseCommands} is set to false. */
+    public boolean noiseCommands() {
+        return context == null || !Boolean.FALSE.equals(context.noiseCommands());
     }
 
     /** Same settings with {@code smallModel} replaced (e.g. by a command line flag). */
     public HarnessSettings withSmallModel(boolean small) {
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context,
-                fastModel, output, small, permissions, providers, defaultProvider);
+                fastModel, output, small, permissions, providers, defaultProvider, chatRetentionLimit);
     }
 
-    public boolean serializeModelCalls() {
-        return execution == null || execution.serializeModelCalls() == null || execution.serializeModelCalls();
+    /** Same settings with {@code chatRetentionLimit} replaced. */
+    public HarnessSettings withChatRetentionLimit(Integer limit) {
+        return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context,
+                fastModel, output, smallModel, permissions, providers, defaultProvider, limit);
+    }
+
+    /** Concurrency limit: {@code 1} serialized (default), {@code N} bounded, {@code -1} unlimited. */
+    public int maxParallel() {
+        if (execution == null || execution.maxParallel() == null) return 1;
+        int n = execution.maxParallel();
+        return n < 0 ? -1 : Math.max(1, n);
     }
 
     public boolean isSmallModel() {
@@ -331,6 +408,60 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
         } catch (IOException e) {
             throw new UncheckedIOException("Cannot read settings " + file, e);
         }
+    }
+
+    /** The global settings file {@code <jllm.home or user.home>/.jllm/settings.json}. */
+    public static Path globalFile() {
+        return Path.of(System.getProperty("jllm.home", System.getProperty("user.home")), ".jllm", "settings.json");
+    }
+
+    /** The project settings file {@code <projectDir>/.jllm/settings.json}. */
+    public static Path projectFile(Path projectDir) {
+        return projectDir.resolve(".jllm").resolve("settings.json");
+    }
+
+    /**
+     * Global, then project, then explicit file: later wins, objects merged per key, other values (including arrays)
+     * replaced. Missing files are skipped; {@code explicit} and {@code projectDir} may be null.
+     */
+    public static HarnessSettings loadLayered(Path explicit, Path projectDir) {
+        return loadLayered(explicit, projectDir, System::getenv);
+    }
+
+    public static HarnessSettings loadLayered(Path explicit, Path projectDir, Function<String, String> env) {
+        List<Path> files = new ArrayList<>();
+        files.add(globalFile());
+        if (projectDir != null) files.add(projectFile(projectDir));
+        if (explicit != null) files.add(explicit);
+        ObjectMapper mapper = new ObjectMapper().configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        JsonNode merged = null;
+        try {
+            for (Path f : files) {
+                if (!java.nio.file.Files.isRegularFile(f)) {
+                    if (f.equals(explicit)) throw new UncheckedIOException("Cannot read settings " + f,
+                            new java.io.FileNotFoundException(f.toString()));
+                    continue;
+                }
+                JsonNode tree = mapper.readTree(f.toFile());
+                merged = merged == null ? tree : merge(merged, tree);
+            }
+            if (merged == null) return empty();
+            return mapper.treeToValue(expand(merged, env), HarnessSettings.class);
+        } catch (IOException e) {
+            throw new UncheckedIOException("Cannot read settings", e);
+        }
+    }
+
+    static JsonNode merge(JsonNode base, JsonNode over) {
+        if (base instanceof ObjectNode b && over instanceof ObjectNode o) {
+            for (Iterator<Map.Entry<String, JsonNode>> it = o.fields(); it.hasNext(); ) {
+                Map.Entry<String, JsonNode> e = it.next();
+                JsonNode existing = b.get(e.getKey());
+                b.set(e.getKey(), existing == null ? e.getValue() : merge(existing, e.getValue()));
+            }
+            return b;
+        }
+        return over;
     }
 
     static JsonNode expand(JsonNode node, Function<String, String> env) {

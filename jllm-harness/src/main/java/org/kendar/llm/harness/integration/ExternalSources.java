@@ -12,10 +12,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.function.Supplier;
 
 /**
@@ -23,6 +20,8 @@ import java.util.function.Supplier;
  * unregisters them. State is in memory: the {@code enabled} flag of the settings is only the startup default.
  */
 public final class ExternalSources {
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(ExternalSources.class);
 
     public enum Kind {
         MCP("mcp"), API("api");
@@ -62,6 +61,7 @@ public final class ExternalSources {
     private final HttpClient http;
     private final ObjectMapper mapper;
     private final Map<String, Source> sources = new LinkedHashMap<>();
+    private final Map<String, McpClient> connections = new HashMap<>();
 
     public ExternalSources(HarnessToolRegistry registry, HarnessSettings settings, HttpClient http,
                            ObjectMapper mapper) {
@@ -112,6 +112,7 @@ public final class ExternalSources {
     public synchronized void disable(Kind kind, String name) {
         Source s = require(kind, name);
         registry.removeSource(key(kind, name));
+        closeConnection(key(kind, name));
         s.enabled = false;
         s.tools = 0;
     }
@@ -150,19 +151,39 @@ public final class ExternalSources {
     }
 
     private List<HarnessTool> mcpDiscover(McpServerSettings m) {
+        String key = key(Kind.MCP, m.name());
+        McpClient client = McpToolProvider.connect(m, http, mapper);
         try {
-            return McpToolProvider.discover(m, http, mapper);
+            List<HarnessTool> tools = McpToolProvider.tools(m, client, mapper);
+            closeConnection(key);
+            connections.put(key, client);
+            return tools;
         } catch (java.io.IOException e) {
+            closeQuietly(client);
             throw new IllegalStateException(e.getMessage(), e);
         } catch (InterruptedException e) {
+            closeQuietly(client);
             Thread.currentThread().interrupt();
             throw new IllegalStateException("interrupted", e);
         }
     }
 
-    private String mcpProbe(McpServerSettings m) {
+    private void closeConnection(String key) {
+        McpClient old = connections.remove(key);
+        if (old != null) closeQuietly(old);
+    }
+
+    private static void closeQuietly(McpClient client) {
         try {
-            int n = new McpHttpClient(http, mapper, m.url(), m.headers()).listTools().size();
+            client.close();
+        } catch (java.io.IOException e) {
+            log.debug("MCP connection did not close cleanly: {}", e.toString());
+        }
+    }
+
+    private String mcpProbe(McpServerSettings m) {
+        try (McpClient client = McpToolProvider.connect(m, http, mapper)) {
+            int n = client.listTools().size();
             return n + " tools offered";
         } catch (java.io.IOException e) {
             throw new IllegalStateException(e.getMessage(), e);

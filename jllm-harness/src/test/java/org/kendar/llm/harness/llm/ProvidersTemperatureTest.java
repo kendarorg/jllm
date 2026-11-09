@@ -1,11 +1,10 @@
 package org.kendar.llm.harness.llm;
 
-import org.kendar.llm.harness.AgentHarness;
-
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.kendar.llm.harness.HarnessTestSupport.ScriptedModel;
+import org.kendar.llm.harness.AgentHarness;
+import org.kendar.llm.harness.HarnessTestSupport.*;
 import org.kendar.llm.harness.settings.HarnessSettings;
 
 import java.nio.file.Path;

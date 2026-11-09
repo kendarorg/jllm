@@ -15,7 +15,6 @@ import org.kendar.llm.harness.context.mnemonic.InMemoryMnemonicStore;
 import org.kendar.llm.harness.context.mnemonic.MnemonicStore;
 import org.kendar.llm.harness.context.mnemonic.MnemonicStrategy;
 import org.kendar.llm.harness.hooks.Hooks;
-import org.kendar.llm.harness.session.InMemorySubAgentRunLog;
 import org.kendar.llm.harness.llm.ModelClient;
 import org.kendar.llm.harness.llm.ModelRequest;
 import org.kendar.llm.harness.llm.ModelResponse;
@@ -23,10 +22,9 @@ import org.kendar.llm.harness.llm.Usage;
 import org.kendar.llm.harness.permission.ApprovalService;
 import org.kendar.llm.harness.permission.PermissionGate;
 import org.kendar.llm.harness.sandbox.LocalDirSandboxExecutor;
-import org.kendar.llm.harness.HarnessConfig;
-import org.kendar.llm.harness.HarnessMetrics;
 import org.kendar.llm.harness.session.ChatSessionService;
 import org.kendar.llm.harness.session.InMemoryChatSessionStore;
+import org.kendar.llm.harness.session.InMemorySubAgentRunLog;
 import org.kendar.llm.harness.session.SubAgentRunLog;
 import org.kendar.llm.harness.tools.HarnessTool;
 import org.kendar.llm.harness.tools.HarnessToolRegistry;
@@ -149,7 +147,9 @@ public final class HarnessTestSupport {
     public static HarnessConfig config(Path baseDir) {
         return HarnessConfig.defaults().withAgentId("jllm").withLocalDirSandboxAllowed(false).withMaxTokens(1024).withApprovalTimeoutSeconds(5)
                 .withContextBudgetTokens(150_000).withSandboxBaseDir(baseDir.toString())
-                .withSandboxTimeoutSeconds(10);
+                .withSandboxTimeoutSeconds(10)
+                // sanitization has its own tests; other tests assert on the raw tool output
+                .withOutput(new HarnessConfig.Output(30_000, 2_000, "off", true, java.util.List.of()));
     }
 
     public static SimpleTool tool(String name, String group, ToolKind kind, SimpleTool.Body body) {
@@ -207,9 +207,18 @@ public final class HarnessTestSupport {
         }
 
         public Rig(Path baseDir, HarnessMetrics metrics) {
+            this(baseDir, metrics, new InMemoryChatSessionStore());
+        }
+
+        /** Chats kept in {@code store}, e.g. a file store shared by two rigs to simulate a restart. */
+        public Rig(Path baseDir, org.kendar.llm.harness.session.ChatSessionStore store) {
+            this(baseDir, HarnessMetrics.noop(), store);
+        }
+
+        private Rig(Path baseDir, HarnessMetrics metrics, org.kendar.llm.harness.session.ChatSessionStore store) {
             this.metrics = metrics;
             this.config = config(baseDir);
-            sessions = new ChatSessionService(new InMemoryChatSessionStore(), config.agentId(), MAPPER);
+            sessions = new ChatSessionService(store, config.agentId(), MAPPER);
             wire();
         }
 

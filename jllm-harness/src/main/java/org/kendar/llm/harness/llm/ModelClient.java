@@ -15,6 +15,15 @@ public interface ModelClient {
     /** Single-shot, tool-less completion returning the concatenated text. */
     String simpleComplete(String system, String user, int maxTokens);
 
+    /**
+     * One plain request with an explicit sampling temperature (0 = most deterministic), for yes/no decisions. A client
+     * that cannot send a temperature (Anthropic) ignores it.
+     */
+    default String simpleComplete(String system, String user, int maxTokens, Double temperature,
+                                  java.util.function.Consumer<Usage> usageSink) {
+        return simpleComplete(system, user, maxTokens, usageSink);
+    }
+
     /** As above, reporting the call's token usage to {@code usageSink} (may be null). */
     default String simpleComplete(String system, String user, int maxTokens, java.util.function.Consumer<Usage> usageSink) {
         return simpleComplete(system, user, maxTokens);

@@ -6,7 +6,7 @@ import java.util.Locale;
 
 /**
  * Builds the {@link ModelClient} for a provider name, shared by every front end (CLI, web).
- * Providers: anthropic, openai, qwen, llamacpp, ollama. Null/blank arguments fall back to the provider defaults.
+ * Providers: anthropic, openai, gemini, qwen, llamacpp, ollama. Null/blank arguments fall back to the provider defaults.
  */
 public final class ModelClientFactory {
 
@@ -33,13 +33,15 @@ public final class ModelClientFactory {
         LlmSettings s = switch (p) {
             case "openai" -> new LlmSettings("openai", "https://api.openai.com/v1", key, "gpt-4.1", 8192, 5, 600,
                     true, true);
+            case "gemini" -> new LlmSettings("gemini", "https://generativelanguage.googleapis.com/v1beta/openai", key,
+                    "gemini-2.5-pro", 8192, 5, 600, true, false);
             case "qwen" -> new LlmSettings("qwen", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1", key,
                     "qwen3-coder-plus", 8192, 5, 600, true, false);
             case "ollama" -> ModelClients.ollamaSettings(ModelClients.OLLAMA_URL, ModelClients.OLLAMA_DEFAULT_MODEL);
             case "llamacpp" -> new LlmSettings("llamacpp", "http://localhost:8080/v1", key == null ? "" : key,
                     "local", 8192, 2, 1800, false, false);
             default -> throw new IllegalArgumentException("Unknown provider '" + p
-                    + "' (expected anthropic | openai | qwen | llamacpp | ollama)");
+                    + "' (expected anthropic | openai | gemini | qwen | llamacpp | ollama)");
         };
         return ModelClients.from(new LlmSettings(s.name(), blank(baseUrl) ? s.baseUrl() : baseUrl, s.apiKey(),
                 blank(model) ? s.model() : model, maxTokens, s.maxRetries(), s.timeoutSeconds(),

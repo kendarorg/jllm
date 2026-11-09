@@ -5,12 +5,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.List;
-import java.util.concurrent.CancellationException;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.function.BooleanSupplier;
 
 /**
@@ -26,15 +21,48 @@ public class CancelToken implements BooleanSupplier {
         }
 
         @Override
+        public void onRetry(RetryListener listener) {
+        }
+
+        @Override
         public Runnable onCancel(Runnable hook) {
             return () -> {
             };
         }
     };
 
+    /** Told when a model client waits before retrying a failed call. */
+    @FunctionalInterface
+    public interface RetryListener {
+        /**
+         * @param status  HTTP status, or 0 for a network error
+         * @param attempt the retry about to be made (1-based)
+         * @param max     maximum number of retries
+         * @param delayMs wait before it
+         */
+        void retrying(int status, int attempt, int max, long delayMs);
+    }
+
+    private volatile RetryListener retryListener;
     private volatile boolean cancelled;
     private final CountDownLatch latch = new CountDownLatch(1);
     private final List<Runnable> hooks = new CopyOnWriteArrayList<>();
+
+    /** Sets the listener the clients call before each retry wait; replaces any previous one. */
+    public void onRetry(RetryListener listener) {
+        this.retryListener = listener;
+    }
+
+    /** Called by the clients before waiting to retry. */
+    public void retrying(int status, int attempt, int max, long delayMs) {
+        RetryListener l = retryListener;
+        if (l == null) return;
+        try {
+            l.retrying(status, attempt, max, delayMs);
+        } catch (RuntimeException ignored) {
+            // a listener must not break the call
+        }
+    }
 
     public boolean isCancelled() {
         return cancelled;

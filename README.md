@@ -70,7 +70,7 @@ MCP servers and REST APIs need no code, only configuration:
 }
 ```
 
-- **MCP**: streamable-HTTP servers, static headers (`${ENV_VAR}` expanded), tools listed at startup. A server that is
+- **MCP**: streamable-HTTP servers or stdio child processes (`command`/`args`/`env`), static headers (`${ENV_VAR}` expanded), tools listed at startup. A server that is
   down does not stop the harness. No OAuth.
 - **REST**: the OpenAPI 3 spec is parsed and each operation matching `allowedPaths` becomes a tool whose input schema
   comes from the spec. Nothing outside the allowlist is reachable. GET/HEAD are read-only, other methods need approval.
@@ -100,8 +100,9 @@ providers, stores), [MCP and REST](docs/MCP.md), [TOOLS](docs/TOOLS.md).
 
 Anthropic (prompt caching, thinking, citations) and any OpenAI-compatible endpoint (OpenAI, Qwen, llama.cpp, vLLM,
 Ollama), selectable by name from a settings `providers` list and switchable with `/model`. An optional fast model handles summaries, tool-group selection and the `auto`-mode classifier. A stricter
-prompt for small local models is available. Two context strategies for long chats: `compaction` (default) and
-`mnemonic` (never rewrites the log).
+prompt for small local models is available. If a provider fails, the next one in the `order` chain is tried. Three
+context strategies for long chats: `compaction` (default), `mnemonic` (never rewrites the log) and `scope` (whole-request
+budget, large tool results offloaded to disk, pinned first message, a `todo_write` task list).
 
 ## Quick start
 
@@ -132,7 +133,7 @@ Set `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`, `QWEN_API_KEY`) first. Embedding t
 | [MCP](docs/MCP.md) | MCP servers and OpenAPI REST APIs as tools |
 | [SKILLS](docs/SKILLS.md) | skills, instruction files, agent prompts |
 | [EXTENDING](docs/EXTENDING.md) | custom tools, hooks, plugins, policies, providers, agent types, context strategies, stores, sandbox, tests |
-| [CACHES](docs/CACHES.md) | prompt-cache layout, compaction and mnemonic algorithms |
+| [CACHES](docs/CACHES.md) | prompt-cache layout, compaction, mnemonic and scope algorithms |
 | [INTERNALS](docs/INTERNALS.md) | architecture, run lifecycle, loop, approvals, sub-agents, concurrency, persistence |
 | [FLOW](docs/FLOW.md) | step-by-step diagrams of every pipeline |
 | [SAMPLES](docs/SAMPLES.md) | prompts and generated projects used to compare setups |

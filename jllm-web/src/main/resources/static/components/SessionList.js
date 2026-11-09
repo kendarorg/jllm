@@ -1,11 +1,11 @@
-import { store, newChat, openChat, deleteChat } from '../store.js';
+import {copyId, deleteChat, newChat, openChat, shortId, store} from '../store.js';
 
 export default {
   setup() {
     function remove(s) {
       if (confirm('Delete this chat?')) deleteChat(s.chatId);
     }
-    return { store, newChat, openChat, remove };
+    return { store, newChat, openChat, remove, copyId, shortId };
   },
   template: `
   <aside class="sidebar" aria-label="Chat sessions">
@@ -16,6 +16,9 @@ export default {
           :aria-selected="s.chatId === store.chatId"
           @click="openChat(s.chatId)" @keydown.enter="openChat(s.chatId)">
         <span class="session-title">{{ s.title || 'Chat' }}</span>
+        <span class="session-id" :title="s.chatId">{{ shortId(s.chatId) }}</span>
+        <button class="copy" :aria-label="'Copy chat id ' + s.chatId" title="Copy the chat id"
+                @click.stop="copyId(s.chatId)">⧉</button>
         <button class="del" :aria-label="'Delete chat ' + (s.title || '')" @click.stop="remove(s)">✕</button>
       </li>
     </ul>

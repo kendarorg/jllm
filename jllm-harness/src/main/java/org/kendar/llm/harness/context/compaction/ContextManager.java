@@ -95,8 +95,12 @@ public class ContextManager {
                                    BooleanSupplier cancelled, java.util.function.Consumer<Usage> usageSink,
                                    boolean allowRewrite, RequestPrefix prefix) {
         if (!config.compaction().auto()) return false;
-        return compactTo(chatId, messages, lastUsage, sink, cancelled, usageSink, allowRewrite,
+        // rewriting history invalidates the signed thinking blocks of the turn in progress: optionally wait for it to end
+        if (config.compaction().deferOnThinkingOverflow() && currentTurnHasThinking(messages)) return false;
+        boolean changed = compactTo(chatId, messages, lastUsage, sink, cancelled, usageSink, allowRewrite,
                 config.compaction().ceiling(config.contextBudgetTokens()), prefix);
+        if (changed) stripThinking(messages, true);
+        return changed;
     }
 
     /**
@@ -230,6 +234,7 @@ public class ContextManager {
                 metrics.compaction(2);
             }
         }
+        if (cleared > 0 || summarized) stripThinking(messages, true);
         return new CompactResult(cleared > 0 || summarized, before, estimateTokens(messages, null), cleared);
     }
 
@@ -249,7 +254,42 @@ public class ContextManager {
                 }
             }
         }
+        if (cleared > 0) stripThinking(messages, false);
         return cleared;
+    }
+
+    /**
+     * Anthropic binds a thinking block's signature to the content before it; once earlier content is rewritten the
+     * block is rejected (400 "Invalid signature"). Reasoning of finished turns is not needed, so drop it.
+     *
+     * @param includeCurrent also drop the blocks of the turn in progress; the caller must then stop requesting
+     *                       thinking for the rest of that turn (the API wants them in a tool loop while it is on)
+     */
+    static void stripThinking(ArrayNode messages, boolean includeCurrent) {
+        int cut = includeCurrent ? messages.size() : cutIndex(messages, 1);
+        for (int i = 0; i < cut; i++) {
+            JsonNode m = messages.get(i);
+            if (!"assistant".equals(m.path("role").asText()) || !m.path("content").isArray()) continue;
+            ArrayNode content = (ArrayNode) m.path("content");
+            for (int j = content.size() - 1; j >= 0 && content.size() > 1; j--) {
+                if (isThinkingBlock(content.get(j))) content.remove(j);
+            }
+        }
+    }
+
+    /** True when the turn in progress (after the last plain user message) holds a thinking block. */
+    public static boolean currentTurnHasThinking(ArrayNode messages) {
+        for (int i = cutIndex(messages, 1); i < messages.size(); i++) {
+            JsonNode m = messages.get(i);
+            if (!"assistant".equals(m.path("role").asText()) || !m.path("content").isArray()) continue;
+            for (JsonNode b : m.path("content")) if (isThinkingBlock(b)) return true;
+        }
+        return false;
+    }
+
+    private static boolean isThinkingBlock(JsonNode b) {
+        String t = b.path("type").asText();
+        return "thinking".equals(t) || "redacted_thinking".equals(t);
     }
 
     private boolean summarize(ArrayNode messages, int keepTurns, java.util.function.Consumer<Usage> usageSink,
@@ -369,13 +409,14 @@ public class ContextManager {
         m.put("role", "user");
         m.putArray("content").addObject().put("type", "text").put("text", SUMMARY_PREFIX + summary);
         messages.addAll(tail);
+        stripThinking(messages, false);
     }
 
     /**
      * Index of the plain-user-text message that starts the {@code keepTurns}-th most recent turn, so a cut there
      * never separates a tool_use from its tool_result. 0 when there are not enough turns to cut.
      */
-    int cutIndex(ArrayNode messages, int keepTurns) {
+    static int cutIndex(ArrayNode messages, int keepTurns) {
         int turns = 0;
         for (int i = messages.size() - 1; i >= 0; i--) {
             if (isPlainUserText(messages.get(i)) && ++turns == Math.max(1, keepTurns)) {

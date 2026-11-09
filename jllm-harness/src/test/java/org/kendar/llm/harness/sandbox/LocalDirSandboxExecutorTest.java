@@ -11,7 +11,8 @@ import java.nio.file.Path;
 import java.time.Duration;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.kendar.llm.harness.HarnessTestSupport.*;
+import static org.kendar.llm.harness.HarnessTestSupport.config;
+import static org.kendar.llm.harness.HarnessTestSupport.json;
 
 class LocalDirSandboxExecutorTest {
 

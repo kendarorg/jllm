@@ -11,7 +11,7 @@ flowchart LR
     B --- AP["approvalPolicy(ToolApprovalPolicy)"]
     B --- MC["modelClient / fastModelClient(ModelClient)"]
     B --- CS["contextStrategy(ContextStrategyFactory)"]
-    B --- ST["sessionStore / subAgentRunLog / mnemonicStore"]
+    B --- ST["sessionStore / subAgentRunLog / mnemonicStore / stateStore"]
     B --- SB["sandbox(SandboxExecutor)"]
     B --- ME["metrics(HarnessMetrics) / pricing(HarnessPricing)"]
     B --- SE["settings(file or HarnessSettings)<br/>MCP, REST, skills, agents, instructions"]
@@ -102,9 +102,9 @@ public interface Hook { HookResult run(HookContext ctx) throws Exception; }
 | `USER_PROMPT` | user message, before anything | `text` | deny (prompt dropped, warning), add context to the message |
 | `PRE_AGENT` | main agent start, every sub-agent start | `agent`, `text` (prompt) | deny (main: no run; sub-agent: its `task` entry fails) |
 | `PRE_LLM` | before every model call | `agent` | deny (run ends with an error; log stays valid) |
-| `POST_LLM` | after every model call | `agent`, `text`, `isError` | observe |
+| `POST_LLM` | after every model call | `agent`, `text`, `isError`, `durationMs`, `usage` (null on failure) | observe |
 | `PRE_TOOL` | before the permission check | `tool`, `input` | deny, rewrite input, add context to the result |
-| `POST_TOOL` | after the tool ran | `tool`, `input`, `output`, `isError` | add context to the result |
+| `POST_TOOL` | after the tool ran | `tool`, `input`, `output`, `isError`, `durationMs` | add context to the result |
 | `POST_AGENT` | agent end, also on failure | `agent`, `text` (answer or error), `isError` | observe |
 | `STOP` | end of a main-agent turn | `text` (final answer) | observe |
 
@@ -144,6 +144,35 @@ builder.beforeToolCall(ctx -> ctx.tool().equals("bash") && ctx.input().path("com
                 : HookResult.allow())
        .afterLlmCall(ctx -> { audit.log(ctx.chatId(), ctx.agent(), ctx.text()); return HookResult.allow(); });
 ```
+
+### Tracing
+
+`durationMs` and `usage` on `POST_LLM` / `POST_TOOL` are all a tracing adapter needs; the harness has no OpenTelemetry
+dependency. An adapter is a plugin that registers hooks and keeps the spans itself (sketch, not shipped):
+
+```java
+public final class OtelPlugin implements HarnessPlugin {
+    public void install(PluginRegistrar r) {
+        Tracer tracer = GlobalOpenTelemetry.getTracer("jllm");
+        r.hook(HookEvent.POST_LLM, c -> {
+            Span s = tracer.spanBuilder("llm").setStartTimestamp(Instant.now().minusMillis(c.durationMs())).startSpan();
+            if (c.usage() != null) s.setAttribute("tokens.input", c.usage().contextTokens());
+            if (c.isError()) s.setStatus(StatusCode.ERROR);
+            s.end();
+            return HookResult.allow();
+        });
+        r.hook(HookEvent.POST_TOOL, c -> {
+            Span s = tracer.spanBuilder("tool " + c.tool()).setStartTimestamp(Instant.now().minusMillis(c.durationMs())).startSpan();
+            if (c.isError()) s.setStatus(StatusCode.ERROR);
+            s.end();
+            return HookResult.allow();
+        });
+    }
+}
+```
+
+The factories `HookContext.afterLlm(...)` and `HookContext.postTool(..., durationMs)` carry the timing; the older
+factories report `durationMs` 0. A hook that throws is logged and skipped.
 
 ## 3. Plugins and slash commands
 
@@ -196,6 +225,9 @@ public interface ModelClient {
     default ModelResponse complete(ModelRequest request, CancelToken cancel) { return complete(request); }
     String simpleComplete(String system, String user, int maxTokens);
     default String simpleComplete(String system, String user, int maxTokens, Consumer<Usage> usageSink) { … }
+    /** explicit sampling temperature for yes/no decisions; a client that cannot send one (Anthropic) ignores it */
+    default String simpleComplete(String system, String user, int maxTokens, Double temperature,
+                                  Consumer<Usage> usageSink) { … }
 }
 ```
 
@@ -219,8 +251,13 @@ Named providers, `/model` switching and temperature are described in [USAGE](USA
 `ModelRequest.temperature()` of `null` means "do not send"; wrap a client in `TemperatureModelClient` to give it a
 default.
 
+**Fallback.** `ProviderSettings.order` chains configured providers: `ProviderCatalog.client(...)` returns a
+`FallbackModelClient` that tries them in ascending `order` when one throws a `ModelException` (not a context overflow,
+not a cancellation). `FallbackModelClient.onFallback(listener)` reports the provider about to be tried. Retry stays
+inside each client (`maxRetries`).
+
 `fastModelClient(...)` (or settings `fastModel`) adds a small model for tool-group selection, compaction summaries and
-the `auto` classifier. With `serializeModelCalls` both are wrapped in `LimitedModelClient(…, 1)`.
+the `auto` classifier. Unless `maxParallel` is -1 both are wrapped in `LimitedModelClient(…, maxParallel)`.
 
 ## 6. Sub-agent types
 
@@ -255,7 +292,7 @@ sequenceDiagram
     participant S as runSubAgent
     participant U as user
     M->>T: {subagent_type, prompts (max 8)}
-    alt parallel allowed (serializeModelCalls=false, and read-only type or mode default/plan)
+    alt parallel allowed (maxParallel != 1, and read-only type or mode default/plan)
         T->>S: all prompts concurrently
     else
         T->>S: one after the other (global lock)
@@ -294,6 +331,8 @@ builder.contextStrategy(deps -> new SlidingWindowStrategy(deps.config(), deps.ma
 ```
 
 `deps` gives `config`, `model`, `summaryModel` (fast or main), `approvals`, `mapper`, `metrics`, `subAgentRuns`.
+Built-in kinds are `COMPACTION`, `MNEMONIC` and `SCOPE` (`context.scope.*`, `builder.scopeOptions(...)`); the todo
+tools of `SCOPE` come from `tools()`, a pattern to reuse for a strategy that needs tools of its own.
 
 Contract:
 
@@ -309,9 +348,10 @@ Contract:
 
 | Port | Default | CLI | Holds |
 |---|---|---|---|
-| `ChatSessionStore` | `InMemoryChatSessionStore` | `FileHistoryChatSessionStore` | `ChatSessionData`: messages (JSON lines), mode, tool groups, usage, title, agent id |
+| `ChatSessionStore` | `InMemoryChatSessionStore` | `FileChatSessionStore` | `ChatSessionData`: messages (JSON lines), mode, tool groups, usage, title, agent id, message count |
 | `SubAgentRunLog` | `InMemorySubAgentRunLog` | `FileHistorySubAgentRunLog` | sub-agent prompt, transcript, answer, status, usage |
 | `MnemonicStore` | `InMemoryMnemonicStore` | `FileMnemonicStore` | mnemonic decisions per chat and agent |
+| `StateStore` | `InMemoryStateStore` | `FileStateStore` | small JSON documents per chat: tool grants (`grants`), todo lists (`todos-<agent>`); `<history>/<chat>/state/<name>.json` |
 
 ```java
 public interface ChatSessionStore {

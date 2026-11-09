@@ -16,10 +16,10 @@ The API key comes from `--api-key` or the `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`
 ## Flags
 
 ```text
-Main [--provider anthropic|openai|qwen|llamacpp|ollama] [--model M] [--base-url U] [--api-key K]
-     [--mode default|plan|edit|auto] [--workdir DIR] [--prompt TEXT] [--settings FILE] [--system-prompt TEXT]
+Main [--provider anthropic|openai|gemini|qwen|llamacpp|ollama] [--model M] [--base-url U] [--api-key K]
+     [--mode default|plan|edit|auto] [--workdir DIR] [--prompt TEXT] [--settings FILE] [--system-prompt TEXT] [--system-prompt-file FILE] [--system-prompt-replace FILE]
      [--max-turns N] [--context-tokens TOKENS] [--max-tokens TOKENS]
-     [--context-strategy compaction|mnemonic] [--search-api-key BRAVE_KEY] [--small-model]
+     [--context-strategy compaction|mnemonic|scope] [--search-api-key BRAVE_KEY] [--small-model]
      [--sandbox local|docker] [--docker-image IMAGE] [--docker-mode oneshot|daemon]
      [--docker-remote] [--docker-remote-host ADDRESS]
      [--sandbox-clean] [--sandbox-clean-all]
@@ -27,19 +27,21 @@ Main [--provider anthropic|openai|qwen|llamacpp|ollama] [--model M] [--base-url 
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--provider` | settings `defaultProvider`, else `anthropic` | a provider name from the settings `providers` list, or a built-in: `anthropic`, `openai`, `qwen`, `llamacpp`, `ollama` |
+| `--provider` | settings `defaultProvider`, else `anthropic` | a provider name from the settings `providers` list, or a built-in: `anthropic`, `openai`, `gemini`, `qwen`, `llamacpp`, `ollama` |
 | `--model` | per provider (`claude-sonnet-5-5`, `gpt-4.1`, `qwen3-coder-plus`, `local`, `llama3.1`) | model name; overrides the named provider for this session only |
 | `--base-url` | per provider | endpoint (OpenAI-compatible URLs include `/v1`) |
 | `--api-key` | `<PROVIDER>_API_KEY` env var | `ASK_TOKEN` asks for it on startup |
 | `--mode` | `default` | initial [permission mode](../jllm-harness/README.md#modes-working-directory-and-scratch-directory) |
 | `--workdir` | current directory | project directory; the file tools are confined to it |
 | `--prompt` | none | run one turn non-interactively, then exit |
-| `--settings` | none | harness [settings file](../docs/USAGE.md#5-settings-file) |
+| `--settings` | none | harness [settings file](../docs/USAGE.md#5-settings-file), merged over `~/.jllm/settings.json` and `.jllm/settings.json` |
 | `--system-prompt` | none | text appended to the built-in system prompt |
+| `--system-prompt-file` | none | file appended to the system prompt |
+| `--system-prompt-replace` | none | file that replaces the built-in system prompt; also `SYSTEM.md` / `APPEND_SYSTEM.md` in `~/.jllm/` and `.jllm/` (see [USAGE](../docs/USAGE.md#system-prompt-files)) |
 | `--max-turns` | 40 | model calls per user turn |
 | `--context-tokens` | 100000 | the model's context window; wins over `context.maxTokens` |
 | `--max-tokens` | 32000 | output limit of one response, not the window |
-| `--context-strategy` | `compaction` | `compaction` or `mnemonic`; wins over `context.strategy` |
+| `--context-strategy` | `compaction` | `compaction`, `mnemonic` or `scope`; wins over `context.strategy` |
 | `--search-api-key` | `BRAVE_API_KEY` env var | Brave key for `web_search`; without it DuckDuckGo is scraped |
 | `--small-model` | off | no value; adds the small-model rules to the system prompt |
 | `--sandbox` | `local` | `local` (no isolation) or `docker`: `bash` runs in a container with the project directory mounted ([SANDBOX](../docs/SANDBOX.md)); wins over `sandbox.backend` |
@@ -65,7 +67,7 @@ On startup the CLI prints three directories:
 | history dir | `<project>/.kendhar/history/<chatId>/<agentId>/` | `messages.jsonl`, sub-agent runs, `mnemonic.json` |
 
 When the project directory is not writable, scratch and history go under `sandbox.tempDir`
-(default `${java.io.tmpdir}/agent-harness`). Chats persist there, so `/chats` and `/resume <id>` work across runs.
+(default `${java.io.tmpdir}/agent-harness`). Chats persist there. At startup the CLI offers to continue the newest saved chat (`--resume prompt|no|<id>`, default `prompt`; `--prompt` and piped input never ask), see [USAGE](../docs/USAGE.md#saved-chats-and-restarting).
 
 The CLI has **no isolation**: shell commands run as the current user, and plan mode cannot stop a shell command from
 writing to the project directory.
@@ -124,7 +126,10 @@ included.
 | `/cost` | tokens (input, output, cache read, cache write) and estimated cost |
 | `/where` | working and scratch directory |
 | `/status` | context strategy, estimated context size against the window, usage, chat count |
-| `/chats` `/resume <id>` `/title <text>` | list, switch, rename chats |
+| `/chats` `/resume <id\|prefix>` `/title <text>` | list, switch, rename chats |
+| `/chats delete <id>` `/chats clean [days]` | delete one chat; list chats older than `days` (default 30), `/chats clean confirm` deletes them |
+| `/export [md\|html] [file]` | write the chat as a transcript into the scratch directory |
+| `/login [name]` `/logout <name>` | OAuth login (providers, MCP servers with `oauth`); no name lists them |
 | `/exit` `/quit` | leave the CLI |
 
 Menu toggles live in memory only; the settings file is the startup default.
@@ -138,12 +143,12 @@ java -jar jllm-cli.jar --provider llamacpp --base-url http://localhost:8080/v1 -
 
 Ollama's OpenAI endpoint cannot set the context size per request. Raise it on the Ollama side
 (`OLLAMA_CONTEXT_LENGTH` or `num_ctx` in a Modelfile) and keep `--context-tokens` below it. Model calls are serialized
-by default (`execution.serializeModelCalls`), which suits one local GPU. `--small-model` is described in the
+by default (`execution.maxParallel`), which suits one local GPU. `--small-model` is described in the
 [harness README](../jllm-harness/README.md#embedding).
 
 ## Wiring
 
-`Main` builds the harness with `CwdSandboxExecutor` (rooted at the project dir), `FileHistoryChatSessionStore`,
+`Main` builds the harness with `CwdSandboxExecutor` (rooted at the project dir), `FileChatSessionStore`,
 `FileHistorySubAgentRunLog` and `FileMnemonicStore`, then subscribes to the chat's events. Precedence for the same
 setting: flag, then settings file, then default. See [USAGE](../docs/USAGE.md) for the settings file and the event
 contract.

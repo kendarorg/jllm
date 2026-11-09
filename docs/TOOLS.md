@@ -11,6 +11,7 @@ What the model can call, how tools are grouped, selected per chat and gated. To 
 | `write_file` | Files | FILE_EDIT | `path`, `content`, `append?` | creates parent dirs; `append: true` adds to the end (for large files written in parts); preview is a `-`/`+` diff |
 | `edit_file` | Files | FILE_EDIT | `path`, `old_string`, `new_string`, `replace_all?`, or `edits[]` | `old_string` must be unique unless `replace_all`; tolerates trailing whitespace and smart quotes/dashes (only if the match is unique); keeps BOM and CRLF; `edits` applies several replacements against the original text, all or none; the result is a short diff; a miss lists the closest lines |
 | `glob` | Files | READ_ONLY | `pattern` | at most 200 paths, sorted; `**/x` also matches top-level files |
+| `ls` | Files | READ_ONLY | `path?` | one directory, not recursive: directories first (`d name/`), then files (`f name size`); at most 200 entries; not available on a remote (docker daemon) work dir |
 | `grep` | Files | READ_ONLY | `pattern` (Java regex), `path?`, `glob?` | `path:line:text`, at most 200 hits, files over 1 MB skipped |
 | `bash` | Shell | OTHER | `command`, `timeout_seconds?` | runs through the `SandboxExecutor`; timeout capped at 600 s; stderr is merged into stdout; only the last 50 KB are kept and the result says `[output truncated: N lines omitted; full log: <scratch>/bash-N.log]` (read the log with `read_file` or `grep`) |
 | `web_search` | Web | READ_ONLY | `query`, `count?` (≤ 20) | Brave with a key, DuckDuckGo HTML otherwise |
@@ -20,11 +21,13 @@ What the model can call, how tools are grouped, selected per chat and gated. To 
 | `task` | Agents | READ_ONLY | `prompts[≤8]`, `subagent_type?` | sub-agent fan-out; main agent only |
 | `request_tool_group` | Agents | READ_ONLY | `groups[]` | only while groups are missing; main agent only |
 | `history_recall` | Memory | READ_ONLY | `id?`, `query?`, `file?`, `scope?`, `offset?` | mnemonic strategy only ([CACHES §4](CACHES.md#4-mnemonic-strategy)) |
+| `todo_write` | Todo | READ_ONLY | `todos[]` (`id?`, `content`, `status`) | scope strategy only: replaces the whole list, at most one `in_progress`; emits the `todos` event ([CACHES §5](CACHES.md#5-scope-strategy)) |
+| `todo_read` | Todo | READ_ONLY | none | scope strategy only: the current list |
 | `mcp__<server>__<tool>` | `Mcp/<server>` | READ_ONLY if `readOnly`, else OTHER | server schema | [MCP](MCP.md) |
 | `<api>__<operationId>` | `Rest/<api>` | READ_ONLY for GET/HEAD, else OTHER | built from the spec | [MCP §3](MCP.md#3-rest-apis-openapi) |
 
-`builder.withoutStandardTools()` drops Files, Shell and Web. `task`, `request_tool_group` and `history_recall` are not
-in the registry: the loop adds them to the tool list of each request.
+`builder.withoutStandardTools()` drops Files, Shell and Web. `task`, `request_tool_group`, `history_recall` and the
+todo tools are not in the registry: the loop adds them to the tool list of each request.
 
 ### Tool kinds
 
@@ -142,6 +145,7 @@ with `interactive=false` (the built-in main and sub-agent loops are both interac
 | `web.fetchMaxChars` | 40000 | `web_fetch` body before the context limit |
 | REST response | 20000 | `RestApiToolProvider` |
 | `history_recall` page | 12000 (`mnemonic.recallMaxChars`) | per call, continue with `offset` |
+| `context.scope.offloadChars` | 20000 | `scope` strategy: a larger result is offloaded to a file, head and tail stay (applies after the `toolMaxChars` cut) |
 
 ## Document readers
 

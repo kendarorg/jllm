@@ -6,12 +6,11 @@ import org.junit.jupiter.api.Test;
 import org.kendar.llm.harness.llm.Usage;
 import org.kendar.llm.harness.permission.PermissionMode;
 
-import java.nio.file.Path;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.kendar.llm.harness.HarnessTestSupport.*;
+import static org.kendar.llm.harness.HarnessTestSupport.MAPPER;
 
 class ChatSessionServiceTest {
 

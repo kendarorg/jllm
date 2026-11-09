@@ -16,7 +16,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
 /** Minimal MCP client over streamable HTTP: initialize, tools/list and tools/call. */
-public final class McpHttpClient {
+public final class McpHttpClient implements McpClient {
 
     private static final String PROTOCOL_VERSION = "2025-03-26";
 
@@ -27,6 +27,13 @@ public final class McpHttpClient {
     private final AtomicLong ids = new AtomicLong();
     private volatile String sessionId;
     private volatile boolean initialized;
+    private volatile org.kendar.llm.harness.auth.AuthProvider auth;
+
+    /** Adds the provider's headers (OAuth bearer) to every request; a 401 triggers one retry with a fresh token. */
+    public McpHttpClient authProvider(org.kendar.llm.harness.auth.AuthProvider provider) {
+        this.auth = provider;
+        return this;
+    }
 
     public McpHttpClient(HttpClient http, ObjectMapper mapper, String url, Map<String, String> headers) {
         this.http = http;
@@ -35,6 +42,7 @@ public final class McpHttpClient {
         this.headers = headers;
     }
 
+    @Override
     public synchronized void initialize() throws IOException, InterruptedException {
         if (initialized) return;
         ObjectNode params = mapper.createObjectNode();
@@ -48,7 +56,7 @@ public final class McpHttpClient {
         initialized = true;
     }
 
-    /** @return the entries of tools/list, following pagination */
+    @Override
     public List<JsonNode> listTools() throws IOException, InterruptedException {
         initialize();
         List<JsonNode> tools = new ArrayList<>();
@@ -63,7 +71,7 @@ public final class McpHttpClient {
         return tools;
     }
 
-    /** @return the result object of tools/call */
+    @Override
     public JsonNode callTool(String name, JsonNode arguments) throws IOException, InterruptedException {
         initialize();
         ObjectNode params = mapper.createObjectNode();
@@ -80,14 +88,11 @@ public final class McpHttpClient {
     }
 
     private JsonNode post(ObjectNode body, boolean expectResult) throws IOException, InterruptedException {
-        HttpRequest.Builder b = HttpRequest.newBuilder(url).timeout(Duration.ofSeconds(60))
-                .header("Content-Type", "application/json")
-                .header("Accept", "application/json, text/event-stream");
-        if (sessionId != null) b.header("Mcp-Session-Id", sessionId);
-        headers.forEach(b::header);
-        HttpResponse<String> resp = http.send(
-                b.POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body))).build(),
-                HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> resp = send(body);
+        if (resp.statusCode() == 401 && auth != null) {
+            auth.onUnauthorized();
+            resp = send(body);
+        }
         resp.headers().firstValue("Mcp-Session-Id").ifPresent(id -> sessionId = id);
         if (resp.statusCode() / 100 != 2) {
             throw new IOException("MCP " + url + " answered HTTP " + resp.statusCode() + ": " + resp.body());
@@ -99,6 +104,23 @@ public final class McpHttpClient {
             throw new IOException("MCP error: " + err.path("message").asText(err.toString()));
         }
         return message.path("result");
+    }
+
+    private HttpResponse<String> send(ObjectNode body) throws IOException, InterruptedException {
+        HttpRequest.Builder b = HttpRequest.newBuilder(url).timeout(Duration.ofSeconds(60))
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json, text/event-stream");
+        if (sessionId != null) b.header("Mcp-Session-Id", sessionId);
+        headers.forEach(b::header);
+        if (auth != null) {
+            try {
+                auth.headers().forEach(b::header);
+            } catch (IllegalStateException e) {
+                throw new IOException(e.getMessage(), e);
+            }
+        }
+        return http.send(b.POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body))).build(),
+                HttpResponse.BodyHandlers.ofString());
     }
 
     /** Reads a plain JSON body, or the matching message out of an SSE stream. */

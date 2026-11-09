@@ -48,9 +48,9 @@ flowchart TB
 
     subgraph LLM["LLM layer"]
         MC["ModelClient"]
-        LMC["LimitedModelClient<br/>(serializeModelCalls)"]
+        LMC["LimitedModelClient<br/>(maxParallel)"]
         ANT["AnthropicModelClient"]
-        OAI["OpenAiCompatModelClient<br/>openai qwen llamacpp vLLM ollama"]
+        OAI["OpenAiCompatModelClient<br/>openai gemini qwen llamacpp vLLM ollama"]
         FAST["fast ModelClient (optional)"]
     end
 
@@ -79,7 +79,7 @@ The fast model is optional. If none is configured, `ContextManager` and `ToolSel
 
 ```mermaid
 flowchart TD
-    A["settings.applyTo(config)"] --> B{"serializeModelCalls?"}
+    A["settings.applyTo(config)"] --> B{"maxParallel != -1?"}
     B -->|yes, default| C["wrap modelClient in LimitedModelClient(1)"]
     B -->|no| D
     C --> D["sandbox = given or LocalDirSandboxExecutor"]
@@ -162,7 +162,7 @@ sequenceDiagram
 | `refusal`, `model_context_window_exceeded` | warning; return |
 | context-overflow error | `compactNow` once, retry same turn (`turn--`); second failure is an `error` event |
 | cancel | `cancelled` event, return |
-| `maxTurns` reached | warning "Stopped after N turns" |
+| `maxTurns` reached | interactive run: approval of type `continue` (approve = another `maxTurns`); otherwise, or when rejected, warning "Stopped after N turns" |
 
 ## 4. Tool call pipeline (`AgentLoop.executeTool`)
 
@@ -363,10 +363,11 @@ flowchart LR
         C3["ContextManager.summarizeSpan fallback<br/>simpleComplete, 3000 tokens"]
         C4["ToolSelector.chooseGroups<br/>simpleComplete, 256 tokens"]
         C5["ToolClassifier.classify<br/>simpleComplete, 60 tokens, 20 s timeout"]
+        C6["NoiseQualifier.decide<br/>simpleComplete, temperature 0, 8 tokens, 4 s timeout, command text only"]
     end
     C1 & C2 --> MAIN["main ModelClient<br/>(or sub-agent type.model)"]
-    C3 & C4 & C5 --> FASTQ["fast ModelClient if set, else main"]
-    MAIN & FASTQ --> LMC["LimitedModelClient<br/>fair semaphore, 1 slot when serializeModelCalls"]
+    C3 & C4 & C5 & C6 --> FASTQ["fast ModelClient if set, else main"]
+    MAIN & FASTQ --> LMC["LimitedModelClient<br/>fair semaphore, maxParallel slots (default 1)"]
     LMC --> P{"provider"}
     P --> ANT["AnthropicModelClient<br/>POST /v1/messages (non-streaming)"]
     P --> OAI["OpenAiCompatModelClient<br/>POST /chat/completions<br/>retry on 429 / 5xx with backoff or retry-after"]
@@ -437,8 +438,9 @@ Event types: `run_started`, `run_queued`, `text`, `usage`, `tool_call`, `tool_re
 
 - `ChatSessionData` holds messages (JSON lines), mode, tool groups, usage counters, title, `agentId`.
 - `AgentLoop` saves the message log after the user message, after every assistant response, and after every tool-result message. A model call that fails or is denied appends nothing, so the log always stays valid for the next call.
-- Stores: `InMemoryChatSessionStore` (default), `FileHistoryChatSessionStore` (mirrors to `messages.jsonl`, CLI). Sub-agent runs: `InMemorySubAgentRunLog`, `FileHistorySubAgentRunLog`.
-- Grants (`approve always`) and declined-rewrite markers are runtime state only, never in the context.
+- Stores: `InMemoryChatSessionStore` (default), `FileChatSessionStore` (`session.json` + `messages.jsonl`, read back on restart, CLI and web). Sub-agent runs: `InMemorySubAgentRunLog`, `FileHistorySubAgentRunLog`.
+- Grants (`approve always`) are saved through the `StateStore` (`<history>/<chat>/state/grants.json` in the CLI and web), so they survive a restart; with the default in-memory store they last for the run. Declined-rewrite markers are runtime state only. None of them is in the context.
+- The `StateStore` also holds the todo lists of the `scope` strategy (`todos-<agent>`). The plan mode is the session `mode`; plan files are in the scratch directory.
 
 ## 12. Sandbox
 

@@ -6,11 +6,11 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.kendar.llm.harness.HarnessMetrics;
-import org.kendar.llm.harness.llm.AnthropicSettings;
+import org.kendar.llm.harness.HarnessTestSupport.CountingMetrics;
 import org.kendar.llm.harness.HarnessTestSupport.Events;
 import org.kendar.llm.harness.HarnessTestSupport.Rig;
 import org.kendar.llm.harness.llm.AnthropicModelClient;
+import org.kendar.llm.harness.llm.AnthropicSettings;
 import org.kendar.llm.harness.session.ChatSessionData;
 import org.kendar.llm.harness.tools.ToolKind;
 
@@ -26,8 +26,6 @@ import java.util.concurrent.ConcurrentLinkedDeque;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.kendar.llm.harness.HarnessTestSupport.MAPPER;
 import static org.kendar.llm.harness.HarnessTestSupport.tool;
-import org.kendar.llm.harness.HarnessTestSupport.CountingMetrics;
-import static org.mockito.Mockito.when;
 
 /**
  * Real AnthropicModelClient against a fake HTTP server returning scripted usage metadata

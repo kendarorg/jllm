@@ -3,9 +3,7 @@ package org.kendar.llm.harness.agent;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.kendar.llm.harness.HarnessTestSupport.Events;
-import org.kendar.llm.harness.HarnessTestSupport.Recorded;
-import org.kendar.llm.harness.HarnessTestSupport.Rig;
+import org.kendar.llm.harness.HarnessTestSupport.*;
 import org.kendar.llm.harness.tools.ToolKind;
 
 import java.nio.charset.StandardCharsets;
@@ -15,7 +13,6 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.kendar.llm.harness.HarnessTestSupport.*;
-import static org.mockito.Mockito.when;
 
 /**
  * The cache boundary: the pinned chatId+agentId system block (and the policy block after it) must be

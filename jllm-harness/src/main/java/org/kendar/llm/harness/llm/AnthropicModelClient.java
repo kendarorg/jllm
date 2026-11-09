@@ -30,6 +30,13 @@ public class AnthropicModelClient implements ModelClient {
     static final String RAG_TOOL = "search_local_knowledge";
 
     private final long backoffBaseMs;
+    private volatile org.kendar.llm.harness.auth.AuthProvider auth;
+
+    /** Headers come from the provider (OAuth, rotating keys) instead of the static {@code apiKey}. */
+    public AnthropicModelClient authProvider(org.kendar.llm.harness.auth.AuthProvider provider) {
+        this.auth = provider;
+        return this;
+    }
 
     public AnthropicModelClient(AnthropicSettings props, ObjectMapper mapper) {
         this(props, mapper, 1000L);
@@ -49,7 +56,7 @@ public class AnthropicModelClient implements ModelClient {
 
     @Override
     public ModelResponse complete(ModelRequest req, CancelToken cancel) {
-        if (props.apiKey() == null || props.apiKey().isBlank()) {
+        if (auth == null && (props.apiKey() == null || props.apiKey().isBlank())) {
             throw new ModelException("Anthropic API key (ANTHROPIC_API_KEY) is not configured");
         }
         ObjectNode body = buildBody(req);
@@ -86,7 +93,7 @@ public class AnthropicModelClient implements ModelClient {
         ObjectNode body = mapper.createObjectNode();
         body.put("model", props.model());
 
-        int thinking = props.thinkingBudget();
+        int thinking = req.thinkingLevel() != null ? req.thinkingLevel().anthropicBudget() : props.thinkingBudget();
         int maxTokens = req.maxTokens() > 0 ? req.maxTokens() : props.maxTokens();
         if (thinking >= 1024) {
             maxTokens = Math.max(maxTokens, thinking + 1024);
@@ -120,8 +127,47 @@ public class AnthropicModelClient implements ModelClient {
             cacheControl(lastTool);
             applyToolChoice(body, req, thinking >= 1024);
         }
-        body.set("messages", props.citations() ? withSearchResults(req.messages()) : req.messages());
+        ArrayNode msgs = withoutFinishedThinking(req.messages());
+        body.set("messages", props.citations() ? withSearchResults(msgs) : msgs);
         return body;
+    }
+
+    /**
+     * Copy of the messages without the thinking blocks of finished turns. The API ignores them there anyway, and a
+     * signature is bound to the content before it: once that was rewritten (compaction, masking, a resumed chat saved
+     * before a rewrite) the block is rejected with a 400. The turn in progress keeps its blocks.
+     */
+    ArrayNode withoutFinishedThinking(ArrayNode messages) {
+        int cut = 0;
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            if (plainUserText(messages.get(i))) {
+                cut = i;
+                break;
+            }
+        }
+        ArrayNode out = null;
+        for (int i = 0; i < cut; i++) {
+            JsonNode m = messages.get(i);
+            if (!"assistant".equals(m.path("role").asText()) || !m.path("content").isArray()) continue;
+            ArrayNode kept = mapper.createArrayNode();
+            for (JsonNode b : m.get("content")) {
+                String t = b.path("type").asText();
+                if (!"thinking".equals(t) && !"redacted_thinking".equals(t)) kept.add(b);
+            }
+            if (kept.size() == m.get("content").size() || kept.isEmpty()) continue;
+            if (out == null) out = messages.deepCopy();
+            ((ObjectNode) out.get(i)).set("content", kept);
+        }
+        return out != null ? out : messages;
+    }
+
+    private static boolean plainUserText(JsonNode msg) {
+        if (!"user".equals(msg.path("role").asText())) return false;
+        JsonNode c = msg.path("content");
+        if (c.isTextual()) return true;
+        if (!c.isArray() || c.isEmpty()) return false;
+        for (JsonNode b : c) if (!"text".equals(b.path("type").asText())) return false;
+        return true;
     }
 
     private void applyToolChoice(ObjectNode body, ModelRequest req, boolean thinkingOn) {
@@ -217,13 +263,24 @@ public class AnthropicModelClient implements ModelClient {
         } catch (IOException e) {
             throw new ModelException("Cannot serialize request", e);
         }
-        HttpRequest request = HttpRequest.newBuilder(URI.create(props.baseUrl().replaceAll("/+$", "") + "/v1/messages"))
-                .timeout(Duration.ofSeconds(Math.max(1, props.timeoutSeconds())))
-                .header("content-type", "application/json")
-                .header("x-api-key", props.apiKey())
-                .header("anthropic-version", API_VERSION)
-                .POST(HttpRequest.BodyPublishers.ofString(payload))
-                .build();
+        java.util.function.Supplier<HttpRequest> build = () -> {
+            HttpRequest.Builder rb = HttpRequest.newBuilder(URI.create(props.baseUrl().replaceAll("/+$", "") + "/v1/messages"))
+                    .timeout(Duration.ofSeconds(Math.max(1, props.timeoutSeconds())))
+                    .header("content-type", "application/json")
+                    .header("anthropic-version", API_VERSION);
+            if (auth != null) {
+                try {
+                    auth.headers().forEach(rb::header);
+                } catch (RuntimeException e) {
+                    throw new ModelException("Authentication failed: " + e.getMessage(), e);
+                }
+            } else {
+                rb.header("x-api-key", props.apiKey());
+            }
+            return rb.POST(HttpRequest.BodyPublishers.ofString(payload)).build();
+        };
+        HttpRequest request = build.get();
+        boolean authRetried = false;
 
         int attempt = 0;
         while (true) {
@@ -232,6 +289,12 @@ public class AnthropicModelClient implements ModelClient {
                 int status = resp.statusCode();
                 if (status == 200) {
                     return mapper.readTree(resp.body());
+                }
+                if (status == 401 && auth != null && !authRetried) {
+                    authRetried = true;
+                    auth.onUnauthorized();
+                    request = build.get();
+                    continue;
                 }
                 boolean retryable = status == 429 || status == 529 || status >= 500;
                 if (!retryable || attempt >= props.maxRetries()) {
@@ -242,6 +305,7 @@ public class AnthropicModelClient implements ModelClient {
                         .orElse(Math.min(30_000L, backoffBaseMs << attempt));
                 log.warn("Anthropic API {} — retry {} in {} ms", status, attempt + 1, delayMs);
                 attempt++;
+                cancel.retrying(status, attempt, props.maxRetries(), delayMs);
                 cancel.sleep(delayMs);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
@@ -251,8 +315,10 @@ public class AnthropicModelClient implements ModelClient {
                     throw new ModelException("Anthropic API call failed: " + e.getMessage(), e);
                 }
                 attempt++;
+                long netDelay = Math.min(30_000L, backoffBaseMs << attempt);
+                cancel.retrying(0, attempt, props.maxRetries(), netDelay);
                 try {
-                    cancel.sleep(Math.min(30_000L, backoffBaseMs << attempt));
+                    cancel.sleep(netDelay);
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
                     throw new ModelException("Interrupted while calling the model", ie);

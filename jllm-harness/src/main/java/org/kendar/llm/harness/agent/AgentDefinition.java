@@ -1,6 +1,7 @@
 package org.kendar.llm.harness.agent;
 
 import org.kendar.llm.harness.llm.ModelClient;
+import org.kendar.llm.harness.llm.ThinkingLevel;
 
 import java.util.List;
 
@@ -16,14 +17,20 @@ import java.util.List;
  * @param model          model of this agent type; null = the main model
  * @param readOnly       only read-only tools, whatever the mode of the caller
  * @param temperature    sampling temperature of this agent type; null = the provider's
+ * @param thinking       reasoning effort of this agent type; null = the provider's
  */
 public record AgentDefinition(String name, String description, List<String> tools, String prompt,
                               boolean inheritContext, ModelClient model, boolean readOnly,
-                              Double temperature) {
+                              Double temperature, ThinkingLevel thinking) {
 
     public AgentDefinition {
         tools = tools == null ? List.of() : List.copyOf(tools);
         prompt = prompt == null ? "" : prompt;
+    }
+
+    public AgentDefinition(String name, String description, List<String> tools, String prompt,
+                           boolean inheritContext, ModelClient model, boolean readOnly, Double temperature) {
+        this(name, description, tools, prompt, inheritContext, model, readOnly, temperature, null);
     }
 
     public AgentDefinition(String name, String description, List<String> tools, String prompt,

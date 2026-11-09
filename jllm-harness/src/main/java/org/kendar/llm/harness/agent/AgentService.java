@@ -1,9 +1,9 @@
 package org.kendar.llm.harness.agent;
 
-import org.kendar.llm.harness.HarnessConfig;
-import org.kendar.llm.harness.context.CompactResult;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.kendar.llm.harness.HarnessConfig;
+import org.kendar.llm.harness.context.CompactResult;
 import org.kendar.llm.harness.llm.CancelToken;
 import org.kendar.llm.harness.permission.ApprovalService;
 import org.kendar.llm.harness.session.ChatSessionData;
@@ -14,12 +14,7 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Semaphore;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.function.Consumer;
 
 /** Owns one run per chat at a time, buffers its events (replayable by seq) and supports cancellation. */
@@ -55,10 +50,17 @@ public class AgentService {
     private final Map<String, ChatRun> runs = new ConcurrentHashMap<>();
 
     private final boolean serializeRuns;
-    private final Semaphore runSlot = new Semaphore(1, true);
+    private final Semaphore runSlot;
 
     public AgentService(AgentLoop loop, ChatSessionService sessions, ApprovalService approvals, ObjectMapper mapper,
                         HarnessConfig config) {
+        this(loop, sessions, approvals, mapper, config, 1);
+    }
+
+    /** @param maxParallel chat runs allowed at once while {@code serializeRuns} is on ({@code -1} unlimited, 0 means 1) */
+    public AgentService(AgentLoop loop, ChatSessionService sessions, ApprovalService approvals, ObjectMapper mapper,
+                        HarnessConfig config, int maxParallel) {
+        this.runSlot = new Semaphore(maxParallel < 0 ? Integer.MAX_VALUE : Math.max(1, maxParallel), true);
         this.loop = loop;
         this.sessions = sessions;
         this.approvals = approvals;
@@ -231,6 +233,10 @@ public class AgentService {
         approvals.cancelAll(chatId);
     }
 
+    public List<AgentLoop.ActiveSubAgent> activeSubAgents(String chatId) {
+        return loop.activeSubAgents(chatId);
+    }
+
     public boolean isRunning(String chatId) {
         ChatRun run = runs.get(chatId);
         return run != null && run.running;
@@ -285,5 +291,11 @@ public class AgentService {
     public boolean resolveApproval(String chatId, String approvalId, boolean approved, String edited,
                                    boolean remember) {
         return approvals.resolve(chatId, approvalId, approved, edited, remember);
+    }
+
+    /** @param rememberDir allow file writes in the call's directory and below, for this chat */
+    public boolean resolveApproval(String chatId, String approvalId, boolean approved, String edited,
+                                   boolean remember, boolean rememberDir) {
+        return approvals.resolve(chatId, approvalId, approved, edited, remember, rememberDir);
     }
 }

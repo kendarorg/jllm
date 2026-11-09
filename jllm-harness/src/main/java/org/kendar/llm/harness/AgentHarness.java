@@ -1,19 +1,8 @@
 package org.kendar.llm.harness;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.kendar.llm.harness.agent.AgentCatalog;
-import org.kendar.llm.harness.agent.AgentDefinition;
-import org.kendar.llm.harness.agent.AgentEvent;
-import org.kendar.llm.harness.instructions.InstructionLoader;
-import org.kendar.llm.harness.settings.AgentSettings;
-import org.kendar.llm.harness.skills.SkillCatalog;
-import org.kendar.llm.harness.skills.SkillTool;
-import org.kendar.llm.harness.session.ChatSessionData;
-import org.kendar.llm.harness.agent.AgentLoop;
-import org.kendar.llm.harness.agent.AgentService;
-import org.kendar.llm.harness.agent.RequestToolGroupTool;
-import org.kendar.llm.harness.agent.SubAgentTool;
-import org.kendar.llm.harness.agent.ToolSelector;
+import org.kendar.llm.harness.agent.*;
+import org.kendar.llm.harness.commands.CustomCommand;
 import org.kendar.llm.harness.commands.SlashCommands;
 import org.kendar.llm.harness.context.CompactResult;
 import org.kendar.llm.harness.context.ContextStrategy;
@@ -24,41 +13,32 @@ import org.kendar.llm.harness.context.compaction.ContextManager;
 import org.kendar.llm.harness.context.mnemonic.InMemoryMnemonicStore;
 import org.kendar.llm.harness.context.mnemonic.MnemonicStore;
 import org.kendar.llm.harness.context.mnemonic.MnemonicStrategy;
-import org.kendar.llm.harness.llm.ModelClient;
-import org.kendar.llm.harness.llm.ModelClients;
-import org.kendar.llm.harness.permission.ApprovalService;
-import org.kendar.llm.harness.permission.PermissionGate;
-import org.kendar.llm.harness.permission.PermissionRules;
-import org.kendar.llm.harness.commands.CustomCommand;
 import org.kendar.llm.harness.hooks.Hook;
 import org.kendar.llm.harness.hooks.HookEvent;
 import org.kendar.llm.harness.hooks.Hooks;
+import org.kendar.llm.harness.instructions.InstructionLoader;
 import org.kendar.llm.harness.integration.ExternalSources;
+import org.kendar.llm.harness.llm.LimitedModelClient;
+import org.kendar.llm.harness.llm.ModelClient;
+import org.kendar.llm.harness.llm.ModelClients;
+import org.kendar.llm.harness.permission.*;
 import org.kendar.llm.harness.plugin.HarnessPlugin;
 import org.kendar.llm.harness.plugin.PluginRegistrar;
-import org.kendar.llm.harness.permission.ToolApprovalPolicy;
-import org.kendar.llm.harness.permission.ToolClassifier;
-import org.kendar.llm.harness.settings.HarnessSettings;
-import org.kendar.llm.harness.llm.LimitedModelClient;
 import org.kendar.llm.harness.sandbox.LocalDirSandboxExecutor;
 import org.kendar.llm.harness.sandbox.SandboxExecutor;
-import org.kendar.llm.harness.session.ChatSessionService;
-import org.kendar.llm.harness.session.ChatSessionStore;
-import org.kendar.llm.harness.session.InMemoryChatSessionStore;
-import org.kendar.llm.harness.session.InMemorySubAgentRunLog;
-import org.kendar.llm.harness.session.SubAgentRunLog;
-import org.kendar.llm.harness.tools.FileSystemAgentTools;
-import org.kendar.llm.harness.tools.HarnessTool;
-import org.kendar.llm.harness.tools.HarnessToolRegistry;
-import org.kendar.llm.harness.tools.ShellAgentTools;
-import org.kendar.llm.harness.tools.WebAgentTools;
+import org.kendar.llm.harness.session.*;
+import org.kendar.llm.harness.settings.AgentSettings;
+import org.kendar.llm.harness.settings.HarnessSettings;
+import org.kendar.llm.harness.skills.SkillCatalog;
+import org.kendar.llm.harness.skills.SkillTool;
+import org.kendar.llm.harness.tools.*;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.http.HttpClient;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
@@ -82,7 +62,7 @@ public final class AgentHarness {
     private final HarnessPricing pricing;
     private org.kendar.llm.harness.llm.ProviderCatalog providers;
     private org.kendar.llm.harness.llm.ModelSwitch modelSwitch;
-    private boolean serializeModelCalls;
+    private int maxParallel;
     private org.kendar.llm.harness.tools.Checkpoints checkpoints;
     private final SlashCommands commands = new SlashCommands(this);
 
@@ -153,6 +133,47 @@ public final class AgentHarness {
         return service.isRunning(chatId);
     }
 
+    /** Sub-agents running now for the chat, oldest first. */
+    public java.util.List<org.kendar.llm.harness.agent.AgentLoop.ActiveSubAgent> activeSubAgents(String chatId) {
+        return service.activeSubAgents(chatId);
+    }
+
+    /** Deletes a chat with everything kept for it: log, context-strategy state, sub-agent runs. */
+    public void deleteChat(String chatId) {
+        service.cancel(chatId);
+        context.forget(chatId);
+        subAgentRuns.deleteChat(chatId);
+        sessions.delete(chatId);
+    }
+
+    /** Chats not updated for {@code days} days, oldest first, never {@code keepChatId}. */
+    public List<ChatSessionData> staleChats(int days, String keepChatId) {
+        java.time.Instant limit = java.time.Instant.now().minus(java.time.Duration.ofDays(days));
+        List<ChatSessionData> out = new ArrayList<>();
+        for (ChatSessionData s : sessions.list()) {
+            if (!s.chatId().equals(keepChatId) && s.updatedAt().isBefore(limit)) out.add(s);
+        }
+        java.util.Collections.reverse(out); // list() is newest first
+        return out;
+    }
+
+    /**
+     * Deletes the oldest chats beyond {@code limit}, never {@code keepChatId} (which counts toward the limit).
+     *
+     * @return the number of deleted chats
+     */
+    public int enforceChatRetention(Integer limit, String keepChatId) {
+        if (limit == null || limit < 1) return 0;
+        List<ChatSessionData> all = sessions.list(); // newest first
+        int deleted = 0;
+        for (int i = all.size() - 1; i >= 0 && all.size() - deleted > limit; i--) {
+            if (all.get(i).chatId().equals(keepChatId)) continue;
+            deleteChat(all.get(i).chatId());
+            deleted++;
+        }
+        return deleted;
+    }
+
     public long lastSeq(String chatId) {
         return service.lastSeq(chatId);
     }
@@ -174,6 +195,12 @@ public final class AgentHarness {
     public boolean resolveApproval(String chatId, String approvalId, boolean approved, String edited,
                                    boolean remember) {
         return service.resolveApproval(chatId, approvalId, approved, edited, remember);
+    }
+
+    /** @param rememberDir allow file writes in the call's directory and below, for this chat */
+    public boolean resolveApproval(String chatId, String approvalId, boolean approved, String edited,
+                                   boolean remember, boolean rememberDir) {
+        return service.resolveApproval(chatId, approvalId, approved, edited, remember, rememberDir);
     }
 
     /** Manual compaction. @throws AgentService.RunAlreadyActiveException if a run is in progress */
@@ -233,7 +260,7 @@ public final class AgentHarness {
             }
         }
         ModelClient next = providers.client(p);
-        if (serializeModelCalls) next = new LimitedModelClient(next, 1);
+        if (maxParallel > 0) next = new LimitedModelClient(next, maxParallel);
         modelSwitch.switchTo(next, providerName, window);
         return new SwitchResult(SwitchStatus.SWITCHED, "Model: " + providerName + " (" + p.toLlmSettings().model() + ")");
     }
@@ -258,6 +285,18 @@ public final class AgentHarness {
     }
 
     /** Slash commands shared by the command line and the web front end. */
+    private java.util.Map<String, org.kendar.llm.harness.auth.OAuthLogin> logins = java.util.Map.of();
+    private org.kendar.llm.harness.auth.TokenStore tokenStore = org.kendar.llm.harness.auth.TokenStore.defaultStore();
+
+    /** The logins {@code /login} can run: discovered {@link org.kendar.llm.harness.auth.OAuthLogin} services and MCP servers with oauth. */
+    public java.util.Map<String, org.kendar.llm.harness.auth.OAuthLogin> logins() {
+        return logins;
+    }
+
+    public org.kendar.llm.harness.auth.TokenStore tokenStore() {
+        return tokenStore;
+    }
+
     public SlashCommands commands() {
         return commands;
     }
@@ -312,6 +351,7 @@ public final class AgentHarness {
         private HarnessConfig config = HarnessConfig.defaults();
         private HarnessPricing pricing = new HarnessPricing(0, 0, 0, 0);
         private String systemPrompt = "";
+        private String systemPromptReplace;
         private boolean smallModel;
         private ObjectMapper mapper = new ObjectMapper();
         private HarnessSettings settings = HarnessSettings.empty();
@@ -319,6 +359,9 @@ public final class AgentHarness {
         private final List<CommandSpec> commands = new ArrayList<>();
         private ContextStrategyFactory contextStrategy;
         private MnemonicStore mnemonicStore = new InMemoryMnemonicStore();
+        private org.kendar.llm.harness.context.scope.ScopeStrategy.Options scopeOptions =
+                org.kendar.llm.harness.context.scope.ScopeStrategy.Options.defaults();
+        private org.kendar.llm.harness.state.StateStore stateStore = new org.kendar.llm.harness.state.InMemoryStateStore();
         private String activeProvider;
         private org.kendar.llm.harness.llm.ProviderSettings sessionProvider;
         private final org.kendar.llm.harness.tools.DocumentReaders documentReaders =
@@ -498,6 +541,15 @@ public final class AgentHarness {
         }
 
         /**
+         * Replaces the built-in {@code system-prompt.md}. Drops its tool-usage guidance; the small-model rules, the
+         * addendum, instruction files and strategy notes still follow it.
+         */
+        public Builder systemPromptReplace(String replacement) {
+            this.systemPromptReplace = replacement == null || replacement.isBlank() ? null : replacement;
+            return this;
+        }
+
+        /**
          * The main model is small: adds the stricter rules of {@code small-model.md} after the base prompt, for the
          * main agent and its sub-agents. Also on when settings {@code smallModel} is true.
          */
@@ -508,7 +560,7 @@ public final class AgentHarness {
 
         /**
          * A custom context strategy; it replaces the one chosen by {@code config.contextStrategy()} (settings
-         * {@code context.strategy}: compaction or mnemonic).
+         * {@code context.strategy}: compaction, mnemonic or scope).
          */
         public Builder contextStrategy(ContextStrategyFactory factory) {
             this.contextStrategy = factory;
@@ -516,6 +568,18 @@ public final class AgentHarness {
         }
 
         /** Where the mnemonic strategy keeps its decisions; default in memory. */
+        /** Thresholds of the {@code scope} context strategy. */
+        public Builder scopeOptions(org.kendar.llm.harness.context.scope.ScopeStrategy.Options options) {
+            this.scopeOptions = options;
+            return this;
+        }
+
+        /** Where tool grants and todo lists are kept; default in memory (lost on restart). */
+        public Builder stateStore(org.kendar.llm.harness.state.StateStore store) {
+            this.stateStore = store;
+            return this;
+        }
+
         public Builder mnemonicStore(MnemonicStore store) {
             this.mnemonicStore = store;
             return this;
@@ -541,8 +605,8 @@ public final class AgentHarness {
             org.kendar.llm.harness.llm.ModelSwitch modelSwitch = new org.kendar.llm.harness.llm.ModelSwitch(
                     modelClient, activeProvider, active == null ? null : active.contextTokens());
             modelClient = modelSwitch;
-            boolean serializeModelCalls = settings.serializeModelCalls();
-            if (serializeModelCalls) modelClient = new LimitedModelClient(modelClient, 1);
+            int maxParallel = settings.maxParallel();
+            if (maxParallel > 0) modelClient = new LimitedModelClient(modelClient, maxParallel);
             SandboxExecutor box = sandbox != null ? sandbox : new LocalDirSandboxExecutor(config);
 
             org.kendar.llm.harness.tools.Checkpoints harnessCheckpoints = new org.kendar.llm.harness.tools.Checkpoints();
@@ -561,51 +625,72 @@ public final class AgentHarness {
             ExternalSources sources = new ExternalSources(registry, settings, HttpClient.newHttpClient(), mapper);
 
             ChatSessionService sessions = new ChatSessionService(sessionStore, config.agentId(), mapper);
-            ApprovalService approvals = new ApprovalService(config.approvalTimeoutSeconds());
+            ApprovalService approvals = new ApprovalService(config.approvalTimeoutSeconds(), stateStore);
             ModelClient fast = fastClient != null ? fastClient
                     : settings.fastModel() != null ? ModelClients.from(settings.fastModel(), mapper) : null;
             ContextStrategy context = contextStrategy(new ContextStrategyFactory.Deps(config, modelClient,
-                    fast != null ? fast : modelClient, approvals, mapper, metrics, subAgentRunLog));
+                    fast != null ? fast : modelClient, approvals, mapper, metrics, subAgentRunLog), box);
             context.install(hooks);
             ToolSelector selector = new ToolSelector(config, fast != null ? fast : modelClient, mapper);
             RequestToolGroupTool requestToolGroup = new RequestToolGroupTool(registry, sessions, mapper);
             AgentLoop[] ref = new AgentLoop[1];
-            SubAgentTool subAgentTool = new SubAgentTool(() -> ref[0], mapper, agentCatalog(settings, mapper, serializeModelCalls, providers),
-                    !serializeModelCalls);
+            SubAgentTool subAgentTool = new SubAgentTool(() -> ref[0], mapper, agentCatalog(settings, mapper, maxParallel, providers),
+                    maxParallel != 1);
             String instructions = InstructionLoader.load(settings.instructionFiles());
-            String prompt = basePrompt()
+            String prompt = (systemPromptReplace != null ? systemPromptReplace : basePrompt())
                     + (smallModel || settings.isSmallModel() ? "\n\n" + Prompts.load("small-model.md") : "")
                     + (systemPrompt.isBlank() ? "" : "\n\n" + systemPrompt)
                     + (instructions.isBlank() ? "" : "\n\n" + instructions)
-                    + (context.kind() == ContextStrategyKind.MNEMONIC ? "\n\n" + MnemonicStrategy.systemAddendum() : "");
+                    + (context.kind() == ContextStrategyKind.MNEMONIC ? "\n\n" + MnemonicStrategy.systemAddendum() : "")
+                    + (context.kind() == ContextStrategyKind.SCOPE
+                    ? "\n\n" + org.kendar.llm.harness.context.scope.ScopeStrategy.systemAddendum() : "");
             AgentLoop loop = new AgentLoop(config, modelClient, context, selector,
                     new PermissionGate(approvalPolicy, permissionRules), approvals, sessions, box, registry, subAgentTool,
                     requestToolGroup, subAgentRunLog, mapper, metrics, prompt, hooks,
                     fast == null ? null : new ToolClassifier(fast, mapper));
             ref[0] = loop;
-            AgentService service = new AgentService(loop, sessions, approvals, mapper, config);
+            if (settings.noiseCommands()) {
+                loop.noisePruner(new org.kendar.llm.harness.context.noise.NoiseCommandPruner(sessions,
+                        new org.kendar.llm.harness.context.noise.NoiseQualifier(fast != null ? fast : modelClient),
+                        mapper));
+            }
+            AgentService service = new AgentService(loop, sessions, approvals, mapper, config, maxParallel);
             AgentHarness harness = new AgentHarness(service, sessions, registry, sources, skills, box,
                     subAgentRunLog, context, config, pricing);
             harness.permissionRules = permissionRules;
             harness.providers = providers;
             harness.checkpoints = harnessCheckpoints;
             harness.modelSwitch = modelSwitch;
-            harness.serializeModelCalls = serializeModelCalls;
+            harness.maxParallel = maxParallel;
+            java.util.Map<String, org.kendar.llm.harness.auth.OAuthLogin> found = new java.util.TreeMap<>();
+            for (var l : java.util.ServiceLoader.load(org.kendar.llm.harness.auth.OAuthLogin.class)) found.put(l.name(), l);
+            for (var m : settings.mcpServers()) {
+                if (!m.isStdio() && Boolean.TRUE.equals(m.oauth())) {
+                    var l = new org.kendar.llm.harness.auth.McpOAuthLogin(m.name(), m.url(), HttpClient.newHttpClient(), mapper);
+                    found.put(l.name(), l);
+                }
+            }
+            harness.logins = found;
             commands.forEach(c -> harness.commands().register(c.name(), c.description(), c.command()));
             return harness;
         }
 
-        private ContextStrategy contextStrategy(ContextStrategyFactory.Deps deps) {
+        private ContextStrategy contextStrategy(ContextStrategyFactory.Deps deps, SandboxExecutor box) {
             if (contextStrategy != null) return contextStrategy.create(deps);
             return switch (deps.config().contextStrategy()) {
                 case MNEMONIC -> new MnemonicStrategy(deps.config(), deps.mapper(), deps.metrics(), mnemonicStore,
                         deps.subAgentRuns());
+                case SCOPE -> new org.kendar.llm.harness.context.scope.ScopeStrategy(deps.config(),
+                        new ContextManager(deps.config(), deps.summaryModel(), deps.approvals(), deps.mapper(),
+                                deps.metrics()), deps.mapper(),
+                        new org.kendar.llm.harness.context.scope.TodoStore(stateStore, deps.mapper()), settings.scopeOptions(scopeOptions),
+                        (chat, agent) -> box.scratchDir(chat, AgentLoop.scratchId(agent)), box::displayPath);
                 case COMPACTION, CUSTOM -> new CompactionStrategy(new ContextManager(deps.config(), deps.summaryModel(),
                         deps.approvals(), deps.mapper(), deps.metrics()), deps.config(), deps.mapper());
             };
         }
 
-        private static AgentCatalog agentCatalog(HarnessSettings settings, ObjectMapper mapper, boolean serialize,
+        private static AgentCatalog agentCatalog(HarnessSettings settings, ObjectMapper mapper, int maxParallel,
                                                   org.kendar.llm.harness.llm.ProviderCatalog providers) {
             List<AgentDefinition> defs = new ArrayList<>();
             for (AgentSettings a : settings.agents()) {
@@ -619,10 +704,10 @@ public final class AgentHarness {
                 }
                 ModelClient own = a.provider() != null ? providers.client(a.provider())
                         : a.model() == null ? null : ModelClients.from(a.model(), mapper);
-                if (own != null && serialize) own = new LimitedModelClient(own, 1);
+                if (own != null && maxParallel > 0) own = new LimitedModelClient(own, maxParallel);
                 defs.add(new AgentDefinition(a.name(), a.description() == null ? "" : a.description(), a.tools(),
                         prompt, Boolean.TRUE.equals(a.inheritContext()), own, Boolean.TRUE.equals(a.readOnly()),
-                        a.temperature()));
+                        a.temperature(), a.thinking()));
             }
             return new AgentCatalog(defs);
         }

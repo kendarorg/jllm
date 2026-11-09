@@ -16,13 +16,7 @@ import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.kendar.llm.harness.HarnessTestSupport.MAPPER;
-import static org.kendar.llm.harness.HarnessTestSupport.ScriptedModel;
-import static org.kendar.llm.harness.HarnessTestSupport.config;
-import static org.kendar.llm.harness.HarnessTestSupport.json;
-import static org.kendar.llm.harness.HarnessTestSupport.text;
-import static org.kendar.llm.harness.HarnessTestSupport.tool;
-import static org.kendar.llm.harness.HarnessTestSupport.toolUse;
+import static org.kendar.llm.harness.HarnessTestSupport.*;
 
 class HooksTest {
 

@@ -27,7 +27,7 @@ This jar is the library only. The front ends are separate modules:
 Flags, startup directories, the interactive session and the approval prompt are in the
 [CLI README](../jllm-cli/README.md); `jllm.*` properties and the REST/SSE API are in the
 [web README](../jllm-web/README.md). Both build the same `AgentHarness`, with `CwdSandboxExecutor` and the
-`FileHistory*` stores, and have **no isolation**: shell commands run as the current user.
+`FileChatSessionStore` and `FileHistory*` stores, and have **no isolation**: shell commands run as the current user.
 
 ## 3. Slash commands
 
@@ -35,6 +35,29 @@ Handled by `SlashCommands` without calling the model (except `/compact`). Shared
 web `POST /api/chat/{id}/messages` endpoint both route through it. The full table is in the
 [CLI README](../jllm-cli/README.md#slash-commands). Menu toggles (`/tools`, `/mcp`, `/apis`, `/skills`) live in memory
 only; the settings file is the startup default.
+
+### Saved chats and restarting
+
+Chats are saved under `<history root>/<chatId>/` (`session.json` row, `<agentId>/messages.jsonl` log, plus the context
+state files) and survive a restart. Nothing is restored silently:
+
+- **CLI**, at startup. No saved chat: a new chat. One saved chat: `Continue it? [Y/n]`. Several: the newest is offered
+  with `[Y/n/l]` (`l` = numbered list, `n` = new chat). The last 6 messages are printed on resume.
+- `--resume prompt|no|<id>`: `prompt` (default) asks as above; `no` always starts a new chat; `<id>` (unique prefix
+  accepted) opens that chat, an unknown id fails. `--prompt` runs and piped stdin never ask.
+- `/chats` lists id, title, message count and last update (current marked); `/resume <id|prefix>` switches;
+  `/chats delete <id|prefix>` deletes one (not the current); `/chats clean [days]` (default 30) lists the chats not
+  updated for that long and deletes them after `/chats clean confirm`.
+- **Web**: `GET /api/chat` lists the saved chats (`chatId`, `title`, `messageCount`, `updatedAt`), `GET /api/chat/{id}`
+  loads one. The UI shows the chat id in the header and, short, in each list row (full id in the tooltip, copy
+  button). If the browser remembers the chat it had open (`localStorage`), it offers "Continue <title> (<id>)?
+  [Continue] [New chat]" instead of opening it. A chat whose run was cut off shows an "interrupted" notice. A shell call that was replaced by a stub in the context is shown in the chat with its original command and output, marked "not in context".
+- Settings `chatRetentionLimit` (integer, default unlimited): at startup the oldest chats beyond the limit are deleted,
+  never the one being opened.
+- One process per history root: `<root>/.lock` is held while it runs; a second process fails at startup.
+- A run killed mid-turn leaves an assistant tool call without result; on load a `tool_result` "interrupted: process
+  stopped" is appended (and saved) so the next request is valid. A pending approval, the steer/follow-up queues and a
+  declined-rewrite marker are not restored.
 
 ## 4. Permission modes
 
@@ -66,6 +89,13 @@ switch leaves the cached tool block and the text before it intact (see [CACHES �
 
 ## 5. Settings file
 
+**Layers.** The CLI and the web front end merge up to three files, later ones winning: the global
+`~/.jllm/settings.json` (home = `-Djllm.home` or the user home), the project `.jllm/settings.json` (in the working
+directory), then the file given with `--settings` / `jllm.settings-file`. Missing global and project files are skipped;
+a missing explicit file is an error. Objects are merged key by key; arrays (`mcpServers`, `providers`,
+`instructionFiles`, ...) and scalars of a later file replace the earlier value. Keep API keys in the global file.
+`${ENV_VAR}` is expanded after merging. Embedding: `HarnessSettings.loadLayered(explicit, projectDir)`.
+
 Every key is optional. `${ENV_VAR}` is expanded in every string; a missing variable fails the load. Unknown keys are
 ignored.
 
@@ -82,17 +112,19 @@ ignored.
   "fastModel":  {"name": "ollama", "baseUrl": "http://localhost:11434/v1", "apiKey": "", "model": "qwen3:4b",
                  "maxTokens": 4096, "maxRetries": 2, "timeoutSeconds": 600,
                  "requireApiKey": false, "useMaxCompletionTokens": false},
-  "providers":  [{"name": "claude-sonnet", "type": "anthropic", "model": "claude-sonnet-5-5", "apiKey": "${ANTHROPIC_API_KEY}"},
+  "providers":  [{"name": "claude-sonnet", "type": "anthropic", "model": "claude-sonnet-5-5", "apiKey": "${ANTHROPIC_API_KEY}", "order": 1},
                  {"name": "local-qwen", "type": "openai", "baseUrl": "http://localhost:8080/v1", "model": "local",
-                  "requireApiKey": false, "contextTokens": 32000, "smallModel": true, "temperature": 0.2}],
+                  "requireApiKey": false, "contextTokens": 32000, "smallModel": true, "temperature": 0.2, "order": 2}],
   "defaultProvider": "claude-sonnet",
   "permissions": {"deny": ["bash(rm -rf .*)", "write_file(.*\\.env)", "web_fetch"],
                   "ask": ["bash(.*curl.*)"], "allow": ["bash(mvn .*)"]},
-  "execution":  {"serializeModelCalls": true},
+  "execution":  {"maxParallel": 1},
   "sandbox":    {"tempDir": "/var/tmp/harness", "timeoutSeconds": 120, "backend": "docker",
                  "docker": {"image": "maven:3-eclipse-temurin-21", "network": "none"}},
   "context":    {"maxTokens": 100000, "auto": true, "keepTokens": 15000, "buffer": null, "keepRecentTurns": 6,
-                 "strategy": "compaction", "mnemonic": {"maskTrigger": null}},
+                 "strategy": "compaction", "mnemonic": {"maskTrigger": null},
+                 "scope": {"offloadChars": 20000, "overflowOffloadChars": 2000, "previewChars": 1500,
+                           "safetyPercent": 2, "reserveCap": 4096}},
   "output":     {"toolMaxChars": 30000, "eventMaxChars": 2000},
   "smallModel": false
 }
@@ -106,20 +138,48 @@ ignored.
 | `providers`, `defaultProvider` | named model providers, see [Providers](#providers-and-temperature) |
 | `permissions` | regex deny/ask/allow rules, see [Permission rules](#permission-rules) |
 | `fastModel` | small model for compaction summaries, tool-group selection and the `auto` classifier |
-| `execution.serializeModelCalls` | default `true`: one model call in flight for the whole harness, sub-agents run depth-first |
+| `execution.maxParallel` | default `1`: one model call in flight, sub-agents run depth-first. `N`: at most N model calls and N chat runs at once (chat runs need `serializeRuns`); `N != 1` lets read-only sub-agents run in parallel. `-1`: unlimited |
+| `chatRetentionLimit` | default unlimited: keep at most this many saved chats, deleting the oldest at startup (never the opened one) |
 | `smallModel` | default `false`: append the small-model rules (`prompts/small-model.md`) to the system prompt; `--small-model` sets it |
 | `sandbox.tempDir`, `sandbox.timeoutSeconds` | scratch root; default shell timeout (the tool caps it at 600 s) |
 | `sandbox.backend`, `sandbox.localFallback`, `sandbox.docker.*` | `local` (default) or `docker`; fall back to local when docker is missing (default `true`); `binary`, `image`, `memory`, `cpus`, `pidsLimit`, `user`, `network`, `mode` (`oneshot` or `daemon`, a long-running container), `remote`, `remoteHost` (docker on another machine). See [SANDBOX](SANDBOX.md). CLI and web: `--sandbox`, `--docker-image`, `--docker-mode`, `--docker-remote`, `--docker-remote-host` |
-| `context.*` | [CACHES](CACHES.md) |
+| `context.noiseCommands` | default `true`: after a run, shell commands that add no information (`mkdir`, `rm`, `cd`, ...) are replaced in the context by a stub, see [INTERNALS §9](INTERNALS.md#noise-commands). `false` turns it off |
+| `context.deferCompactionOnThinkingOverflow` | Anthropic extended thinking, default `false`. Compaction rewrites history, which voids the signed thinking blocks (API 400 "Invalid `signature` in `thinking` block"). `false`: finished turns lose their thinking blocks; if compaction fires in the middle of a tool loop, thinking is switched off for the rest of that turn. `true`: compaction is skipped while the turn in progress holds thinking blocks, so thinking stays on but the prompt can exceed the budget until the turn ends. **This can incur increased charges** (larger prompts, and a rewrite after the turn invalidates the prompt cache) |
+| `context.*` | [CACHES](CACHES.md); `context.strategy` is `compaction`, `mnemonic` or `scope`; `context.scope.*` are the thresholds of `scope` ([CACHES §5](CACHES.md#5-scope-strategy)) |
 | `output.toolMaxChars` | tool output kept in the context; the rest is cut with `[truncated N chars]` (the head is kept, the tail for `bash`) |
 | `output.eventMaxChars` | tool output carried by the `tool_result` event to the front end |
 
+### System prompt files
+
+`SYSTEM.md` replaces the built-in `system-prompt.md` (tool-usage guidance included); `APPEND_SYSTEM.md` is appended.
+Both are read from `~/.jllm/` and the project `.jllm/`: for `SYSTEM.md` the project file wins, the two
+`APPEND_SYSTEM.md` files are both appended (global first). CLI: `--system-prompt-file FILE` appends a file,
+`--system-prompt-replace FILE` replaces (wins over `SYSTEM.md`); `--system-prompt TEXT` still appends and comes last.
+After the prompt come, as before, the small-model rules, instruction files and strategy notes. Builder:
+`systemPrompt(addendum)`, `systemPromptReplace(text)`.
+
+### Authentication
+
+Model clients and HTTP MCP servers can take an `AuthProvider` (package `org.kendar.llm.harness.auth`) instead of a
+static key: it returns the headers of each request and is told about a 401, after which the client retries once.
+`AuthProvider.staticKey(...)` and `dynamicKey(...)` cover plain and rotating keys. Generic OAuth pieces, with no
+provider-specific code: `OAuthTokenClient` (code, refresh and device grants), `Pkce`, `LoopbackCallbackServer`,
+`DeviceCodeFlow`, `BrowserLauncher`, `TokenStore` (`~/.jllm/auth.json`, atomic writes, owner-only, file lock, never
+logged), `RefreshingAuthProvider` (refresh 60 s ahead, single flight, rotated refresh token saved first).
+A provider login is an `OAuthLogin` (name, `login(UserInteraction)`, `authProvider(store)`), usually `AuthCodeLogin` or
+`DeviceCodeLogin` plus endpoints, registered as a `java.util.ServiceLoader` service. `/login [name]` runs it
+(no name: list logins and what is logged in), `/logout <name>` removes the stored token. The clients take it with
+`AnthropicModelClient.authProvider(...)` / `OpenAiCompatModelClient.authProvider(...)`; it is not selectable from the
+settings file. MCP OAuth: see [MCP](MCP.md). No provider login is shipped.
+
 ### Providers and temperature
 
-`providers` is a list of named model definitions (`name`, `type` = `anthropic` | `openai` | `qwen` | `llamacpp` |
+`providers` is a list of named model definitions (`name`, `type` = `anthropic` | `openai` | `gemini` | `qwen` | `llamacpp` |
 `ollama`, `baseUrl`, `apiKey`, `model`, `maxTokens`, `maxRetries`, `timeoutSeconds`, `requireApiKey`,
-`useMaxCompletionTokens`, `contextTokens`, `smallModel`, `temperature`). The old names `anthropic`, `openai`, `qwen`,
-`llamacpp`, `ollama` stay valid without a definition.
+`useMaxCompletionTokens`, `contextTokens`, `smallModel`, `temperature`, `order`, `thinking`). The old names `anthropic`, `openai`, `gemini`, `qwen`,
+`llamacpp`, `ollama` stay valid without a definition. `gemini` uses Google's OpenAI-compatible endpoint
+(`https://generativelanguage.googleapis.com/v1beta/openai`, default model `gemini-2.5-pro`, key from
+`GEMINI_API_KEY`); native Gemini features (image input, Vertex) are not supported.
 
 - CLI: `--provider <name>` picks one; `--model`, `--base-url`, `--api-key` override it for the session only. With an
   unknown name, or `--model` alone, they define a `custom (session)` entry that is never written to the settings file.
@@ -127,11 +187,24 @@ ignored.
   runs use the new model; the prompt cache restarts once. If the conversation does not fit the new `contextTokens`,
   you are asked whether to compact first; if you decline, or the strategy cannot compact (`mnemonic`), the switch is
   refused and the model stays.
-- An agent type may set `"provider": "<name>"` (wins over an inline `model`) and `"temperature"`.
+- **Retry and fallback.** Each client retries a 429/5xx answer `maxRetries` times (default 5 remote, 2 local) with
+  backoff. `order` (optional integer) chains the providers: when a provider still fails after its retries, the
+  providers with a higher `order` are tried in ascending order; one without `order` is never a fallback. A request
+  refused as too long, and a cancellation, are not passed on to another provider. A fallback that cannot be built
+  (for example a missing key) is skipped.
+- An agent type may set `"provider": "<name>"` (wins over an inline `model`), `"temperature"` and `"thinking"`.
 - `temperature` (0 to 2) is resolved agent type, then provider, then unset; unset means nothing is sent.
   `explore` uses 0.2 and `plan` 0.3. OpenAI-compatible clients send it, and retry once without it if the server
   rejects it. **The Anthropic client never sends it:** current Claude models and the current API version reject
   `temperature`, so a value set on an Anthropic provider is ignored.
+- `thinking` (`minimal` | `low` | `medium` | `high`) sets the reasoning effort, on a provider and on an agent type.
+  Resolved request, then agent type, then provider, then unset; unset leaves the client's own default (Anthropic:
+  no thinking, OpenAI-compatible: nothing sent).
+  - Anthropic: extended-thinking budget of 2048 (`low`), 8192 (`medium`) or 16384 (`high`) tokens; `minimal` turns
+    thinking off. `max_tokens` is raised to fit the budget, and a forced `toolChoice` is ignored while thinking is on.
+  - OpenAI-compatible (openai, gemini, qwen, llamacpp, ollama): sent as `reasoning_effort`; `minimal` is `minimal`, or `none`
+    on Ollama. A server that rejects it gets a retry: `minimal`/`none` steps down to `low`, anything else is
+    dropped, and a warning is logged. The run continues.
 
 ### Permission rules
 
@@ -212,7 +285,7 @@ sequenceDiagram
         S-->>FE: run_queued
     end
     S->>L: run
-    L-->>FE: usage, text, tool_call, tool_result, compaction, classifier, warning
+    L-->>FE: usage, text, tool_call, tool_result, compaction, classifier, warning, retry
     L-->>FE: approval_request {id, type, title, preview, proposed, agent?}
     FE->>H: resolveApproval(chatId, id, approved, edited, remember)
     opt cancel
@@ -222,6 +295,9 @@ sequenceDiagram
     L-->>FE: plan_ready (plan mode only), error (on failure)
     S-->>FE: run_finished {cancelled}
 ```
+
+`retry` `{status, attempt, max, delayMs, message}`: a model call failed with HTTP `status` (0 = network error) and the client
+waits `delayMs` before retry `attempt` of `max`; it is followed by the normal events once the call succeeds.
 
 | Event | Data |
 |---|---|
@@ -233,7 +309,8 @@ sequenceDiagram
 | `tool_result` | `id`, `name`, `isError`, `output` (cut at `eventMaxChars`) |
 | `approval_request` | `id`, `chatId`, `type` (`tool` or `context`), `title`, `preview`, `proposed`, `agent` |
 | `classifier` | `tool`, `verdict` |
-| `compaction` | compaction: `tier`, `cleared`/`estimatedTokens`; mnemonic: `kind`, `masked`, `savedTokens`, `estimatedTokens` |
+| `compaction` | compaction: `tier`, `cleared`/`estimatedTokens`; mnemonic: `kind`, `masked`, `savedTokens`, `estimatedTokens`; scope: `strategy`, `estimatedTokens` |
+| `todos` | `todos`: the complete list written by `todo_write` (`id`, `content`, `status`) |
 | `warning`, `error` | `message` |
 | `cancelled` | — |
 | `plan_ready` | `message` |
@@ -256,5 +333,6 @@ user's edited text as `edited`.
 | `cost(session)` | estimated USD with `builder.pricing(new HarnessPricing(in, out, cacheRead, cacheWrite))` (per million tokens) |
 | `tools()`, `sources()`, `skills()` | runtime toggles of tools, MCP/REST sources, skills |
 | `workDir(chatId)`, `scratchDir(chatId)`, `sandbox()` | directories |
+| `builder.stateStore(...)` | where tool grants and todo lists are kept (default in memory; the CLI and web use files) |
 | `subAgentRuns()` | audit log of sub-agent runs |
 | `pendingApprovals(chatId)`, `lastSeq(chatId)`, `isRunning(chatId)` | state for UIs |

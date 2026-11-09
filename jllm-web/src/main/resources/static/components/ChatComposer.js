@@ -1,5 +1,5 @@
-import { ref, computed, watch, nextTick, onMounted } from 'vue';
-import { store, send, searchFiles } from '../store.js';
+import {computed, nextTick, onMounted, ref, watch} from 'vue';
+import {searchFiles, send, store} from '../store.js';
 
 export default {
   setup() {

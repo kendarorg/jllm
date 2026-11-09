@@ -19,10 +19,10 @@ public class JllmWebApplication {
     private static final Set<String> KEYLESS_PROVIDERS = Set.of("llamacpp", "ollama");
 
     /** The flags the CLI takes too, spelled the same (CLI-only: --mode, --prompt, --sandbox-clean, --sandbox-clean-all). */
-    static final String USAGE = "Usage: jllm-web [--provider anthropic|openai|qwen|llamacpp|ollama] [--model M] "
+    static final String USAGE = "Usage: jllm-web [--provider anthropic|openai|gemini|qwen|llamacpp|ollama] [--model M] "
             + "[--base-url U] [--api-key K] [--workdir DIR] [--system-prompt TEXT] [--max-turns N] "
             + "[--context-tokens TOKENS] [--search-api-key BRAVE_KEY] [--settings FILE] "
-            + "[--context-strategy compaction|mnemonic] [--max-tokens TOKENS] [--small-model] "
+            + "[--context-strategy compaction|mnemonic|scope] [--max-tokens TOKENS] [--small-model] "
             + "[--sandbox local|docker] [--docker-image IMAGE] [--docker-mode oneshot|daemon] "
             + "[--docker-remote] [--docker-remote-host ADDRESS]"
             + System.lineSeparator() + "Flags take --flag value or --flag=value. Spring's own flags (--server.port=9000) work too.";

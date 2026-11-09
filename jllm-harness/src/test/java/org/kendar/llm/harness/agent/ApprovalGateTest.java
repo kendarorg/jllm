@@ -7,8 +7,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
-import org.kendar.llm.harness.HarnessTestSupport.Events;
-import org.kendar.llm.harness.HarnessTestSupport.Rig;
+import org.kendar.llm.harness.HarnessTestSupport.*;
 import org.kendar.llm.harness.permission.PermissionMode;
 import org.kendar.llm.harness.tools.FileSystemAgentTools;
 import org.kendar.llm.harness.tools.ToolKind;
@@ -20,7 +19,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.kendar.llm.harness.HarnessTestSupport.*;
-import static org.mockito.Mockito.when;
 
 /** exec / file-edit approval path: ToolApprovalPolicy -> PermissionGate -> ApprovalService. */
 class ApprovalGateTest {

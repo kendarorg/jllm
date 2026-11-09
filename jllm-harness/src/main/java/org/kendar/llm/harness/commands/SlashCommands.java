@@ -64,9 +64,12 @@ public final class SlashCommands {
             new Info("/where", "Show the working directory and the scratch directory"),
             new Info("/sandbox", "Docker daemon mode: /sandbox clean removes the sandbox container (project files stay), /sandbox backup copies a remote container back"),
             new Info("/status", "Context usage, cost and chat count"),
-            new Info("/chats", "List the chats"),
-            new Info("/resume", "Switch to another chat: /resume <id>"),
+            new Info("/chats", "List the chats; /chats delete <id>, /chats clean [days]"),
+            new Info("/resume", "Switch to another chat: /resume <id or prefix>"),
             new Info("/title", "Rename this chat: /title <text>"),
+            new Info("/export", "Write this chat as a transcript: /export [md|html] [file] (default md, into the scratch directory)"),
+            new Info("/login", "Log in to an OAuth provider or MCP server: /login <name> (no name lists them). Blocks until done"),
+            new Info("/logout", "Remove the stored login: /logout <name>"),
             new Info("/exit", "Close the chat (command line only; does nothing elsewhere)"));
 
     /** Input that steps back in a menu: the Esc character, {@code /back} or {@code b}. */
@@ -201,12 +204,16 @@ public final class SlashCommands {
                     yield Result.text(cleaned == null ? "This sandbox has no container to clean" : cleaned);
                 }
                 case "/status" -> Result.text(status(chatId));
-                case "/chats" -> Result.text(chats(chatId));
+                case "/chats" -> Result.text(chatsCommand(chatId, arg));
                 case "/resume" -> {
-                    if (arg.isEmpty()) yield Result.text("usage: /resume <id>");
-                    ChatSessionData s = sessions.get(arg);
+                    if (arg.isEmpty()) yield Result.text("usage: /resume <id or unique prefix>");
+                    ChatSessionData s = sessions.resolve(arg);
                     yield new Result("chat " + s.chatId() + " " + s.title(), s.chatId(), true);
                 }
+                case "/login" -> Result.text(login(arg));
+                case "/logout" -> Result.text(arg.isEmpty() ? "usage: /logout <name>"
+                        : harness.tokenStore().remove(arg) ? "Logged out of " + arg : "No stored login for " + arg);
+                case "/export" -> Result.text(export(chatId, arg));
                 case "/title" -> {
                     if (arg.isEmpty()) yield Result.text("usage: /title <text>");
                     sessions.setTitle(chatId, arg);
@@ -222,6 +229,51 @@ public final class SlashCommands {
         }
     }
 
+    private String login(String name) {
+        var logins = harness.logins();
+        if (name.isEmpty()) {
+            return logins.isEmpty() ? "No logins available" : "logins: " + String.join(", ", logins.keySet())
+                    + "\nlogged in: " + String.join(", ", harness.tokenStore().names());
+        }
+        var login = logins.get(name);
+        if (login == null) return "unknown login " + name + " (" + String.join(", ", logins.keySet()) + ")";
+        StringBuilder out = new StringBuilder();
+        try {
+            harness.tokenStore().put(name, login.login(new org.kendar.llm.harness.auth.UserInteraction() {
+                @Override
+                public void show(String message) {
+                    out.append(message).append('\n');
+                    System.err.println(message); // the result is returned only when the login ends
+                }
+
+                @Override
+                public String ask(String prompt) {
+                    return null;
+                }
+            }));
+            return out + "Logged in to " + name;
+        } catch (org.kendar.llm.harness.auth.OAuthException e) {
+            return out + "Login failed: " + e.getMessage();
+        }
+    }
+
+    private String export(String chatId, String arg) throws java.io.IOException {
+        String[] a = arg.isEmpty() ? new String[0] : arg.split("\\s+", 2);
+        boolean html = a.length > 0 && a[0].equalsIgnoreCase("html");
+        boolean fmt = a.length > 0 && (html || a[0].equalsIgnoreCase("md"));
+        String file = fmt ? (a.length > 1 ? a[1].strip() : "") : arg;
+        ChatSessionData s = harness.sessions().get(chatId);
+        if (file.isEmpty()) file = "chat-" + chatId + (html ? ".html" : ".md");
+        java.nio.file.Path dir = harness.scratchDir(chatId).toAbsolutePath().normalize();
+        java.nio.file.Path target = dir.resolve(file).normalize();
+        if (!target.startsWith(dir)) return "error: the file must be inside the scratch directory";
+        var messages = harness.sessions().messages(s);
+        java.nio.file.Files.createDirectories(target.getParent());
+        java.nio.file.Files.writeString(target, html ? org.kendar.llm.harness.session.ChatExporter.html(s.title(), messages)
+                : org.kendar.llm.harness.session.ChatExporter.markdown(s.title(), messages));
+        return "exported " + messages.size() + " messages to " + harness.sandbox().displayPath(target);
+    }
+
     private Result setMode(String chatId, String mode) {
         PermissionMode m = PermissionMode.parse(mode);
         harness.sessions().setMode(chatId, m);
@@ -230,15 +282,27 @@ public final class SlashCommands {
 
     private String usage(ChatSessionData s) {
         return "input " + s.inputTokens() + ", output " + s.outputTokens() + ", cache read " + s.cacheReadTokens()
-                + ", cache write " + s.cacheCreationTokens() + String.format(", cost $%.4f", harness.cost(s));
+                + ", cache write " + s.cacheCreationTokens() + String.format(", cost $%.4f", harness.cost(s))
+                + (s.qualifierInputTokens() + s.qualifierOutputTokens() == 0 ? ""
+                : "\nnoise qualifier: input " + s.qualifierInputTokens() + ", output " + s.qualifierOutputTokens());
     }
 
     private String status(String chatId) {
         ChatSessionData s = harness.sessions().get(chatId);
         long used = harness.contextTokens(chatId);
         long budget = harness.contextBudget();
+        StringBuilder agents = new StringBuilder();
+        var active = harness.activeSubAgents(chatId);
+        long now = System.currentTimeMillis();
+        agents.append("running agents: ").append(active.isEmpty() ? "none" : active.size()).append('\n');
+        for (var a : active) {
+            String p = a.prompt().replaceAll("\\s+", " ");
+            agents.append("  ").append(a.label()).append(" (").append((now - a.startedAtMillis()) / 1000).append("s) ")
+                    .append(p.length() > 70 ? p.substring(0, 70) + "…" : p).append('\n');
+        }
         return "chat: " + s.chatId() + " \"" + s.title() + "\"\n"
                 + "mode: " + s.mode() + "\n"
+                + agents
                 + "context strategy: " + harness.contextStrategy().kind().name().toLowerCase() + "\n"
                 + "context: ~" + used + " / " + budget + " tokens (" + (budget > 0 ? used * 100 / budget : 0) + "%)\n"
                 + "usage: " + usage(s) + "\n"
@@ -265,11 +329,60 @@ public final class SlashCommands {
         return Result.text(menus.scripted(target, p[0], p.length > 1 ? p[1] : null));
     }
 
+    private final Map<String, List<String>> pendingClean = new ConcurrentHashMap<>();
+
+    /** {@code /chats}, {@code /chats delete <id>}, {@code /chats clean [days]} then {@code /chats clean confirm}. */
+    private String chatsCommand(String current, String arg) {
+        if (arg.isEmpty()) return chats(current);
+        String[] p = arg.split("\\s+", 2);
+        switch (p[0]) {
+            case "delete" -> {
+                if (p.length < 2) return "usage: /chats delete <id or unique prefix>";
+                ChatSessionData s = harness.sessions().resolve(p[1]);
+                if (s.chatId().equals(current)) return "Cannot delete the current chat";
+                harness.deleteChat(s.chatId());
+                return "Deleted chat " + s.chatId() + " \"" + s.title() + "\"";
+            }
+            case "clean" -> {
+                String a = p.length > 1 ? p[1].strip() : "";
+                if (a.equals("confirm")) {
+                    List<String> ids = pendingClean.remove(current);
+                    if (ids == null) return "Nothing to confirm: run /chats clean [days] first";
+                    int n = 0;
+                    for (String id : ids) {
+                        if (id.equals(current) || harness.sessions().find(id).isEmpty()) continue;
+                        harness.deleteChat(id);
+                        n++;
+                    }
+                    return "Deleted " + n + " chat(s)";
+                }
+                int days = a.isEmpty() ? 30 : a.matches("\\d+") ? Integer.parseInt(a) : -1;
+                if (days < 0) return "usage: /chats clean [days]";
+                List<ChatSessionData> stale = harness.staleChats(days, current);
+                if (stale.isEmpty()) return "No chat older than " + days + " days";
+                pendingClean.put(current, stale.stream().map(ChatSessionData::chatId).toList());
+                StringBuilder sb = new StringBuilder(stale.size() + " chat(s) not updated for " + days
+                        + " days will be deleted:\n");
+                for (ChatSessionData s : stale) sb.append("  ").append(chatLine(s)).append('\n');
+                return sb.append("Type /chats clean confirm to delete them").toString();
+            }
+            default -> {
+                return "usage: /chats | /chats delete <id> | /chats clean [days]";
+            }
+        }
+    }
+
+    /** {@code id  "title"  (N messages, updated <time>)} */
+    public static String chatLine(ChatSessionData s) {
+        return s.chatId() + "  \"" + s.title() + "\"  (" + s.messageCount() + " messages, updated "
+                + java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+                .format(s.updatedAt().atZone(java.time.ZoneId.systemDefault())) + ")";
+    }
+
     private String chats(String current) {
         StringBuilder sb = new StringBuilder();
         for (ChatSessionData s : harness.sessions().list()) {
-            sb.append(s.chatId().equals(current) ? "* " : "  ").append(s.chatId()).append("  ").append(s.title())
-                    .append('\n');
+            sb.append(s.chatId().equals(current) ? "* " : "  ").append(chatLine(s)).append('\n');
         }
         return sb.toString().stripTrailing();
     }

@@ -3,7 +3,7 @@
     <option name="MAIN_CLASS_NAME" value="org.kendar.llm.web.JllmWebApplication" />
     <module name="jllm-web" />
     <option name="PROGRAM_PARAMETERS" value="--jllm.context-strategy=compaction --jllm.small-model=true --jllm.provider=llamacpp --jllm.base-url=http://localhost:11434/v1 --jllm.model=qwen3:8b --jllm.context-tokens=6000" />
-    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/jllm-web/tmp" />
+    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/tmp" />
     <method v="2">
       <option name="Make" enabled="true" />
     </method>
