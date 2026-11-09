@@ -13,6 +13,8 @@ They are also the reference for how to embed it.
 | [jllm-cli](jllm-cli) | terminal front end, one shaded runnable jar | [README](jllm-cli/README.md) |
 | [jllm-web](jllm-web) | Spring Boot REST + SSE API with a no-build Vue 3 chat UI | [README](jllm-web/README.md) |
 
+Also: [HISTORY](docs/HISTORY.md) (how the harness evolved) and [HARNESSES-COMPARE](docs/HARNESSES-COMPARE.md) (feature matrix against mini-swe-agent, Pi, OpenCode, Qwen Code, Hermes Agent).
+
 What is still missing:
 
 * Oauth & Tokens on MCP/API calls
@@ -137,8 +139,6 @@ Set `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`, `QWEN_API_KEY`) first. Embedding t
 | [INTERNALS](docs/INTERNALS.md) | architecture, run lifecycle, loop, approvals, sub-agents, concurrency, persistence |
 | [FLOW](docs/FLOW.md) | step-by-step diagrams of every pipeline |
 | [SAMPLES](docs/SAMPLES.md) | prompts and generated projects used to compare setups |
-| [HISTORY](docs/HISTORY.md) | how the harness evolved |
-| [HARNESSES-COMPARE](docs/HARNESSES-COMPARE.md) | feature matrix and comparison with mini-swe-agent, Pi, OpenCode, Qwen Code, Hermes Agent |
 
 ## Credits
 
