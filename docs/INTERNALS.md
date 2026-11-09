@@ -339,7 +339,8 @@ is gone (compaction, `/clear`). The model cannot recall them (`history_recall` d
 | Endpoint | `POST {baseUrl}/v1/messages`, non-streaming | `POST {baseUrl}/chat/completions` |
 | System | two blocks, `cache_control` on the second | one `system` message |
 | Tools | `cache_control` on the last; `tool_choice` only when needed | translated to functions |
-| Retries | 429, 529, 5xx and I/O errors; `retry-after` or exponential backoff (max 30 s) | 429, 5xx; same backoff |
+| Retries | 429, 529, 5xx and I/O errors; `retry-after` or exponential backoff (max 30 s); each wait is reported as a `retry` event (`CancelToken.onRetry`) | 429, 5xx and I/O errors; same backoff and event |
+| Auth | `x-api-key`, or an `AuthProvider`; one retry after a 401 | `Authorization: Bearer`, or an `AuthProvider`; one retry after a 401 |
 | Extras | extended thinking (`thinkingBudget`), citations: `search_local_knowledge` results become `search_result` blocks | `max_completion_tokens` for OpenAI proper |
 
 Messages are kept in Anthropic shape everywhere; the OpenAI client translates on the way out and back.

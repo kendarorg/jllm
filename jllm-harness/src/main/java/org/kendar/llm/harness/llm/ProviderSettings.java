@@ -57,6 +57,7 @@ public record ProviderSettings(String name, String type, String baseUrl, String 
         boolean local = t.equals("ollama") || t.equals("llamacpp");
         String defUrl = switch (t) {
             case "anthropic" -> "https://api.anthropic.com";
+            case "gemini" -> "https://generativelanguage.googleapis.com/v1beta/openai";
             case "qwen" -> "https://dashscope-intl.aliyuncs.com/compatible-mode/v1";
             case "ollama" -> ModelClients.OLLAMA_URL;
             case "llamacpp" -> "http://localhost:8080/v1";
@@ -64,6 +65,7 @@ public record ProviderSettings(String name, String type, String baseUrl, String 
         };
         String defModel = switch (t) {
             case "anthropic" -> AnthropicSettings.defaults(null).model();
+            case "gemini" -> "gemini-2.5-pro";
             case "qwen" -> "qwen3-coder-plus";
             case "ollama" -> ModelClients.OLLAMA_DEFAULT_MODEL;
             case "llamacpp" -> "local";

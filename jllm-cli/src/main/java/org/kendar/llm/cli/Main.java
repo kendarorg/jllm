@@ -34,9 +34,9 @@ import java.util.concurrent.TimeUnit;
  * Command line front end: an interactive chat (or a single {@code --prompt}) over the standard tools.
  *
  * <pre>
- * java -cp ... org.kendar.llm.harness.Main [--provider anthropic|openai|qwen|llamacpp|ollama] [--model M]
+ * java -cp ... org.kendar.llm.harness.Main [--provider anthropic|openai|gemini|qwen|llamacpp|ollama] [--model M]
  *     [--base-url U] [--api-key K] [--mode plan|edit|auto] [--workdir DIR] [--prompt TEXT]
- *     [--settings FILE] [--system-prompt TEXT] [--max-turns N] [--context-tokens TOKENS]
+ *     [--settings FILE] [--system-prompt TEXT] [--system-prompt-file FILE] [--system-prompt-replace FILE] [--max-turns N] [--context-tokens TOKENS]
  *     [--search-api-key BRAVE_KEY] [--context-strategy compaction|mnemonic|scope] [--max-tokens TOKENS] [--small-model]
  *     [--resume prompt|no|CHAT_ID]
  * </pre>
@@ -80,7 +80,7 @@ public final class Main {
     public static void main(String[] argv) throws Exception {
         Map<String, String> a = parse(argv);
         if (a.containsKey("help")) {
-            System.out.println("Usage: Main [--provider anthropic|openai|qwen|llamacpp|ollama] [--model M] [--base-url U] "
+            System.out.println("Usage: Main [--provider anthropic|openai|gemini|qwen|llamacpp|ollama] [--model M] [--base-url U] "
                     + "[--api-key K] [--mode plan|edit|auto] [--workdir DIR] [--prompt TEXT] "
                     + "[--system-prompt TEXT] [--max-turns N] [--context-tokens TOKENS] [--search-api-key BRAVE_KEY] "
                     + "[--settings FILE] [--context-strategy compaction|mnemonic|scope] [--max-tokens TOKENS] [--small-model] "
@@ -95,8 +95,20 @@ public final class Main {
             a.put("api-key", key);
         }
         ObjectMapper mapper = new ObjectMapper();
-        HarnessSettings settings = a.containsKey("settings") ? HarnessSettings.load(Path.of(a.get("settings")))
-                : HarnessSettings.empty();
+        Path projectDir = Path.of(a.getOrDefault("workdir", "")).toAbsolutePath().normalize();
+        // global ~/.jllm/settings.json, then project .jllm/settings.json, then --settings; later wins
+        HarnessSettings settings = HarnessSettings.loadLayered(
+                a.containsKey("settings") ? Path.of(a.get("settings")) : null, projectDir);
+        var promptFiles = org.kendar.llm.harness.instructions.SystemPromptFiles.load(projectDir);
+        String promptReplace = a.containsKey("system-prompt-replace")
+                ? org.kendar.llm.harness.instructions.SystemPromptFiles.readFile(Path.of(a.get("system-prompt-replace")))
+                : promptFiles.replace();
+        String promptAppend = org.kendar.llm.harness.instructions.SystemPromptFiles.join(
+                org.kendar.llm.harness.instructions.SystemPromptFiles.join(promptFiles.append(),
+                        a.containsKey("system-prompt-file")
+                                ? org.kendar.llm.harness.instructions.SystemPromptFiles.readFile(Path.of(a.get("system-prompt-file")))
+                                : null),
+                a.get("system-prompt"));
         // the flag wins over the settings file
         String tokens = a.containsKey("context-tokens") ? a.get("context-tokens") : a.get("context-budget");
         if (tokens != null) settings = settings.withMaxTokens(Integer.parseInt(tokens));
@@ -111,7 +123,6 @@ public final class Main {
         }
         HarnessConfig config = settings.applyTo(HarnessConfig.defaults());
         // the agent works in the project directory; scratch directories go under the settings' sandbox.tempDir
-        Path projectDir = Path.of(a.getOrDefault("workdir", "")).toAbsolutePath().normalize();
         String searchKey = a.getOrDefault("search-api-key", System.getenv("BRAVE_API_KEY"));
         if (searchKey != null) config = config.withSearchApiKey(searchKey);
         if (a.containsKey("max-turns")) config = config.withMaxTurns(Integer.parseInt(a.get("max-turns")));
@@ -137,7 +148,8 @@ public final class Main {
                 .activeProvider(choice.name())
                 .sessionProvider(choice.session())
                 .config(config)
-                .systemPrompt(a.get("system-prompt"))
+                .systemPrompt(promptAppend)
+                .systemPromptReplace(promptReplace)
                 .sandbox(sandbox)
                 .sessionStore(new FileChatSessionStore(cwdSandbox.historyRoot(), mapper))
                 .subAgentRunLog(new FileHistorySubAgentRunLog(new InMemorySubAgentRunLog(), cwdSandbox.historyRoot()))

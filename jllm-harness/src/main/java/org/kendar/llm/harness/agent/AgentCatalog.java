@@ -17,7 +17,7 @@ public final class AgentCatalog {
     /** @throws IllegalArgumentException if a name is used twice, or clashes with a built-in */
     public AgentCatalog(Collection<AgentDefinition> custom) {
         add(new AgentDefinition(DEFAULT, "Carries out an independent task with its own context", List.of(), ""));
-        add(new AgentDefinition("explore", "Fast search through files and code", List.of("read_file", "glob", "grep", "grep_code"),
+        add(new AgentDefinition("explore", "Fast search through files and code", List.of("read_file", "glob", "ls", "grep", "grep_code"),
                 Prompts.load("agent-explore.md"), false, null, true, 0.2));
         add(new AgentDefinition("plan", "Designs an implementation plan without changing anything", List.of(),
                 Prompts.load("agent-plan.md"), false, null, true, 0.3));

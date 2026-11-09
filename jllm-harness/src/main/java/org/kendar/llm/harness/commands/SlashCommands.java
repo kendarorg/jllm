@@ -67,6 +67,9 @@ public final class SlashCommands {
             new Info("/chats", "List the chats; /chats delete <id>, /chats clean [days]"),
             new Info("/resume", "Switch to another chat: /resume <id or prefix>"),
             new Info("/title", "Rename this chat: /title <text>"),
+            new Info("/export", "Write this chat as a transcript: /export [md|html] [file] (default md, into the scratch directory)"),
+            new Info("/login", "Log in to an OAuth provider or MCP server: /login <name> (no name lists them). Blocks until done"),
+            new Info("/logout", "Remove the stored login: /logout <name>"),
             new Info("/exit", "Close the chat (command line only; does nothing elsewhere)"));
 
     /** Input that steps back in a menu: the Esc character, {@code /back} or {@code b}. */
@@ -207,6 +210,10 @@ public final class SlashCommands {
                     ChatSessionData s = sessions.resolve(arg);
                     yield new Result("chat " + s.chatId() + " " + s.title(), s.chatId(), true);
                 }
+                case "/login" -> Result.text(login(arg));
+                case "/logout" -> Result.text(arg.isEmpty() ? "usage: /logout <name>"
+                        : harness.tokenStore().remove(arg) ? "Logged out of " + arg : "No stored login for " + arg);
+                case "/export" -> Result.text(export(chatId, arg));
                 case "/title" -> {
                     if (arg.isEmpty()) yield Result.text("usage: /title <text>");
                     sessions.setTitle(chatId, arg);
@@ -220,6 +227,51 @@ public final class SlashCommands {
         } catch (Exception e) {
             return Result.text("error: " + e.getMessage());
         }
+    }
+
+    private String login(String name) {
+        var logins = harness.logins();
+        if (name.isEmpty()) {
+            return logins.isEmpty() ? "No logins available" : "logins: " + String.join(", ", logins.keySet())
+                    + "\nlogged in: " + String.join(", ", harness.tokenStore().names());
+        }
+        var login = logins.get(name);
+        if (login == null) return "unknown login " + name + " (" + String.join(", ", logins.keySet()) + ")";
+        StringBuilder out = new StringBuilder();
+        try {
+            harness.tokenStore().put(name, login.login(new org.kendar.llm.harness.auth.UserInteraction() {
+                @Override
+                public void show(String message) {
+                    out.append(message).append('\n');
+                    System.err.println(message); // the result is returned only when the login ends
+                }
+
+                @Override
+                public String ask(String prompt) {
+                    return null;
+                }
+            }));
+            return out + "Logged in to " + name;
+        } catch (org.kendar.llm.harness.auth.OAuthException e) {
+            return out + "Login failed: " + e.getMessage();
+        }
+    }
+
+    private String export(String chatId, String arg) throws java.io.IOException {
+        String[] a = arg.isEmpty() ? new String[0] : arg.split("\\s+", 2);
+        boolean html = a.length > 0 && a[0].equalsIgnoreCase("html");
+        boolean fmt = a.length > 0 && (html || a[0].equalsIgnoreCase("md"));
+        String file = fmt ? (a.length > 1 ? a[1].strip() : "") : arg;
+        ChatSessionData s = harness.sessions().get(chatId);
+        if (file.isEmpty()) file = "chat-" + chatId + (html ? ".html" : ".md");
+        java.nio.file.Path dir = harness.scratchDir(chatId).toAbsolutePath().normalize();
+        java.nio.file.Path target = dir.resolve(file).normalize();
+        if (!target.startsWith(dir)) return "error: the file must be inside the scratch directory";
+        var messages = harness.sessions().messages(s);
+        java.nio.file.Files.createDirectories(target.getParent());
+        java.nio.file.Files.writeString(target, html ? org.kendar.llm.harness.session.ChatExporter.html(s.title(), messages)
+                : org.kendar.llm.harness.session.ChatExporter.markdown(s.title(), messages));
+        return "exported " + messages.size() + " messages to " + harness.sandbox().displayPath(target);
     }
 
     private Result setMode(String chatId, String mode) {

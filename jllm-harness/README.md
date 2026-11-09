@@ -54,7 +54,7 @@ h.start(chatId, "List the files in the workspace");
 ```
 
 Providers: `ModelClients.anthropic(...)`, `ModelClients.from(LlmSettings, mapper)` for any OpenAI-compatible endpoint
-(openai, qwen, llamacpp, vLLM) and `ModelClients.ollama("llama3.1", mapper)` for a local Ollama
+(openai, gemini, qwen, llamacpp, vLLM) and `ModelClients.ollama("llama3.1", mapper)` for a local Ollama
 (`http://localhost:11434/v1`, no key). On the command line: `--provider ollama --model qwen3:8b`
 (`--base-url` for a remote Ollama). Ollama's OpenAI endpoint cannot set the context size per request: if long chats
 get truncated, raise it on the Ollama side (`OLLAMA_CONTEXT_LENGTH`, or `num_ctx` in a Modelfile) and keep

@@ -503,6 +503,10 @@ public class AgentLoop {
                 ModelRequest request = new ModelRequest(pinned, turnExtra, view.messages(), tools, config.maxTokens(),
                         null, !config.parallelToolUse());
                 if (thinkingOff) request = request.withThinkingLevel(org.kendar.llm.harness.llm.ThinkingLevel.MINIMAL);
+                token.onRetry((status, attempt, max, delayMs) -> sink.emit("retry", mapper.createObjectNode()
+                        .put("status", status).put("attempt", attempt).put("max", max).put("delayMs", delayMs)
+                        .put("message", "Model call failed" + (status > 0 ? " (HTTP " + status + ")" : "")
+                                + ", retry " + attempt + "/" + max + " in " + Math.max(1, delayMs / 1000) + " s")));
                 resp = client.complete(request, token);
                 metrics.modelCall(java.time.Duration.ofNanos(System.nanoTime() - modelStart), "ok");
                 hooks.run(HookContext.afterLlm(chatId, agent, responseText(resp), false,

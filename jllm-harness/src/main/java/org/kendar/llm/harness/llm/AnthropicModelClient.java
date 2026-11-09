@@ -30,6 +30,13 @@ public class AnthropicModelClient implements ModelClient {
     static final String RAG_TOOL = "search_local_knowledge";
 
     private final long backoffBaseMs;
+    private volatile org.kendar.llm.harness.auth.AuthProvider auth;
+
+    /** Headers come from the provider (OAuth, rotating keys) instead of the static {@code apiKey}. */
+    public AnthropicModelClient authProvider(org.kendar.llm.harness.auth.AuthProvider provider) {
+        this.auth = provider;
+        return this;
+    }
 
     public AnthropicModelClient(AnthropicSettings props, ObjectMapper mapper) {
         this(props, mapper, 1000L);
@@ -49,7 +56,7 @@ public class AnthropicModelClient implements ModelClient {
 
     @Override
     public ModelResponse complete(ModelRequest req, CancelToken cancel) {
-        if (props.apiKey() == null || props.apiKey().isBlank()) {
+        if (auth == null && (props.apiKey() == null || props.apiKey().isBlank())) {
             throw new ModelException("Anthropic API key (ANTHROPIC_API_KEY) is not configured");
         }
         ObjectNode body = buildBody(req);
@@ -256,13 +263,24 @@ public class AnthropicModelClient implements ModelClient {
         } catch (IOException e) {
             throw new ModelException("Cannot serialize request", e);
         }
-        HttpRequest request = HttpRequest.newBuilder(URI.create(props.baseUrl().replaceAll("/+$", "") + "/v1/messages"))
-                .timeout(Duration.ofSeconds(Math.max(1, props.timeoutSeconds())))
-                .header("content-type", "application/json")
-                .header("x-api-key", props.apiKey())
-                .header("anthropic-version", API_VERSION)
-                .POST(HttpRequest.BodyPublishers.ofString(payload))
-                .build();
+        java.util.function.Supplier<HttpRequest> build = () -> {
+            HttpRequest.Builder rb = HttpRequest.newBuilder(URI.create(props.baseUrl().replaceAll("/+$", "") + "/v1/messages"))
+                    .timeout(Duration.ofSeconds(Math.max(1, props.timeoutSeconds())))
+                    .header("content-type", "application/json")
+                    .header("anthropic-version", API_VERSION);
+            if (auth != null) {
+                try {
+                    auth.headers().forEach(rb::header);
+                } catch (RuntimeException e) {
+                    throw new ModelException("Authentication failed: " + e.getMessage(), e);
+                }
+            } else {
+                rb.header("x-api-key", props.apiKey());
+            }
+            return rb.POST(HttpRequest.BodyPublishers.ofString(payload)).build();
+        };
+        HttpRequest request = build.get();
+        boolean authRetried = false;
 
         int attempt = 0;
         while (true) {
@@ -271,6 +289,12 @@ public class AnthropicModelClient implements ModelClient {
                 int status = resp.statusCode();
                 if (status == 200) {
                     return mapper.readTree(resp.body());
+                }
+                if (status == 401 && auth != null && !authRetried) {
+                    authRetried = true;
+                    auth.onUnauthorized();
+                    request = build.get();
+                    continue;
                 }
                 boolean retryable = status == 429 || status == 529 || status >= 500;
                 if (!retryable || attempt >= props.maxRetries()) {
@@ -281,6 +305,7 @@ public class AnthropicModelClient implements ModelClient {
                         .orElse(Math.min(30_000L, backoffBaseMs << attempt));
                 log.warn("Anthropic API {} — retry {} in {} ms", status, attempt + 1, delayMs);
                 attempt++;
+                cancel.retrying(status, attempt, props.maxRetries(), delayMs);
                 cancel.sleep(delayMs);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
@@ -290,8 +315,10 @@ public class AnthropicModelClient implements ModelClient {
                     throw new ModelException("Anthropic API call failed: " + e.getMessage(), e);
                 }
                 attempt++;
+                long netDelay = Math.min(30_000L, backoffBaseMs << attempt);
+                cancel.retrying(0, attempt, props.maxRetries(), netDelay);
                 try {
-                    cancel.sleep(Math.min(30_000L, backoffBaseMs << attempt));
+                    cancel.sleep(netDelay);
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
                     throw new ModelException("Interrupted while calling the model", ie);

@@ -285,6 +285,18 @@ public final class AgentHarness {
     }
 
     /** Slash commands shared by the command line and the web front end. */
+    private java.util.Map<String, org.kendar.llm.harness.auth.OAuthLogin> logins = java.util.Map.of();
+    private org.kendar.llm.harness.auth.TokenStore tokenStore = org.kendar.llm.harness.auth.TokenStore.defaultStore();
+
+    /** The logins {@code /login} can run: discovered {@link org.kendar.llm.harness.auth.OAuthLogin} services and MCP servers with oauth. */
+    public java.util.Map<String, org.kendar.llm.harness.auth.OAuthLogin> logins() {
+        return logins;
+    }
+
+    public org.kendar.llm.harness.auth.TokenStore tokenStore() {
+        return tokenStore;
+    }
+
     public SlashCommands commands() {
         return commands;
     }
@@ -339,6 +351,7 @@ public final class AgentHarness {
         private HarnessConfig config = HarnessConfig.defaults();
         private HarnessPricing pricing = new HarnessPricing(0, 0, 0, 0);
         private String systemPrompt = "";
+        private String systemPromptReplace;
         private boolean smallModel;
         private ObjectMapper mapper = new ObjectMapper();
         private HarnessSettings settings = HarnessSettings.empty();
@@ -528,6 +541,15 @@ public final class AgentHarness {
         }
 
         /**
+         * Replaces the built-in {@code system-prompt.md}. Drops its tool-usage guidance; the small-model rules, the
+         * addendum, instruction files and strategy notes still follow it.
+         */
+        public Builder systemPromptReplace(String replacement) {
+            this.systemPromptReplace = replacement == null || replacement.isBlank() ? null : replacement;
+            return this;
+        }
+
+        /**
          * The main model is small: adds the stricter rules of {@code small-model.md} after the base prompt, for the
          * main agent and its sub-agents. Also on when settings {@code smallModel} is true.
          */
@@ -615,7 +637,7 @@ public final class AgentHarness {
             SubAgentTool subAgentTool = new SubAgentTool(() -> ref[0], mapper, agentCatalog(settings, mapper, maxParallel, providers),
                     maxParallel != 1);
             String instructions = InstructionLoader.load(settings.instructionFiles());
-            String prompt = basePrompt()
+            String prompt = (systemPromptReplace != null ? systemPromptReplace : basePrompt())
                     + (smallModel || settings.isSmallModel() ? "\n\n" + Prompts.load("small-model.md") : "")
                     + (systemPrompt.isBlank() ? "" : "\n\n" + systemPrompt)
                     + (instructions.isBlank() ? "" : "\n\n" + instructions)
@@ -640,6 +662,15 @@ public final class AgentHarness {
             harness.checkpoints = harnessCheckpoints;
             harness.modelSwitch = modelSwitch;
             harness.maxParallel = maxParallel;
+            java.util.Map<String, org.kendar.llm.harness.auth.OAuthLogin> found = new java.util.TreeMap<>();
+            for (var l : java.util.ServiceLoader.load(org.kendar.llm.harness.auth.OAuthLogin.class)) found.put(l.name(), l);
+            for (var m : settings.mcpServers()) {
+                if (!m.isStdio() && Boolean.TRUE.equals(m.oauth())) {
+                    var l = new org.kendar.llm.harness.auth.McpOAuthLogin(m.name(), m.url(), HttpClient.newHttpClient(), mapper);
+                    found.put(l.name(), l);
+                }
+            }
+            harness.logins = found;
             commands.forEach(c -> harness.commands().register(c.name(), c.description(), c.command()));
             return harness;
         }

@@ -40,8 +40,11 @@ public class HarnessConfiguration {
     public AgentHarness agentHarness(JllmProperties p, ModelClient modelClient, HarnessPricing pricing,
                                      ObjectMapper mapper) {
         String settingsFile = JllmProperties.blankToNull(p.settingsFile());
-        HarnessSettings settings = settingsFile == null ? HarnessSettings.empty()
-                : HarnessSettings.load(Path.of(settingsFile));
+        Path projectDir = Path.of(p.workdir() == null ? "" : p.workdir()).toAbsolutePath().normalize();
+        // global ~/.jllm/settings.json, then project .jllm/settings.json, then the settings file; later wins
+        HarnessSettings settings = HarnessSettings.loadLayered(settingsFile == null ? null : Path.of(settingsFile),
+                projectDir);
+        var promptFiles = org.kendar.llm.harness.instructions.SystemPromptFiles.load(projectDir);
         // same precedence as the CLI: the property wins over the settings file
         if (p.contextTokens() != null && p.contextTokens() > 0) settings = settings.withMaxTokens(p.contextTokens());
         if (JllmProperties.blankToNull(p.contextStrategy()) != null) {
@@ -61,13 +64,14 @@ public class HarnessConfiguration {
         if (p.maxTurns() != null && p.maxTurns() > 0) config = config.withMaxTurns(p.maxTurns());
         config = config.withMaxTokens(p.maxTokensOrDefault());
 
-        Path projectDir = Path.of(p.workdir() == null ? "" : p.workdir()).toAbsolutePath().normalize();
         ChatDirSandboxExecutor sandbox = new ChatDirSandboxExecutor(config, projectDir);
         HistoryRootLock.acquire(sandbox.location()); // one process per base directory; held until the process ends
         AgentHarness harness = AgentHarness.builder()
                 .modelClient(modelClient)
                 .config(config)
-                .systemPrompt(JllmProperties.blankToNull(p.systemPrompt()))
+                .systemPrompt(org.kendar.llm.harness.instructions.SystemPromptFiles.join(promptFiles.append(),
+                        JllmProperties.blankToNull(p.systemPrompt())))
+                .systemPromptReplace(promptFiles.replace())
                 .sandbox(executor(settings, config, sandbox, projectDir))
                 .sessionStore(new FileChatSessionStore(sandbox::historyRoot, () -> chatHistoryRoots(sandbox), mapper))
                 .subAgentRunLog(new FileHistorySubAgentRunLog(new InMemorySubAgentRunLog(), sandbox::historyRoot))

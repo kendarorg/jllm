@@ -410,6 +410,60 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
         }
     }
 
+    /** The global settings file {@code <jllm.home or user.home>/.jllm/settings.json}. */
+    public static Path globalFile() {
+        return Path.of(System.getProperty("jllm.home", System.getProperty("user.home")), ".jllm", "settings.json");
+    }
+
+    /** The project settings file {@code <projectDir>/.jllm/settings.json}. */
+    public static Path projectFile(Path projectDir) {
+        return projectDir.resolve(".jllm").resolve("settings.json");
+    }
+
+    /**
+     * Global, then project, then explicit file: later wins, objects merged per key, other values (including arrays)
+     * replaced. Missing files are skipped; {@code explicit} and {@code projectDir} may be null.
+     */
+    public static HarnessSettings loadLayered(Path explicit, Path projectDir) {
+        return loadLayered(explicit, projectDir, System::getenv);
+    }
+
+    public static HarnessSettings loadLayered(Path explicit, Path projectDir, Function<String, String> env) {
+        List<Path> files = new ArrayList<>();
+        files.add(globalFile());
+        if (projectDir != null) files.add(projectFile(projectDir));
+        if (explicit != null) files.add(explicit);
+        ObjectMapper mapper = new ObjectMapper().configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        JsonNode merged = null;
+        try {
+            for (Path f : files) {
+                if (!java.nio.file.Files.isRegularFile(f)) {
+                    if (f.equals(explicit)) throw new UncheckedIOException("Cannot read settings " + f,
+                            new java.io.FileNotFoundException(f.toString()));
+                    continue;
+                }
+                JsonNode tree = mapper.readTree(f.toFile());
+                merged = merged == null ? tree : merge(merged, tree);
+            }
+            if (merged == null) return empty();
+            return mapper.treeToValue(expand(merged, env), HarnessSettings.class);
+        } catch (IOException e) {
+            throw new UncheckedIOException("Cannot read settings", e);
+        }
+    }
+
+    static JsonNode merge(JsonNode base, JsonNode over) {
+        if (base instanceof ObjectNode b && over instanceof ObjectNode o) {
+            for (Iterator<Map.Entry<String, JsonNode>> it = o.fields(); it.hasNext(); ) {
+                Map.Entry<String, JsonNode> e = it.next();
+                JsonNode existing = b.get(e.getKey());
+                b.set(e.getKey(), existing == null ? e.getValue() : merge(existing, e.getValue()));
+            }
+            return b;
+        }
+        return over;
+    }
+
     static JsonNode expand(JsonNode node, Function<String, String> env) {
         if (node.isTextual()) return com.fasterxml.jackson.databind.node.TextNode.valueOf(expand(node.asText(), env));
         if (node instanceof ObjectNode obj) {

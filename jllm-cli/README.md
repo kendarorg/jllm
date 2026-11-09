@@ -16,8 +16,8 @@ The API key comes from `--api-key` or the `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`
 ## Flags
 
 ```text
-Main [--provider anthropic|openai|qwen|llamacpp|ollama] [--model M] [--base-url U] [--api-key K]
-     [--mode default|plan|edit|auto] [--workdir DIR] [--prompt TEXT] [--settings FILE] [--system-prompt TEXT]
+Main [--provider anthropic|openai|gemini|qwen|llamacpp|ollama] [--model M] [--base-url U] [--api-key K]
+     [--mode default|plan|edit|auto] [--workdir DIR] [--prompt TEXT] [--settings FILE] [--system-prompt TEXT] [--system-prompt-file FILE] [--system-prompt-replace FILE]
      [--max-turns N] [--context-tokens TOKENS] [--max-tokens TOKENS]
      [--context-strategy compaction|mnemonic|scope] [--search-api-key BRAVE_KEY] [--small-model]
      [--sandbox local|docker] [--docker-image IMAGE] [--docker-mode oneshot|daemon]
@@ -27,15 +27,17 @@ Main [--provider anthropic|openai|qwen|llamacpp|ollama] [--model M] [--base-url 
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--provider` | settings `defaultProvider`, else `anthropic` | a provider name from the settings `providers` list, or a built-in: `anthropic`, `openai`, `qwen`, `llamacpp`, `ollama` |
+| `--provider` | settings `defaultProvider`, else `anthropic` | a provider name from the settings `providers` list, or a built-in: `anthropic`, `openai`, `gemini`, `qwen`, `llamacpp`, `ollama` |
 | `--model` | per provider (`claude-sonnet-5-5`, `gpt-4.1`, `qwen3-coder-plus`, `local`, `llama3.1`) | model name; overrides the named provider for this session only |
 | `--base-url` | per provider | endpoint (OpenAI-compatible URLs include `/v1`) |
 | `--api-key` | `<PROVIDER>_API_KEY` env var | `ASK_TOKEN` asks for it on startup |
 | `--mode` | `default` | initial [permission mode](../jllm-harness/README.md#modes-working-directory-and-scratch-directory) |
 | `--workdir` | current directory | project directory; the file tools are confined to it |
 | `--prompt` | none | run one turn non-interactively, then exit |
-| `--settings` | none | harness [settings file](../docs/USAGE.md#5-settings-file) |
+| `--settings` | none | harness [settings file](../docs/USAGE.md#5-settings-file), merged over `~/.jllm/settings.json` and `.jllm/settings.json` |
 | `--system-prompt` | none | text appended to the built-in system prompt |
+| `--system-prompt-file` | none | file appended to the system prompt |
+| `--system-prompt-replace` | none | file that replaces the built-in system prompt; also `SYSTEM.md` / `APPEND_SYSTEM.md` in `~/.jllm/` and `.jllm/` (see [USAGE](../docs/USAGE.md#system-prompt-files)) |
 | `--max-turns` | 40 | model calls per user turn |
 | `--context-tokens` | 100000 | the model's context window; wins over `context.maxTokens` |
 | `--max-tokens` | 32000 | output limit of one response, not the window |
@@ -126,6 +128,8 @@ included.
 | `/status` | context strategy, estimated context size against the window, usage, chat count |
 | `/chats` `/resume <id\|prefix>` `/title <text>` | list, switch, rename chats |
 | `/chats delete <id>` `/chats clean [days]` | delete one chat; list chats older than `days` (default 30), `/chats clean confirm` deletes them |
+| `/export [md\|html] [file]` | write the chat as a transcript into the scratch directory |
+| `/login [name]` `/logout <name>` | OAuth login (providers, MCP servers with `oauth`); no name lists them |
 | `/exit` `/quit` | leave the CLI |
 
 Menu toggles live in memory only; the settings file is the startup default.

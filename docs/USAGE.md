@@ -89,6 +89,13 @@ switch leaves the cached tool block and the text before it intact (see [CACHES Â
 
 ## 5. Settings file
 
+**Layers.** The CLI and the web front end merge up to three files, later ones winning: the global
+`~/.jllm/settings.json` (home = `-Djllm.home` or the user home), the project `.jllm/settings.json` (in the working
+directory), then the file given with `--settings` / `jllm.settings-file`. Missing global and project files are skipped;
+a missing explicit file is an error. Objects are merged key by key; arrays (`mcpServers`, `providers`,
+`instructionFiles`, ...) and scalars of a later file replace the earlier value. Keep API keys in the global file.
+`${ENV_VAR}` is expanded after merging. Embedding: `HarnessSettings.loadLayered(explicit, projectDir)`.
+
 Every key is optional. `${ENV_VAR}` is expanded in every string; a missing variable fails the load. Unknown keys are
 ignored.
 
@@ -142,12 +149,37 @@ ignored.
 | `output.toolMaxChars` | tool output kept in the context; the rest is cut with `[truncated N chars]` (the head is kept, the tail for `bash`) |
 | `output.eventMaxChars` | tool output carried by the `tool_result` event to the front end |
 
+### System prompt files
+
+`SYSTEM.md` replaces the built-in `system-prompt.md` (tool-usage guidance included); `APPEND_SYSTEM.md` is appended.
+Both are read from `~/.jllm/` and the project `.jllm/`: for `SYSTEM.md` the project file wins, the two
+`APPEND_SYSTEM.md` files are both appended (global first). CLI: `--system-prompt-file FILE` appends a file,
+`--system-prompt-replace FILE` replaces (wins over `SYSTEM.md`); `--system-prompt TEXT` still appends and comes last.
+After the prompt come, as before, the small-model rules, instruction files and strategy notes. Builder:
+`systemPrompt(addendum)`, `systemPromptReplace(text)`.
+
+### Authentication
+
+Model clients and HTTP MCP servers can take an `AuthProvider` (package `org.kendar.llm.harness.auth`) instead of a
+static key: it returns the headers of each request and is told about a 401, after which the client retries once.
+`AuthProvider.staticKey(...)` and `dynamicKey(...)` cover plain and rotating keys. Generic OAuth pieces, with no
+provider-specific code: `OAuthTokenClient` (code, refresh and device grants), `Pkce`, `LoopbackCallbackServer`,
+`DeviceCodeFlow`, `BrowserLauncher`, `TokenStore` (`~/.jllm/auth.json`, atomic writes, owner-only, file lock, never
+logged), `RefreshingAuthProvider` (refresh 60 s ahead, single flight, rotated refresh token saved first).
+A provider login is an `OAuthLogin` (name, `login(UserInteraction)`, `authProvider(store)`), usually `AuthCodeLogin` or
+`DeviceCodeLogin` plus endpoints, registered as a `java.util.ServiceLoader` service. `/login [name]` runs it
+(no name: list logins and what is logged in), `/logout <name>` removes the stored token. The clients take it with
+`AnthropicModelClient.authProvider(...)` / `OpenAiCompatModelClient.authProvider(...)`; it is not selectable from the
+settings file. MCP OAuth: see [MCP](MCP.md). No provider login is shipped.
+
 ### Providers and temperature
 
-`providers` is a list of named model definitions (`name`, `type` = `anthropic` | `openai` | `qwen` | `llamacpp` |
+`providers` is a list of named model definitions (`name`, `type` = `anthropic` | `openai` | `gemini` | `qwen` | `llamacpp` |
 `ollama`, `baseUrl`, `apiKey`, `model`, `maxTokens`, `maxRetries`, `timeoutSeconds`, `requireApiKey`,
-`useMaxCompletionTokens`, `contextTokens`, `smallModel`, `temperature`, `order`, `thinking`). The old names `anthropic`, `openai`, `qwen`,
-`llamacpp`, `ollama` stay valid without a definition.
+`useMaxCompletionTokens`, `contextTokens`, `smallModel`, `temperature`, `order`, `thinking`). The old names `anthropic`, `openai`, `gemini`, `qwen`,
+`llamacpp`, `ollama` stay valid without a definition. `gemini` uses Google's OpenAI-compatible endpoint
+(`https://generativelanguage.googleapis.com/v1beta/openai`, default model `gemini-2.5-pro`, key from
+`GEMINI_API_KEY`); native Gemini features (image input, Vertex) are not supported.
 
 - CLI: `--provider <name>` picks one; `--model`, `--base-url`, `--api-key` override it for the session only. With an
   unknown name, or `--model` alone, they define a `custom (session)` entry that is never written to the settings file.
@@ -170,7 +202,7 @@ ignored.
   no thinking, OpenAI-compatible: nothing sent).
   - Anthropic: extended-thinking budget of 2048 (`low`), 8192 (`medium`) or 16384 (`high`) tokens; `minimal` turns
     thinking off. `max_tokens` is raised to fit the budget, and a forced `toolChoice` is ignored while thinking is on.
-  - OpenAI-compatible (openai, qwen, llamacpp, ollama): sent as `reasoning_effort`; `minimal` is `minimal`, or `none`
+  - OpenAI-compatible (openai, gemini, qwen, llamacpp, ollama): sent as `reasoning_effort`; `minimal` is `minimal`, or `none`
     on Ollama. A server that rejects it gets a retry: `minimal`/`none` steps down to `low`, anything else is
     dropped, and a warning is logged. The run continues.
 
@@ -253,7 +285,7 @@ sequenceDiagram
         S-->>FE: run_queued
     end
     S->>L: run
-    L-->>FE: usage, text, tool_call, tool_result, compaction, classifier, warning
+    L-->>FE: usage, text, tool_call, tool_result, compaction, classifier, warning, retry
     L-->>FE: approval_request {id, type, title, preview, proposed, agent?}
     FE->>H: resolveApproval(chatId, id, approved, edited, remember)
     opt cancel
@@ -263,6 +295,9 @@ sequenceDiagram
     L-->>FE: plan_ready (plan mode only), error (on failure)
     S-->>FE: run_finished {cancelled}
 ```
+
+`retry` `{status, attempt, max, delayMs, message}`: a model call failed with HTTP `status` (0 = network error) and the client
+waits `delayMs` before retry `attempt` of `max`; it is followed by the normal events once the call succeeds.
 
 | Event | Data |
 |---|---|

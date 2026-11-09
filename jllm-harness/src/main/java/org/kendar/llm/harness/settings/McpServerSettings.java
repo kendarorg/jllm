@@ -14,9 +14,11 @@ import java.util.Map;
  * @param command  executable of a stdio server
  * @param args     arguments of the executable
  * @param env      environment variables added to the child process
+ * @param oauth    HTTP server that needs an OAuth login: run {@code /login mcp:<name>} once; default false
  */
 public record McpServerSettings(String name, String url, Map<String, String> headers, String group, Boolean enabled,
-                                Boolean readOnly, String command, List<String> args, Map<String, String> env) {
+                                Boolean readOnly, String command, List<String> args, Map<String, String> env,
+                                Boolean oauth) {
 
     public McpServerSettings {
         headers = headers == null ? Map.of() : Map.copyOf(headers);
@@ -29,10 +31,15 @@ public record McpServerSettings(String name, String url, Map<String, String> hea
         }
     }
 
+    public McpServerSettings(String name, String url, Map<String, String> headers, String group, Boolean enabled,
+                             Boolean readOnly, String command, List<String> args, Map<String, String> env) {
+        this(name, url, headers, group, enabled, readOnly, command, args, env, null);
+    }
+
     /** An HTTP server. */
     public McpServerSettings(String name, String url, Map<String, String> headers, String group, Boolean enabled,
                              Boolean readOnly) {
-        this(name, url, headers, group, enabled, readOnly, null, null, null);
+        this(name, url, headers, group, enabled, readOnly, null, null, null, null);
     }
 
     public boolean isStdio() {

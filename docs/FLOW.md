@@ -50,7 +50,7 @@ flowchart TB
         MC["ModelClient"]
         LMC["LimitedModelClient<br/>(maxParallel)"]
         ANT["AnthropicModelClient"]
-        OAI["OpenAiCompatModelClient<br/>openai qwen llamacpp vLLM ollama"]
+        OAI["OpenAiCompatModelClient<br/>openai gemini qwen llamacpp vLLM ollama"]
         FAST["fast ModelClient (optional)"]
     end
 

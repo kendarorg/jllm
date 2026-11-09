@@ -28,6 +28,14 @@ public class OpenAiCompatModelClient implements ModelClient {
     private final LlmSettings cfg;
     private final ObjectMapper mapper;
     private final long backoffBaseMs;
+    private volatile org.kendar.llm.harness.auth.AuthProvider auth;
+
+    /** Headers come from the provider (OAuth, rotating keys) instead of the static {@code apiKey}. */
+    public OpenAiCompatModelClient authProvider(org.kendar.llm.harness.auth.AuthProvider provider) {
+        this.auth = provider;
+        return this;
+    }
+
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(20)).build();
 
     public OpenAiCompatModelClient(LlmSettings cfg, ObjectMapper mapper) {
@@ -48,7 +56,7 @@ public class OpenAiCompatModelClient implements ModelClient {
 
     @Override
     public ModelResponse complete(ModelRequest req, CancelToken cancel) {
-        if (cfg.requireApiKey() && (cfg.apiKey() == null || cfg.apiKey().isBlank())) {
+        if (auth == null && cfg.requireApiKey() && (cfg.apiKey() == null || cfg.apiKey().isBlank())) {
             throw new ModelException("API key for LLM provider '" + cfg.name() + "' is not configured");
         }
         ObjectNode body = buildBody(req);
@@ -348,13 +356,23 @@ public class OpenAiCompatModelClient implements ModelClient {
         } catch (IOException e) {
             throw new ModelException("Cannot serialize request", e);
         }
-        HttpRequest.Builder rb = HttpRequest.newBuilder(URI.create(cfg.baseUrl().replaceAll("/+$", "") + "/chat/completions"))
-                .timeout(Duration.ofSeconds(Math.max(1, cfg.timeoutSeconds())))
-                .header("content-type", "application/json");
-        if (cfg.apiKey() != null && !cfg.apiKey().isBlank()) {
-            rb.header("authorization", "Bearer " + cfg.apiKey());
-        }
-        HttpRequest request = rb.POST(HttpRequest.BodyPublishers.ofString(payload)).build();
+        java.util.function.Supplier<HttpRequest> build = () -> {
+            HttpRequest.Builder rb = HttpRequest.newBuilder(URI.create(cfg.baseUrl().replaceAll("/+$", "") + "/chat/completions"))
+                    .timeout(Duration.ofSeconds(Math.max(1, cfg.timeoutSeconds())))
+                    .header("content-type", "application/json");
+            if (auth != null) {
+                try {
+                    auth.headers().forEach(rb::header);
+                } catch (RuntimeException e) {
+                    throw new ModelException("Authentication failed: " + e.getMessage(), e);
+                }
+            } else if (cfg.apiKey() != null && !cfg.apiKey().isBlank()) {
+                rb.header("authorization", "Bearer " + cfg.apiKey());
+            }
+            return rb.POST(HttpRequest.BodyPublishers.ofString(payload)).build();
+        };
+        HttpRequest request = build.get();
+        boolean authRetried = false;
 
         int attempt = 0;
         while (true) {
@@ -363,6 +381,12 @@ public class OpenAiCompatModelClient implements ModelClient {
                 int status = resp.statusCode();
                 if (status == 200) {
                     return mapper.readTree(resp.body());
+                }
+                if (status == 401 && auth != null && !authRetried) {
+                    authRetried = true;
+                    auth.onUnauthorized();
+                    request = build.get();
+                    continue;
                 }
                 boolean retryable = status == 429 || status >= 500;
                 if (!retryable || attempt >= cfg.maxRetries()) {
@@ -373,6 +397,7 @@ public class OpenAiCompatModelClient implements ModelClient {
                         .orElse(Math.min(30_000L, backoffBaseMs << attempt));
                 log.warn("{} API {} - retry {} in {} ms", cfg.name(), status, attempt + 1, delayMs);
                 attempt++;
+                cancel.retrying(status, attempt, cfg.maxRetries(), delayMs);
                 cancel.sleep(delayMs);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
@@ -382,8 +407,10 @@ public class OpenAiCompatModelClient implements ModelClient {
                     throw new ModelException(cfg.name() + " API call failed: " + e.getMessage(), e);
                 }
                 attempt++;
+                long netDelay = Math.min(30_000L, backoffBaseMs << attempt);
+                cancel.retrying(0, attempt, cfg.maxRetries(), netDelay);
                 try {
-                    cancel.sleep(Math.min(30_000L, backoffBaseMs << attempt));
+                    cancel.sleep(netDelay);
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
                     throw new ModelException("Interrupted while calling the model", ie);

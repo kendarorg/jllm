@@ -67,6 +67,7 @@ sequenceDiagram
 | `group` | `Mcp/<name>` | tool group (selection, `/tools`, `request_tool_group`) |
 | `readOnly` | `false` | `true`: the tools never ask for approval |
 | `enabled` | `true` | startup state |
+| `oauth` | `false` | HTTP server that needs an OAuth login, see below |
 
 ### Protocol
 
@@ -111,7 +112,17 @@ sequenceDiagram
 - A `check` starts a separate process and stops it again.
 - A server that writes requests of its own (sampling, roots) gets no answer; its messages are ignored.
 
-Not supported: OAuth (use static headers), resources, prompts, sampling, server notifications.
+Not supported: resources, prompts, sampling, server notifications.
+
+### OAuth
+
+With `"oauth": true` run `/login mcp:<name>` once. The harness reads `/.well-known/oauth-protected-resource` of the
+server's origin (falling back to the origin itself as authorization server), then the authorization server metadata,
+registers a public client dynamically (needs a `registration_endpoint`) and runs the authorization code flow with PKCE
+through a loopback redirect on `127.0.0.1`; the URL is opened in a browser or printed. The token is stored in
+`~/.jllm/auth.json` as `mcp:<name>` together with the client id and token endpoint, sent as `Authorization: Bearer`,
+refreshed ahead of expiry and refreshed once more after a 401. Without a stored login the server is skipped at startup
+with "run /login mcp:<name>". `/logout mcp:<name>` removes it. Static `headers` still work for servers with API keys.
 
 ## 3. REST APIs (OpenAPI)
 

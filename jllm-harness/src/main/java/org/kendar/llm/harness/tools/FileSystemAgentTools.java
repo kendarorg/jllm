@@ -46,7 +46,7 @@ public class FileSystemAgentTools implements HarnessToolSet {
 
     @Override
     public List<HarnessTool> tools() {
-        return List.of(readFile(), writeFile(), editFile(), glob(), grep(), grepCode());
+        return List.of(readFile(), writeFile(), editFile(), glob(), ls(), grep(), grepCode());
     }
 
     /** Resolves a path for reading: inside the work dir, or an absolute path inside the scratch dir. */
@@ -256,6 +256,44 @@ public class FileSystemAgentTools implements HarnessToolSet {
         if (!pattern.startsWith("**/")) return full;
         PathMatcher topLevel = FileSystems.getDefault().getPathMatcher("glob:" + pattern.substring(3));
         return p -> full.matches(p) || topLevel.matches(p);
+    }
+
+    private HarnessTool ls() {
+        return new SimpleTool("ls",
+                "List one directory (not recursive): directories first, then files, with type and size in bytes.",
+                SimpleTool.schema("path?", "Directory relative to the work dir (default: the work dir)"),
+                GROUP, ToolKind.READ_ONLY, (ctx, in) -> {
+            if (ctx.files() != null) return "ls is not available on a remote work dir; use glob";
+            Path dir = in.hasNonNull("path") && !in.path("path").asText().isBlank()
+                    ? jail(ctx, in.path("path").asText()) : ctx.workDir().toAbsolutePath().normalize();
+            if (!Files.isDirectory(dir)) return "Not a directory: " + in.path("path").asText();
+            List<String> dirs = new ArrayList<>();
+            List<String> files = new ArrayList<>();
+            try (Stream<Path> s = Files.list(dir)) {
+                for (Path p : (Iterable<Path>) s.sorted()::iterator) {
+                    String name = p.getFileName().toString();
+                    if (Files.isDirectory(p)) dirs.add("d " + name + "/");
+                    else {
+                        long size;
+                        try {
+                            size = Files.size(p);
+                        } catch (IOException e) {
+                            size = -1;
+                        }
+                        files.add("f " + name + " " + size);
+                    }
+                }
+            }
+            List<String> all = new ArrayList<>(dirs);
+            all.addAll(files);
+            if (all.isEmpty()) return "(empty)";
+            if (all.size() > MAX_RESULTS) {
+                int more = all.size() - MAX_RESULTS;
+                all = new ArrayList<>(all.subList(0, MAX_RESULTS));
+                all.add("... " + more + " more entries");
+            }
+            return String.join("\n", all);
+        });
     }
 
     private HarnessTool glob() {

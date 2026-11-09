@@ -11,7 +11,7 @@ import java.util.*;
 public final class ProviderCatalog {
 
     public static final String CUSTOM = "custom (session)";
-    private static final Set<String> BUILT_INS = Set.of("anthropic", "openai", "qwen", "llamacpp", "ollama");
+    private static final Set<String> BUILT_INS = Set.of("anthropic", "openai", "gemini", "qwen", "llamacpp", "ollama");
 
     private final Map<String, ProviderSettings> configured = new LinkedHashMap<>();
     private volatile ProviderSettings custom;

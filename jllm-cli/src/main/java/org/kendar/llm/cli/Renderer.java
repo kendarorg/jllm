@@ -49,6 +49,7 @@ final class Renderer {
             }
             case "tool_result" -> toolResult(d);
             case "warning" -> out.accept(color(YELLOW, "[warning] " + d.path("message").asText()));
+            case "retry" -> out.accept(color(YELLOW, "[retry] " + d.path("message").asText()));
             case "error" -> err.accept(color(RED, "[error] " + d.path("message").asText()));
             case "compaction" -> out.accept(color(DIM, "[compaction] " + d));
             case "plan_ready" -> out.accept("[plan] " + d.path("message").asText());

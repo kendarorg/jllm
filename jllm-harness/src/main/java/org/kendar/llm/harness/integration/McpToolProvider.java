@@ -38,7 +38,13 @@ public final class McpToolProvider {
     public static McpClient connect(McpServerSettings server, HttpClient http, ObjectMapper mapper) {
         return server.isStdio()
                 ? new McpStdioClient(mapper, server.name(), server.command(), server.args(), server.env())
-                : new McpHttpClient(http, mapper, server.url(), server.headers());
+                : oauth(server, new McpHttpClient(http, mapper, server.url(), server.headers()), http, mapper);
+    }
+
+    private static McpClient oauth(McpServerSettings server, McpHttpClient client, HttpClient http, ObjectMapper mapper) {
+        if (!Boolean.TRUE.equals(server.oauth())) return client;
+        return client.authProvider(new org.kendar.llm.harness.auth.McpOAuthLogin(server.name(), server.url(), http, mapper)
+                .authProvider(org.kendar.llm.harness.auth.TokenStore.defaultStore()));
     }
 
     /** Connects to the server and lists its tools. The tools keep the client, so it stays open. */
