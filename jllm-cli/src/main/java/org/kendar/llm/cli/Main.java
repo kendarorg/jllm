@@ -57,7 +57,24 @@ public final class Main {
     /** Default output limit of one response, all providers. */
     static final int DEFAULT_MAX_TOKENS = 32_000;
 
+    /** The JLine terminal, null when stdin/stdout is not a terminal (plain output and input). */
+    private static Term term;
+    private static Renderer renderer;
+    private static volatile boolean running;
+    private static volatile long runStart;
+    private static volatile long lastInterrupt;
+
     private Main() {
+    }
+
+    private static void say(String s) {
+        if (term != null) term.println(s);
+        else System.out.println(s);
+    }
+
+    private static void sayErr(String s) {
+        if (term != null) term.println(s);
+        else System.err.println(s);
     }
 
     public static void main(String[] argv) throws Exception {
@@ -130,19 +147,25 @@ public final class Main {
                 .objectMapper(mapper)
                 .discoverPlugins()
                 .build();
-        System.out.println("project dir: " + harness.sandbox().location() + (settings.dockerSandbox()
+        List<String> names = new java.util.ArrayList<>(harness.commands().list().stream().map(i -> i.name()).toList());
+        names.add("/expand");
+        term = a.containsKey("prompt") ? null : Term.open(names, cwdSandbox.historyRoot().resolve("cli-history"));
+        renderer = new Renderer(Main::say, Main::sayErr, term != null);
+        say("project dir: " + harness.sandbox().location() + (settings.dockerSandbox()
                 ? " (shell commands run in docker image " + config.sandbox().docker().image()
                 + (settings.dockerDaemon() ? ", long-running container, project mounted at /workspace)" : ")")
                 : " (no isolation: shell commands run as you, plan mode cannot stop them writing here)"));
-        System.out.println("scratch dir: " + cwdSandbox.scratchRoot());
-        System.out.println("history dir: " + cwdSandbox.historyRoot());
+        say("scratch dir: " + cwdSandbox.scratchRoot());
+        say("history dir: " + cwdSandbox.historyRoot());
         PermissionMode initialMode = PermissionMode.parse(a.get("mode"));
         BlockingQueue<AgentEvent> events = new LinkedBlockingQueue<>();
         Chat chat = new Chat();
         // piped input is the script, not an answer: ask only when nothing is waiting on stdin
         boolean interactive = !a.containsKey("prompt") && System.in.available() == 0;
-        BlockingQueue<String> in = stdin();
+        BlockingQueue<String> in = term == null ? stdin() : new LinkedBlockingQueue<>();
+        Term.Tail tail = term == null ? null : new Term.Tail(term);
         String resumeId = ResumeChooser.choose(harness, a.get("resume"), interactive, () -> {
+            if (term != null) return term.readLine(tail.get(), () -> { });
             try {
                 String l = in.take();
                 return l == EOF ? null : l;
@@ -150,14 +173,15 @@ public final class Main {
                 Thread.currentThread().interrupt();
                 return null;
             }
-        }, System.out);
+        }, term == null ? System.out : tail);
+        if (tail != null) tail.flush();
         String openId = resumeId != null ? resumeId : harness.sessions().create(null).chatId();
         int deleted = harness.enforceChatRetention(settings.chatRetentionLimit(), openId);
-        if (deleted > 0) System.out.println("chatRetentionLimit: deleted " + deleted + " old chat(s)");
+        if (deleted > 0) say("chatRetentionLimit: deleted " + deleted + " old chat(s)");
         switchTo(harness, chat, openId, resumeId == null || a.containsKey("mode") ? initialMode : null, events);
         if (resumeId != null) {
-            System.out.println("resumed chat " + openId);
-            ResumeChooser.replay(harness, openId, System.out);
+            say("resumed chat " + openId);
+            ResumeChooser.replay(harness, openId, term == null ? System.out : new Term.Tail(term));
         }
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             harness.cancel(chat.id);
@@ -169,18 +193,30 @@ public final class Main {
             runTurn(harness, chat.id, a.get("prompt"), events, in);
             System.exit(0);
         }
-        System.out.println("agent-harness chat " + chat.id + " (type /help for commands, /exit to quit; /cancel stops a run)");
+        say("agent-harness chat " + chat.id + " (type /help for commands, /exit to quit; /cancel or ctrl+c stops a run)");
+        if (term != null) startTerminalUi(harness, chat, choice.name(), in);
         while (true) {
-            System.out.print(harness.sessions().get(chat.id).mode().toLowerCase() + "> ");
-            System.out.flush();
+            if (term == null) {
+                System.out.print(harness.sessions().get(chat.id).mode().toLowerCase() + "> ");
+                System.out.flush();
+            }
             String line = in.take();
-            if (line == EOF || line.strip().equals("/quit")
-                    || line.strip().equals("/exit")) break;
+            if (line == EOF) break;
+            if (isExitCommand(line)) {
+                ask("Stop the whole process and exit? [y/N] ");
+                String answer = in.take();
+                if (answer == EOF || answer.strip().toLowerCase().startsWith("y")) break;
+                continue;
+            }
             if (harness.commands().menuActive(chat.id)) {
                 menu(harness.commands().menuInput(chat.id, line));
                 continue;
             }
             if (line.isBlank()) continue;
+            if (line.strip().equals("/expand") || line.strip().startsWith("/expand ")) {
+                renderer.expand(line.strip().substring("/expand".length()));
+                continue;
+            }
             if (harness.commands().handles(line.strip())) {
                 command(harness, chat, line.strip(), events);
                 continue;
@@ -191,6 +227,68 @@ public final class Main {
     }
 
     private static final String EOF = new String("<eof>");
+
+    private static boolean isExitCommand(String line) {
+        String s = line.strip();
+        return s.equals("/exit") || s.equals("/quit");
+    }
+
+    /** Set while a /exit typed during a run waits for its y/N answer (the next typed line). */
+    private static boolean exitPending;
+
+    /** Line reader thread (the prompt stays up while the agent runs), key bindings and the status bar. */
+    private static void startTerminalUi(AgentHarness harness, Chat chat, String provider, BlockingQueue<String> in) {
+        PermissionMode[] cycle = {PermissionMode.DEFAULT, PermissionMode.EDIT, PermissionMode.PLAN, PermissionMode.AUTO};
+        term.bind("\u001b[Z", () -> { // shift+tab: next permission mode
+            PermissionMode cur = PermissionMode.parse(harness.sessions().get(chat.id).mode());
+            int i = java.util.Arrays.asList(cycle).indexOf(cur);
+            harness.sessions().setMode(chat.id, cycle[(i + 1) % cycle.length]);
+            drawStatus(harness, chat, provider);
+        });
+        term.bind("\u000f", () -> renderer.expand("")); // ctrl+o: the last tool call in full
+        Thread reader = new Thread(() -> {
+            while (true) {
+                String l = term.readLine("> ", () -> {
+                    long now = System.currentTimeMillis();
+                    if (running) harness.cancel(chat.id);
+                    else if (now - lastInterrupt < 2000) System.exit(0);
+                    else say(Renderer.DIM + "(press ctrl+c again to exit)" + Renderer.RESET);
+                    lastInterrupt = now;
+                });
+                in.add(l == null ? EOF : l);
+                if (l == null) return;
+            }
+        }, "terminal-input");
+        reader.setDaemon(true);
+        reader.start();
+        Thread bar = new Thread(() -> {
+            while (true) {
+                drawStatus(harness, chat, provider);
+                try {
+                    Thread.sleep(500);
+                } catch (InterruptedException e) {
+                    return;
+                }
+            }
+        }, "status-bar");
+        bar.setDaemon(true);
+        bar.start();
+    }
+
+    private static final String[] SPIN = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"};
+
+    private static void drawStatus(AgentHarness harness, Chat chat, String provider) {
+        int subs = harness.activeSubAgents(chat.id).size();
+        String state = running
+                ? Renderer.YELLOW + SPIN[(int) (System.currentTimeMillis() / 100 % SPIN.length)] + " working "
+                + (System.currentTimeMillis() - runStart) / 1000 + "s"
+                + (subs > 0 ? " · " + subs + " sub-agent" + (subs > 1 ? "s" : "") : "")
+                + " (ctrl+c to interrupt)" + Renderer.RESET
+                : Renderer.GREEN + "idle" + Renderer.RESET;
+        term.status(Renderer.BOLD + harness.sessions().get(chat.id).mode().toLowerCase() + Renderer.RESET
+                + " · " + provider + " · " + chat.id + " · " + state
+                + Renderer.DIM + "  shift+tab mode · ctrl+o expand" + Renderer.RESET);
+    }
 
     /** Reads stdin on a daemon thread, so lines typed while a run is active can be seen (e.g. /cancel). */
     /**
@@ -248,18 +346,44 @@ public final class Main {
     }
 
     private static void menu(SlashCommands.Result r) {
-        if (r.output() != null && !r.output().isBlank()) System.out.println(r.output());
+        if (r.output() != null && !r.output().isBlank()) say(r.output());
     }
 
     private static void runTurn(AgentHarness harness, String chatId, String text, BlockingQueue<AgentEvent> events,
                                 BlockingQueue<String> in) throws InterruptedException {
         events.clear();
+        runStart = System.currentTimeMillis();
+        running = true;
+        try {
+            runLoop(harness, chatId, text, events, in);
+        } finally {
+            running = false;
+        }
+    }
+
+    private static void runLoop(AgentHarness harness, String chatId, String text, BlockingQueue<AgentEvent> events,
+                                BlockingQueue<String> in) throws InterruptedException {
         harness.start(chatId, text);
         while (true) {
             // Input typed during the run: a command (/cancel, /followup <text>) runs, any other line steers the agent
             for (String typed = in.poll(); typed != null; typed = in.poll()) {
                 if (typed == EOF || typed.isBlank()) continue;
+                if (exitPending) {
+                    exitPending = false;
+                    if (typed.strip().toLowerCase().startsWith("y")) {
+                        harness.cancel(chatId);
+                        System.exit(0);
+                    }
+                    say("Continuing.");
+                    continue;
+                }
+                if (isExitCommand(typed)) {
+                    ask("The agent is running. Stop it and exit the whole process? [y/N] ");
+                    exitPending = true;
+                    continue;
+                }
                 if (typed.strip().equals("/cancel")) harness.cancel(chatId);
+                else if (typed.strip().startsWith("/expand")) renderer.expand(typed.strip().substring(7));
                 else if (harness.commands().handles(typed.strip())) menu(harness.commands().execute(chatId, typed.strip()));
                 else harness.steer(chatId, typed.strip());
             }
@@ -267,33 +391,21 @@ public final class Main {
             if (ev == null) continue;
             JsonNode d = ev.data();
             switch (ev.type()) {
-                case "text" -> System.out.println(d.path("text").asText());
-                case "tool_call" -> System.out.println("[tool] " + d.path("name").asText() + " " + d.path("input"));
-                case "tool_result" -> System.out.println("[result" + (d.path("isError").asBoolean() ? ", error" : "")
-                        + "] " + abbreviate(d.path("output").asText()));
-                case "warning" -> System.out.println("[warning] " + d.path("message").asText());
-                case "error" -> System.err.println("[error] " + d.path("message").asText());
-                case "compaction" -> System.out.println("[compaction] " + d);
-                case "plan_ready" -> System.out.println("[plan] " + d.path("message").asText());
                 case "approval_request" -> approve(harness, chatId, d, in);
-                case "cancelled" -> System.out.println("[cancelled]");
-                case "steer_queued" -> System.out.println("[queued " + d.path("kind").asText() + "] " + d.path("text").asText());
-                case "steer_applied" -> System.out.println("[applied] " + d.path("text").asText());
                 case "run_finished" -> {
                     return;
                 }
-                default -> { }
+                default -> renderer.render(ev);
             }
         }
     }
 
     private static void approve(AgentHarness harness, String chatId, JsonNode d, BlockingQueue<String> in)
             throws InterruptedException {
-        System.out.println("[approval] " + d.path("type").asText() + " " + d.path("title").asText());
-        System.out.println(d.path("preview").asText());
+        say(Renderer.YELLOW + "[approval] " + d.path("type").asText() + " " + d.path("title").asText() + Renderer.RESET
+                + "\n" + d.path("preview").asText());
         if ("continue".equals(d.path("type").asText())) {
-            System.out.print("Turns to allow [" + d.path("proposed").asText() + ", n = stop] ");
-            System.out.flush();
+            ask("Turns to allow [" + d.path("proposed").asText() + ", n = stop] ");
             String t = in.take();
             String v = t == EOF ? "n" : t.strip();
             boolean stop = v.toLowerCase().startsWith("n");
@@ -301,10 +413,9 @@ public final class Main {
             return;
         }
         String writeDir = d.path("writeDir").asText("");
-        System.out.print("Allow? [y/N/a=allow for this chat"
+        ask("Allow? [y/N/a=allow for this chat"
                 + (writeDir.isEmpty() ? "" : "/d=allow writes in " + writeDir + "/ and subfolders"
                 + ", or 'd <path>' for another folder of the project") + "] ");
-        System.out.flush();
         String answer = in.take();
         String raw = answer == EOF ? "" : answer.strip();
         String a = raw.toLowerCase();
@@ -314,15 +425,20 @@ public final class Main {
         if (typedDir != null && typedDir.isEmpty()) typedDir = null;
         if (typedDir != null && org.kendar.llm.harness.permission.ApprovalService
                 .grantDirOf(java.nio.file.Path.of("").toAbsolutePath(), typedDir) == null) {
-            System.out.println("[warning] Path not allowed (absolute, '..' or .git): no folder granted");
+            say("[warning] Path not allowed (absolute, '..' or .git): no folder granted");
         }
         boolean ok = remember || rememberDir || a.startsWith("y");
         harness.resolveApproval(chatId, d.path("id").asText(), ok, typedDir, remember, rememberDir);
     }
 
-    private static String abbreviate(String s) {
-        String one = s.replace('\n', ' ');
-        return one.length() > 300 ? one.substring(0, 300) + "..." : one;
+    /** A question: above the prompt on a terminal (the answer comes from the input line), inline otherwise. */
+    private static void ask(String question) {
+        if (term != null) {
+            say(Renderer.BOLD + question + Renderer.RESET);
+        } else {
+            System.out.print(question);
+            System.out.flush();
+        }
     }
 
     /** The model client for the command line, the name it is known by and the session-only entry, if any. */

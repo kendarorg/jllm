@@ -133,6 +133,11 @@ public final class AgentHarness {
         return service.isRunning(chatId);
     }
 
+    /** Sub-agents running now for the chat, oldest first. */
+    public java.util.List<org.kendar.llm.harness.agent.AgentLoop.ActiveSubAgent> activeSubAgents(String chatId) {
+        return service.activeSubAgents(chatId);
+    }
+
     /** Deletes a chat with everything kept for it: log, context-strategy state, sub-agent runs. */
     public void deleteChat(String chatId) {
         service.cancel(chatId);

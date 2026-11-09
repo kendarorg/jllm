@@ -70,6 +70,17 @@ public class AgentLoop {
     private final Hooks hooks;
     private final ToolClassifier classifier;
     private final AtomicInteger subAgentSeq = new AtomicInteger();
+    private final java.util.Map<String, ActiveSubAgent> activeSubAgents = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** A sub-agent that is running now. */
+    public record ActiveSubAgent(String label, String chatId, String prompt, long startedAtMillis) {
+    }
+
+    /** The sub-agents running for the chat, oldest first. */
+    public List<ActiveSubAgent> activeSubAgents(String chatId) {
+        return activeSubAgents.values().stream().filter(a -> a.chatId().equals(chatId))
+                .sorted(java.util.Comparator.comparingLong(ActiveSubAgent::startedAtMillis)).toList();
+    }
     private final ToolOutputSanitizer sanitizer;
     /** Chats whose current run has read untrusted tool output. */
     private final java.util.Set<String> tainted = java.util.concurrent.ConcurrentHashMap.newKeySet();
@@ -304,6 +315,7 @@ public class AgentLoop {
         String label = agentName + " #" + subAgentSeq.incrementAndGet();
         HookResult entering = hooks.run(HookContext.before(HookEvent.PRE_AGENT, chatId, agentName, prompt));
         if (entering.denied()) throw new IllegalStateException("Sub-agent blocked by a hook: " + entering.denyReason());
+        activeSubAgents.put(label, new ActiveSubAgent(label, chatId, prompt, System.currentTimeMillis()));
         try {
             answer = loop(chatId, messages, () -> tools, "chatId=" + chatId + "; subagent", extra,
                     mode, errors, cancelled, false, true, agentName, client, inherited, label);
@@ -311,6 +323,7 @@ public class AgentLoop {
             if (failure[0] == null) failure[0] = String.valueOf(e.getMessage());
             throw e;
         } finally {
+            activeSubAgents.remove(label);
             hooks.run(HookContext.after(HookEvent.POST_AGENT, chatId, agentName,
                     failure[0] != null ? failure[0] : answer, failure[0] != null));
             sessions.addUsage(chatId, used[0]);
@@ -844,7 +857,8 @@ public class AgentLoop {
             if (label != null) ev.put("agent", label);
             if (writeDir != null) ev.put("writeDir", writeDir);
             sink.emit("approval_request", ev);
-        }, cancelled);
+        }, cancelled, () -> !tainted.contains(ctx.chatId()) && (approvals.granted(ctx.chatId(), tool.name())
+                || approvals.dirGranted(ctx.chatId(), writeDir)));
         boolean ok = d.approved();
         if (ok && d.remember()) approvals.grant(ctx.chatId(), tool.name());
         if (ok && d.rememberDir()) {

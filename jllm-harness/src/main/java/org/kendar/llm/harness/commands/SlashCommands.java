@@ -239,8 +239,18 @@ public final class SlashCommands {
         ChatSessionData s = harness.sessions().get(chatId);
         long used = harness.contextTokens(chatId);
         long budget = harness.contextBudget();
+        StringBuilder agents = new StringBuilder();
+        var active = harness.activeSubAgents(chatId);
+        long now = System.currentTimeMillis();
+        agents.append("running agents: ").append(active.isEmpty() ? "none" : active.size()).append('\n');
+        for (var a : active) {
+            String p = a.prompt().replaceAll("\\s+", " ");
+            agents.append("  ").append(a.label()).append(" (").append((now - a.startedAtMillis()) / 1000).append("s) ")
+                    .append(p.length() > 70 ? p.substring(0, 70) + "…" : p).append('\n');
+        }
         return "chat: " + s.chatId() + " \"" + s.title() + "\"\n"
                 + "mode: " + s.mode() + "\n"
+                + agents
                 + "context strategy: " + harness.contextStrategy().kind().name().toLowerCase() + "\n"
                 + "context: ~" + used + " / " + budget + " tokens (" + (budget > 0 ? used * 100 / budget : 0) + "%)\n"
                 + "usage: " + usage(s) + "\n"

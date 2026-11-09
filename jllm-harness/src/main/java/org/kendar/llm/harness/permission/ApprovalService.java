@@ -71,6 +71,16 @@ public class ApprovalService {
      */
     public ApprovalDecision await(String chatId, String type, String title, String preview, String proposed,
                                   Consumer<PendingApproval> onCreated, BooleanSupplier cancelled) {
+        return await(chatId, type, title, preview, proposed, onCreated, cancelled, null);
+    }
+
+    /**
+     * As above; {@code alreadyAllowed} is re-checked once this call's turn comes, so a grant given to an earlier
+     * dialog of the same chat (e.g. "allow writes in this folder") covers the calls queued behind it.
+     */
+    public ApprovalDecision await(String chatId, String type, String title, String preview, String proposed,
+                                  Consumer<PendingApproval> onCreated, BooleanSupplier cancelled,
+                                  BooleanSupplier alreadyAllowed) {
         ReentrantLock lock = dialogs.computeIfAbsent(chatId, k -> new ReentrantLock(true));
         try {
             while (!lock.tryLock(500, TimeUnit.MILLISECONDS)) {
@@ -82,6 +92,9 @@ public class ApprovalService {
         }
         try {
             if (cancelled != null && cancelled.getAsBoolean()) return ApprovalDecision.REJECTED;
+            if (alreadyAllowed != null && alreadyAllowed.getAsBoolean()) {
+                return new ApprovalDecision(true, null, false, false);
+            }
             return show(chatId, type, title, preview, proposed, onCreated, cancelled);
         } finally {
             lock.unlock();

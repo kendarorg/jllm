@@ -233,6 +233,10 @@ public class AgentService {
         approvals.cancelAll(chatId);
     }
 
+    public List<AgentLoop.ActiveSubAgent> activeSubAgents(String chatId) {
+        return loop.activeSubAgents(chatId);
+    }
+
     public boolean isRunning(String chatId) {
         ChatRun run = runs.get(chatId);
         return run != null && run.running;
