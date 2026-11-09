@@ -138,7 +138,6 @@ Set `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`, `QWEN_API_KEY`) first. Embedding t
 | [CACHES](docs/CACHES.md) | prompt-cache layout, compaction, mnemonic and scope algorithms |
 | [INTERNALS](docs/INTERNALS.md) | architecture, run lifecycle, loop, approvals, sub-agents, concurrency, persistence |
 | [FLOW](docs/FLOW.md) | step-by-step diagrams of every pipeline |
-| [SAMPLES](docs/SAMPLES.md) | prompts and generated projects used to compare setups |
 
 ## Credits
 

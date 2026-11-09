@@ -119,7 +119,7 @@ Then came tuning against real small models such as Haiku:
   model can finish it (`PartialWrite`, `PartialToolCall`).
 - A `small-model.md` prompt addendum, switched on with `--small-model` or the `smallModel` setting. It gives
   concrete, checkable rules: file list first, one file per response, edit rather than rewrite, no placeholders.
-- A full documentation set in `docs/`: FLOW, SAMPLES, CACHES, EXTENDING, INTERNALS, MCP, SKILLS, TOOLS, USAGE.
+- A full documentation set in `docs/`: FLOW, CACHES, EXTENDING, INTERNALS, MCP, SKILLS, TOOLS, USAGE.
 
 ## 5. Front ends and documentation split
 The command line moved out of the library into its own module, `jllm-cli` (shaded runnable jar), and a browser front
