@@ -15,7 +15,7 @@ They are also the reference for how to embed it.
 
 Also: [HISTORY](docs/HISTORY.md) (how the harness evolved) and [HARNESSES-COMPARE](docs/HARNESSES-COMPARE.md) (feature matrix against mini-swe-agent, Pi, OpenCode, Qwen Code, Hermes Agent).
 
-What is still missing:
+What is still missing (more in [FUTURE](docs/FUTURE.md)):
 
 * Oauth & Tokens on MCP/API calls
 * Authentication & authorization on WebUI (it's just a demonstration :) )
