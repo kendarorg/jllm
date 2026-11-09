@@ -45,6 +45,8 @@ export async function copyId(id) {
 /** Short form of a chat id for lists; the full id is in the tooltip and in the header. */
 export const shortId = id => (id || '').slice(0, 8);
 
+const guard = fn => async (...a) => { try { return await fn(...a); } catch (e) { toast(e.message, 'error'); } };
+
 export const continueOffer = guard(async () => {
   const o = store.resumeOffer; store.resumeOffer = null;
   if (o) await openChat(o.chatId);
@@ -61,8 +63,6 @@ export function toast(text, type = '') {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { store.toast = { text: '', type: '' }; }, 3000);
 }
-
-const guard = fn => async (...a) => { try { return await fn(...a); } catch (e) { toast(e.message, 'error'); } };
 
 // ── rendering helpers ───────────────────────────────────────────────────────
 export function addMsg(role, text, cls) {
