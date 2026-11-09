@@ -156,6 +156,29 @@ public class ApprovalService {
         }
     }
 
+    /**
+     * A user-typed directory to grant, relative to the work dir ('/'-separated, "." for the root), or null when it is
+     * not acceptable: blank, absolute, containing a {@code ..} segment, or inside a {@code .git} directory.
+     */
+    public static String grantDirOf(java.nio.file.Path workDir, String typed) {
+        if (workDir == null || typed == null) return null;
+        String t = typed.strip().replace('\\', '/');
+        if (t.isEmpty() || t.startsWith("/") || t.matches("^[A-Za-z]:.*")) return null;
+        for (String seg : t.split("/")) {
+            if (seg.equals("..")) return null;
+            if (seg.equalsIgnoreCase(".git")) return null;
+        }
+        try {
+            java.nio.file.Path root = workDir.toAbsolutePath().normalize();
+            java.nio.file.Path p = root.resolve(t).normalize();
+            if (!p.startsWith(root)) return null;
+            java.nio.file.Path rel = root.relativize(p);
+            return rel.toString().isEmpty() ? "." : rel.toString().replace('\\', '/');
+        } catch (java.nio.file.InvalidPathException e) {
+            return null;
+        }
+    }
+
     public void grantDir(String chatId, String dir) {
         if (dir != null) grant(chatId, DIR + dir);
     }

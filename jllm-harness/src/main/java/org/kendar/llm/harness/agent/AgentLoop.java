@@ -847,7 +847,11 @@ public class AgentLoop {
         }, cancelled);
         boolean ok = d.approved();
         if (ok && d.remember()) approvals.grant(ctx.chatId(), tool.name());
-        if (ok && d.rememberDir()) approvals.grantDir(ctx.chatId(), writeDir);
+        if (ok && d.rememberDir()) {
+            // A typed path (carried in "edited") replaces the offered directory; an invalid one grants nothing
+            boolean typed = d.edited() != null && !d.edited().isBlank();
+            approvals.grantDir(ctx.chatId(), typed ? ApprovalService.grantDirOf(ctx.workDir(), d.edited()) : writeDir);
+        }
         metrics.approval("tool", ok);
         return ok;
     }

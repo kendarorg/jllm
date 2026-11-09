@@ -302,14 +302,22 @@ public final class Main {
         }
         String writeDir = d.path("writeDir").asText("");
         System.out.print("Allow? [y/N/a=allow for this chat"
-                + (writeDir.isEmpty() ? "" : "/d=allow writes in " + writeDir + "/ and subfolders") + "] ");
+                + (writeDir.isEmpty() ? "" : "/d=allow writes in " + writeDir + "/ and subfolders"
+                + ", or 'd <path>' for another folder of the project") + "] ");
         System.out.flush();
         String answer = in.take();
-        String a = answer == EOF ? "" : answer.strip().toLowerCase();
+        String raw = answer == EOF ? "" : answer.strip();
+        String a = raw.toLowerCase();
         boolean remember = a.startsWith("a");
         boolean rememberDir = !writeDir.isEmpty() && a.startsWith("d");
+        String typedDir = rememberDir && raw.length() > 1 ? raw.substring(1).strip() : null;
+        if (typedDir != null && typedDir.isEmpty()) typedDir = null;
+        if (typedDir != null && org.kendar.llm.harness.permission.ApprovalService
+                .grantDirOf(java.nio.file.Path.of("").toAbsolutePath(), typedDir) == null) {
+            System.out.println("[warning] Path not allowed (absolute, '..' or .git): no folder granted");
+        }
         boolean ok = remember || rememberDir || a.startsWith("y");
-        harness.resolveApproval(chatId, d.path("id").asText(), ok, null, remember, rememberDir);
+        harness.resolveApproval(chatId, d.path("id").asText(), ok, typedDir, remember, rememberDir);
     }
 
     private static String abbreviate(String s) {
