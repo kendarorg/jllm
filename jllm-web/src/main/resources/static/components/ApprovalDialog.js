@@ -1,5 +1,5 @@
 import {computed, nextTick, onMounted, onUnmounted, ref, watch} from 'vue';
-import {resolveApproval, store} from '../store.js';
+import {resolveApproval, store, toast} from '../store.js';
 
 export default {
   setup() {
@@ -17,14 +17,26 @@ export default {
       cls: l.startsWith('+ ') ? 'add' : l.startsWith('- ') ? 'del' : l.startsWith('--- ') ? 'hdr' : '',
     })));
 
+    const otherDir = ref('');
+    watch(a, () => { otherDir.value = ''; });
     const approve = (remember = false, rememberDir = false) =>
       resolveApproval(a.value, true, ['context', 'continue'].includes(a.value.type) ? edited.value : null, remember, rememberDir);
+    // A typed folder (relative to the project) replaces the offered one, as 'd <path>' in the CLI
+    const approveDir = (typed = false) => {
+      const t = typed ? otherDir.value.trim().replace(/\\/g, '/') : '';
+      // same rules as the server: absolute, '..' and .git grant nothing
+      if (typed && (t.startsWith('/') || /^[A-Za-z]:/.test(t)
+          || t.split('/').some(s => s === '..' || s.toLowerCase() === '.git'))) {
+        toast('Path not allowed (absolute, ".." or .git): no folder granted', 'error');
+      }
+      return resolveApproval(a.value, true, typed ? otherDir.value.trim() : null, false, true);
+    };
     const reject = () => resolveApproval(a.value, false);
 
     const onEsc = e => { if (e.key === 'Escape' && a.value) reject(); };
     onMounted(() => document.addEventListener('keydown', onEsc));
     onUnmounted(() => document.removeEventListener('keydown', onEsc));
-    return { a, edited, approveBtn, diffLines, approve, reject };
+    return { a, edited, approveBtn, diffLines, approve, approveDir, otherDir, reject };
   },
   template: `
   <div class="overlay" :class="{ show: a }" role="dialog" aria-modal="true" aria-labelledby="dlg-title">
@@ -44,7 +56,9 @@ export default {
       </div>
       <div class="dialog-foot">
         <button class="btn-danger" @click="reject">Reject</button>
-        <button class="btn-sm" v-if="a.writeDir" @click="approve(false, true)">Allow writes in {{ a.writeDir }}/ and subfolders</button>
+        <input v-if="a.writeDir" v-model="otherDir" placeholder="other project folder" aria-label="Other project folder to allow writes in">
+        <button class="btn-sm" v-if="a.writeDir && otherDir.trim()" @click="approveDir(true)">Allow writes in {{ otherDir.trim() }}/</button>
+        <button class="btn-sm" v-if="a.writeDir" @click="approveDir(false)">Allow writes in {{ a.writeDir }}/ and subfolders</button>
         <button class="btn-sm" v-if="a.type === 'tool'" @click="approve(true)">Allow for this chat</button>
         <button class="btn-primary" ref="approveBtn" @click="approve(false)">Approve</button>
       </div>

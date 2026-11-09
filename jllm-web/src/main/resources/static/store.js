@@ -21,6 +21,7 @@ export const store = reactive({
   lastSeq: 0,
   msgCount: undefined,
   pendingUser: null,
+  menuOpen: false,      // a numbered slash-command menu is open on the server for this chat
   sending: false,
   tabs: {},             // chatId -> chat | files | history; a chat has an entry once it has been opened
   // the selected tab belongs to the open chat: reading/writing it goes through tabs[chatId]
@@ -141,7 +142,7 @@ export const deleteChat = guard(async id => {
 export async function openChat(id) {
   if (es) es.close();
   if (!store.tabs[id]) store.tabs[id] = 'chat';   // never opened before: start on Chat; otherwise keep its own tab
-  store.chatId = id; store.approvals = []; group = null; store.items = []; store.resumeOffer = null;
+  store.chatId = id; store.approvals = []; store.menuOpen = false; group = null; store.items = []; store.resumeOffer = null;
   remember(id);
   const s = await api('/api/chat/' + id);
   let refs = [];
@@ -248,9 +249,11 @@ export async function send(text) {
   if (!text || !store.chatId) return null;
   const cmd = text.startsWith('/') && store.commands.find(c => c.name === text.split(/\s+/)[0]);
   if (cmd && cmd.action.startsWith('prompt:')) return cmd.action.slice(7);
+  // while a menu is open the server takes the input (number, b, /back) instead of the agent
+  const isCmd = !!cmd || store.menuOpen;
   // slash commands run on the server through the same endpoint and are allowed during a run
-  if (!cmd && store.running) return null;
-  if (!cmd) {
+  if (!isCmd && store.running) return null;
+  if (!isCmd) {
     addMsg('user', text);
     store.pendingUser = text; store.running = true;
   }
@@ -258,11 +261,12 @@ export async function send(text) {
   try {
     const r = await post(`/api/chat/${store.chatId}/messages`, { text });
     if (r && r.command) {
+      store.menuOpen = !!r.menu;
       if (r.switchTo || r.refresh) await openChat(r.switchTo || store.chatId);
       if (r.output) addMsg('notice', r.output);
     }
   } catch (e) {
-    if (!cmd) { store.items.pop(); store.pendingUser = null; store.running = false; }
+    if (!isCmd) { store.items.pop(); store.pendingUser = null; store.running = false; }
     toast(e.message, 'error');
     return text;
   } finally { store.sending = false; }

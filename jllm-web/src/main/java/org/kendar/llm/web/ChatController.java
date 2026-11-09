@@ -155,10 +155,13 @@ public class ChatController {
             return ResponseEntity.badRequest().body(Map.of("error", "text is required"));
         }
         if (sessions.find(id).isEmpty()) return ResponseEntity.notFound().build();
-        if (agentService.commands().handles(text.strip())) {
-            var r = agentService.commands().execute(id, text.strip());
+        boolean inMenu = agentService.commands().menuActive(id);
+        if (inMenu || agentService.commands().handles(text.strip())) {
+            var r = inMenu ? agentService.commands().menuInput(id, text.strip())
+                    : agentService.commands().execute(id, text.strip());
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("command", true);
+            m.put("menu", r.menu());
             m.put("output", r.output() == null ? "" : r.output());
             m.put("switchTo", r.switchToChatId());
             m.put("refresh", r.refresh());
