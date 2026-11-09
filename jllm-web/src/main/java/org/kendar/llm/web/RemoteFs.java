@@ -51,7 +51,7 @@ final class RemoteFs {
             if (seg.equals("..")) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Path outside the project");
             out.add(seg);
         }
-        if (root == Root.WORKSPACE && out.stream().anyMatch(s -> HIDDEN_DIR.equalsIgnoreCase(s))) {
+        if (root == Root.WORKSPACE && out.stream().anyMatch(HIDDEN_DIR::equalsIgnoreCase)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Not found");
         }
         return String.join("/", out);
@@ -161,7 +161,7 @@ final class RemoteFs {
     }
 
     String tree(String path, int depth) {
-        return io(() -> fb.tree(target(path), Math.max(1, Math.min(depth, 10))));
+        return io(() -> fb.tree(target(path), Math.clamp(depth, 1, 10)));
     }
 
     // ── read / modify ─────────────────────────────────────────────────────────

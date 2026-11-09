@@ -97,7 +97,7 @@ public class ChatSessionService {
         try {
             StringBuilder sb = new StringBuilder();
             for (JsonNode m : messages) {
-                if (sb.length() > 0) sb.append('\n');
+                if (!sb.isEmpty()) sb.append('\n');
                 sb.append(mapper.writeValueAsString(m));
                 if (!m.path("content").isArray()) continue;
                 for (JsonNode block : m.path("content")) {
@@ -140,7 +140,7 @@ public class ChatSessionService {
         try {
             StringBuilder sb = new StringBuilder();
             for (JsonNode m : messages) {
-                if (sb.length() > 0) sb.append('\n');
+                if (!sb.isEmpty()) sb.append('\n');
                 sb.append(mapper.writeValueAsString(m));
             }
             return sb.toString();

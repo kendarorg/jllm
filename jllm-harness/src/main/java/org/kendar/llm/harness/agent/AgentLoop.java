@@ -180,12 +180,11 @@ public class AgentLoop {
         if (prompt.addedContext() != null) content.addObject().put("type", "text").put("text", prompt.addedContext());
         sessions.saveMessages(chatId, messages);
 
-        String extra = systemPrompt;
-        String answer = "";
+      String answer = "";
         boolean failed = true;
         try {
             answer = loop(chatId, messages, () -> chatTools(chatId, userText), sessions.pinnedPrefix(session),
-                    extra, PermissionMode.parse(session.mode()), sink, cancelled, true, true, HookContext.MAIN,
+                systemPrompt, PermissionMode.parse(session.mode()), sink, cancelled, true, true, HookContext.MAIN,
                     model, new int[]{0}, null, inbox);
             failed = false;
         } finally {
@@ -481,7 +480,8 @@ public class AgentLoop {
             ContextView view = context.prepare(new ContextTurn(chatId, contextKey, messages, inherited, last, prefix,
                     sink, cancelled, spent, persist));
             if (view.logChanged() && persist) sessions.saveMessages(chatId, messages);
-            if (view.changed()) last = null;
+            if (view.changed()) {
+            }
             if (turnHadThinking && !thinkingOff && !org.kendar.llm.harness.context.compaction.ContextManager
                     .currentTurnHasThinking(messages)) {
                 thinkingOff = true;

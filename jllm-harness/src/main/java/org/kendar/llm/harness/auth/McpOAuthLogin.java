@@ -49,7 +49,7 @@ public final class McpOAuthLogin implements OAuthLogin {
         String issuer = origin;
         JsonNode resource = getJson(origin + "/.well-known/oauth-protected-resource");
         if (resource != null && resource.path("authorization_servers").isArray()
-                && resource.get("authorization_servers").size() > 0) {
+                && !resource.get("authorization_servers").isEmpty()) {
             issuer = resource.get("authorization_servers").get(0).asText().replaceAll("/+$", "");
         }
         JsonNode m = getJson(issuer + "/.well-known/oauth-authorization-server");

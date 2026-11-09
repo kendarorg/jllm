@@ -80,7 +80,7 @@ final class Renderer {
             }
         }
         drop.sort(null);
-        for (int i = drop.size() - 1; i >= 0; i--) blocks.remove((int) drop.get(i));
+        for (int i = drop.size() - 1; i >= 0; i--) blocks.remove(drop.get(i));
         return copy;
     }
 

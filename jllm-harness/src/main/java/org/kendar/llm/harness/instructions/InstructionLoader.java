@@ -28,7 +28,7 @@ public final class InstructionLoader {
             }
             try {
                 String text = Files.readString(path, StandardCharsets.UTF_8).strip();
-                if (sb.length() > 0) sb.append("\n\n");
+                if (!sb.isEmpty()) sb.append("\n\n");
                 sb.append("Instructions from ").append(path.getFileName()).append(":\n").append(text);
             } catch (IOException e) {
                 log.warn("Cannot read {}: {}", path, e.getMessage());

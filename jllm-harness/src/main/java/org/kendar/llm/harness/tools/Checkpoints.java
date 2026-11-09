@@ -122,7 +122,7 @@ public final class Checkpoints {
                 return new UndoResult(0, restored, deleted);
             }
             nums.sort(Comparator.reverseOrder());
-            List<Integer> picked = nums.subList(0, Math.min(nums.size(), Math.max(1, turns)));
+            List<Integer> picked = nums.subList(0, Math.clamp(turns, 1, nums.size()));
             Set<String> seen = new HashSet<>();
             for (int n : picked) {
                 String dir = remoteRoot(chatId) + "/" + n;

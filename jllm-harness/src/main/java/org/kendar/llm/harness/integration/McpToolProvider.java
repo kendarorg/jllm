@@ -72,7 +72,7 @@ public final class McpToolProvider {
     private static String render(JsonNode result) {
         StringBuilder sb = new StringBuilder();
         for (JsonNode c : result.path("content")) {
-            if (sb.length() > 0) sb.append('\n');
+            if (!sb.isEmpty()) sb.append('\n');
             sb.append("text".equals(c.path("type").asText()) ? c.path("text").asText() : c.toString());
         }
         if (sb.isEmpty() && result.has("structuredContent")) sb.append(result.get("structuredContent"));

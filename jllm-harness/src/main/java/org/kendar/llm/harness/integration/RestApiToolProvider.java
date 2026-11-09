@@ -113,7 +113,7 @@ public final class RestApiToolProvider {
         }
         StringBuilder path = new StringBuilder();
         for (String part : e.split("\\*", -1)) {
-            if (path.length() > 0 || e.startsWith("*")) path.append(".*");
+            if (!path.isEmpty() || e.startsWith("*")) path.append(".*");
             path.append(Pattern.quote(part));
         }
         return Pattern.compile(method + " " + path);

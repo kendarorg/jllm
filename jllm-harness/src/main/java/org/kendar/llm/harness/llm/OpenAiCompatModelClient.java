@@ -141,10 +141,10 @@ public class OpenAiCompatModelClient implements ModelClient {
         StringBuilder sys = new StringBuilder();
         if (req.pinnedSystem() != null && !req.pinnedSystem().isBlank()) sys.append(req.pinnedSystem());
         if (req.extraSystem() != null && !req.extraSystem().isBlank()) {
-            if (sys.length() > 0) sys.append("\n\n");
+            if (!sys.isEmpty()) sys.append("\n\n");
             sys.append(req.extraSystem());
         }
-        if (sys.length() > 0) {
+        if (!sys.isEmpty()) {
             ObjectNode s = out.addObject();
             s.put("role", "system");
             s.put("content", sys.toString());
@@ -209,7 +209,7 @@ public class OpenAiCompatModelClient implements ModelClient {
             }
             ObjectNode o = out.addObject();
             o.put("role", "assistant");
-            if (text.length() == 0 && !calls.isEmpty()) o.putNull("content");
+            if (text.isEmpty() && !calls.isEmpty()) o.putNull("content");
             else o.put("content", text.toString());
             if (!calls.isEmpty()) o.set("tool_calls", calls);
         } else {
@@ -225,11 +225,11 @@ public class OpenAiCompatModelClient implements ModelClient {
                     if (b.path("is_error").asBoolean(false) && !t.startsWith("Error")) t = "Error: " + t;
                     o.put("content", t);
                 } else if ("text".equals(type)) {
-                    if (text.length() > 0) text.append("\n");
+                    if (!text.isEmpty()) text.append("\n");
                     text.append(b.path("text").asText());
                 }
             }
-            if (text.length() > 0) {
+            if (!text.isEmpty()) {
                 ObjectNode o = out.addObject();
                 o.put("role", role);
                 o.put("content", text.toString());

@@ -51,9 +51,9 @@ public class WebAgentTools implements HarnessToolSet {
                         "count:integer?", "Number of results (default 5, max 20)"),
                 GROUP, ToolKind.READ_ONLY, (ctx, in) -> {
             if (config.web().searchApiKey() == null || config.web().searchApiKey().isBlank()) {
-                return duckDuckGoSearch(in.path("query").asText(), Math.max(1, Math.min(20, in.path("count").asInt(5))));
+                return duckDuckGoSearch(in.path("query").asText(), Math.clamp(in.path("count").asInt(5), 1, 20));
             }
-            int count = Math.max(1, Math.min(20, in.path("count").asInt(5)));
+            int count = Math.clamp(in.path("count").asInt(5), 1, 20);
             String q = URLEncoder.encode(in.path("query").asText(), StandardCharsets.UTF_8);
             HttpRequest req = HttpRequest.newBuilder(
                             URI.create("https://api.search.brave.com/res/v1/web/search?q=" + q + "&count=" + count))
@@ -72,7 +72,7 @@ public class WebAgentTools implements HarnessToolSet {
                         .append(r.path("url").asText()).append('\n')
                         .append(Jsoup.parse(r.path("description").asText()).text()).append("\n\n");
             }
-            return sb.length() == 0 ? "No results" : sb.toString();
+            return sb.isEmpty() ? "No results" : sb.toString();
         });
     }
 
@@ -86,7 +86,7 @@ public class WebAgentTools implements HarnessToolSet {
                 GROUP, ToolKind.READ_ONLY, (ctx, in) -> {
             String lang = in.path("lang").asText("en");
             if (!lang.matches("[a-z]{2,12}(-[a-z]{2,12})?")) throw new IllegalArgumentException("Invalid lang " + lang);
-            int count = Math.max(1, Math.min(20, in.path("count").asInt(5)));
+            int count = Math.clamp(in.path("count").asInt(5), 1, 20);
             String host = "https://" + lang + ".wikipedia.org";
             HttpRequest req = HttpRequest.newBuilder(URI.create(host + "/w/api.php?action=query&list=search&format=json"
                             + "&srlimit=" + count + "&srsearch="
@@ -106,7 +106,7 @@ public class WebAgentTools implements HarnessToolSet {
                         .append(URLEncoder.encode(title.replace(' ', '_'), StandardCharsets.UTF_8)).append('\n')
                         .append(Jsoup.parse(r.path("snippet").asText()).text()).append("\n\n");
             }
-            return sb.length() == 0 ? "No results" : sb.toString();
+            return sb.isEmpty() ? "No results" : sb.toString();
         });
     }
 
@@ -131,7 +131,7 @@ public class WebAgentTools implements HarnessToolSet {
             sb.append(snippet == null ? "" : snippet.text()).append("\n\n");
             if (++n >= count) break;
         }
-        return sb.length() == 0 ? "No results" : sb.toString();
+        return sb.isEmpty() ? "No results" : sb.toString();
     }
 
     /** DuckDuckGo wraps result links as //duckduckgo.com/l/?uddg=URL-ENCODED-TARGET. */

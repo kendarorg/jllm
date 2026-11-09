@@ -41,10 +41,10 @@ public final class MnemonicState {
     public record Segment(int cut, String cutHash, int firstUser, String firstUserHash, String notes, String index) {
     }
 
-    public List<Mask> masks = new ArrayList<>();
+    public final List<Mask> masks = new ArrayList<>();
     /** New masks only at or after this message index: the first masked message of the last batch. */
     public int frontier;
-    public List<Segment> segments = new ArrayList<>();
+    public final List<Segment> segments = new ArrayList<>();
 
     @JsonIgnore
     Segment current() {

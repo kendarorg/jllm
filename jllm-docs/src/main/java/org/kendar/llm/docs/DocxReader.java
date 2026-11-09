@@ -91,10 +91,10 @@ public final class DocxReader implements DocumentReader {
                         String text = para.toString();
                         if (tableDepth > 0) {
                             if (cell != null && !text.isBlank()) {
-                                if (cell.length() > 0) cell.append(' ');
+                                if (!cell.isEmpty()) cell.append(' ');
                                 cell.append(text.strip());
                             }
-                        } else if (!text.isBlank() || out.length() == 0 || out.charAt(out.length() - 1) != '\n') {
+                        } else if (!text.isBlank() || out.isEmpty() || out.charAt(out.length() - 1) != '\n') {
                             out.append(prefix(style, numbered)).append(text).append('\n');
                         }
                     }

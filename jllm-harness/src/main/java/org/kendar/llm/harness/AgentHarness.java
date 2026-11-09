@@ -286,7 +286,7 @@ public final class AgentHarness {
 
     /** Slash commands shared by the command line and the web front end. */
     private java.util.Map<String, org.kendar.llm.harness.auth.OAuthLogin> logins = java.util.Map.of();
-    private org.kendar.llm.harness.auth.TokenStore tokenStore = org.kendar.llm.harness.auth.TokenStore.defaultStore();
+    private final org.kendar.llm.harness.auth.TokenStore tokenStore = org.kendar.llm.harness.auth.TokenStore.defaultStore();
 
     /** The logins {@code /login} can run: discovered {@link org.kendar.llm.harness.auth.OAuthLogin} services and MCP servers with oauth. */
     public java.util.Map<String, org.kendar.llm.harness.auth.OAuthLogin> logins() {

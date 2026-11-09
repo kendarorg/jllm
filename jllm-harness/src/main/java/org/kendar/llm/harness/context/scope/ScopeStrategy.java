@@ -80,10 +80,13 @@ public class ScopeStrategy implements ContextStrategy {
     }
 
     public static String systemAddendum() {
-        return "# Task list\n\nFor work with 3 or more steps, keep a task list with todo_write (send the complete list "
-                + "each time, at most one item in_progress, mark items completed as soon as they are done). The "
-                + "current list is shown to you with every request; todo_read returns it. Large tool results may be "
-                + "offloaded to a file: the result then names the file, read it with read_file when you need more.";
+        return """
+            # Task list
+            
+            For work with 3 or more steps, keep a task list with todo_write (send the complete list \
+            each time, at most one item in_progress, mark items completed as soon as they are done). The \
+            current list is shown to you with every request; todo_read returns it. Large tool results may be \
+            offloaded to a file: the result then names the file, read it with read_file when you need more.""";
     }
 
     @Override

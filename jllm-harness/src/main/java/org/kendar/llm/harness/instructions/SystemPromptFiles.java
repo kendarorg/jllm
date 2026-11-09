@@ -25,7 +25,7 @@ public record SystemPromptFiles(String replace, String append) {
         String p = read(project, "APPEND_SYSTEM.md");
         StringBuilder sb = new StringBuilder();
         if (g != null) sb.append(g);
-        if (p != null) sb.append(sb.length() > 0 ? "\n\n" : "").append(p);
+        if (p != null) sb.append(!sb.isEmpty() ? "\n\n" : "").append(p);
         return new SystemPromptFiles(replace, sb.toString());
     }
 

@@ -133,7 +133,7 @@ public final class NoiseCommandPruner {
             for (JsonNode b : m.path("content")) {
                 String type = b.path("type").asText();
                 if ("tool_use".equals(type) && wanted.contains(b.path("id").asText())) {
-                    ObjectNode ref = originals.computeIfAbsent(b.path("id").asText(), k -> reference(k));
+                    ObjectNode ref = originals.computeIfAbsent(b.path("id").asText(), this::reference);
                     ((ObjectNode) ref.get("original")).set("tool_use", b.deepCopy());
                     String command = b.path("input").path("command").asText("");
                     ObjectNode input = mapper.createObjectNode();
@@ -141,7 +141,7 @@ public final class NoiseCommandPruner {
                             ? command.substring(0, STUB_COMMAND_CHARS) + "…" : command);
                     ((ObjectNode) b).set("input", input);
                 } else if ("tool_result".equals(type) && wanted.contains(b.path("tool_use_id").asText())) {
-                    ObjectNode ref = originals.computeIfAbsent(b.path("tool_use_id").asText(), k -> reference(k));
+                    ObjectNode ref = originals.computeIfAbsent(b.path("tool_use_id").asText(), this::reference);
                     ((ObjectNode) ref.get("original")).set("tool_result", b.deepCopy());
                     ((ObjectNode) b).put("content", STUB_RESULT);
                     ((ObjectNode) b).remove("is_error");

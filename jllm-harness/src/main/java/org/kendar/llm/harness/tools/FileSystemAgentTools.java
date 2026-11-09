@@ -421,7 +421,7 @@ public class FileSystemAgentTools implements HarnessToolSet {
                 }
             }
             if (more) sb.append("[output limited: narrow path or glob to see the remaining files]\n");
-            return sb.length() == 0 ? "No files" : sb.toString();
+            return sb.isEmpty() ? "No files" : sb.toString();
         });
     }
 

@@ -2,6 +2,7 @@ package org.kendar.llm.cli;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.checkerframework.checker.nullness.qual.NonNull;
 import org.kendar.llm.harness.AgentHarness;
 import org.kendar.llm.harness.HarnessConfig;
 import org.kendar.llm.harness.agent.AgentEvent;
@@ -159,7 +160,7 @@ public final class Main {
                 .objectMapper(mapper)
                 .discoverPlugins()
                 .build();
-        List<String> names = new java.util.ArrayList<>(harness.commands().list().stream().map(i -> i.name()).toList());
+        List<String> names = new java.util.ArrayList<>(harness.commands().list().stream().map(SlashCommands.Info::name).toList());
         names.add("/expand");
         term = a.containsKey("prompt") ? null : Term.open(names, cwdSandbox.historyRoot().resolve("cli-history"));
         renderer = new Renderer(Main::say, Main::sayErr, term != null);
@@ -180,7 +181,7 @@ public final class Main {
             if (term != null) return term.readLine(tail.get(), () -> { });
             try {
                 String l = in.take();
-                return l == EOF ? null : l;
+                return l.equals(EOF) ? null : l;
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 return null;
@@ -213,11 +214,11 @@ public final class Main {
                 System.out.flush();
             }
             String line = in.take();
-            if (line == EOF) break;
+            if (line.equals(EOF)) break;
             if (isExitCommand(line)) {
                 ask("Stop the whole process and exit? [y/N] ");
                 String answer = in.take();
-                if (answer == EOF || answer.strip().toLowerCase().startsWith("y")) break;
+                if (answer.equals(EOF) || answer.strip().toLowerCase().startsWith("y")) break;
                 continue;
             }
             if (harness.commands().menuActive(chat.id)) {
@@ -238,7 +239,7 @@ public final class Main {
         System.exit(0);
     }
 
-    private static final String EOF = new String("<eof>");
+    private static final String EOF = "<eof>";
 
     private static boolean isExitCommand(String line) {
         String s = line.strip();
@@ -258,6 +259,23 @@ public final class Main {
             drawStatus(harness, chat, provider);
         });
         term.bind("\u000f", () -> renderer.expand("")); // ctrl+o: the last tool call in full
+        Thread reader = getThread(harness, chat, in);
+        reader.start();
+        Thread bar = new Thread(() -> {
+            while (true) {
+                drawStatus(harness, chat, provider);
+                try {
+                    Thread.sleep(500);
+                } catch (InterruptedException e) {
+                    return;
+                }
+            }
+        }, "status-bar");
+        bar.setDaemon(true);
+        bar.start();
+    }
+
+    private static @NonNull Thread getThread(AgentHarness harness, Chat chat, BlockingQueue<String> in) {
         Thread reader = new Thread(() -> {
             while (true) {
                 String l = term.readLine("> ", () -> {
@@ -272,19 +290,7 @@ public final class Main {
             }
         }, "terminal-input");
         reader.setDaemon(true);
-        reader.start();
-        Thread bar = new Thread(() -> {
-            while (true) {
-                drawStatus(harness, chat, provider);
-                try {
-                    Thread.sleep(500);
-                } catch (InterruptedException e) {
-                    return;
-                }
-            }
-        }, "status-bar");
-        bar.setDaemon(true);
-        bar.start();
+        return reader;
     }
 
     private static final String[] SPIN = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"};
@@ -379,7 +385,7 @@ public final class Main {
         while (true) {
             // Input typed during the run: a command (/cancel, /followup <text>) runs, any other line steers the agent
             for (String typed = in.poll(); typed != null; typed = in.poll()) {
-                if (typed == EOF || typed.isBlank()) continue;
+                if (typed.equals(EOF) || typed.isBlank()) continue;
                 if (exitPending) {
                     exitPending = false;
                     if (typed.strip().toLowerCase().startsWith("y")) {
@@ -419,7 +425,7 @@ public final class Main {
         if ("continue".equals(d.path("type").asText())) {
             ask("Turns to allow [" + d.path("proposed").asText() + ", n = stop] ");
             String t = in.take();
-            String v = t == EOF ? "n" : t.strip();
+            String v = t.equals(EOF) ? "n" : t.strip();
             boolean stop = v.toLowerCase().startsWith("n");
             harness.resolveApproval(chatId, d.path("id").asText(), !stop, v.isEmpty() ? null : v, false, false);
             return;
@@ -429,7 +435,7 @@ public final class Main {
                 + (writeDir.isEmpty() ? "" : "/d=allow writes in " + writeDir + "/ and subfolders"
                 + ", or 'd <path>' for another folder of the project") + "] ");
         String answer = in.take();
-        String raw = answer == EOF ? "" : answer.strip();
+        String raw = answer.equals(EOF) ? "" : answer.strip();
         String a = raw.toLowerCase();
         boolean remember = a.startsWith("a");
         boolean rememberDir = !writeDir.isEmpty() && a.startsWith("d");

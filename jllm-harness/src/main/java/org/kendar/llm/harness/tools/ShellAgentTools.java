@@ -27,7 +27,7 @@ public class ShellAgentTools implements HarnessToolSet {
                         "timeout_seconds:integer?", "Timeout in seconds (default from config)"),
                 "Shell", ToolKind.OTHER, (ctx, in) -> {
             int secs = in.path("timeout_seconds").asInt(config.sandbox().timeoutSeconds());
-            Duration timeout = Duration.ofSeconds(Math.max(1, Math.min(secs, 600)));
+            Duration timeout = Duration.ofSeconds(Math.clamp(secs, 1, 600));
             String command = in.path("command").asText();
             ExecutionResult r = sandbox.execute(ctx.chatId(), ctx.scratchDir(), ctx.readOnlyWork(), command, timeout);
             StringBuilder sb = new StringBuilder();
