@@ -158,6 +158,17 @@ replaced in the context by a stub after their turn, in batches because the rewri
 stay in the log as `ignore` reference lines. The qualifier asks the cheap model at temperature 0, with the command
 only. Not done on purpose: restoring the last `/model`.
 
+## 8. Cleanup and comparison
+
+- **Static-analysis cleanup** across `jllm-cli` and `jllm-harness`: method references instead of lambdas, `equals`
+  instead of `==` for the CLI's `EOF` sentinel (now a plain constant), and small fixes in the context, tools,
+  session and provider classes. No behaviour change intended.
+- **Portable tests.** `McpStdioClientTest` no longer needs `sh`: the fake MCP server is a Java class run by the
+  current JVM. `DockerSandboxExecutorTest` was reworked so it runs on Windows too.
+- **Docs.** `docs/HARNESSES-COMPARE.md` added: a feature matrix of jllm against mini-swe-agent, Pi, OpenCode, Qwen
+  Code and Hermes Agent (competitor columns are from memory and unverified). The root `history.md` was removed in
+  favour of this file; README links updated.
+
 ## Overall direction
 - **Where it lives:** an embedded component, then a standalone library with a CLI, then a web front end.
 - **Model target:** Anthropic, then local llama.cpp/Qwen, then small models.
