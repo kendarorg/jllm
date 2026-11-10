@@ -84,6 +84,6 @@ class SubAgentContextStackTest {
         assertTrue(subs.get(0).toolNames().containsAll(List.of("search", "writer", "task")));
         var last = subs.get(1).messages();
         String result = last.get(last.size() - 1).toString();
-        assertTrue(result.contains("Tool 'writer' is not available to this sub-agent"), result);
+        assertTrue(result.contains("Tool unavailable for agent"), result);
     }
 }

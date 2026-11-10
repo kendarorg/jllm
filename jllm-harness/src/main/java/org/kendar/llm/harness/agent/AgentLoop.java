@@ -832,8 +832,7 @@ public class AgentLoop {
         org.kendar.llm.harness.tools.ToolInputValidator.Outcome check = tool == null ? null : checkInput(tool, input, ctx);
         if (tool == null) {
             result = refused.contains(name)
-                    ? toolResult(id, "Tool '" + name + "' is not available to this sub-agent. Use one of: "
-                            + String.join(", ", byName.keySet()), true)
+                    ? toolResult(id, "Tool unavailable for agent", true)
                     : toolResult(id, "Unknown tool '" + name + "'", true);
         } else if (cancelled.getAsBoolean()) {
             result = toolResult(id, "Cancelled by user", true);
