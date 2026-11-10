@@ -17,8 +17,9 @@ Also: [HISTORY](docs/HISTORY.md) (how the harness evolved) and [HARNESSES-COMPAR
 
 What is still missing (more in [FUTURE](docs/FUTURE.md)):
 
-* Oauth & Tokens on MCP/API calls
-* Authentication & authorization on WebUI (it's just a demonstration :) )
+* OAuth & token support on MCP/API calls (static headers only)
+* Authentication & authorization on the web UI: `jllm-web` is a reference front end meant for localhost or a trusted
+  network. Do not expose it publicly without a reverse proxy that handles authentication.
 
 ## The idea
 
@@ -111,11 +112,11 @@ budget, large tool results offloaded to disk, pinned first message, a `todo_writ
 ```sh
 # terminal
 mvn -pl jllm-cli -am package -DskipTests
-java -jar jllm-cli/target/jllm-cli-1.0-SNAPSHOT.jar --provider anthropic --mode edit
+java -jar jllm-cli/target/jllm-cli-1.0.0.jar --provider anthropic --mode edit
 
 # browser, http://localhost:8080
 mvn -pl jllm-web -am package -DskipTests
-java -jar jllm-web/target/jllm-web-1.0-SNAPSHOT.jar --provider anthropic
+java -jar jllm-web/target/jllm-web-1.0.0.jar --provider anthropic
 ```
 
 Set `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`, `GROK_API_KEY`, `QWEN_API_KEY`) first. Embedding the library is shown above and in the
@@ -145,3 +146,8 @@ Set `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`, `GROK_API_KEY`, `QWEN_API_KEY`) fi
 - [building-a-coding-agent-from-scratch-course](https://github.com/decodingai-magazine/building-a-coding-agent-from-scratch-course):
   the structure of the harness.
 - [opencode](https://github.com/sst/opencode): the inspiration.
+
+## License
+
+[Apache License 2.0](LICENSE). Redistributions and derivative works must keep the copyright notice and the
+[NOTICE](NOTICE) file, so the original attribution is preserved.

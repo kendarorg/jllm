@@ -7,7 +7,7 @@ Vue 3 chat UI. The Spring layer is a thin adapter; all agent logic lives in the 
 
 ```sh
 mvn -pl jllm-web -am package -DskipTests
-java -jar jllm-web/target/jllm-web-1.0-SNAPSHOT.jar --provider anthropic
+java -jar jllm-web/target/jllm-web-1.0.0.jar --provider anthropic
 ```
 
 Then open <http://localhost:8080>. The UI is plain static files in `src/main/resources/static`: Vue 3 as an ES module

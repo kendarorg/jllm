@@ -7,7 +7,7 @@ standard tools. One class, `org.kendar.llm.cli.Main`, packaged as a shaded runna
 
 ```sh
 mvn -pl jllm-cli -am package -DskipTests
-java -jar jllm-cli/target/jllm-cli-1.0-SNAPSHOT.jar --provider anthropic --mode edit
+java -jar jllm-cli/target/jllm-cli-1.0.0.jar --provider anthropic --mode edit
 ```
 
 The API key comes from `--api-key` or the `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GROK_API_KEY` / `QWEN_API_KEY` environment variable.
