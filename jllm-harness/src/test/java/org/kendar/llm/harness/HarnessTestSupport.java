@@ -146,6 +146,8 @@ public final class HarnessTestSupport {
 
     public static HarnessConfig config(Path baseDir) {
         return HarnessConfig.defaults().withAgentId("jllm").withLocalDirSandboxAllowed(false).withMaxTokens(1024).withApprovalTimeoutSeconds(5)
+                // the sub-agent tests assert on the sub-agent's own request; the stack has its own tests
+                .withUseContextStack(false)
                 .withContextBudgetTokens(150_000).withSandboxBaseDir(baseDir.toString())
                 .withSandboxTimeoutSeconds(10)
                 // sanitization has its own tests; other tests assert on the raw tool output

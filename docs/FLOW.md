@@ -321,8 +321,8 @@ sequenceDiagram
         ST->>SL: runSubAgent(chatId, toolUseId, prompt, type, parentMode, run)
         SL->>SL: fresh messages [+ copy of parent history if inheritContext]
         SL->>SL: mode = PLAN if readOnly type else parentMode
-        SL->>SL: tools = ToolSelector.select(prompt, registry filtered by readOnly + type.tools)
-        SL->>SL: extra = system + subagent-suffix (+ readonly-suffix) (+ type prompt)
+        SL->>SL: useContextStack (default): pinned, system, mode note and tools = the parent's; role text + task in the first message; type restrictions enforced at execution
+        SL->>SL: else: tools = ToolSelector.select(prompt, registry filtered by readOnly + type.tools), extra = system + subagent-suffix (+ readonly-suffix) (+ type prompt)
         SL->>SL: hook PRE_AGENT (deny => task entry fails)
         loop own ReAct loop (persist=false)
             SL->>LLM: complete (type.model or main model)

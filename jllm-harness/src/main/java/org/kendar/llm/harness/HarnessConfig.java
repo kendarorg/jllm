@@ -9,7 +9,7 @@ public record HarnessConfig(String agentId, int maxTurns, int maxTokens, boolean
                             boolean serializeRuns, int toolBatchThreshold, int approvalTimeoutSeconds,
                             int contextBudgetTokens, int keepRecentTurns, Set<String> coreGroups,
                             Sandbox sandbox, Web web, Compaction compaction, Output output,
-                            ContextStrategyKind contextStrategy, Mnemonic mnemonic) {
+                            ContextStrategyKind contextStrategy, Mnemonic mnemonic, boolean useContextStack) {
 
     /** @param localDirSandboxAllowed allow falling back to a plain local directory when docker is unavailable */
     public record Sandbox(String baseDir, int timeoutSeconds, boolean localDirSandboxAllowed, Docker docker) {
@@ -164,67 +164,67 @@ public record HarnessConfig(String agentId, int maxTurns, int maxTokens, boolean
     public static HarnessConfig defaults() {
         return new HarnessConfig("agent", 40, 8192, true, true, 12, 600, 100_000, 6,
                 Set.of("Files", "Shell"), Sandbox.defaults(), Web.defaults(), Compaction.defaults(), Output.defaults(),
-                ContextStrategyKind.COMPACTION, Mnemonic.defaults());
+                ContextStrategyKind.COMPACTION, Mnemonic.defaults(), true);
     }
 
     public HarnessConfig withAgentId(String v) {
         return new HarnessConfig(v, maxTurns, maxTokens, parallelToolUse, serializeRuns, toolBatchThreshold,
-                approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, web, compaction, output, contextStrategy, mnemonic);
+                approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, web, compaction, output, contextStrategy, mnemonic, useContextStack);
     }
 
     public HarnessConfig withMaxTurns(int v) {
         return new HarnessConfig(agentId, v, maxTokens, parallelToolUse, serializeRuns, toolBatchThreshold,
-                approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, web, compaction, output, contextStrategy, mnemonic);
+                approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, web, compaction, output, contextStrategy, mnemonic, useContextStack);
     }
 
     public HarnessConfig withMaxTokens(int v) {
         return new HarnessConfig(agentId, maxTurns, v, parallelToolUse, serializeRuns, toolBatchThreshold,
-                approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, web, compaction, output, contextStrategy, mnemonic);
+                approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, web, compaction, output, contextStrategy, mnemonic, useContextStack);
     }
 
     public HarnessConfig withParallelToolUse(boolean v) {
         return new HarnessConfig(agentId, maxTurns, maxTokens, v, serializeRuns, toolBatchThreshold,
-                approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, web, compaction, output, contextStrategy, mnemonic);
+                approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, web, compaction, output, contextStrategy, mnemonic, useContextStack);
     }
 
     public HarnessConfig withSerializeRuns(boolean v) {
         return new HarnessConfig(agentId, maxTurns, maxTokens, parallelToolUse, v, toolBatchThreshold,
-                approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, web, compaction, output, contextStrategy, mnemonic);
+                approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, web, compaction, output, contextStrategy, mnemonic, useContextStack);
     }
 
     public HarnessConfig withToolBatchThreshold(int v) {
         return new HarnessConfig(agentId, maxTurns, maxTokens, parallelToolUse, serializeRuns, v,
-                approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, web, compaction, output, contextStrategy, mnemonic);
+                approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, web, compaction, output, contextStrategy, mnemonic, useContextStack);
     }
 
     public HarnessConfig withApprovalTimeoutSeconds(int v) {
         return new HarnessConfig(agentId, maxTurns, maxTokens, parallelToolUse, serializeRuns, toolBatchThreshold,
-                v, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, web, compaction, output, contextStrategy, mnemonic);
+                v, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, web, compaction, output, contextStrategy, mnemonic, useContextStack);
     }
 
     public HarnessConfig withContextBudgetTokens(int v) {
         return new HarnessConfig(agentId, maxTurns, maxTokens, parallelToolUse, serializeRuns, toolBatchThreshold,
-                approvalTimeoutSeconds, v, keepRecentTurns, coreGroups, sandbox, web, compaction, output, contextStrategy, mnemonic);
+                approvalTimeoutSeconds, v, keepRecentTurns, coreGroups, sandbox, web, compaction, output, contextStrategy, mnemonic, useContextStack);
     }
 
     public HarnessConfig withKeepRecentTurns(int v) {
         return new HarnessConfig(agentId, maxTurns, maxTokens, parallelToolUse, serializeRuns, toolBatchThreshold,
-                approvalTimeoutSeconds, contextBudgetTokens, v, coreGroups, sandbox, web, compaction, output, contextStrategy, mnemonic);
+                approvalTimeoutSeconds, contextBudgetTokens, v, coreGroups, sandbox, web, compaction, output, contextStrategy, mnemonic, useContextStack);
     }
 
     public HarnessConfig withCoreGroups(Set<String> v) {
         return new HarnessConfig(agentId, maxTurns, maxTokens, parallelToolUse, serializeRuns, toolBatchThreshold,
-                approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, v, sandbox, web, compaction, output, contextStrategy, mnemonic);
+                approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, v, sandbox, web, compaction, output, contextStrategy, mnemonic, useContextStack);
     }
 
     public HarnessConfig withSandbox(Sandbox v) {
         return new HarnessConfig(agentId, maxTurns, maxTokens, parallelToolUse, serializeRuns, toolBatchThreshold,
-                approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, v, web, compaction, output, contextStrategy, mnemonic);
+                approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, v, web, compaction, output, contextStrategy, mnemonic, useContextStack);
     }
 
     public HarnessConfig withWeb(Web v) {
         return new HarnessConfig(agentId, maxTurns, maxTokens, parallelToolUse, serializeRuns, toolBatchThreshold,
-                approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, v, compaction, output, contextStrategy, mnemonic);
+                approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, v, compaction, output, contextStrategy, mnemonic, useContextStack);
     }
 
     public HarnessConfig withSandboxBaseDir(String dir) {
@@ -265,23 +265,35 @@ public record HarnessConfig(String agentId, int maxTurns, int maxTokens, boolean
 
     public HarnessConfig withCompaction(Compaction v) {
         return new HarnessConfig(agentId, maxTurns, maxTokens, parallelToolUse, serializeRuns, toolBatchThreshold,
-                approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, web, v, output, contextStrategy, mnemonic);
+                approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, web, v, output, contextStrategy, mnemonic, useContextStack);
     }
 
     public HarnessConfig withOutput(Output v) {
         return new HarnessConfig(agentId, maxTurns, maxTokens, parallelToolUse, serializeRuns, toolBatchThreshold,
-                approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, web, compaction, v, contextStrategy, mnemonic);
+                approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, web, compaction, v, contextStrategy, mnemonic, useContextStack);
     }
 
     public HarnessConfig withContextStrategy(ContextStrategyKind v) {
         return new HarnessConfig(agentId, maxTurns, maxTokens, parallelToolUse, serializeRuns, toolBatchThreshold,
                 approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, web, compaction, output,
-                v, mnemonic);
+                v, mnemonic, useContextStack);
+    }
+
+    /**
+     * Sub-agents continue the parent's request prefix (same pinned text, system prompt and tool list, then the
+     * parent's history) instead of building their own, so a prefix-caching server can reuse the parent's KV cache and
+     * the parent's cache is untouched when the sub-agent returns. Their role text moves into the first message and
+     * their tool restrictions apply at execution time.
+     */
+    public HarnessConfig withUseContextStack(boolean v) {
+        return new HarnessConfig(agentId, maxTurns, maxTokens, parallelToolUse, serializeRuns, toolBatchThreshold,
+                approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, web, compaction, output,
+                contextStrategy, mnemonic, v);
     }
 
     public HarnessConfig withMnemonic(Mnemonic v) {
         return new HarnessConfig(agentId, maxTurns, maxTokens, parallelToolUse, serializeRuns, toolBatchThreshold,
                 approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, web, compaction, output,
-                contextStrategy, v);
+                contextStrategy, v, useContextStack);
     }
 }

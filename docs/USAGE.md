@@ -139,6 +139,7 @@ ignored.
 | `permissions` | regex deny/ask/allow rules, see [Permission rules](#permission-rules) |
 | `fastModel` | small model for compaction summaries, tool-group selection and the `auto` classifier |
 | `execution.maxParallel` | default `1`: one model call in flight, sub-agents run depth-first. `N`: at most N model calls and N chat runs at once (chat runs need `serializeRuns`); `N != 1` lets read-only sub-agents run in parallel. `-1`: unlimited |
+| `execution.useContextStack` | default `true`: a sub-agent continues the parent's request prefix (same system prompt and tool list, role text and task as a message), so a prefix-caching server reuses the parent's KV cache and the parent's cache is intact when the sub-agent returns. Tool restrictions of the agent type are enforced when a call is made (a refused call returns "Tool X is not available to this sub-agent" plus the tools it may use). `false`: the sub-agent builds its own system text and filtered tool list |
 | `chatRetentionLimit` | default unlimited: keep at most this many saved chats, deleting the oldest at startup (never the opened one) |
 | `smallModel` | default `false`: append the small-model rules (`prompts/small-model.md`) to the system prompt; `--small-model` sets it |
 | `sandbox.tempDir`, `sandbox.timeoutSeconds` | scratch root; default shell timeout (the tool caps it at 600 s) |

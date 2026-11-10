@@ -84,8 +84,10 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
      * @param maxParallel maximum model calls in flight, and chat runs / sub-agents running at once. Default {@code 1}:
      *                    one model call at a time, depth-first (made for a local LLM). {@code -1} = unlimited;
      *                    {@code 0} is treated as {@code 1}
+     * @param useContextStack sub-agents continue the parent's request prefix (see
+     *                    {@link HarnessConfig#withUseContextStack}); default {@code true}
      */
-    public record Execution(Integer maxParallel) {
+    public record Execution(Integer maxParallel, Boolean useContextStack) {
     }
 
     /**
@@ -283,6 +285,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
     /** Settings that are set replace the matching value of {@code config}; the others are left as they are. */
     public HarnessConfig applyTo(HarnessConfig config) {
         HarnessConfig c = config;
+        if (execution != null && execution.useContextStack() != null) c = c.withUseContextStack(execution.useContextStack());
         if (sandbox != null) {
             if (sandbox.tempDir() != null && !sandbox.tempDir().isBlank()) c = c.withSandboxBaseDir(sandbox.tempDir());
             if (sandbox.timeoutSeconds() != null) c = c.withSandboxTimeoutSeconds(sandbox.timeoutSeconds());

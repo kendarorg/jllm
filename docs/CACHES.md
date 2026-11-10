@@ -76,6 +76,13 @@ With `execution.maxParallel` (default 1) every model client is wrapped in `Limit
 in flight for the whole harness, sub-agents run one at a time, depth-first. A local server with one KV cache slot then
 never has its cache evicted by a concurrent request.
 
+### Sub-agents as a cache stack
+
+With `execution.useContextStack` (default `true`) a sub-agent request has the same pinned text, system prompt, mode note
+and tool list as its parent, followed by the parent's history and then the sub-agent's role text and task. The sub-agent
+therefore extends the parent's cached prefix (push) and the parent's next request is the earlier prefix plus the `task`
+call and its result (pop). Without it the sub-agent's prefix differs from the start and a single-slot server re-prefills.
+
 ## 2. Size estimates
 
 | | Compaction | Mnemonic |

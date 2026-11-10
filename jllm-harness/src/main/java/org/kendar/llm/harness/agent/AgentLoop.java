@@ -294,9 +294,16 @@ public class AgentLoop {
         ArrayNode messages = mapper.createArrayNode();
         int[] inherited = {0};
         if (agentType != null && agentType.inheritContext()) inherited[0] = copyParentContext(chatId, messages);
+        boolean readOnly = agentType != null && agentType.readOnly();
+        boolean stack = config.useContextStack();
+        String roleNote = Prompts.load("subagent-suffix.md")
+                + (readOnly ? "\n\n" + Prompts.load("subagent-readonly-suffix.md") : "")
+                + (agentType == null || agentType.prompt().isBlank() ? "" : "\n\n" + agentType.prompt());
         ObjectNode user = messages.addObject();
         user.put("role", "user");
-        user.putArray("content").addObject().put("type", "text").put("text", prompt);
+        // context stack: the role text cannot go into the system prompt (it would change the shared prefix)
+        user.putArray("content").addObject().put("type", "text")
+                .put("text", stack ? roleNote + "\n\nTask:\n" + prompt : prompt);
         ModelClient client = agentType != null && agentType.model() != null ? agentType.model() : model;
         if (agentType != null && agentType.temperature() != null) {
             client = new org.kendar.llm.harness.llm.TemperatureModelClient(client, agentType.temperature());
@@ -305,18 +312,41 @@ public class AgentLoop {
             client = new org.kendar.llm.harness.llm.ThinkingModelClient(client, agentType.thinking());
         }
 
-        boolean readOnly = agentType != null && agentType.readOnly();
         PermissionMode mode = readOnly ? PermissionMode.PLAN : (parentMode == null ? PermissionMode.DEFAULT : parentMode);
-        // the registry holds neither task nor request_tool_group: sub-agents never see them
-        List<HarnessTool> tools = new ArrayList<>(toolSelector.select(prompt,
-                registry.all().stream().filter(t -> !readOnly || t.kind() == ToolKind.READ_ONLY)
-                        .filter(t -> agentType == null || agentType.tools().isEmpty()
-                                || agentType.tools().contains(t.name()))
-                        .toList()));
-        tools.addAll(context.tools());
-        String extra = systemPrompt + "\n\n" + Prompts.load("subagent-suffix.md")
-                + (readOnly ? "\n\n" + Prompts.load("subagent-readonly-suffix.md") : "")
-                + (agentType == null || agentType.prompt().isBlank() ? "" : "\n\n" + agentType.prompt());
+        List<HarnessTool> tools;
+        String extra;
+        String pinned;
+        StackFrame frame = null;
+        if (stack) {
+            // same pinned text, system prompt, mode note and tool list as the parent: the request continues its prefix
+            ChatSessionData session = sessions.get(chatId);
+            PermissionMode pm = parentMode == null ? PermissionMode.parse(session.mode()) : parentMode;
+            String scratch = scratchId(session.agentId());
+            ToolContext pctx = new ToolContext(chatId, sandbox.workDir(chatId), sandbox.scratchDir(chatId, scratch),
+                    pm == PermissionMode.PLAN, null, pm, null, sandbox.files(chatId, scratch));
+            tools = chatTools(chatId, "");
+            extra = systemPrompt + modeNote(pm, pctx);
+            pinned = sessions.pinnedPrefix(session);
+            java.util.Set<String> contextTools = new java.util.HashSet<>();
+            context.tools().forEach(t -> contextTools.add(t.name()));
+            frame = new StackFrame(extra, t -> {
+                if (contextTools.contains(t.name())) return true;
+                if (t == subAgentTool || t == requestToolGroup) return false;
+                if (readOnly && t.kind() != ToolKind.READ_ONLY) return false;
+                return agentType == null || agentType.tools().isEmpty() || agentType.tools().contains(t.name());
+            });
+        } else {
+            // the registry holds neither task nor request_tool_group: sub-agents never see them
+            tools = new ArrayList<>(toolSelector.select(prompt,
+                    registry.all().stream().filter(t -> !readOnly || t.kind() == ToolKind.READ_ONLY)
+                            .filter(t -> agentType == null || agentType.tools().isEmpty()
+                                    || agentType.tools().contains(t.name()))
+                            .toList()));
+            tools.addAll(context.tools());
+            extra = systemPrompt + "\n\n" + roleNote;
+            pinned = "chatId=" + chatId + "; subagent";
+        }
+        List<HarnessTool> subTools = tools;
         // a model failure inside the sub-agent must reach SubAgentTool as a failure, not an empty "ok" result
         String[] failure = {null};
         Usage[] used = {Usage.ZERO};
@@ -337,8 +367,8 @@ public class AgentLoop {
         if (entering.denied()) throw new IllegalStateException("Sub-agent blocked by a hook: " + entering.denyReason());
         activeSubAgents.put(label, new ActiveSubAgent(label, chatId, prompt, System.currentTimeMillis()));
         try {
-            answer = loop(chatId, messages, () -> tools, "chatId=" + chatId + "; subagent", extra,
-                    mode, errors, cancelled, false, true, agentName, client, inherited, label);
+            answer = loop(chatId, messages, () -> subTools, pinned, extra,
+                    mode, errors, cancelled, false, true, agentName, client, inherited, label, null, frame);
         } catch (RuntimeException e) {
             if (failure[0] == null) failure[0] = String.valueOf(e.getMessage());
             throw e;
@@ -454,13 +484,25 @@ public class AgentLoop {
                         String extra, PermissionMode mode, EventSink sink, BooleanSupplier cancelled,
                         boolean persist, boolean interactive, String agent, ModelClient client, int[] inherited,
                         String label, Inbox inbox) {
+        return loop(chatId, messages, toolSource, pinned, extra, mode, sink, cancelled, persist, interactive, agent,
+                client, inherited, label, inbox, null);
+    }
+
+    /** Request prefix of a sub-agent that continues its parent's (context stack): fixed system text, tool filter. */
+    private record StackFrame(String turnExtra, java.util.function.Predicate<HarnessTool> allowed) {
+    }
+
+    private String loop(String chatId, ArrayNode messages, Supplier<List<HarnessTool>> toolSource, String pinned,
+                        String extra, PermissionMode mode, EventSink sink, BooleanSupplier cancelled,
+                        boolean persist, boolean interactive, String agent, ModelClient client, int[] inherited,
+                        String label, Inbox inbox, StackFrame frame) {
         String scratchId = persist ? scratchId(sessions.get(chatId).agentId())
                 : scratchId(agent.length() > 26 ? agent.substring(0, 26) : agent) + "-" + Uuids.v7String();
         // the main agent's context state lives as long as the chat; a sub-agent's only for this run
         String contextKey = persist ? sessions.get(chatId).agentId() : scratchId;
         try {
             return runLoop(chatId, messages, toolSource, pinned, extra, mode, sink, cancelled, persist, interactive,
-                    agent, client, inherited, label, scratchId, contextKey, inbox);
+                    agent, client, inherited, label, scratchId, contextKey, inbox, frame);
         } finally {
             if (!persist) context.release(chatId, contextKey);
         }
@@ -469,12 +511,12 @@ public class AgentLoop {
     private String runLoop(String chatId, ArrayNode messages, Supplier<List<HarnessTool>> toolSource, String pinned,
                            String extra, PermissionMode mode, EventSink sink, BooleanSupplier cancelled,
                            boolean persist, boolean interactive, String agent, ModelClient client, int[] inherited,
-                           String label, String scratchId, String contextKey, Inbox inbox) {
+                           String label, String scratchId, String contextKey, Inbox inbox, StackFrame frame) {
         ToolContext tctx = new ToolContext(chatId, sandbox.workDir(chatId), sandbox.scratchDir(chatId, scratchId),
                 mode == PermissionMode.PLAN, null, mode, new AgentRun(sink, cancelled, contextKey),
                 sandbox.files(chatId, scratchId));
         // the mode goes after the cached system prefix, so switching modes does not invalidate the prompt cache
-        String turnExtra = extra + modeNote(mode, tctx);
+        String turnExtra = frame != null ? frame.turnExtra() : extra + modeNote(mode, tctx);
         boolean overflowRetried = false;
         boolean truncationRetried = false;
         int continuations = 0;
@@ -494,7 +536,11 @@ public class AgentLoop {
             }
             List<HarnessTool> tools = toolSource.get();
             Map<String, HarnessTool> byName = new LinkedHashMap<>();
-            tools.forEach(t -> byName.put(t.name(), t));
+            java.util.Set<String> refused = new java.util.LinkedHashSet<>();
+            tools.forEach(t -> {
+                if (frame == null || frame.allowed().test(t)) byName.put(t.name(), t);
+                else refused.add(t.name());
+            });
 
             java.util.function.Consumer<Usage> spent = u -> { metrics.tokens(u); sessions.addUsage(chatId, u); };
             RequestPrefix prefix = new RequestPrefix(pinned, turnExtra, tools, client, !config.parallelToolUse());
@@ -655,7 +701,7 @@ public class AgentLoop {
             String intent = lastUserText(messages);
             List<Future<ObjectNode>> futures = new ArrayList<>();
             for (JsonNode use : toolUses) {
-                futures.add(toolExecutor.submit(() -> executeTool(use, byName, tctx, mode, sink, cancelled, interactive, intent, label)));
+                futures.add(toolExecutor.submit(() -> executeTool(use, byName, refused, tctx, mode, sink, cancelled, interactive, intent, label)));
             }
             // cancel interrupts the running tool threads; every tool_use still gets a tool_result below
             Runnable unhook = token.onCancel(() -> futures.forEach(f -> f.cancel(true)));
@@ -768,7 +814,7 @@ public class AgentLoop {
         m.putArray("content").addObject().put("type", "text").put("text", text);
     }
 
-    private ObjectNode executeTool(JsonNode use, Map<String, HarnessTool> byName, ToolContext ctx, PermissionMode mode,
+    private ObjectNode executeTool(JsonNode use, Map<String, HarnessTool> byName, java.util.Set<String> refused, ToolContext ctx, PermissionMode mode,
                                    EventSink sink, BooleanSupplier cancelled, boolean interactive,
                                    String intent, String label) {
         String id = use.path("id").asText();
@@ -785,7 +831,10 @@ public class AgentLoop {
         HarnessTool tool = byName.get(name);
         org.kendar.llm.harness.tools.ToolInputValidator.Outcome check = tool == null ? null : checkInput(tool, input, ctx);
         if (tool == null) {
-            result = toolResult(id, "Unknown tool '" + name + "'", true);
+            result = refused.contains(name)
+                    ? toolResult(id, "Tool '" + name + "' is not available to this sub-agent. Use one of: "
+                            + String.join(", ", byName.keySet()), true)
+                    : toolResult(id, "Unknown tool '" + name + "'", true);
         } else if (cancelled.getAsBoolean()) {
             result = toolResult(id, "Cancelled by user", true);
         } else if (!check.valid()) {

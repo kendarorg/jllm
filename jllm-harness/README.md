@@ -128,6 +128,10 @@ AgentHarness h = AgentHarness.builder()
   ```json
   {"execution": {"maxParallel": 4}}
   ```
+- `execution.useContextStack` (default `true`): a sub-agent continues the parent's request prefix (same pinned text,
+  system prompt and tool list; role text and task go in its first message) so the parent's KV cache is reused and still
+  valid when the sub-agent returns. The agent type's tool restrictions are applied when a call is executed. `false`
+  restores a separate system text and filtered tool list per sub-agent.
 - Hook points, in order for one turn: `beforeAgent` (`PRE_AGENT`), then per model call `beforeLlmCall` /
   `afterLlmCall` (`PRE_LLM` / `POST_LLM`), per tool call `beforeToolCall` / `afterToolCall` (`PRE_TOOL` / `POST_TOOL`),
   then `afterAgent` (`POST_AGENT`). A `task` sub-agent fires the same agent and model-call hooks nested inside the
