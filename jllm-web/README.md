@@ -22,7 +22,7 @@ flags as the CLI, without the prefix: `--provider openai`, `--sandbox docker`, `
 
 | Property | Default | Meaning |
 |---|---|---|
-| `jllm.provider` | `anthropic` | `anthropic`, `openai`, `gemini`, `qwen`, `llamacpp`, `ollama` |
+| `jllm.provider` | `anthropic` | `anthropic`, `openai`, `gemini`, `grok`, `qwen`, `llamacpp`, `ollama` |
 | `jllm.api-key` | `<PROVIDER>_API_KEY` env var | API key |
 | `jllm.model` | per provider | model name |
 | `jllm.base-url` | per provider | endpoint override |

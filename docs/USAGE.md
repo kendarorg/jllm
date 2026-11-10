@@ -175,12 +175,13 @@ settings file. MCP OAuth: see [MCP](MCP.md). No provider login is shipped.
 
 ### Providers and temperature
 
-`providers` is a list of named model definitions (`name`, `type` = `anthropic` | `openai` | `gemini` | `qwen` | `llamacpp` |
+`providers` is a list of named model definitions (`name`, `type` = `anthropic` | `openai` | `gemini` | `grok` | `qwen` | `llamacpp` |
 `ollama`, `baseUrl`, `apiKey`, `model`, `maxTokens`, `maxRetries`, `timeoutSeconds`, `requireApiKey`,
-`useMaxCompletionTokens`, `contextTokens`, `smallModel`, `temperature`, `order`, `thinking`). The old names `anthropic`, `openai`, `gemini`, `qwen`,
+`useMaxCompletionTokens`, `contextTokens`, `smallModel`, `temperature`, `order`, `thinking`). The old names `anthropic`, `openai`, `gemini`, `grok`, `qwen`,
 `llamacpp`, `ollama` stay valid without a definition. `gemini` uses Google's OpenAI-compatible endpoint
 (`https://generativelanguage.googleapis.com/v1beta/openai`, default model `gemini-2.5-pro`, key from
 `GEMINI_API_KEY`); native Gemini features (image input, Vertex) are not supported.
+`grok` uses xAI's OpenAI-compatible endpoint (`https://api.x.ai/v1`, default model `grok-4`, key from `GROK_API_KEY`).
 
 - CLI: `--provider <name>` picks one; `--model`, `--base-url`, `--api-key` override it for the session only. With an
   unknown name, or `--model` alone, they define a `custom (session)` entry that is never written to the settings file.
@@ -203,7 +204,7 @@ settings file. MCP OAuth: see [MCP](MCP.md). No provider login is shipped.
   no thinking, OpenAI-compatible: nothing sent).
   - Anthropic: extended-thinking budget of 2048 (`low`), 8192 (`medium`) or 16384 (`high`) tokens; `minimal` turns
     thinking off. `max_tokens` is raised to fit the budget, and a forced `toolChoice` is ignored while thinking is on.
-  - OpenAI-compatible (openai, gemini, qwen, llamacpp, ollama): sent as `reasoning_effort`; `minimal` is `minimal`, or `none`
+  - OpenAI-compatible (openai, gemini, grok, qwen, llamacpp, ollama): sent as `reasoning_effort`; `minimal` is `minimal`, or `none`
     on Ollama. A server that rejects it gets a retry: `minimal`/`none` steps down to `low`, anything else is
     dropped, and a warning is logged. The run continues.
 

@@ -35,7 +35,7 @@ import java.util.concurrent.TimeUnit;
  * Command line front end: an interactive chat (or a single {@code --prompt}) over the standard tools.
  *
  * <pre>
- * java -cp ... org.kendar.llm.harness.Main [--provider anthropic|openai|gemini|qwen|llamacpp|ollama] [--model M]
+ * java -cp ... org.kendar.llm.harness.Main [--provider anthropic|openai|gemini|grok|qwen|llamacpp|ollama] [--model M]
  *     [--base-url U] [--api-key K] [--mode plan|edit|auto] [--workdir DIR] [--prompt TEXT]
  *     [--settings FILE] [--system-prompt TEXT] [--system-prompt-file FILE] [--system-prompt-replace FILE] [--max-turns N] [--context-tokens TOKENS]
  *     [--search-api-key BRAVE_KEY] [--context-strategy compaction|mnemonic|scope] [--max-tokens TOKENS] [--small-model]
@@ -81,7 +81,7 @@ public final class Main {
     public static void main(String[] argv) throws Exception {
         Map<String, String> a = parse(argv);
         if (a.containsKey("help")) {
-            System.out.println("Usage: Main [--provider anthropic|openai|gemini|qwen|llamacpp|ollama] [--model M] [--base-url U] "
+            System.out.println("Usage: Main [--provider anthropic|openai|gemini|grok|qwen|llamacpp|ollama] [--model M] [--base-url U] "
                     + "[--api-key K] [--mode plan|edit|auto] [--workdir DIR] [--prompt TEXT] "
                     + "[--system-prompt TEXT] [--max-turns N] [--context-tokens TOKENS] [--search-api-key BRAVE_KEY] "
                     + "[--settings FILE] [--context-strategy compaction|mnemonic|scope] [--max-tokens TOKENS] [--small-model] "

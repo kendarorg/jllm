@@ -5,7 +5,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 /**
  * {@code jllm.*} settings.
  *
- * @param provider      anthropic | openai | gemini | qwen | llamacpp | ollama
+ * @param provider      anthropic | openai | gemini | grok | qwen | llamacpp | ollama
  * @param apiKey        API key; empty falls back to the {@code <PROVIDER>_API_KEY} environment variable
  * @param baseUrl       endpoint override; empty = provider default
  * @param model         model override; empty = provider default

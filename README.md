@@ -118,7 +118,7 @@ mvn -pl jllm-web -am package -DskipTests
 java -jar jllm-web/target/jllm-web-1.0-SNAPSHOT.jar --provider anthropic
 ```
 
-Set `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`, `QWEN_API_KEY`) first. Embedding the library is shown above and in the
+Set `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`, `GROK_API_KEY`, `QWEN_API_KEY`) first. Embedding the library is shown above and in the
 [harness README](jllm-harness/README.md#embedding).
 
 ## Documentation
