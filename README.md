@@ -1,11 +1,19 @@
-# jllm
+# JLLM — An Embeddable Java Agent Harness
 
-An agent harness you embed directly in a Java application. Add one library, give it a model, and your application
-gets a tool-using agent that can call **your own Java code**, **MCP servers** and **REST APIs** under a permission
-system you control. Java 21, Maven multi-module.
+**A frameworkless agent runtime you embed directly in your Java application.**
 
-The terminal chat (`jllm-cli`) and the browser chat (`jllm-web`) are two ready-made front ends built on that library.
-They are also the reference for how to embed it.
+Add one library, give it a model, and your application gets a tool-using AI agent that can call **your own Java code**, **MCP servers**, and **REST APIs**, all under a permission system you control.
+
+Built for Java 21, with a Maven multi-module architecture.
+
+JLLM includes two ready-made front ends built on the same library:
+
+- **jllm-cli** — terminal-based agent chat.
+- **jllm-web** — browser-based agent chat.
+
+They're not separate products or mandatory dependencies. They're working examples of what you can build by embedding the JLLM runtime in your own application.
+
+**Bring the model. Bring your Java code. JLLM connects them.**
 
 | Module | What | Doc |
 |---|---|---|
