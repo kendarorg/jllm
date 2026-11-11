@@ -2,6 +2,8 @@
 
 Status: plan, nothing implemented. No Jira ticket yet, so no branch has been created.
 
+Prerequisite: [PLUGIN-CONFIG-PLAN](PLUGIN-CONFIG-PLAN.md). `JsPlugin` needs an id (`js`) and reads its settings from the `plugins` section.
+
 ## Goal
 
 A new Maven module, `jllm-js`, that adds one tool, `run_js`. The model writes JavaScript; the script runs in GraalJS
@@ -23,16 +25,16 @@ to the UI.
 | Access to the world | Only through tools. No host object, no socket, no process, no `require`, no `fetch` | A sandbox, not a scripting host. |
 | Virtual filesystem | File operations go through the Files tools, which are jailed to the chat's work directory. The script cannot touch anything else. | Helper files and outputs stay in the chat directory. |
 | Permission path | The `run_js` approval covers the script itself (`ToolKind.OTHER`, preview = full code). Calls from the script to Files tools need no prompt. Calls to tools that leave the sandbox (Web group, MCP, REST) ask for approval per call, with the usual "grant for this chat" option. | Files stay inside the chat storage, so they are free. Web requests and external services are the risk, so they keep their prompt. |
-| Bash from JS | The bridge refuses the name `bash`. The profile also removes it (see shell exclusion). | Defence in depth: the bridge does not depend on the registry being right. |
+| Bash from JS | The bridge refuses the name `bash`. Loading `JsPlugin` removes it (see shell replacement). | Defence in depth: the bridge does not depend on the registry being right. |
 | Filesystem | Anything the Files tools allow inside the chat storage, from JS. | The user's choice. The only limit is the storage size below. |
-| Storage size | `js.storage.maxBytes` in settings caps the total size of the chat storage. `-1` (default) means no limit. Writes that would exceed a positive limit fail. | Default `-1`: no limit. Set a positive byte count in settings to cap it. |
+| Storage size | `plugins.js.settings.storage.maxBytes` in settings caps the total size of the chat storage. `-1` (default) means no limit. Writes that would exceed a positive limit fail. | Default `-1`: no limit. Set a positive byte count in settings to cap it. |
 | Hooks and output | Tool calls from a script still run `PRE_TOOL` / `POST_TOOL` hooks and output sanitizing and taint marking | Audit and the prompt-injection defences keep working for data that enters the model's context. |
 | Tool exposure | Generated JS module from each tool's `inputSchema`, cached by content hash | Model writes `tools.db_query({sql})` rather than guessing JSON. |
 | Interpreter warning | Truffle's interpreter-only warning and engine diagnostics are logged only at DEBUG level for `org.kendar.llm.js` | Normal runs stay quiet; debugging shows everything. |
 | Context reuse | One `Context` per chat, reused by its `run_js` calls. `Engine` shared. Never shared across chats. | Startup cost paid once per chat; no state leaks between chats. |
-| Shell | `JsPlugin` and a `bash` tool are mutually exclusive. The build fails if both are present. | A host shell gives a second, unrestricted way out, including helper scripts. |
+| Shell | Installing `JsPlugin` removes the `bash` tool. No `bash` tool is offered while `run_js` is loaded. | A host shell gives a second, unrestricted way out, including helper scripts. |
 
-## Shell exclusion
+## Shell replacement
 
 Models do not ask for Python. Once `bash` is offered, a model that needs to scrape or transform data tends to write a
 helper script with `write_file` (`scrape.py`) and run it with `bash python3 scrape.py`. The built-in `bash` tool
@@ -44,12 +46,12 @@ boundary is the absence of the tool.
 
 Rules:
 
-1. A `run_js` profile is the standard tools without `bash`, plus `JsPlugin`. The profile removes `bash` explicitly.
+1. Loading `JsPlugin` removes the `bash` tool from the harness. The plugin declares it replaces `bash`, and the builder
+   drops it before the registry is built. No separate profile flag is needed.
    `withoutStandardTools()` is not enough: it also drops Files and Web.
-2. `JsPlugin` declares `requireAbsent("bash")`. If a `bash` tool is registered when the harness is built (or added
-   later through `HarnessToolRegistry.setSource`), the build fails with a message that says run_js and bash cannot
-   coexist.
-3. The reverse holds too: a harness with `bash` cannot install `JsPlugin`.
+2. Removal is at build time. A `bash` tool added later through `HarnessToolRegistry.setSource` is refused while
+   `JsPlugin` is loaded, with a message that says run_js replaces bash. It is not silently added back.
+3. Installing `JsPlugin` is what removes `bash`, so the two never coexist in one harness.
 4. A `deny` rule on `bash` is kept as a second layer. It hides the tool, it does not remove it, so it is not enough alone.
 5. The `docker` backend for shell is not part of the JS profile. It can be a separate profile without `run_js`.
 6. Sub-agents inherit the tool set. A test must check that a sub-agent of a `run_js` chat cannot get `bash`.
@@ -64,8 +66,9 @@ module docs must say so.
 **1. Selective removal of standard tools.** `Builder.withoutTools(Collection<String> names)`. It applies to the tool list
 before the registry is built (`AgentHarness.java`, around line 640), so the tools are absent, not hidden.
 
-**2. Build-time exclusion.** `PluginRegistrar.requireAbsent(String toolName)`. The builder checks it at `build()` and in
-`HarnessToolRegistry.setSource`, and fails with `IllegalStateException` on a clash.
+**2. Replacement of a standard tool.** `PluginRegistrar.replaces(String toolName)`. The builder removes the named tool
+before the registry is built, as `withoutTools` does. A later `HarnessToolRegistry.setSource` that adds a tool of that
+name is refused with `IllegalStateException`, so the replaced tool cannot come back.
 
 **3. Tool catalog for the plugin.** A plugin's `install(PluginRegistrar)` gets only the registrar. It cannot see tools
 collected later, nor MCP or REST tools, which are added after `build()` and can change at runtime. `ToolContext` has no
@@ -76,7 +79,7 @@ registry either. So:
   - `String invoke(ToolContext ctx, String name, JsonNode input)`: runs one tool with `PRE_TOOL` hooks, execution,
     `POST_TOOL` hooks, output sanitizing and taint marking. It calls `PermissionGate` only for external tools, as below.
 - `PluginRegistrar.catalog()` returns a lazy handle backed by the registry, so it sees MCP and REST tools as they come
-  and go.
+  and go. `AgentHarness.catalog()` returns the same handle for standalone use (entry point B).
 - `invoke` must not be able to call `run_js` (no recursion), and it must refuse tools hidden by a `deny` rule, and the
   name `bash`.
 - `invoke` applies `PermissionGate` for external tools only: the Web group, and tools from MCP and REST sources. Files
@@ -86,10 +89,67 @@ registry either. So:
 
 **4. Storage quota on the write path.** The size check belongs where bytes are written, so it covers writes from the
 model and from JS alike. `FileSystemAgentTools` checks the chat storage total (a running counter per chat, recomputed
-once at startup) before a write, and fails the write if the new total would exceed `js.storage.maxBytes`, unless the value is `-1`. The check is
+once at startup) before a write, and fails the write if the new total would exceed `plugins.js.settings.storage.maxBytes`, unless the value is `-1`. The check is
 in the core, so the limit is also set by the harness, not only by the plugin.
 
 The change lives in `jllm-harness` and needs its own tests before `jllm-js` depends on it.
+
+## Using it from Java
+
+There are two entry points on the same engine. The agent uses the first; an application's own code uses the second.
+
+**A. As a plugin of an agent.** The model calls `run_js`. Used by the CLI and web front ends.
+
+```java
+AgentHarness h = AgentHarness.builder()
+        .modelClient(client)
+        .plugin(new JsPlugin())          // removes bash
+        .build();
+```
+
+**B. Standalone, from application code.** No model, no approval prompt. The application runs a script directly, for
+example a scheduled scrapbooking job. It gets the same tools, the same chat storage layout and the same limits.
+
+```java
+try (JsRuntime js = JsRuntime.builder()
+        .catalog(h.catalog())                    // tools from a harness, or any ToolCatalog
+        .storageRoot(Path.of("/data/scrapbook")) // chats live under <root>/<chatId>, as in ChatDirSandboxExecutor
+        .allowExternal(true)                     // the app vouches for this code; default false
+        .build()) {
+
+    JsResult r = js.run("nightly-scrapbook", """
+            const page = tools.web_fetch({url: 'https://example.com/feed'});
+            tools.write_file({path: 'feed.html', content: page});
+            return 'ok';
+            """, Duration.ofSeconds(60));
+
+    if (!r.ok()) log.warn("script failed: {}", r.error());
+}
+```
+
+Rules for B:
+
+- `chatId` follows the rule in [SANDBOX](../docs/SANDBOX.md): `[A-Za-z0-9._-]{1,64}`, no `..`.
+- A `chatId` that is also a web chat shares its storage. That is intended: a job can write what a chat reads.
+- `allowExternal` defaults to `false`. With it off, a Web, MCP or REST call from the script fails with an error, and no
+  prompt is shown, since there is no user. With it on, every external call is allowed. Turning it on is a trust
+  decision of the embedding application.
+- The Files tools and the storage limit apply exactly as in A. `bash` is not involved: standalone use has no model.
+- `run` blocks the calling thread and returns a `JsResult`. It is safe to call from a virtual thread.
+- Calls for one `chatId` are serialised, as in A. Calls for different chats run in parallel.
+- `closeChat(chatId)` closes that chat's `Context`. `close()` closes all of them. Use `try-with-resources`.
+
+Result shape:
+
+| Field | Meaning |
+|---|---|
+| `ok` | the script returned without an exception or a limit hit |
+| `value` | the returned value, serialised to JSON, or `null` |
+| `console` | captured `console.log` output, capped at 50 KB |
+| `error` | `null` when `ok`; otherwise `<message> at line N` |
+| `truncated` | the console output was cut |
+
+Timeout, the statement limit and cancel all end the run with `ok = false` and an explanatory `error`. They do not throw.
 
 ## Module layout
 
@@ -97,7 +157,9 @@ The change lives in `jllm-harness` and needs its own tests before `jllm-js` depe
 jllm-js/
   pom.xml                       org.graalvm.polyglot:polyglot + :js (community), depends on jllm-harness
   src/main/java/org/kendar/llm/js/
-    JsPlugin.java               HarnessPlugin: requireAbsent("bash"), registers run_js
+    JsPlugin.java               HarnessPlugin: replaces("bash"), registers run_js
+    JsRuntime.java              standalone entry point (B): builder, run, closeChat, close
+    JsResult.java               record: ok, value, console, error, truncated
     RunJsTool.java              HarnessTool: input {code, timeoutSeconds?}, kind OTHER, preview = code
     JsSandbox.java              builds the locked-down Context, runs code, enforces limits
     ChatContexts.java           one Context per chatId, closed on chat delete and shutdown
@@ -164,13 +226,18 @@ marking, not into the script as trusted input.
    the `run_js` approval preview contains the full script; `PRE_TOOL` hook can deny or rewrite an inner call; output
    sanitizing and taint apply to inner results; a tool hidden by a `deny` rule is not callable from JS; the name `bash`
    is refused even when a tool of that name is registered.
-3a. Storage: a write that would exceed `js.storage.maxBytes` fails, from JS and from the model, and creates no file; the
+3a. Storage: a write that would exceed `plugins.js.settings.storage.maxBytes` fails, from JS and from the model, and creates no file; the
     total is kept across restarts; a rejected write does not change the total.
 4. Lifecycle: one Context reused across calls in a chat; a second chat gets its own Context; cancel and timeout stop a
    script and the next call gets a fresh Context; deleting a chat closes its Contexts; concurrent `run_js` calls in one
    chat are serialised.
-5. Shell exclusion: `withoutTools("bash")` removes the tool from `registry.every()`, and a direct call to it fails; a
-   build with `JsPlugin` and `bash` fails; `setSource` that adds a tool named `bash` while `JsPlugin` is installed fails.
+4a. Standalone: `JsRuntime.run` with `allowExternal(false)` fails a Web call without a prompt; with `true` it succeeds;
+    `chatId` validation rejects `..` and `/`; a web chat and a standalone run with the same `chatId` see the same
+    files; `run` returns `ok = false` on timeout, statement limit and cancel without throwing; `close` closes all
+    contexts.
+5. Shell replacement: a harness built with `JsPlugin` has no `bash` in `registry.every()`, and a direct call to it fails;
+   `withoutTools("bash")` on its own also removes the tool; `setSource` that adds a tool named `bash` while `JsPlugin`
+   is installed throws `IllegalStateException`.
 6. Interpreter warning: absent at normal log level, present at DEBUG.
 7. Sub-agent: a sub-agent of a `run_js` chat gets the same tool list, without `bash`.
 8. End to end: the scrapbooking workflow, with fake HTTP tools, produces the same output as the original script on the
@@ -193,12 +260,12 @@ grant of the tool, later calls to it do not prompt again. The script's HTTP fetc
 
 | # | Work | Done when |
 |---|---|---|
-| 1 | Core change in `jllm-harness`: `withoutTools`, `requireAbsent`, `ToolCatalog` with the invoke path extracted from `AgentLoop`, storage quota on writes | existing harness tests green; new tests for 1 to 4 green |
-| 2 | `jllm-js` skeleton: Maven module, Graal dependencies, `JsPlugin` discovered via `discoverPlugins()` | `run_js` appears in `/tools`, runs `return 1+1` |
+| 1 | Core change in `jllm-harness`: `withoutTools`, `replaces`, `ToolCatalog` with the invoke path extracted from `AgentLoop`, storage quota on writes | existing harness tests green; new tests for 1 to 4 green |
+| 2 | `jllm-js` skeleton: Maven module, Graal dependencies, `JsPlugin` discovered via `discoverPlugins()`, `JsRuntime` with `run` | `run_js` appears in `/tools`, runs `return 1+1`; `JsRuntime.run` returns the same result from Java |
 | 3 | Sandbox locks and limits, chat-scoped Context | lock tests fail the script as expected; lifecycle tests green |
 | 4 | `ToolLibrary` generation and cache, index in the `run_js` description | generation and cache tests green |
 | 5 | Bridge: catalog invoke, hooks, sanitizing, taint, web and external approval, `bash` refusal | bridge tests green |
-| 6 | Wire into `jllm-cli` and `jllm-web` (discovery, `/help`), profile `withoutTools("bash")` + `JsPlugin`, `docs/JS.md`, README row | `run_js` usable from both front ends; shell exclusion tests green |
+| 6 | Wire into `jllm-cli` and `jllm-web` (discovery, `/help`), `docs/JS.md`, README row | `run_js` usable from both front ends; shell replacement tests green |
 | 7 | Port the scrapbooking script, compare outputs | outputs match on the reference input |
 
 Milestone 1 is the riskiest. It changes the invoke path that every tool call uses.
@@ -208,8 +275,9 @@ Milestone 1 is the riskiest. It changes the invoke path that every tool call use
 - **Approval scope.** The `run_js` approval covers the script's code. Web, MCP and REST calls from the script each ask
   for approval, so a script can still make many requests. The approval preview must show the full script. The list of
   external groups and sources needs confirming, because it decides which calls are free.
-- **Plugin settings.** `js.storage.maxBytes` and the other JS options must be read from the settings file. How a
-  plugin reads its own section of that file is not checked yet; the fallback is a constructor argument on `JsPlugin`.
+- **Standalone trust.** With `allowExternal(true)`, any code the application passes to `JsRuntime.run` can call Web, MCP
+  and REST tools without a prompt. Only the application's own code should reach it.
+- **Plugin settings.** Resolved by [PLUGIN-CONFIG-PLAN](PLUGIN-CONFIG-PLAN.md): `JsPlugin` reads its settings from the `plugins` section.
 - **Graal sandbox API.** The option names above follow the GraalVM Polyglot API. Exact methods depend on the version.
   Check each lock against that version's Javadoc in milestone 3, and let the lock tests prove it.
 - **Dependency resolution.** Neither artifact is in the local Maven cache yet. Check the dependency tree with
