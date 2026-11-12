@@ -63,6 +63,21 @@ public class DockerSandboxExecutor implements SandboxExecutor {
     }
 
     @Override
+    public void environmentWhitelist(java.util.List<String> patterns) {
+        localFallback.environmentWhitelist(patterns);
+    }
+
+    @Override
+    public boolean sharedWorkDir() {
+        return localFallback.sharedWorkDir();
+    }
+
+    @Override
+    public Path chatStorage(String chatId) {
+        return localFallback.chatStorage(chatId);
+    }
+
+    @Override
     public Path location() {
         return localFallback.location();
     }

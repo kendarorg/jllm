@@ -278,7 +278,12 @@ export const setMode = guard(async mode => {
   store.mode = mode; toast('Mode: ' + mode);
 });
 
-export const cancelRun = guard(async () => { if (store.chatId) await post(`/api/chat/${store.chatId}/cancel`); });
+// a run_js call of the model is in flight: the toolbar asks how to stop the script
+export const scriptRunning = () => store.items.some(it => it.kind === 'tools'
+  && it.tools.some(t => t.name === 'run_js' && t.status === 'run'));
+export const cancelRun = guard(async (kill = false) => {
+  if (store.chatId) await post(`/api/chat/${store.chatId}/cancel${kill ? '?kill=true' : ''}`);
+});
 
 export const searchFiles = async q => {
   try { return await api(`/api/chat/${store.chatId}/files?q=${encodeURIComponent(q)}`); } catch (e) { return []; }

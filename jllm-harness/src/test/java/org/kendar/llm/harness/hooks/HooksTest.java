@@ -157,13 +157,21 @@ class HooksTest {
         return HookResult.allow();
     }
 
+    private record TestPlugin(String id, java.util.function.Consumer<org.kendar.llm.harness.plugin.PluginRegistrar> body)
+            implements HarnessPlugin {
+        @Override
+        public void install(org.kendar.llm.harness.plugin.PluginRegistrar registrar) {
+            body.accept(registrar);
+        }
+    }
+
     @Test
     void pluginContributesToolHookAndCommand() throws Exception {
         List<String> seen = Collections.synchronizedList(new ArrayList<>());
-        HarnessPlugin plugin = r -> r
+        HarnessPlugin plugin = new TestPlugin("plug-test", r -> r
                 .tool(tool("plug", "Plug", ToolKind.READ_ONLY, (c, i) -> "plugged"))
                 .hook(HookEvent.POST_TOOL, ctx -> { seen.add(ctx.tool()); return HookResult.allow(); })
-                .command("/deploy", "Deploy it", (chat, arg) -> "deploying " + arg);
+                .command("/deploy", "Deploy it", (chat, arg) -> "deploying " + arg));
         ScriptedModel model = new ScriptedModel().enqueue(toolUse("t1", "plug", "{}"), text("ok"));
         AgentHarness h = builder(model).plugin(plugin).build();
 

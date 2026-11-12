@@ -28,6 +28,30 @@ public interface SandboxExecutor {
     }
 
     /**
+     * Which variables of the harness process a shell command inherits ({@code *} patterns, see
+     * {@link org.kendar.llm.harness.util.Wildcard}); the default is all. Backends that start commands in a container
+     * ignore it: the container has an environment of its own.
+     */
+    default void environmentWhitelist(java.util.List<String> patterns) {
+    }
+
+    /**
+     * True when the work dir is a project shared by every chat (the CLI): a script's file jail is then the agent's
+     * own scratch directory. False when the work dir belongs to the chat.
+     */
+    default boolean sharedWorkDir() {
+        return false;
+    }
+
+    /**
+     * The directory whose total size {@code storage.maxBytes} limits: everything the chat owns. The work dir by
+     * default; with a shared project directory, the chat's scratch directories only.
+     */
+    default Path chatStorage(String chatId) {
+        return workDir(chatId);
+    }
+
+    /**
      * Scratch directory of one agent of a chat: {@code <root>/<chatId>/<agentId>}, created on demand and always
      * writable, whatever the mode. Main agent and sub-agents each get their own.
      */

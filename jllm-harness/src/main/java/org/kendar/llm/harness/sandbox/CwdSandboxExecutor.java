@@ -78,6 +78,16 @@ public class CwdSandboxExecutor extends LocalDirSandboxExecutor {
         return dir;
     }
 
+    @Override
+    public boolean sharedWorkDir() {
+        return true;
+    }
+
+    @Override
+    public Path chatStorage(String chatId) {
+        return chatScratch(chatId);
+    }
+
     private Path chatScratch(String chatId) {
         return resolveJailed(scratchRoot.toString(), chatId);
     }

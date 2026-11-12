@@ -28,6 +28,7 @@ public final class McpStdioClient implements McpClient {
     private final String name;
     private final List<String> command;
     private final Map<String, String> env;
+    private final List<String> inheritedEnv;
     private final AtomicLong ids = new AtomicLong();
     private final Map<Long, CompletableFuture<JsonNode>> pending = new ConcurrentHashMap<>();
     private volatile boolean closed;
@@ -37,6 +38,16 @@ public final class McpStdioClient implements McpClient {
 
     public McpStdioClient(ObjectMapper mapper, String name, String executable, List<String> args,
                           Map<String, String> env) {
+        this(mapper, name, executable, args, env, null);
+    }
+
+    /**
+     * @param inheritedEnv patterns of the variables of this process the server inherits ({@code null}: all); the
+     *                     server's own {@code env} is added on top
+     */
+    public McpStdioClient(ObjectMapper mapper, String name, String executable, List<String> args,
+                          Map<String, String> env, List<String> inheritedEnv) {
+        this.inheritedEnv = org.kendar.llm.harness.util.EnvWhitelist.orAll(inheritedEnv);
         this.mapper = mapper;
         this.name = name;
         this.command = new ArrayList<>();
@@ -103,6 +114,7 @@ public final class McpStdioClient implements McpClient {
 
     private void start() throws IOException {
         ProcessBuilder pb = new ProcessBuilder(command);
+        org.kendar.llm.harness.util.EnvWhitelist.apply(pb.environment(), inheritedEnv);
         pb.environment().putAll(env);
         process = pb.start();
         stdin = new BufferedWriter(new OutputStreamWriter(process.getOutputStream(), StandardCharsets.UTF_8));

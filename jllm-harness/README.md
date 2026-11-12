@@ -114,8 +114,9 @@ AgentHarness h = AgentHarness.builder()
 
 - `providers`, `defaultProvider`, `permissions` (regex deny/ask/allow rules), temperature, `/model`, `/undo`, steering
   (`steer` / `followUp`), checkpoints and the pdf/docx document readers are described in [USAGE](../docs/USAGE.md#providers-and-temperature)
-  and [TOOLS](../docs/TOOLS.md#document-readers). `builder.discoverPlugins()` installs the `HarnessPlugin`s found by
-  `ServiceLoader` (for example `jllm-pdf` and `jllm-docs`); `builder.documentReader(...)` adds a reader directly.
+  and [TOOLS](../docs/TOOLS.md#document-readers). `builder.discoverPlugins()` loads the `HarnessPlugin`s found by
+  `ServiceLoader` (classpath and `builder.pluginDir(...)`) that are listed and enabled under `plugins` in the settings
+  (ids `pdf`, `docs`; see [EXTENDING](../docs/EXTENDING.md#3-plugins-and-slash-commands)); `builder.documentReader(...)` adds a reader directly.
 - `${ENV_VAR}` is expanded in every string; a missing variable fails the load. OAuth is not supported (static headers).
 - A REST operation becomes a tool only if it matches `allowedPaths` (`METHOD /path`, method optional, `*` wildcard).
   Tools are named `<api>__<operationId>`; GET/HEAD are read-only. MCP tools are `mcp__<server>__<tool>`.

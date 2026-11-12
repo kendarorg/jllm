@@ -62,10 +62,12 @@ public final class ExternalSources {
     private final ObjectMapper mapper;
     private final Map<String, Source> sources = new LinkedHashMap<>();
     private final Map<String, McpClient> connections = new HashMap<>();
+    private final java.util.List<String> toolEnv;
 
     public ExternalSources(HarnessToolRegistry registry, HarnessSettings settings, HttpClient http,
                            ObjectMapper mapper) {
         this.registry = registry;
+        this.toolEnv = settings.toolsWhitelistedEnvVars();
         this.http = http;
         this.mapper = mapper;
         for (McpServerSettings m : settings.mcpServers()) {
@@ -152,7 +154,7 @@ public final class ExternalSources {
 
     private List<HarnessTool> mcpDiscover(McpServerSettings m) {
         String key = key(Kind.MCP, m.name());
-        McpClient client = McpToolProvider.connect(m, http, mapper);
+        McpClient client = McpToolProvider.connect(m, http, mapper, toolEnv);
         try {
             List<HarnessTool> tools = McpToolProvider.tools(m, client, mapper);
             closeConnection(key);
@@ -182,7 +184,7 @@ public final class ExternalSources {
     }
 
     private String mcpProbe(McpServerSettings m) {
-        try (McpClient client = McpToolProvider.connect(m, http, mapper)) {
+        try (McpClient client = McpToolProvider.connect(m, http, mapper, toolEnv)) {
             int n = client.listTools().size();
             return n + " tools offered";
         } catch (java.io.IOException e) {

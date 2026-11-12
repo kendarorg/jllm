@@ -176,8 +176,9 @@ public class ChatController {
     }
 
     @PostMapping("/api/chat/{id}/cancel")
-    public Map<String, Object> cancel(@PathVariable String id) {
-        agentService.cancel(id);
+    public Map<String, Object> cancel(@PathVariable String id,
+                                      @org.springframework.web.bind.annotation.RequestParam(defaultValue = "false") boolean kill) {
+        agentService.cancel(id, kill);
         return Map.of("running", agentService.isRunning(id));
     }
 

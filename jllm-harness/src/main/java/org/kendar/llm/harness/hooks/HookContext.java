@@ -14,9 +14,16 @@ import org.kendar.llm.harness.llm.Usage;
  * @param agent   PRE_LLM, POST_LLM, PRE_AGENT, POST_AGENT: {@value #MAIN} or the sub-agent type name
  * @param durationMs POST_LLM, POST_TOOL: how long the call took; 0 when not measured (tracing adapters)
  * @param usage   POST_LLM: tokens of the call, or null
+ * @param parent  PRE_TOOL, POST_TOOL: null for a call from the model; {@code run_js:<toolUseId>} for a call made by a
+ *                script
  */
 public record HookContext(HookEvent event, String chatId, String text, String tool, JsonNode input, String output,
-                          boolean isError, String agent, long durationMs, Usage usage) {
+                          boolean isError, String agent, long durationMs, Usage usage, String parent) {
+
+    public HookContext(HookEvent event, String chatId, String text, String tool, JsonNode input, String output,
+                       boolean isError, String agent, long durationMs, Usage usage) {
+        this(event, chatId, text, tool, input, output, isError, agent, durationMs, usage, null);
+    }
 
     public HookContext(HookEvent event, String chatId, String text, String tool, JsonNode input, String output,
                        boolean isError, String agent) {
@@ -52,6 +59,16 @@ public record HookContext(HookEvent event, String chatId, String text, String to
 
     public static HookContext preTool(String chatId, String tool, JsonNode input) {
         return new HookContext(HookEvent.PRE_TOOL, chatId, null, tool, input, null, false);
+    }
+
+    public static HookContext preTool(String chatId, String tool, JsonNode input, String parent) {
+        return new HookContext(HookEvent.PRE_TOOL, chatId, null, tool, input, null, false, null, 0L, null, parent);
+    }
+
+    public static HookContext postTool(String chatId, String tool, JsonNode input, String output, boolean isError,
+                                       long durationMs, String parent) {
+        return new HookContext(HookEvent.POST_TOOL, chatId, null, tool, input, output, isError, null, durationMs, null,
+                parent);
     }
 
     public static HookContext postTool(String chatId, String tool, JsonNode input, String output, boolean isError) {

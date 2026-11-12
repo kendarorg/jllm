@@ -25,6 +25,9 @@ public class HarnessToolRegistry {
     private final ToolApprovalPolicy policy;
     private final Map<String, List<HarnessTool>> sources = new LinkedHashMap<>();
     private final Set<String> disabled = ConcurrentHashMap.newKeySet();
+    private final Set<String> replaced = ConcurrentHashMap.newKeySet();
+    private final List<java.util.function.Consumer<Collection<String>>> nameChecks =
+            new java.util.concurrent.CopyOnWriteArrayList<>();
     private volatile Snapshot snapshot;
     private volatile java.util.function.Predicate<String> hidden = n -> false;
 
@@ -38,6 +41,24 @@ public class HarnessToolRegistry {
 
     public HarnessToolRegistry(Collection<? extends HarnessTool> tools) {
         this(tools, null);
+    }
+
+    /** Names of standard tools replaced by a plugin: a source cannot add them back. */
+    public HarnessToolRegistry(Collection<? extends HarnessTool> tools, ToolApprovalPolicy policy,
+                               Collection<String> replaced,
+                               Collection<java.util.function.Consumer<Collection<String>>> nameChecks) {
+        this.core = List.copyOf(tools);
+        this.policy = policy;
+        this.replaced.addAll(replaced);
+        this.nameChecks.addAll(nameChecks);
+        this.snapshot = build(core, sources);
+        checkNames(snapshot);
+        if (policy != null) snapshot.sorted().forEach(policy::registered);
+    }
+
+    private void checkNames(Snapshot s) {
+        List<String> names = s.sorted().stream().map(HarnessTool::name).toList();
+        for (var c : nameChecks) c.accept(names);
     }
 
     /** The enabled tools in the stable order. */
@@ -78,9 +99,16 @@ public class HarnessToolRegistry {
      * @throws IllegalArgumentException if a name clashes with another tool; nothing is changed then
      */
     public synchronized void setSource(String source, Collection<? extends HarnessTool> tools) {
+        for (HarnessTool t : tools) {
+            if (replaced.contains(t.name())) {
+                throw new IllegalStateException("Tool '" + t.name() + "' is replaced by a plugin and cannot be added "
+                        + "(source '" + source + "'): run_js replaces bash.");
+            }
+        }
         Map<String, List<HarnessTool>> next = new LinkedHashMap<>(sources);
         next.put(source, List.copyOf(tools));
         Snapshot built = build(core, next);
+        checkNames(built);
         sources.clear();
         sources.putAll(next);
         snapshot = built;

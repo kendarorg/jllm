@@ -103,6 +103,181 @@ public class AgentLoop {
         validationModes.put(chatId, mode);
     }
 
+    /**
+     * Per-host approval for the web tools. A host the chat has granted passes (also after untrusted output was read:
+     * a host not granted always asks, which is what stops data leaving). Not interactive: refused.
+     */
+    private org.kendar.llm.harness.tools.HostApprover hostApprover(String chatId, EventSink sink,
+                                                                   BooleanSupplier cancelled, boolean interactive,
+                                                                   String label) {
+        return new org.kendar.llm.harness.tools.HostApprover() {
+            @Override
+            public boolean approve(String host, String url) {
+                if (approvals.hostGranted(chatId, host)) return true;
+                if (!interactive) return false;
+                String h = org.kendar.llm.harness.tools.HostMatcher.normalize(host);
+                ApprovalService.ApprovalDecision d = approvals.await(chatId, "host", "Allow web access to " + h,
+                        url, null, a -> {
+                            ObjectNode ev = mapper.valueToTree(a);
+                            if (label != null) ev.put("agent", label);
+                            ev.put("host", h);
+                            sink.emit("approval_request", ev);
+                        }, cancelled, () -> approvals.hostGranted(chatId, host));
+                if (d.approved() && d.remember()) approvals.grantHost(chatId, host);
+                metrics.approval("host", d.approved());
+                return d.approved();
+            }
+
+            /** Per call, never remembered: a bad certificate is asked about every time. */
+            @Override
+            public boolean approveInsecure(String host, String url, String reason) {
+                if (!interactive) return false;
+                String h = org.kendar.llm.harness.tools.HostMatcher.normalize(host);
+                ApprovalService.ApprovalDecision d = approvals.await(chatId, "insecure_cert",
+                        "Invalid certificate for " + h + ": continue anyway?",
+                        "The certificate of " + h + " is not valid:\n" + reason + "\n\nURL: " + url
+                                + "\n\nAllowing sends this one request without checking who is on the other end.",
+                        null, a -> {
+                            ObjectNode ev = mapper.valueToTree(a);
+                            if (label != null) ev.put("agent", label);
+                            ev.put("host", h);
+                            sink.emit("approval_request", ev);
+                        }, cancelled);
+                metrics.approval("insecure_cert", d.approved());
+                return d.approved();
+            }
+        };
+    }
+
+    /** Built-in file tools (identity): free from a script. */
+    private volatile java.util.Set<HarnessTool> builtinFileTools = java.util.Set.of();
+
+    public AgentLoop builtinFileTools(java.util.Collection<HarnessTool> tools) {
+        java.util.Set<HarnessTool> s = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        s.addAll(tools);
+        this.builtinFileTools = s;
+        return this;
+    }
+
+    private static final java.util.Set<String> SCRIPT_REFUSED = java.util.Set.of("run_js", "bash", "sub_agent",
+            "request_tool_group");
+
+    private boolean scriptRefused(HarnessTool t) {
+        return SCRIPT_REFUSED.contains(t.name()) || "Agents".equals(t.group()) || t == subAgentTool
+                || t == requestToolGroup;
+    }
+
+    /** The view of one running agent that a script uses; the tool list follows the agent turn by turn. */
+    private final class Scope implements org.kendar.llm.harness.tools.RunScope {
+        private final PermissionMode mode;
+        private final EventSink sink;
+        private final BooleanSupplier cancelled;
+        private final boolean interactive;
+        private final String label;
+        volatile Map<String, HarnessTool> byName = Map.of();
+        volatile String intent = "";
+
+        Scope(PermissionMode mode, EventSink sink, BooleanSupplier cancelled, boolean interactive, String label) {
+            this.mode = mode;
+            this.sink = sink;
+            this.cancelled = cancelled;
+            this.interactive = interactive;
+            this.label = label;
+        }
+
+        @Override
+        public java.util.Collection<HarnessTool> tools() {
+            return byName.values().stream().filter(t -> !scriptRefused(t)).toList();
+        }
+
+        @Override
+        public ToolContext jail(ToolContext ctx) {
+            if (!sandbox.sharedWorkDir()) return ctx;
+            if (ctx.files() != null) {
+                return ctx.withFiles(new org.kendar.llm.harness.sandbox.ScratchJailBackend(ctx.files()));
+            }
+            return ctx.withRoot(ctx.scratchDir());
+        }
+
+        @Override
+        public String display(java.nio.file.Path path) {
+            return sandbox.displayPath(path);
+        }
+
+        @Override
+        public boolean free(String name) {
+            HarnessTool t = byName.get(name);
+            return t != null && builtinFileTools.contains(t);
+        }
+
+        @Override
+        public String invoke(ToolContext ctx, String name, JsonNode input) {
+            String parent = ctx.toolUseId() == null ? "run_js" : "run_js:" + ctx.toolUseId();
+            ToolContext inner = ctx.withParent(parent);
+            String id = (ctx.toolUseId() == null ? "js" : ctx.toolUseId()) + "/" + java.util.UUID.randomUUID();
+            if (input == null || input.isNull()) input = mapper.createObjectNode();
+            ObjectNode call = mapper.createObjectNode();
+            call.put("id", id).put("name", name).put("parent", parent);
+            call.set("input", input);
+            sink.emit("tool_call", call);
+            long start = System.nanoTime();
+            String out = null;
+            String error = null;
+            try {
+                HarnessTool tool = byName.get(name);
+                // the list is the agent's of this turn; a tool disabled or removed since (/tools, /mcp) is refused now
+                if (tool == null || scriptRefused(tool)
+                        || !(registry.all().contains(tool) || context.tools().contains(tool))) {
+                    throw new org.kendar.llm.harness.tools.ToolCatalog.ToolCallException(
+                            "Unknown or unavailable tool '" + name + "'");
+                }
+                if (cancelled.getAsBoolean()) {
+                    throw new org.kendar.llm.harness.tools.ToolCatalog.ToolCallException("cancelled by the user");
+                }
+                var check = checkInput(tool, input, inner);
+                if (!check.valid()) {
+                    throw new org.kendar.llm.harness.tools.ToolCatalog.ToolCallException("Invalid arguments for '"
+                            + name + "': " + String.join("; ", check.errors()) + ". Expected input schema: "
+                            + tool.inputSchema());
+                }
+                boolean free = builtinFileTools.contains(tool);
+                Authz az = authorize(tool, name, check.input(), inner, mode, sink, cancelled, interactive, intent,
+                        label, free);
+                if (az.denial() != null) {
+                    throw new org.kendar.llm.harness.tools.ToolCatalog.ToolCallException(az.denial());
+                }
+                ObjectNode r;
+                try {
+                    r = runTool(tool, az.input(), inner.withToolUseId(id), id, true);
+                } catch (SandboxUnavailableException e) {
+                    throw new org.kendar.llm.harness.tools.ToolCatalog.ToolCallException(e.getMessage());
+                }
+                out = r.path("content").asText("");
+                boolean failed = r.path("is_error").asBoolean(false);
+                hooks.run(HookContext.postTool(ctx.chatId(), name, az.input(), out, failed,
+                        (System.nanoTime() - start) / 1_000_000L, parent));
+                if (failed) {
+                    throw new org.kendar.llm.harness.tools.ToolCatalog.ToolCallException(
+                            out.startsWith("Error: ") ? out.substring(7) : out);
+                }
+                return out;
+            } catch (org.kendar.llm.harness.tools.ToolCatalog.ToolCallException e) {
+                error = e.getMessage();
+                throw e;
+            } finally {
+                ObjectNode ev = mapper.createObjectNode();
+                ev.put("id", id).put("name", name).put("parent", parent).put("isError", error != null);
+                String text = error != null ? error : out == null ? "" : out;
+                ev.put("size", text.length());
+                int eventMax = config.output().eventMaxChars();
+                ev.put("output", text.length() > eventMax ? text.substring(0, eventMax) + "…" : text);
+                sink.emit("tool_result", ev);
+                metrics.toolCall(name, error != null ? "error" : "ok",
+                        java.time.Duration.ofNanos(System.nanoTime() - start));
+            }
+        }
+    }
+
     /** Chats whose current run has read untrusted tool output. */
     private final java.util.Set<String> tainted = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
@@ -512,9 +687,11 @@ public class AgentLoop {
                            String extra, PermissionMode mode, EventSink sink, BooleanSupplier cancelled,
                            boolean persist, boolean interactive, String agent, ModelClient client, int[] inherited,
                            String label, String scratchId, String contextKey, Inbox inbox, StackFrame frame) {
+        Scope scope = new Scope(mode, sink, cancelled, interactive, label);
         ToolContext tctx = new ToolContext(chatId, sandbox.workDir(chatId), sandbox.scratchDir(chatId, scratchId),
                 mode == PermissionMode.PLAN, null, mode, new AgentRun(sink, cancelled, contextKey),
-                sandbox.files(chatId, scratchId));
+                sandbox.files(chatId, scratchId)).withScope(scope)
+                .withHosts(hostApprover(chatId, sink, cancelled, interactive, label));
         // the mode goes after the cached system prefix, so switching modes does not invalidate the prompt cache
         String turnExtra = frame != null ? frame.turnExtra() : extra + modeNote(mode, tctx);
         boolean overflowRetried = false;
@@ -541,6 +718,7 @@ public class AgentLoop {
                 if (frame == null || frame.allowed().test(t)) byName.put(t.name(), t);
                 else refused.add(t.name());
             });
+            scope.byName = byName;
 
             java.util.function.Consumer<Usage> spent = u -> { metrics.tokens(u); sessions.addUsage(chatId, u); };
             RequestPrefix prefix = new RequestPrefix(pinned, turnExtra, tools, client, !config.parallelToolUse());
@@ -699,6 +877,7 @@ public class AgentLoop {
             }
 
             String intent = lastUserText(messages);
+            scope.intent = intent;
             List<Future<ObjectNode>> futures = new ArrayList<>();
             for (JsonNode use : toolUses) {
                 futures.add(toolExecutor.submit(() -> executeTool(use, byName, refused, tctx, mode, sink, cancelled, interactive, intent, label)));
@@ -841,56 +1020,20 @@ public class AgentLoop {
                     + ". Expected input schema: " + tool.inputSchema(), true);
         } else {
             input = check.input();
-            HookResult pre = hooks.run(HookContext.preTool(ctx.chatId(), name, input));
-            if (pre.modifiedInput() != null) input = pre.modifiedInput();
-            Decision decision = gate.check(mode, tool);
-            if (decision == Decision.ALLOW && mode == PermissionMode.AUTO && classifier != null
-                    && tool.kind() != ToolKind.READ_ONLY && !pre.denied()) {
-                // auto mode: the fast model may wave the call through; anything else goes to the user
-                ToolClassifier.Verdict v = classifier.classify(name, input, ctx.workDir(), intent);
-                if (v != ToolClassifier.Verdict.SAFE) decision = Decision.ASK;
-                sink.emit("classifier", mapper.createObjectNode().put("tool", name).put("verdict", v.name()));
-            }
-            // settings rules: deny wins in every mode and over any grant; ask forces the question; allow skips it
-            PermissionRules.Match rule = gate.rules().match(name, input);
-            if (rule != null && rule.kind() == PermissionRules.Kind.ASK && decision == Decision.ALLOW) {
-                decision = Decision.ASK;
-            }
-            // a grant only replaces the question; deny rules, hooks and plan confinement stay as they are
-            if (decision == Decision.ASK && (approvals.granted(ctx.chatId(), name)
-                    || approvals.commandGranted(ctx.chatId(), name, commandOf(name, input))
-                    || approvals.dirGranted(ctx.chatId(), writeDirOf(tool, input, ctx)))) decision = Decision.ALLOW;
-            if (rule != null && rule.kind() == PermissionRules.Kind.ALLOW && decision == Decision.ASK
-                    && mode != PermissionMode.AUTO) {
-                decision = Decision.ALLOW;
-            }
-            // outside content was read in this run: side effects need an explicit yes, even over grants and allow rules
-            if (decision == Decision.ALLOW && tool.kind() != ToolKind.READ_ONLY && tainted.contains(ctx.chatId())
-                    && (rule == null || rule.kind() != PermissionRules.Kind.DENY)) {
-                decision = Decision.ASK;
-                sink.emit("warning", mapper.createObjectNode().put("message", "Confirming '" + name
-                        + "': this run read untrusted tool output that could contain injected instructions"));
-            }
-            if (decision == Decision.ASK && !interactive) decision = Decision.DENY;
-            if (pre.denied()) {
-                result = toolResult(id, "Denied by a hook: " + pre.denyReason(), true);
-            } else if (rule != null && rule.kind() == PermissionRules.Kind.DENY) {
-                result = toolResult(id, "Denied by permission rule: " + rule.rule(), true);
-            } else if (decision == Decision.DENY) {
-                result = toolResult(id, "Denied by permission policy (mode " + mode + ")", true);
-            } else if (decision == Decision.ASK && !approve(tool, input, ctx, sink, cancelled, label)) {
-                result = toolResult(id, "The user rejected this tool call", true);
+            Authz az = authorize(tool, name, input, ctx, mode, sink, cancelled, interactive, intent, label, false);
+            input = az.input();
+            if (az.denial() != null) {
+                result = toolResult(id, az.denial(), true);
             } else {
-                if (decision == Decision.ASK) approvals.grantCommand(ctx.chatId(), name, commandOf(name, input));
                 try {
                     result = runTool(tool, input, ctx.withToolUseId(id), id);
                 } catch (SandboxUnavailableException e) {
                     result = sandboxUnavailable(e, tool, input, ctx, id, sink, cancelled, interactive, label);
                 }
-                result = withHookContext(result, pre.addedContext(),
+                result = withHookContext(result, az.pre().addedContext(),
                         hooks.run(HookContext.postTool(ctx.chatId(), name, input, result.path("content").asText(""),
                                 result.path("is_error").asBoolean(false),
-                                (System.nanoTime() - toolStart) / 1_000_000L)).addedContext());
+                                (System.nanoTime() - toolStart) / 1_000_000L, ctx.parent())).addedContext());
             }
         }
 
@@ -906,6 +1049,64 @@ public class AgentLoop {
         ev.put("output", out.length() > eventMax ? out.substring(0, eventMax) + "…" : out);
         sink.emit("tool_result", ev);
         return result;
+    }
+
+    /** Outcome of {@link #authorize}: {@code denial} is null when the call may run. */
+    private record Authz(String denial, HookResult pre, JsonNode input) {
+    }
+
+    /**
+     * Hooks, permission decision and approval of one call, shared by the model loop and the script scope.
+     *
+     * @param free built-in file tools called from a script: no gate, no prompt, no taint gating; deny rules, hook
+     *             denials and plan confinement still apply
+     */
+    private Authz authorize(HarnessTool tool, String name, JsonNode input, ToolContext ctx, PermissionMode mode,
+                            EventSink sink, BooleanSupplier cancelled, boolean interactive, String intent,
+                            String label, boolean free) {
+        HookResult pre = hooks.run(HookContext.preTool(ctx.chatId(), name, input, ctx.parent()));
+        if (pre.modifiedInput() != null) input = pre.modifiedInput();
+        Decision decision = free ? Decision.ALLOW : gate.check(mode, tool);
+        if (!free && decision == Decision.ALLOW && mode == PermissionMode.AUTO && classifier != null
+                && tool.kind() != ToolKind.READ_ONLY && !pre.denied()) {
+            // auto mode: the fast model may wave the call through; anything else goes to the user
+            ToolClassifier.Verdict v = classifier.classify(name, input, ctx.workDir(), intent);
+            if (v != ToolClassifier.Verdict.SAFE) decision = Decision.ASK;
+            sink.emit("classifier", mapper.createObjectNode().put("tool", name).put("verdict", v.name()));
+        }
+        // settings rules: deny wins in every mode and over any grant; ask forces the question; allow skips it
+        PermissionRules.Match rule = gate.rules().match(name, input);
+        if (!free && rule != null && rule.kind() == PermissionRules.Kind.ASK && decision == Decision.ALLOW) {
+            decision = Decision.ASK;
+        }
+        // a grant only replaces the question; deny rules, hooks and plan confinement stay as they are
+        if (decision == Decision.ASK && (approvals.granted(ctx.chatId(), name)
+                || approvals.commandGranted(ctx.chatId(), name, commandOf(name, input))
+                || approvals.dirGranted(ctx.chatId(), writeDirOf(tool, input, ctx)))) decision = Decision.ALLOW;
+        if (rule != null && rule.kind() == PermissionRules.Kind.ALLOW && decision == Decision.ASK
+                && mode != PermissionMode.AUTO) {
+            decision = Decision.ALLOW;
+        }
+        // outside content was read in this run: side effects need an explicit yes, even over grants and allow rules
+        if (!free && decision == Decision.ALLOW && tool.kind() != ToolKind.READ_ONLY && tainted.contains(ctx.chatId())
+                && (rule == null || rule.kind() != PermissionRules.Kind.DENY)) {
+            decision = Decision.ASK;
+            sink.emit("warning", mapper.createObjectNode().put("message", "Confirming '" + name
+                    + "': this run read untrusted tool output that could contain injected instructions"));
+        }
+        if (decision == Decision.ASK && !interactive) decision = Decision.DENY;
+        if (pre.denied()) return new Authz("Denied by a hook: " + pre.denyReason(), pre, input);
+        if (rule != null && rule.kind() == PermissionRules.Kind.DENY) {
+            return new Authz("Denied by permission rule: " + rule.rule(), pre, input);
+        }
+        if (decision == Decision.DENY) return new Authz("Denied by permission policy (mode " + mode + ")", pre, input);
+        if (decision == Decision.ASK) {
+            if (!approve(tool, input, ctx, sink, cancelled, label)) {
+                return new Authz("The user rejected this tool call", pre, input);
+            }
+            approvals.grantCommand(ctx.chatId(), name, commandOf(name, input));
+        }
+        return new Authz(null, pre, input);
     }
 
     /** Validates (and in lenient mode repairs) the arguments; a failing validator never blocks the call. */
@@ -940,6 +1141,7 @@ public class AgentLoop {
             preview = input.toString();
         }
         String title = label == null ? tool.name() : "[" + label + "] " + tool.name();
+        if (ctx.parent() != null) title += " (from " + ctx.parent().replaceFirst(":.*", "") + ")";
         String writeDir = writeDirOf(tool, input, ctx);
         ApprovalService.ApprovalDecision d = approvals.await(ctx.chatId(), "tool", title, preview, null, a -> {
             ObjectNode ev = mapper.valueToTree(a);
@@ -995,7 +1197,8 @@ public class AgentLoop {
         String scratchId = ctx.scratchDir() == null || ctx.scratchDir().getFileName() == null ? "main"
                 : ctx.scratchDir().getFileName().toString();
         ToolContext local = new ToolContext(chatId, sandbox.workDir(chatId), sandbox.scratchDir(chatId, scratchId),
-                ctx.readOnlyWork(), id, ctx.mode(), ctx.run(), sandbox.files(chatId, scratchId));
+                ctx.readOnlyWork(), id, ctx.mode(), ctx.run(), sandbox.files(chatId, scratchId), ctx.parent(),
+                ctx.scope()).withHosts(ctx.hosts());
         ObjectNode r = runTool(tool, input, local, id);
         r.put("content", "[running without isolation on the host: " + sandbox.workDir(chatId) + "]\n"
                 + r.path("content").asText(""));
@@ -1003,9 +1206,18 @@ public class AgentLoop {
     }
 
     private ObjectNode runTool(HarnessTool tool, JsonNode input, ToolContext ctx, String id) {
+        return runTool(tool, input, ctx, id, false);
+    }
+
+    /** @param raw the caller wants the full output: no truncation, no sanitizing (taint is still decided) */
+    private ObjectNode runTool(HarnessTool tool, JsonNode input, ToolContext ctx, String id, boolean raw) {
         try {
             String out = tool.execute(ctx, input);
             if (out == null) out = "";
+            if (raw) {
+                sanitizeOutput(tool, ctx, out); // taint decision only
+                return toolResult(id, out, false);
+            }
             int max = config.output().toolMaxChars();
             if (out.length() > max) {
                 out = tool.truncation() == org.kendar.llm.harness.tools.TruncationMode.TAIL
@@ -1023,7 +1235,7 @@ public class AgentLoop {
 
     /** Tool groups whose output is produced by the harness or the user's own skills, not by outside content. */
     private static final java.util.Set<String> INTERNAL_GROUPS = java.util.Set.of("Agents", "Skills", "Memory");
-    private static final java.util.Set<String> LOCAL_GROUPS = java.util.Set.of("Files", "Shell");
+    private static final java.util.Set<String> LOCAL_GROUPS = java.util.Set.of("Files", "Shell", "Js");
 
     /** Cleans and wraps the output of a tool; marks the chat tainted when it may carry outside instructions. */
     private String sanitizeOutput(HarnessTool tool, ToolContext ctx, String out) {

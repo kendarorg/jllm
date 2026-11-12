@@ -232,12 +232,21 @@ public class AgentService {
     }
 
     public void cancel(String chatId) {
+        cancel(chatId, false);
+    }
+
+    /**
+     * @param kill stop a running script (run_js) at once; otherwise it gets a grace period to clean up. A pending
+     *             approval is dismissed as denied either way.
+     */
+    public void cancel(String chatId, boolean kill) {
         ChatRun run = runs.get(chatId);
         if (run == null || !run.running) return;
         run.cancelRequested = true;
         run.steering.clear();
         run.followUp.clear();
-        run.token.cancel();
+        if (kill) run.token.kill();
+        else run.token.cancel();
         approvals.cancelAll(chatId);
     }
 

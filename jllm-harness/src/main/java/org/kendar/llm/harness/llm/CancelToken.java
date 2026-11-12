@@ -68,6 +68,19 @@ public class CancelToken implements BooleanSupplier {
         return cancelled;
     }
 
+    private volatile boolean killRequested;
+
+    /** Cancel and ask whatever runs for the user to stop at once: no cleanup (a script is killed, not asked). */
+    public void kill() {
+        killRequested = true;
+        cancel();
+    }
+
+    /** True after {@link #kill()}; a plain {@link #cancel()} leaves it false. */
+    public boolean isKillRequested() {
+        return killRequested;
+    }
+
     @Override
     public boolean getAsBoolean() {
         return cancelled;

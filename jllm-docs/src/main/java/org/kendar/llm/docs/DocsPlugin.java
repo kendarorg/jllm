@@ -7,6 +7,11 @@ import org.kendar.llm.harness.plugin.PluginRegistrar;
 public final class DocsPlugin implements HarnessPlugin {
 
     @Override
+    public String id() {
+        return "docs";
+    }
+
+    @Override
     public void install(PluginRegistrar registrar) {
         registrar.documentReader(new DocxReader());
     }

@@ -7,6 +7,11 @@ import org.kendar.llm.harness.plugin.PluginRegistrar;
 public final class PdfPlugin implements HarnessPlugin {
 
     @Override
+    public String id() {
+        return "pdf";
+    }
+
+    @Override
     public void install(PluginRegistrar registrar) {
         registrar.documentReader(new PdfReader());
     }

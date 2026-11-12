@@ -16,7 +16,9 @@ What the model can call, how tools are grouped, selected per chat and gated. To 
 | `bash` | Shell | OTHER | `command`, `timeout_seconds?` | runs through the `SandboxExecutor`; timeout capped at 600 s; stderr is merged into stdout; only the last 50 KB are kept and the result says `[output truncated: N lines omitted; full log: <scratch>/bash-N.log]` (read the log with `read_file` or `grep`) |
 | `web_search` | Web | READ_ONLY | `query`, `count?` (≤ 20) | Brave with a key, DuckDuckGo HTML otherwise |
 | `wikipedia_search` | Web | READ_ONLY | `query`, `lang?`, `count?` | titles, URLs, snippets |
-| `web_fetch` | Web | READ_ONLY | `url` | http/https only; HTML reduced to text; cut at `fetchMaxChars` (40000) |
+| `web_fetch` | Web | READ_ONLY | `url` | http/https only; HTML reduced to text; cut at `fetchMaxChars` (40000); asks once per host (see [per-host approval](#per-host-web-approval)) |
+| `web_download` | Web | READ_ONLY | `url`, `path` | writes the bytes unchanged to `path` in the chat work dir, returns path, size and content type; refused above `web.downloadMaxBytes` (100 MB, no file left); counts against `storage.maxBytes`; asks per host like `web_fetch` |
+| `run_js` | Js | OTHER | `code`, `timeoutSeconds?` | only with the `jllm-js` plugin, see [JS](JS.md) |
 | `skill` | Skills | READ_ONLY | `name` | only when skills are configured ([SKILLS](SKILLS.md)) |
 | `task` | Agents | READ_ONLY | `prompts[≤8]`, `subagent_type?` | sub-agent fan-out; main agent only |
 | `request_tool_group` | Agents | READ_ONLY | `groups[]` | only while groups are missing; main agent only |
@@ -26,7 +28,7 @@ What the model can call, how tools are grouped, selected per chat and gated. To 
 | `mcp__<server>__<tool>` | `Mcp/<server>` | READ_ONLY if `readOnly`, else OTHER | server schema | [MCP](MCP.md) |
 | `<api>__<operationId>` | `Rest/<api>` | READ_ONLY for GET/HEAD, else OTHER | built from the spec | [MCP §3](MCP.md#3-rest-apis-openapi) |
 
-`builder.withoutStandardTools()` drops Files, Shell and Web. `task`, `request_tool_group`, `history_recall` and the
+`builder.withoutStandardTools()` drops Files, Shell and Web; `builder.withoutTools(names)` drops only the named standard tools (absent, not hidden), and a plugin can call `registrar.replaces(name)` to do the same and keep the tool from coming back through `HarnessToolRegistry.setSource`. `task`, `request_tool_group`, `history_recall` and the
 todo tools are not in the registry: the loop adds them to the tool list of each request.
 
 ### Tool kinds
@@ -161,6 +163,8 @@ with `interactive=false` (the built-in main and sub-agent loops are both interac
 | `output.toolMaxChars` | 30000 | text of a tool result kept in the context |
 | `output.eventMaxChars` | 2000 | text in the `tool_result` event |
 | `web.fetchMaxChars` | 40000 | `web_fetch` body before the context limit |
+| `web.downloadMaxBytes` | 100000000 | largest file `web_download` accepts |
+| `storage.maxBytes` | -1 (no limit) | total size of a chat storage (web: the work dir of the chat; CLI: `<project>/.kendhar/scratchpad/<chatId>/`). A write by `write_file`, `edit_file` or `web_download` that would exceed it fails and creates no file. Project files edited by the model in the CLI are outside the chat storage and are not counted; writes made by a shell command are not counted until the next start |
 | REST response | 20000 | `RestApiToolProvider` |
 | `history_recall` page | 12000 (`mnemonic.recallMaxChars`) | per call, continue with `offset` |
 | `context.scope.offloadChars` | 20000 | `scope` strategy: a larger result is offloaded to a file, head and tail stay (applies after the `toolMaxChars` cut) |
@@ -169,7 +173,7 @@ with `interactive=false` (the built-in main and sub-agent loops are both interac
 
 `read_file` looks up the file extension in the registered `DocumentReader`s (`extensions()`, `extract(Path)`), extracts
 the text and then applies `offset`, `limit` and the line cap to it. The path jail runs before the reader. A binary
-extension with no reader answers `No reader for .pdf; add the jllm-pdf module`. Extraction has a 30 s timeout and a
+extension with no reader answers `No reader for .pdf; put the pdf plugin jar in the plugin directory and enable it under plugins`. Extraction has a 30 s timeout and a
 5 MB text cap; the binary file may be up to 50 MB.
 
 | Module | Extensions | Notes |
@@ -177,12 +181,48 @@ extension with no reader answers `No reader for .pdf; add the jllm-pdf module`. 
 | `jllm-pdf` | `pdf` | Apache PDFBox 3; text only, `--- page N ---` markers; scanned PDFs answer "no extractable text (scanned?)"; password-protected files fail with a clear error |
 | `jllm-docs` | `docx` (and `doc`) | JDK ZIP + StAX, no dependency; headings as `#`, list items as `-`, table rows as `a \| b`; headers, footers and comments skipped; tracked insertions kept, deletions dropped; legacy `.doc` answers "legacy .doc not supported, convert to docx" |
 
-`jllm-cli` and `jllm-web` include both. An embedder adds a module and installs its plugin
-(`builder.plugin(new PdfPlugin())`), or calls `builder.discoverPlugins()` to load every `HarnessPlugin` on the
-classpath through `ServiceLoader`. Own formats: `builder.documentReader(reader)` or `registrar.documentReader(reader)`.
+The front ends carry neither: `./mvnw install` copies each plugin jar to `target/plugins/`; pass that directory with
+`--plugin-dir` (CLI) or `jllm.plugin-dir` (web), default `./plugins`, and enable the plugin: `"plugins": {"pdf":
+{"enabled": true}}` in the settings file, `--plugins.pdf.enabled=true` for one CLI run, or
+`--jllm.plugins.pdf.enabled=true` in the web application. An embedder can add the module as a dependency and call
+`builder.plugin(new PdfPlugin())` (no settings entry needed), or `builder.discoverPlugins()` plus `plugins` settings.
+Own formats: `builder.documentReader(reader)` or `registrar.documentReader(reader)`.
 
 ## Checkpoints
 
 The first time a user turn writes a file with `write_file` or `edit_file`, the old content is copied to
 `<workdir>/.kendhar/checkpoints/<chatId>/<turn>/` (files that did not exist are recorded and deleted on undo).
 `/undo [n]` restores the last n turns that edited files. Files changed by `bash` are not recorded and not restored.
+
+## Per-host web approval
+
+`web_fetch` and `web_download` ask before contacting a host, although they are `READ_ONLY`; `web_search` and
+`wikipedia_search` call fixed hosts and never ask. The question is an `approval_request` event with `type: "host"`,
+the `host`, and the full URL as `preview`. The user answers once, or grants "this host and its subdomains for this
+chat".
+
+- A grant for `example.com` covers `example.com` and `*.example.com` on a label boundary (`badexample.com` is not
+  covered); a grant for `www.example.com` does not cover `example.com`.
+- Matching is on the host as written in the URL: lowercase, trailing dot removed, IDN converted to ASCII, port and
+  scheme ignored. An IP literal matches only itself; there is no DNS resolution, so a name grant does not cover the
+  IPs it resolves to and the reverse.
+- Redirects are followed by the tool (at most 5 hops, https to http refused). A redirect to a host not granted asks
+  for that host; a denial fails the call with an error naming the target.
+- Grants are per chat and are kept with the other chat grants. They still hold after the chat has read untrusted
+  output, unlike tool grants: a host not granted always asks, and that is what stops data leaving.
+- `deny` permission rules on the tools apply first. A run that cannot ask (non-interactive) refuses a host not
+  granted, in every permission mode.
+- `ToolContext.hosts()` is the approver; `null` (direct calls in tests or embedding code) allows every host.
+
+### Invalid certificates
+
+When the TLS certificate of a host is not valid (self-signed, expired, wrong name, unknown authority), `web_fetch`
+and `web_download` do not fail at once: they ask, with an `approval_request` of `type: "insecure_cert"` that shows the
+reason, and the call goes on without checking the certificate only if the user says yes.
+
+- The answer covers that one call and that one host, never the chat: the next call asks again. A redirect to another
+  host with a bad certificate asks again for that host.
+- A refusal, a run that cannot ask, or a context without a `HostApprover` fail the call with an error naming the host
+  and the reason.
+- The question comes after the per-host question above, which still applies. Network errors and timeouts are not
+  certificate problems and fail as before.

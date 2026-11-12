@@ -84,7 +84,8 @@ final class RemoteFileTools {
         return out;
     }
 
-    static String write(ToolContext ctx, JsonNode in, Checkpoints checkpoints) throws IOException {
+    static String write(ToolContext ctx, JsonNode in, Checkpoints checkpoints, StorageQuota quota)
+            throws IOException {
         FileBackend fb = ctx.files();
         String shown = in.path("path").asText();
         FileBackend.Target t = fb.writeTarget(shown, ctx.readOnlyWork());
@@ -99,10 +100,14 @@ final class RemoteFileTools {
             } else {
                 part = content.getBytes(StandardCharsets.UTF_8);
             }
+            quota.reserveRemote(ctx.chatId(), part.length);
             fb.write(t, part, true);
             return "Appended " + content.length() + " chars to " + shown;
         }
-        fb.write(t, content.getBytes(StandardCharsets.UTF_8), false);
+        byte[] bytes = content.getBytes(StandardCharsets.UTF_8);
+        FileBackend.Stat old = fb.stat(t);
+        quota.reserveRemote(ctx.chatId(), bytes.length - (old.exists() ? old.size() : 0));
+        fb.write(t, bytes, false);
         return "Wrote " + content.length() + " chars to " + shown;
     }
 
@@ -120,13 +125,16 @@ final class RemoteFileTools {
         return "--- " + in.path("path").asText() + "\n" + FileSystemAgentTools.diff(old, in.path("content").asText());
     }
 
-    static String edit(ToolContext ctx, JsonNode in, Checkpoints checkpoints) throws IOException {
+    static String edit(ToolContext ctx, JsonNode in, Checkpoints checkpoints, StorageQuota quota)
+            throws IOException {
         FileBackend fb = ctx.files();
         FileBackend.Target t = fb.writeTarget(in.path("path").asText(), ctx.readOnlyWork());
         TextEdits.TextFile file = TextEdits.TextFile.decode(fb.read(t, 0, -1));
         TextEdits.Applied applied = TextEdits.apply(file.text(), FileSystemAgentTools.parseEdits(in));
         if (checkpoints != null) checkpoints.record(ctx, t);
-        fb.write(t, file.encode(applied.text()), false);
+        byte[] out = file.encode(applied.text());
+        quota.reserveRemote(ctx.chatId(), out.length - fb.stat(t).size());
+        fb.write(t, out, false);
         return "Edited " + in.path("path").asText() + " (" + applied.replacements() + " replacement(s))\n"
                 + applied.diff();
     }

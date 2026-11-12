@@ -62,6 +62,11 @@ public final class Main {
     private static Term term;
     private static Renderer renderer;
     private static volatile boolean running;
+    /** A run_js call of the model is in flight: stopping the run asks how to stop the script. */
+    private static volatile boolean scriptRunning;
+    private static volatile boolean stopPending;
+    private static volatile long stopAsked;
+    private static final long STOP_ANSWER_MILLIS = 30_000;
     private static volatile long runStart;
     private static volatile long lastInterrupt;
 
@@ -87,7 +92,8 @@ public final class Main {
                     + "[--settings FILE] [--context-strategy compaction|mnemonic|scope] [--max-tokens TOKENS] [--small-model] "
                     + "[--resume prompt|no|CHAT_ID] "
                     + "[--sandbox local|docker] [--docker-image IMAGE] [--docker-mode oneshot|daemon] "
-                    + "[--docker-remote] [--docker-remote-host ADDRESS] [--sandbox-clean] [--sandbox-clean-all]");
+                    + "[--docker-remote] [--docker-remote-host ADDRESS] [--sandbox-clean] [--sandbox-clean-all] "
+                    + "[--pricing.input-per-million=USD] [--pricing.output-per-million=USD] [--pricing.cache-read-per-million=USD] [--pricing.cache-write-per-million=USD] [--plugin-dir DIR] [--plugins.ID.enabled=true|false] [--plugins.ID.settings.KEY=VALUE]");
             return;
         }
         if (ASK_TOKEN.equals(a.get("api-key"))) {
@@ -111,22 +117,26 @@ public final class Main {
                                 : null),
                 a.get("system-prompt"));
         // the flag wins over the settings file
-        String tokens = a.containsKey("context-tokens") ? a.get("context-tokens") : a.get("context-budget");
-        if (tokens != null) settings = settings.withMaxTokens(Integer.parseInt(tokens));
+        if (a.containsKey("context-tokens") && Integer.parseInt(a.get("context-tokens")) > 0) {
+            settings = settings.withMaxTokens(Integer.parseInt(a.get("context-tokens"))); // <= 0: default, as the web app
+        }
         if (a.containsKey("context-strategy")) settings = settings.withContextStrategy(a.get("context-strategy"));
-        if (a.containsKey("small-model")) settings = settings.withSmallModel(true);
+        if (flag(a, "small-model")) settings = settings.withSmallModel(true);
         if (a.containsKey("sandbox")) settings = settings.withSandboxBackend(a.get("sandbox"));
         if (a.containsKey("docker-image")) settings = settings.withDockerImage(a.get("docker-image"));
         if (a.containsKey("docker-mode")) settings = settings.withDockerMode(a.get("docker-mode"));
-        if (a.containsKey("docker-remote") || a.containsKey("docker-remote-host")) {
-            settings = settings.withDockerRemote(a.containsKey("docker-remote") ? Boolean.TRUE : null,
+        if (flag(a, "docker-remote") || a.containsKey("docker-remote-host")) {
+            settings = settings.withDockerRemote(flag(a, "docker-remote") ? Boolean.TRUE : null,
                     a.get("docker-remote-host"));
+        }
+        for (var e : a.entrySet()) { // --plugins.<id>.enabled=true: this run only, as jllm.plugins.* in the web app
+            if (e.getKey().startsWith("plugins.")) settings = settings.withPluginOption(e.getKey().substring(8), e.getValue());
         }
         HarnessConfig config = settings.applyTo(HarnessConfig.defaults());
         // the agent works in the project directory; scratch directories go under the settings' sandbox.tempDir
         String searchKey = a.getOrDefault("search-api-key", System.getenv("BRAVE_API_KEY"));
         if (searchKey != null) config = config.withSearchApiKey(searchKey);
-        if (a.containsKey("max-turns")) config = config.withMaxTurns(Integer.parseInt(a.get("max-turns")));
+        if (a.containsKey("max-turns") && Integer.parseInt(a.get("max-turns")) > 0) config = config.withMaxTurns(Integer.parseInt(a.get("max-turns")));
         config = config.withMaxTokens(a.containsKey("max-tokens") ? Integer.parseInt(a.get("max-tokens"))
                 : DEFAULT_MAX_TOKENS);
 
@@ -144,7 +154,10 @@ public final class Main {
                 .onWarning(w -> System.err.println("warning: " + w))
                 : new org.kendar.llm.harness.sandbox.DockerSandboxExecutor(config, dockerRunner, cwdSandbox);
         ProviderChoice choice = chooseProvider(a, settings, mapper, config.maxTokens());
-        AgentHarness harness = AgentHarness.builder()
+        AgentHarness.Builder builder = AgentHarness.builder();
+        if (a.containsKey("plugin-dir")) builder.pluginDir(Path.of(a.get("plugin-dir")));
+        else if (java.nio.file.Files.isDirectory(Path.of("plugins"))) builder.pluginDir(Path.of("plugins"));
+        AgentHarness harness = builder
                 .modelClient(choice.client())
                 .activeProvider(choice.name())
                 .sessionProvider(choice.session())
@@ -157,6 +170,9 @@ public final class Main {
                 .mnemonicStore(new FileMnemonicStore(cwdSandbox.historyRoot()))
                 .stateStore(new org.kendar.llm.harness.state.FileStateStore(cwdSandbox.historyRoot()))
                 .settings(settings)
+                .pricing(new org.kendar.llm.harness.HarnessPricing(num(a, "pricing.input-per-million"),
+                        num(a, "pricing.output-per-million"), num(a, "pricing.cache-read-per-million"),
+                        num(a, "pricing.cache-write-per-million")))
                 .objectMapper(mapper)
                 .discoverPlugins()
                 .build();
@@ -280,7 +296,7 @@ public final class Main {
             while (true) {
                 String l = term.readLine("> ", () -> {
                     long now = System.currentTimeMillis();
-                    if (running) harness.cancel(chat.id);
+                    if (running) requestStop(harness, chat.id);
                     else if (now - lastInterrupt < 2000) System.exit(0);
                     else say(Renderer.DIM + "(press ctrl+c again to exit)" + Renderer.RESET);
                     lastInterrupt = now;
@@ -372,10 +388,14 @@ public final class Main {
         events.clear();
         runStart = System.currentTimeMillis();
         running = true;
+        scriptRunning = false;
+        stopPending = false;
         try {
             runLoop(harness, chatId, text, events, in);
         } finally {
             running = false;
+            scriptRunning = false;
+            stopPending = false;
         }
     }
 
@@ -386,6 +406,11 @@ public final class Main {
             // Input typed during the run: a command (/cancel, /followup <text>) runs, any other line steers the agent
             for (String typed = in.poll(); typed != null; typed = in.poll()) {
                 if (typed.equals(EOF) || typed.isBlank()) continue;
+                if (stopPending) {
+                    stopPending = false;
+                    harness.cancel(chatId, typed.strip().toLowerCase().startsWith("k"));
+                    continue;
+                }
                 if (exitPending) {
                     exitPending = false;
                     if (typed.strip().toLowerCase().startsWith("y")) {
@@ -400,14 +425,22 @@ public final class Main {
                     exitPending = true;
                     continue;
                 }
-                if (typed.strip().equals("/cancel")) harness.cancel(chatId);
+                if (typed.strip().equals("/cancel")) requestStop(harness, chatId);
                 else if (typed.strip().startsWith("/expand")) renderer.expand(typed.strip().substring(7));
                 else if (harness.commands().handles(typed.strip())) menu(harness.commands().execute(chatId, typed.strip()));
                 else harness.steer(chatId, typed.strip());
             }
+            if (stopPending && System.currentTimeMillis() - stopAsked > STOP_ANSWER_MILLIS) {
+                stopPending = false; // no answer: kill, with no further question
+                harness.cancel(chatId, true);
+            }
             AgentEvent ev = events.poll(100, TimeUnit.MILLISECONDS);
             if (ev == null) continue;
             JsonNode d = ev.data();
+            if (!d.has("parent") && "run_js".equals(d.path("name").asText())) {
+                if (ev.type().equals("tool_call")) scriptRunning = true;
+                else if (ev.type().equals("tool_result")) scriptRunning = false;
+            }
             switch (ev.type()) {
                 case "approval_request" -> approve(harness, chatId, d, in);
                 case "run_finished" -> {
@@ -416,6 +449,21 @@ public final class Main {
                 default -> renderer.render(ev);
             }
         }
+    }
+
+    /**
+     * Stops the run. While a script is running there are two ways: kill it now, or let it clean up (its next tool
+     * call fails with a catchable error; it is killed after its grace period). No answer within 30 s kills it.
+     */
+    private static void requestStop(AgentHarness harness, String chatId) {
+        if (!scriptRunning) {
+            harness.cancel(chatId);
+            return;
+        }
+        if (stopPending) return;
+        stopPending = true;
+        stopAsked = System.currentTimeMillis();
+        ask("A script is running. Stop it how? [k=kill now / g=let it clean up first (default); no answer in 30 s kills it] ");
     }
 
     private static void approve(AgentHarness harness, String chatId, JsonNode d, BlockingQueue<String> in)
@@ -431,6 +479,21 @@ public final class Main {
             return;
         }
         String writeDir = d.path("writeDir").asText("");
+        if ("insecure_cert".equals(d.path("type").asText())) {
+            ask("Continue without checking the certificate of " + d.path("host").asText() + " (this call only)? [y/N] ");
+            String c = in.take();
+            harness.resolveApproval(chatId, d.path("id").asText(),
+                    !c.equals(EOF) && c.strip().toLowerCase().startsWith("y"), null, false, false);
+            return;
+        }
+        if ("host".equals(d.path("type").asText())) {
+            ask("Allow " + d.path("host").asText() + "? [y=once/N/a=this host and its subdomains for this chat] ");
+            String h = in.take();
+            String ha = h.equals(EOF) ? "" : h.strip().toLowerCase();
+            boolean always = ha.startsWith("a");
+            harness.resolveApproval(chatId, d.path("id").asText(), always || ha.startsWith("y"), null, always, false);
+            return;
+        }
         ask("Allow? [y/N/a=allow for this chat"
                 + (writeDir.isEmpty() ? "" : "/d=allow writes in " + writeDir + "/ and subfolders"
                 + ", or 'd <path>' for another folder of the project") + "] ");
@@ -501,6 +564,15 @@ public final class Main {
         if (removed.isEmpty()) System.out.println("No sandbox container to remove" + (all ? "." : " for " + projectDir));
         else removed.forEach(n -> System.out.println("removed " + n));
         System.out.println("Project files and .kendhar are untouched.");
+    }
+
+    /** A boolean flag: bare ({@code --small-model}) or with a value ({@code --small-model=false}). */
+    private static boolean flag(Map<String, String> a, String name) {
+        return a.containsKey(name) && !"false".equalsIgnoreCase(a.get(name));
+    }
+
+    private static double num(Map<String, String> a, String name) {
+        return a.containsKey(name) ? Double.parseDouble(a.get(name)) : 0;
     }
 
     private static Map<String, String> parse(String[] argv) {

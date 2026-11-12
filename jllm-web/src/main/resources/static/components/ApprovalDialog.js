@@ -60,7 +60,8 @@ export default {
         <button class="btn-sm" v-if="a.writeDir && otherDir.trim()" @click="approveDir(true)">Allow writes in {{ otherDir.trim() }}/</button>
         <button class="btn-sm" v-if="a.writeDir" @click="approveDir(false)">Allow writes in {{ a.writeDir }}/ and subfolders</button>
         <button class="btn-sm" v-if="a.type === 'tool'" @click="approve(true)">Allow for this chat</button>
-        <button class="btn-primary" ref="approveBtn" @click="approve(false)">Approve</button>
+        <button class="btn-sm" v-if="a.type === 'host'" @click="approve(true)">Allow {{ a.host }} and subdomains for this chat</button>
+        <button class="btn-primary" ref="approveBtn" @click="approve(false)">{{ a.type === 'host' ? 'Allow once' : a.type === 'insecure_cert' ? 'Continue anyway (this call)' : 'Approve' }}</button>
       </div>
     </div>
   </div>
