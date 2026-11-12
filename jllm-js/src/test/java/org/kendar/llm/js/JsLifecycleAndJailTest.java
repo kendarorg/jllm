@@ -19,7 +19,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.kendar.llm.harness.HarnessTestSupport.*;
+import static org.kendar.llm.harness.testsupport.HarnessTestSupport.*;
 
 class JsLifecycleAndJailTest {
 

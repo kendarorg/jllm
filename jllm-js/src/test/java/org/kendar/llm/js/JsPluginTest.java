@@ -16,7 +16,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.kendar.llm.harness.HarnessTestSupport.*;
+import static org.kendar.llm.harness.testsupport.HarnessTestSupport.*;
 
 class JsPluginTest {
 

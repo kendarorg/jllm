@@ -18,7 +18,9 @@
     </licenses>
 
     <modules>
+        <module>jllm-commons</module>
         <module>jllm-harness</module>
+        <module>jllm-test-support</module>
         <module>jllm-pdf</module>
         <module>jllm-js</module>
         <module>jllm-docs</module>

@@ -18,9 +18,15 @@
     <dependencies>
         <dependency>
             <groupId>org.kendar.llm</groupId>
-            <artifactId>jllm-harness</artifactId>
+            <artifactId>jllm-commons</artifactId>
             <version>${project.version}</version>
             <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.kendar.llm</groupId>
+            <artifactId>jllm-harness</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
