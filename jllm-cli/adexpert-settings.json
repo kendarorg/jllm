@@ -1,4 +1,8 @@
 {
+  "plugins": {
+    "pdf": {"enabled": true},
+    "docs": {"enabled": true}
+  },
   "skills": [
     {"name": "adexpert", "path": "${HOME}/.claude/skills/adexpert/SKILL.md"}
   ],

@@ -2,7 +2,7 @@
   <configuration default="false" name="CLI Haiku" type="Application" factoryName="Application">
     <option name="MAIN_CLASS_NAME" value="org.kendar.llm.cli.Main" />
     <module name="jllm-cli" />
-    <option name="PROGRAM_PARAMETERS" value="--provider anthropic --context-strategy compaction --model claude-haiku-5-5 --api-key ASK_TOKEN --context-budget 99000 --mode default" />
+    <option name="PROGRAM_PARAMETERS" value="--provider anthropic --context-strategy compaction --model claude-haiku-5-5 --api-key ASK_TOKEN --context-tokens 99000 --mode default --plugin-dir $PROJECT_DIR$/target/plugins --plugins.pdf.enabled=true --plugins.docs.enabled=true --plugins.js.enabled=true" />
     <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/tmp" />
     <method v="2">
       <option name="Make" enabled="true" />

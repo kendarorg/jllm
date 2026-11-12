@@ -91,7 +91,7 @@ switch leaves the cached tool block and the text before it intact (see [CACHES Â
 
 **Layers.** The CLI and the web front end merge up to three files, later ones winning: the global
 `~/.jllm/settings.json` (home = `-Djllm.home` or the user home), the project `.jllm/settings.json` (in the working
-directory), then the file given with `--settings` / `jllm.settings-file`. Missing global and project files are skipped;
+directory), then the file given with `--settings` / `jllm.settings`. Missing global and project files are skipped;
 a missing explicit file is an error. Objects are merged key by key; arrays (`mcpServers`, `providers`,
 `instructionFiles`, ...) and scalars of a later file replace the earlier value. Keep API keys in the global file.
 `${ENV_VAR}` is expanded after merging. Embedding: `HarnessSettings.loadLayered(explicit, projectDir)`.

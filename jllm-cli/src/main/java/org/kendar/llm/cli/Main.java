@@ -87,7 +87,8 @@ public final class Main {
                     + "[--settings FILE] [--context-strategy compaction|mnemonic|scope] [--max-tokens TOKENS] [--small-model] "
                     + "[--resume prompt|no|CHAT_ID] "
                     + "[--sandbox local|docker] [--docker-image IMAGE] [--docker-mode oneshot|daemon] "
-                    + "[--docker-remote] [--docker-remote-host ADDRESS] [--sandbox-clean] [--sandbox-clean-all]");
+                    + "[--docker-remote] [--docker-remote-host ADDRESS] [--sandbox-clean] [--sandbox-clean-all] "
+                    + "[--pricing.input-per-million=USD] [--pricing.output-per-million=USD] [--pricing.cache-read-per-million=USD] [--pricing.cache-write-per-million=USD] [--plugin-dir DIR] [--plugins.ID.enabled=true|false] [--plugins.ID.settings.KEY=VALUE]");
             return;
         }
         if (ASK_TOKEN.equals(a.get("api-key"))) {
@@ -111,22 +112,26 @@ public final class Main {
                                 : null),
                 a.get("system-prompt"));
         // the flag wins over the settings file
-        String tokens = a.containsKey("context-tokens") ? a.get("context-tokens") : a.get("context-budget");
-        if (tokens != null) settings = settings.withMaxTokens(Integer.parseInt(tokens));
+        if (a.containsKey("context-tokens") && Integer.parseInt(a.get("context-tokens")) > 0) {
+            settings = settings.withMaxTokens(Integer.parseInt(a.get("context-tokens"))); // <= 0: default, as the web app
+        }
         if (a.containsKey("context-strategy")) settings = settings.withContextStrategy(a.get("context-strategy"));
-        if (a.containsKey("small-model")) settings = settings.withSmallModel(true);
+        if (flag(a, "small-model")) settings = settings.withSmallModel(true);
         if (a.containsKey("sandbox")) settings = settings.withSandboxBackend(a.get("sandbox"));
         if (a.containsKey("docker-image")) settings = settings.withDockerImage(a.get("docker-image"));
         if (a.containsKey("docker-mode")) settings = settings.withDockerMode(a.get("docker-mode"));
-        if (a.containsKey("docker-remote") || a.containsKey("docker-remote-host")) {
-            settings = settings.withDockerRemote(a.containsKey("docker-remote") ? Boolean.TRUE : null,
+        if (flag(a, "docker-remote") || a.containsKey("docker-remote-host")) {
+            settings = settings.withDockerRemote(flag(a, "docker-remote") ? Boolean.TRUE : null,
                     a.get("docker-remote-host"));
+        }
+        for (var e : a.entrySet()) { // --plugins.<id>.enabled=true: this run only, as jllm.plugins.* in the web app
+            if (e.getKey().startsWith("plugins.")) settings = settings.withPluginOption(e.getKey().substring(8), e.getValue());
         }
         HarnessConfig config = settings.applyTo(HarnessConfig.defaults());
         // the agent works in the project directory; scratch directories go under the settings' sandbox.tempDir
         String searchKey = a.getOrDefault("search-api-key", System.getenv("BRAVE_API_KEY"));
         if (searchKey != null) config = config.withSearchApiKey(searchKey);
-        if (a.containsKey("max-turns")) config = config.withMaxTurns(Integer.parseInt(a.get("max-turns")));
+        if (a.containsKey("max-turns") && Integer.parseInt(a.get("max-turns")) > 0) config = config.withMaxTurns(Integer.parseInt(a.get("max-turns")));
         config = config.withMaxTokens(a.containsKey("max-tokens") ? Integer.parseInt(a.get("max-tokens"))
                 : DEFAULT_MAX_TOKENS);
 
@@ -144,7 +149,10 @@ public final class Main {
                 .onWarning(w -> System.err.println("warning: " + w))
                 : new org.kendar.llm.harness.sandbox.DockerSandboxExecutor(config, dockerRunner, cwdSandbox);
         ProviderChoice choice = chooseProvider(a, settings, mapper, config.maxTokens());
-        AgentHarness harness = AgentHarness.builder()
+        AgentHarness.Builder builder = AgentHarness.builder();
+        if (a.containsKey("plugin-dir")) builder.pluginDir(Path.of(a.get("plugin-dir")));
+        else if (java.nio.file.Files.isDirectory(Path.of("plugins"))) builder.pluginDir(Path.of("plugins"));
+        AgentHarness harness = builder
                 .modelClient(choice.client())
                 .activeProvider(choice.name())
                 .sessionProvider(choice.session())
@@ -157,6 +165,9 @@ public final class Main {
                 .mnemonicStore(new FileMnemonicStore(cwdSandbox.historyRoot()))
                 .stateStore(new org.kendar.llm.harness.state.FileStateStore(cwdSandbox.historyRoot()))
                 .settings(settings)
+                .pricing(new org.kendar.llm.harness.HarnessPricing(num(a, "pricing.input-per-million"),
+                        num(a, "pricing.output-per-million"), num(a, "pricing.cache-read-per-million"),
+                        num(a, "pricing.cache-write-per-million")))
                 .objectMapper(mapper)
                 .discoverPlugins()
                 .build();
@@ -501,6 +512,15 @@ public final class Main {
         if (removed.isEmpty()) System.out.println("No sandbox container to remove" + (all ? "." : " for " + projectDir));
         else removed.forEach(n -> System.out.println("removed " + n));
         System.out.println("Project files and .kendhar are untouched.");
+    }
+
+    /** A boolean flag: bare ({@code --small-model}) or with a value ({@code --small-model=false}). */
+    private static boolean flag(Map<String, String> a, String name) {
+        return a.containsKey(name) && !"false".equalsIgnoreCase(a.get(name));
+    }
+
+    private static double num(Map<String, String> a, String name) {
+        return a.containsKey(name) ? Double.parseDouble(a.get(name)) : 0;
     }
 
     private static Map<String, String> parse(String[] argv) {

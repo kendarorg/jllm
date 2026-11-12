@@ -97,7 +97,6 @@ public class JllmWebApplication {
             }
             int eq = a.indexOf('=');
             String key = a.substring(2, eq < 0 ? a.length() : eq);
-            if (key.equals("settings")) key = "settings-file"; // same flag as the CLI
             if (!known.contains(key)) {
                 out.add(a);
             } else if (eq >= 0) {

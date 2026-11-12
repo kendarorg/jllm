@@ -13,22 +13,12 @@
     <artifactId>jllm-cli</artifactId>
     <packaging>jar</packaging>
     <name>jllm-cli</name>
-    <description>Command line chat over jllm-harness. Runnable fat jar: java -jar jllm-cli.jar</description>
+    <description>Command line chat over jllm-harness. Runnable fat jar: java -jar jllm-cli.jar [--plugin-dir DIR] (plugins are loaded from the plugin directory)</description>
 
     <dependencies>
         <dependency>
             <groupId>org.kendar.llm</groupId>
             <artifactId>jllm-harness</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.kendar.llm</groupId>
-            <artifactId>jllm-pdf</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.kendar.llm</groupId>
-            <artifactId>jllm-docs</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>

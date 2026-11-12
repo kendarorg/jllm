@@ -30,7 +30,7 @@ flags as the CLI, without the prefix: `--provider openai`, `--sandbox docker`, `
 | `jllm.context-tokens` | harness default (100000) | context window; wins over the settings file |
 | `jllm.max-turns` | harness default (40) | model calls per user turn |
 | `jllm.workdir` | current directory | project directory the agent works in |
-| `jllm.settings-file` (flag `--settings`) | none | merged over `~/.jllm/settings.json` and `<workdir>/.jllm/settings.json`; harness [settings file](../docs/USAGE.md#5-settings-file) (MCP, REST, skills, agents) |
+| `jllm.settings` (flag `--settings`) | none | merged over `~/.jllm/settings.json` and `<workdir>/.jllm/settings.json`; harness [settings file](../docs/USAGE.md#5-settings-file) (MCP, REST, skills, agents) |
 | `jllm.context-strategy` | `compaction` | `compaction`, `mnemonic` or `scope`; wins over the settings file |
 | `jllm.small-model` | `false` | append the small-model rules to the system prompt |
 | `jllm.sandbox` | `local` | `local` or `docker` (`bash` in a container, chat directory mounted; see [SANDBOX](../docs/SANDBOX.md)); wins over the settings file |
@@ -38,6 +38,8 @@ flags as the CLI, without the prefix: `--provider openai`, `--sandbox docker`, `
 | `jllm.docker-mode` | `oneshot` | `oneshot` or `daemon`: one long-running container per chat for `bash` and the file tools, removed with the chat (see [SANDBOX](../docs/SANDBOX.md)); wins over the settings file |
 | `jllm.docker-remote` | `false` | flag `--docker-remote`: docker on another machine; each chat's workspace is uploaded to its container and backed up under `<X>/<chatId>/.kendhar/` ([SANDBOX](../docs/SANDBOX.md#remote-docker)) |
 | `jllm.docker-remote-host` | from `DOCKER_HOST` | address where the remote host's published ports are reached |
+| `jllm.system-prompt-file` (flag `--system-prompt-file`) | none | file appended to the system prompt |
+| `jllm.system-prompt-replace` (flag `--system-prompt-replace`) | none | file that replaces the built-in system prompt |
 | `jllm.system-prompt` | none | text appended to the built-in system prompt; `SYSTEM.md` (replace) and `APPEND_SYSTEM.md` in `~/.jllm/` and `<workdir>/.jllm/` are also read, see [USAGE](../docs/USAGE.md#system-prompt-files) |
 | `jllm.search-api-key` | `BRAVE_API_KEY` env var | Brave key for `web_search` |
 | `jllm.pricing.input-per-million`, `output-per-million`, `cache-read-per-million`, `cache-write-per-million` | 0 | USD per million tokens, for the cost estimate |

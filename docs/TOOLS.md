@@ -169,7 +169,7 @@ with `interactive=false` (the built-in main and sub-agent loops are both interac
 
 `read_file` looks up the file extension in the registered `DocumentReader`s (`extensions()`, `extract(Path)`), extracts
 the text and then applies `offset`, `limit` and the line cap to it. The path jail runs before the reader. A binary
-extension with no reader answers `No reader for .pdf; add the jllm-pdf module`. Extraction has a 30 s timeout and a
+extension with no reader answers `No reader for .pdf; put the pdf plugin jar in the plugin directory and enable it under plugins`. Extraction has a 30 s timeout and a
 5 MB text cap; the binary file may be up to 50 MB.
 
 | Module | Extensions | Notes |
@@ -177,9 +177,12 @@ extension with no reader answers `No reader for .pdf; add the jllm-pdf module`. 
 | `jllm-pdf` | `pdf` | Apache PDFBox 3; text only, `--- page N ---` markers; scanned PDFs answer "no extractable text (scanned?)"; password-protected files fail with a clear error |
 | `jllm-docs` | `docx` (and `doc`) | JDK ZIP + StAX, no dependency; headings as `#`, list items as `-`, table rows as `a \| b`; headers, footers and comments skipped; tracked insertions kept, deletions dropped; legacy `.doc` answers "legacy .doc not supported, convert to docx" |
 
-`jllm-cli` and `jllm-web` include both. An embedder adds a module and installs its plugin
-(`builder.plugin(new PdfPlugin())`), or calls `builder.discoverPlugins()` to load every `HarnessPlugin` on the
-classpath through `ServiceLoader`. Own formats: `builder.documentReader(reader)` or `registrar.documentReader(reader)`.
+The front ends carry neither: `./mvnw install` copies each plugin jar to `target/plugins/`; pass that directory with
+`--plugin-dir` (CLI) or `jllm.plugin-dir` (web), default `./plugins`, and enable the plugin: `"plugins": {"pdf":
+{"enabled": true}}` in the settings file, `--plugins.pdf.enabled=true` for one CLI run, or
+`--jllm.plugins.pdf.enabled=true` in the web application. An embedder can add the module as a dependency and call
+`builder.plugin(new PdfPlugin())` (no settings entry needed), or `builder.discoverPlugins()` plus `plugins` settings.
+Own formats: `builder.documentReader(reader)` or `registrar.documentReader(reader)`.
 
 ## Checkpoints
 

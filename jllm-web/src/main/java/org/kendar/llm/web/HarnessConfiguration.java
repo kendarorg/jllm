@@ -39,12 +39,21 @@ public class HarnessConfiguration {
     @Bean
     public AgentHarness agentHarness(JllmProperties p, ModelClient modelClient, HarnessPricing pricing,
                                      ObjectMapper mapper) {
-        String settingsFile = JllmProperties.blankToNull(p.settingsFile());
+        String settingsFile = JllmProperties.blankToNull(p.settings());
         Path projectDir = Path.of(p.workdir() == null ? "" : p.workdir()).toAbsolutePath().normalize();
         // global ~/.jllm/settings.json, then project .jllm/settings.json, then the settings file; later wins
         HarnessSettings settings = HarnessSettings.loadLayered(settingsFile == null ? null : Path.of(settingsFile),
                 projectDir);
         var promptFiles = org.kendar.llm.harness.instructions.SystemPromptFiles.load(projectDir);
+        String promptReplace = JllmProperties.blankToNull(p.systemPromptReplace()) != null
+                ? org.kendar.llm.harness.instructions.SystemPromptFiles.readFile(Path.of(p.systemPromptReplace()))
+                : promptFiles.replace();
+        String promptAppend = org.kendar.llm.harness.instructions.SystemPromptFiles.join(
+                org.kendar.llm.harness.instructions.SystemPromptFiles.join(promptFiles.append(),
+                        JllmProperties.blankToNull(p.systemPromptFile()) != null
+                                ? org.kendar.llm.harness.instructions.SystemPromptFiles.readFile(Path.of(p.systemPromptFile()))
+                                : null),
+                JllmProperties.blankToNull(p.systemPrompt()));
         // same precedence as the CLI: the property wins over the settings file
         if (p.contextTokens() != null && p.contextTokens() > 0) settings = settings.withMaxTokens(p.contextTokens());
         if (JllmProperties.blankToNull(p.contextStrategy()) != null) {
@@ -57,6 +66,13 @@ public class HarnessConfiguration {
         if (p.dockerRemote() != null || JllmProperties.blankToNull(p.dockerRemoteHost()) != null) {
             settings = settings.withDockerRemote(p.dockerRemote(), JllmProperties.blankToNull(p.dockerRemoteHost()));
         }
+        if (p.plugins() != null) {
+            for (var e : p.plugins().entrySet()) {
+                if (e.getValue() == null) continue;
+                settings = settings.withPlugin(e.getKey(), e.getValue().enabled(),
+                        e.getValue().settings() == null ? null : mapper.valueToTree(e.getValue().settings()));
+            }
+        }
         HarnessConfig config = settings.applyTo(HarnessConfig.defaults());
         String searchKey = JllmProperties.blankToNull(p.searchApiKey());
         if (searchKey == null) searchKey = System.getenv("BRAVE_API_KEY");
@@ -66,12 +82,14 @@ public class HarnessConfiguration {
 
         ChatDirSandboxExecutor sandbox = new ChatDirSandboxExecutor(config, projectDir);
         HistoryRootLock.acquire(sandbox.location()); // one process per base directory; held until the process ends
-        AgentHarness harness = AgentHarness.builder()
+        AgentHarness.Builder builder = AgentHarness.builder();
+        if (JllmProperties.blankToNull(p.pluginDir()) != null) builder.pluginDir(Path.of(p.pluginDir()));
+        else if (java.nio.file.Files.isDirectory(Path.of("plugins"))) builder.pluginDir(Path.of("plugins"));
+        AgentHarness harness = builder
                 .modelClient(modelClient)
                 .config(config)
-                .systemPrompt(org.kendar.llm.harness.instructions.SystemPromptFiles.join(promptFiles.append(),
-                        JllmProperties.blankToNull(p.systemPrompt())))
-                .systemPromptReplace(promptFiles.replace())
+                .systemPrompt(promptAppend)
+                .systemPromptReplace(promptReplace)
                 .sandbox(executor(settings, config, sandbox, projectDir))
                 .sessionStore(new FileChatSessionStore(sandbox::historyRoot, () -> chatHistoryRoots(sandbox), mapper))
                 .subAgentRunLog(new FileHistorySubAgentRunLog(new InMemorySubAgentRunLog(), sandbox::historyRoot))

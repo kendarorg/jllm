@@ -22,16 +22,6 @@
             <version>${project.version}</version>
         </dependency>
         <dependency>
-            <groupId>org.kendar.llm</groupId>
-            <artifactId>jllm-pdf</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.kendar.llm</groupId>
-            <artifactId>jllm-docs</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>

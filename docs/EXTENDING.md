@@ -198,7 +198,26 @@ AgentHarness h = AgentHarness.builder().modelClient(client).plugin(new DeployPlu
 
 A plugin can also register a `DocumentReader` for `read_file` (`r.documentReader(reader)`; see
 [TOOLS](TOOLS.md#document-readers)). Plugins listed in `META-INF/services/org.kendar.llm.harness.plugin.HarnessPlugin`
-are installed by `builder.discoverPlugins()`.
+are found by `builder.discoverPlugins()`.
+
+Every plugin has an id, returned by `id()` (pattern `[a-z][a-z0-9-]{1,31}`, unique); a plugin without one fails startup.
+`install(registrar, settings)` receives `plugins.<id>.settings` (an empty object when absent); a plugin overrides
+whichever `install` it needs. Plugins passed with `builder.plugin(...)` are installed at `build()` and need no settings
+entry (an entry with `"enabled": false` skips them). Plugins found by discovery, on the classpath or in
+`builder.pluginDir(dir)` (jars, loaded by a child class loader with their own libraries inside), load only when listed
+and enabled:
+
+```json
+"plugins": {
+  "pdf":  { "enabled": true },
+  "docs": { "enabled": false },
+  "js":   { "enabled": true, "settings": { "storage": { "maxBytes": -1 } } }
+}
+```
+
+A found plugin that is not listed, or has no `enabled`, is skipped with a WARN; a listed plugin that is not found gets a
+WARN; a disabled one gets an INFO line. One INFO line summarises what loaded. Settings files merge per plugin id.
+Jars in the plugin directory run with full application rights: do not let untrusted users write there.
 
 Commands must start with `/`, contain no spaces and not clash with a built-in. They run without the model; the
 returned string is shown to the user; an exception is shown as `error: …`. They appear in `/help`.

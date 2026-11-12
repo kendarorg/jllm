@@ -38,23 +38,23 @@ Main [--provider anthropic|openai|gemini|grok|qwen|llamacpp|ollama] [--model M] 
 | `--system-prompt` | none | text appended to the built-in system prompt |
 | `--system-prompt-file` | none | file appended to the system prompt |
 | `--system-prompt-replace` | none | file that replaces the built-in system prompt; also `SYSTEM.md` / `APPEND_SYSTEM.md` in `~/.jllm/` and `.jllm/` (see [USAGE](../docs/USAGE.md#system-prompt-files)) |
-| `--max-turns` | 40 | model calls per user turn |
+| `--max-turns` | 40 (0 or less: default) | model calls per user turn |
 | `--context-tokens` | 100000 | the model's context window; wins over `context.maxTokens` |
 | `--max-tokens` | 32000 | output limit of one response, not the window |
 | `--context-strategy` | `compaction` | `compaction`, `mnemonic` or `scope`; wins over `context.strategy` |
 | `--search-api-key` | `BRAVE_API_KEY` env var | Brave key for `web_search`; without it DuckDuckGo is scraped |
-| `--small-model` | off | no value; adds the small-model rules to the system prompt |
+| `--small-model` | off | bare, or `=false`; adds the small-model rules to the system prompt |
+| `--pricing.input-per-million`, `output-per-million`, `cache-read-per-million`, `cache-write-per-million` | 0 | USD per million tokens, for the cost estimate; same keys as `jllm.pricing.*` of the web app |
 | `--sandbox` | `local` | `local` (no isolation) or `docker`: `bash` runs in a container with the project directory mounted ([SANDBOX](../docs/SANDBOX.md)); wins over `sandbox.backend` |
 | `--docker-image` | `python:3.12-slim` | image of the docker sandbox; wins over `sandbox.docker.image` |
 | `--docker-mode` | `oneshot` | `oneshot` (a container per command) or `daemon` (one long-running container for `bash` and the file tools; kept between runs); wins over `sandbox.docker.mode` |
-| `--docker-remote` | off | no value; the docker daemon is on another machine: the project is uploaded to the container and backed up on exit and on `/sandbox backup` ([SANDBOX](../docs/SANDBOX.md#remote-docker)); wins over `sandbox.docker.remote` |
+| `--docker-remote` | off | bare, or `=false`; the docker daemon is on another machine: the project is uploaded to the container and backed up on exit and on `/sandbox backup` ([SANDBOX](../docs/SANDBOX.md#remote-docker)); wins over `sandbox.docker.remote` |
 | `--docker-remote-host` | from `DOCKER_HOST` | address where the remote host's published ports are reached |
 | `--sandbox-clean` | | no value; removes the daemon-mode container of the startup directory, prints what was removed, exits. Project files stay |
 | `--sandbox-clean-all` | | no value; removes every CLI sandbox container, then exits |
 | `-h`, `--help` | | print usage |
 
-Unknown arguments, or a flag without a value, stop the CLI with an error. `--context-budget` is accepted as an old
-alias of `--context-tokens`.
+Unknown arguments, or a flag without a value, stop the CLI with an error.
 
 ## Directories
 
@@ -153,3 +153,10 @@ by default (`execution.maxParallel`), which suits one local GPU. `--small-model`
 `FileHistorySubAgentRunLog` and `FileMnemonicStore`, then subscribes to the chat's events. Precedence for the same
 setting: flag, then settings file, then default. See [USAGE](../docs/USAGE.md) for the settings file and the event
 contract.
+
+## Plugins
+
+Plugin jars are loaded from `--plugin-dir DIR` (default `./plugins` if it exists; `./mvnw install` fills the repository
+`target/plugins`). A plugin runs only when enabled under `plugins` in the settings file. `--plugins.ID.enabled=true|false` enables or
+disables one for this run, and `--plugins.ID.settings.KEY=VALUE` sets a plugin setting; nothing writes the file. The
+web application takes the same keys with the prefix, `--jllm.plugins.ID.enabled=true`.
