@@ -1,11 +1,10 @@
 package org.kendar.llm.harness.tools;
 
-import org.kendar.llm.harness.sandbox.SandboxExecutor;
-
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
+import java.util.function.Function;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
 
@@ -19,13 +18,17 @@ public final class StorageQuota {
     public static final StorageQuota UNLIMITED = new StorageQuota(-1, null);
 
     private final long maxBytes;
-    private final SandboxExecutor sandbox;
+    /** Chat id to its storage directory; {@code null}: nothing is counted. */
+    private final Function<String, Path> chatStorage;
     private final Map<String, Long> used = new ConcurrentHashMap<>();
 
-    /** @param maxBytes {@code -1} (or any negative value): no limit */
-    public StorageQuota(long maxBytes, SandboxExecutor sandbox) {
+    /**
+     * @param maxBytes {@code -1} (or any negative value): no limit
+     * @param chatStorage chat id to its storage directory (e.g. {@code sandbox::chatStorage}); {@code null}: nothing is counted
+     */
+    public StorageQuota(long maxBytes, Function<String, Path> chatStorage) {
         this.maxBytes = maxBytes;
-        this.sandbox = sandbox;
+        this.chatStorage = chatStorage;
     }
 
     public boolean enabled() {
@@ -39,8 +42,8 @@ public final class StorageQuota {
      * @throws IOException when the new total would exceed the limit; nothing is recorded then
      */
     public synchronized void reserve(String chatId, Path target, long oldSize, long newSize) throws IOException {
-        if (!enabled() || sandbox == null) return;
-        Path root = sandbox.chatStorage(chatId).toAbsolutePath().normalize();
+        if (!enabled() || chatStorage == null) return;
+        Path root = chatStorage.apply(chatId).toAbsolutePath().normalize();
         if (!target.toAbsolutePath().normalize().startsWith(root)) return;
         reserveDelta(chatId, root, newSize - oldSize);
     }
@@ -62,8 +65,8 @@ public final class StorageQuota {
 
     /** Bytes counted for the chat (computes the baseline when needed). */
     public synchronized long used(String chatId) {
-        if (!enabled() || sandbox == null) return 0;
-        return used.computeIfAbsent(chatId, c -> size(sandbox.chatStorage(c).toAbsolutePath().normalize()));
+        if (!enabled() || chatStorage == null) return 0;
+        return used.computeIfAbsent(chatId, c -> size(chatStorage.apply(c).toAbsolutePath().normalize()));
     }
 
     /** Forget the counter of a chat (deleted chat). */

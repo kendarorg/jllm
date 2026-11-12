@@ -1,6 +1,9 @@
 package org.kendar.llm.harness.integration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.kendar.llm.harness.auth.AuthProvider;
+import org.kendar.llm.harness.auth.McpOAuthLogin;
+import org.kendar.llm.harness.auth.TokenStore;
 import org.kendar.llm.harness.settings.HarnessSettings;
 import org.kendar.llm.harness.settings.McpServerSettings;
 import org.kendar.llm.harness.settings.RestApiSettings;
@@ -161,9 +164,13 @@ public final class ExternalSources {
         return kind.prefix + ":" + name;
     }
 
+    private AuthProvider mcpOAuth(McpServerSettings m) {
+        return new McpOAuthLogin(m.name(), m.url(), http, mapper).authProvider(TokenStore.defaultStore());
+    }
+
     private List<HarnessTool> mcpDiscover(McpServerSettings m) {
         String key = key(Kind.MCP, m.name());
-        McpClient client = McpToolProvider.connect(m, http, mapper, toolEnv);
+        McpClient client = McpToolProvider.connect(m, http, mapper, toolEnv, this::mcpOAuth);
         try {
             List<HarnessTool> tools = McpToolProvider.tools(m, client, mapper, identity);
             closeConnection(key);
@@ -193,7 +200,7 @@ public final class ExternalSources {
     }
 
     private String mcpProbe(McpServerSettings m) {
-        try (McpClient client = McpToolProvider.connect(m, http, mapper, toolEnv)) {
+        try (McpClient client = McpToolProvider.connect(m, http, mapper, toolEnv, this::mcpOAuth)) {
             int n = client.listTools().size();
             return n + " tools offered";
         } catch (java.io.IOException e) {

@@ -21,7 +21,7 @@ class StorageQuotaTest {
 
     private HarnessTool write(long max) {
         box = new LocalDirSandboxExecutor(config(base));
-        return new FileSystemAgentTools(null, null, new StorageQuota(max, box)).tools().stream()
+        return new FileSystemAgentTools(null, null, new StorageQuota(max, box::chatStorage)).tools().stream()
                 .filter(t -> t.name().equals("write_file")).findFirst().orElseThrow();
     }
 

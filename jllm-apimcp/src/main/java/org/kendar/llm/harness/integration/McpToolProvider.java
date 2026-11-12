@@ -2,6 +2,7 @@ package org.kendar.llm.harness.integration;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.kendar.llm.harness.auth.AuthProvider;
 import org.kendar.llm.harness.auth.Identity;
 import org.kendar.llm.harness.settings.McpServerSettings;
 import org.kendar.llm.harness.tools.HarnessTool;
@@ -14,6 +15,7 @@ import java.io.IOException;
 import java.net.http.HttpClient;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Function;
 
 /** Exposes the tools of an MCP server as harness tools named {@code mcp__<server>__<tool>}. */
 public final class McpToolProvider {
@@ -43,15 +45,28 @@ public final class McpToolProvider {
     /** @param inheritedEnv patterns of the process variables a stdio server inherits; null: all */
     public static McpClient connect(McpServerSettings server, HttpClient http, ObjectMapper mapper,
                                     List<String> inheritedEnv) {
-        return server.isStdio()
-                ? new McpStdioClient(mapper, server.name(), server.command(), server.args(), server.env(), inheritedEnv)
-                : oauth(server, new McpHttpClient(http, mapper, server.url(), server.headers()), http, mapper);
+        return connect(server, http, mapper, inheritedEnv, s -> null);
     }
 
-    private static McpClient oauth(McpServerSettings server, McpHttpClient client, HttpClient http, ObjectMapper mapper) {
+    /**
+     * @param oauth builds the auth provider of a server with {@code oauth: true}; the harness supplies it (the OAuth
+     *              login lives there), so this module needs no login code
+     */
+    public static McpClient connect(McpServerSettings server, HttpClient http, ObjectMapper mapper,
+                                    List<String> inheritedEnv, Function<McpServerSettings, AuthProvider> oauth) {
+        return server.isStdio()
+                ? new McpStdioClient(mapper, server.name(), server.command(), server.args(), server.env(), inheritedEnv)
+                : withOAuth(server, new McpHttpClient(http, mapper, server.url(), server.headers()), oauth);
+    }
+
+    private static McpClient withOAuth(McpServerSettings server, McpHttpClient client,
+                                       Function<McpServerSettings, AuthProvider> oauth) {
         if (!Boolean.TRUE.equals(server.oauth())) return client;
-        return client.authProvider(new org.kendar.llm.harness.auth.McpOAuthLogin(server.name(), server.url(), http, mapper)
-                .authProvider(org.kendar.llm.harness.auth.TokenStore.defaultStore()));
+        AuthProvider provider = oauth.apply(server);
+        if (provider == null) {
+            throw new IllegalStateException("MCP server '" + server.name() + "' needs OAuth, which is not configured");
+        }
+        return client.authProvider(provider);
     }
 
     /** Connects to the server and lists its tools. The tools keep the client, so it stays open. */

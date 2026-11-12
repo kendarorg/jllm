@@ -744,7 +744,7 @@ public final class AgentHarness {
             List<HarnessTool> all = new ArrayList<>();
             List<HarnessTool> fileTools = new ArrayList<>();
             org.kendar.llm.harness.tools.StorageQuota quota =
-                    new org.kendar.llm.harness.tools.StorageQuota(settings.storageMaxBytes(), box);
+                    new org.kendar.llm.harness.tools.StorageQuota(settings.storageMaxBytes(), box::chatStorage);
             if (standardTools) {
                 fileTools.addAll(new FileSystemAgentTools(documentReaders, harnessCheckpoints, quota).tools());
                 all.addAll(fileTools);

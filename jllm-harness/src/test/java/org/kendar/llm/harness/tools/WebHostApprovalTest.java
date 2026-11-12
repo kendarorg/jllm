@@ -186,7 +186,7 @@ class WebHostApprovalTest {
     @Test
     void downloadCountsAgainstTheStorageQuotaAndAsksPerHost() throws Exception {
         var box = new org.kendar.llm.harness.sandbox.LocalDirSandboxExecutor(config);
-        WebAgentTools web = new WebAgentTools(config, MAPPER, new StorageQuota(10, box));
+        WebAgentTools web = new WebAgentTools(config, MAPPER, new StorageQuota(10, box::chatStorage));
         ToolContext ctx = new ToolContext("c1", box.workDir("c1"));
 
         assertThrows(Exception.class,

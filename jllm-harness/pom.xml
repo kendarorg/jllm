@@ -22,6 +22,21 @@
             <version>${project.version}</version>
         </dependency>
         <dependency>
+            <groupId>org.kendar.llm</groupId>
+            <artifactId>jllm-fs</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.kendar.llm</groupId>
+            <artifactId>jllm-webbrowse</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.kendar.llm</groupId>
+            <artifactId>jllm-apimcp</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
         </dependency>
@@ -74,7 +89,7 @@
                     <parameters>true</parameters>
                 </configuration>
             </plugin>
-            <!-- jllm-commons is bundled directly inside the harness jar -->
+            <!-- jllm-commons, jllm-fs, jllm-webbrowse and jllm-apimcp are bundled directly inside the harness jar -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
@@ -91,6 +106,9 @@
                             <artifactSet>
                                 <includes>
                                     <include>org.kendar.llm:jllm-commons</include>
+                                    <include>org.kendar.llm:jllm-fs</include>
+                                    <include>org.kendar.llm:jllm-webbrowse</include>
+                                    <include>org.kendar.llm:jllm-apimcp</include>
                                 </includes>
                             </artifactSet>
                         </configuration>
