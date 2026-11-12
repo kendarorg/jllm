@@ -308,7 +308,7 @@ A real-container integration test, `DockerWslIntegrationTest`, runs only on requ
 distribution: `mvn test -DargLine="-Djllm.it.wsl=Ubuntu"`. It uses remote mode (Windows paths cannot be bind-mounted into
 WSL's docker) and removes the containers it creates.
 
-The Python tests (`python -m unittest jllm-harness/src/test/python/test_sandbox_agent.py`) cover the token, the
+The Python tests (`python -m unittest core/jllm-harness/src/test/python/test_sandbox_agent.py`) cover the token, the
 environment, execution, the jail and the endpoints; they need `python` and `sh`.
 
 ### Web application: file explorer

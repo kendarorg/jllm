@@ -1,6 +1,6 @@
 # jllm-cli
 
-Terminal front end for [jllm-harness](../jllm-harness/README.md): an interactive chat, or a single `--prompt`, over the
+Terminal front end for [jllm-harness](../core/jllm-harness/README.md): an interactive chat, or a single `--prompt`, over the
 standard tools. One class, `org.kendar.llm.cli.Main`, packaged as a shaded runnable jar.
 
 ## Build and run
@@ -31,7 +31,7 @@ Main [--provider anthropic|openai|gemini|grok|qwen|llamacpp|ollama] [--model M] 
 | `--model` | per provider (`claude-sonnet-5-5`, `gpt-4.1`, `qwen3-coder-plus`, `local`, `llama3.1`) | model name; overrides the named provider for this session only |
 | `--base-url` | per provider | endpoint (OpenAI-compatible URLs include `/v1`) |
 | `--api-key` | `<PROVIDER>_API_KEY` env var | `ASK_TOKEN` asks for it on startup |
-| `--mode` | `default` | initial [permission mode](../jllm-harness/README.md#modes-working-directory-and-scratch-directory) |
+| `--mode` | `default` | initial [permission mode](../core/jllm-harness/README.md#modes-working-directory-and-scratch-directory) |
 | `--workdir` | current directory | project directory; the file tools are confined to it |
 | `--prompt` | none | run one turn non-interactively, then exit |
 | `--settings` | none | harness [settings file](../docs/USAGE.md#5-settings-file), merged over `~/.jllm/settings.json` and `.jllm/settings.json` |
@@ -145,7 +145,7 @@ java -jar jllm-cli.jar --provider llamacpp --base-url http://localhost:8080/v1 -
 Ollama's OpenAI endpoint cannot set the context size per request. Raise it on the Ollama side
 (`OLLAMA_CONTEXT_LENGTH` or `num_ctx` in a Modelfile) and keep `--context-tokens` below it. Model calls are serialized
 by default (`execution.maxParallel`), which suits one local GPU. `--small-model` is described in the
-[harness README](../jllm-harness/README.md#embedding).
+[harness README](../core/jllm-harness/README.md#embedding).
 
 ## Wiring
 

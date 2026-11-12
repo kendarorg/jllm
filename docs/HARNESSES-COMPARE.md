@@ -76,7 +76,7 @@ Legend: yes, no, partial. Same caveats as above: all columns except jllm are fro
 
 # jllm-harness vs mini-swe-agent
 
-Basis: jllm side from `jllm-harness/README.md` and `gaps.md` (code not read). mini-swe-agent side from memory, not verified against its current source.
+Basis: jllm side from `core/jllm-harness/README.md` and `gaps.md` (code not read). mini-swe-agent side from memory, not verified against its current source.
 
 | Aspect | mini-swe-agent | jllm-harness |
 | --- | --- | --- |

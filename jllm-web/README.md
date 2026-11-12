@@ -1,6 +1,6 @@
 # jllm-web
 
-Browser front end for [jllm-harness](../jllm-harness/README.md): a Spring Boot application with a REST + SSE API and a
+Browser front end for [jllm-harness](../core/jllm-harness/README.md): a Spring Boot application with a REST + SSE API and a
 Vue 3 chat UI. The Spring layer is a thin adapter; all agent logic lives in the framework-free harness.
 
 ## Build and run

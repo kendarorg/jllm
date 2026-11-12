@@ -102,9 +102,9 @@ ignored.
 ```json
 {
   "mcpServers": [{"name": "docs", "url": "https://h/mcp", "headers": {"Authorization": "Bearer ${DOCS_TOKEN}"},
-                  "readOnly": true, "enabled": true, "group": "Mcp/docs"}],
+                  "readOnly": true, "enabled": true, "group": "Mcp/docs", "allowList": ["search*", "get_*"], "denyList": ["get_secret"]}],
   "restApis":   [{"name": "pets", "openApiUrl": "https://h/openapi.yaml", "baseUrl": "https://h/api",
-                  "allowedPaths": ["GET /pets", "/pets/{id}", "/store/*"]}],
+                  "allowedPaths": ["GET /pets", "/pets/{id}", "/store/*"], "denyPaths": ["DELETE *"]}],
   "skills":     [{"name": "pdf", "path": "skills/pdf/SKILL.md"}],
   "instructionFiles": ["KENDAR.md", "~/KENDAR.md"],
   "agents":     [{"name": "scout", "description": "Looks around", "tools": ["read_file", "grep"],

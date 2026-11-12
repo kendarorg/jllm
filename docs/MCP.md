@@ -68,6 +68,12 @@ sequenceDiagram
 | `readOnly` | `false` | `true`: the tools never ask for approval |
 | `enabled` | `true` | startup state |
 | `oauth` | `false` | HTTP server that needs an OAuth login, see below |
+| `allowList` | absent = all | tool names (`*` wildcard) that are exposed; `[]` exposes none, `["*"]` all |
+| `denyList` | empty = none | tool names (`*` wildcard) that are hidden; `["*"]` hides all |
+
+Visibility lists decide which tools exist, before the model sees them. Absent `allow` = all; `[]` = none; `["*"]` = all. A `deny` list hides matches (`["*"]` hides all). When both are set, a tool is visible if it is allowed and not denied. A hidden tool is never created, so it is not sent to the model and cannot be called. This is a separate layer from `permissions` (regex rules that decide approval of visible tools).
+
+Example: `"allowList": ["search*", "get_*"], "denyList": ["get_secret"]` exposes `search_docs` and `get_page`, not `get_secret`.
 
 ### Protocol
 
@@ -130,7 +136,7 @@ with "run /login mcp:<name>". `/logout mcp:<name>` removes it. Static `headers` 
 "restApis": [
   {"name": "pets", "openApiUrl": "https://host/openapi.yaml", "baseUrl": "https://host/api",
    "headers": {"X-Api-Key": "${PETS_KEY}"},
-   "allowedPaths": ["GET /pets", "/pets/{id}", "/store/*"], "enabled": true}
+   "allowedPaths": ["GET /pets", "/pets/{id}", "/store/*"], "denyPaths": ["DELETE *"], "enabled": true}
 ]
 ```
 
@@ -140,7 +146,8 @@ with "run /login mcp:<name>". `/logout mcp:<name>` removes it. Static `headers` 
 | `openApiUrl` / `openApiFile` | one required | spec location (OpenAPI 3, refs resolved fully) |
 | `baseUrl` | first `servers` entry of the spec | where calls go |
 | `headers` | none | sent on calls, and used to fetch the spec |
-| `allowedPaths` | empty = **no tools** | `METHOD /path`, method optional, `*` wildcard |
+| `allowedPaths` | absent = all operations; `[]` = **no tools** | `METHOD /path`, method optional, `*` wildcard |
+| `denyPaths` | empty = none | same syntax; matching operations are hidden; `["*"]` hides all |
 | `group` | `Rest/<name>` | tool group |
 | `enabled` | `true` | startup state |
 
@@ -148,8 +155,8 @@ with "run /login mcp:<name>". `/logout mcp:<name>` removes it. Static `headers` 
 
 ```mermaid
 flowchart LR
-    S["spec: path + method + operation"] --> M{"'METHOD /path' matches<br/>an allowedPaths pattern?"}
-    M -->|no| X["skipped"]
+    S["spec: path + method + operation"] --> M{"'METHOD /path' passes<br/>allowedPaths and not denyPaths?"}
+    M -->|no| X["skipped (hidden)"]
     M -->|yes| T["tool &lt;api&gt;__&lt;operationId&gt;<br/>(or METHOD_path)"]
     T --> SC["input schema:<br/>one property per parameter<br/>(path params always required)<br/>+ 'body' for a JSON request body"]
     T --> D["description: summary + description"]
@@ -160,7 +167,9 @@ At call time path parameters are substituted (URL-encoded), query parameters app
 `body` serialized as JSON. The result is `HTTP <status>\n<body>`, cut at 20000 characters. Non-2xx statuses are
 returned to the model, not raised.
 
-`allowedPaths` examples:
+Visibility lists decide which tools exist, before the model sees them. Absent `allow` = all; `[]` = none; `["*"]` = all. A `deny` list hides matches (`["*"]` hides all). When both are set, a tool is visible if it is allowed and not denied. A hidden tool is never created, so it is not sent to the model and cannot be called. This is a separate layer from `permissions` (regex rules that decide approval of visible tools).
+
+`allowedPaths` and `denyPaths` examples:
 
 | Entry | Matches |
 |---|---|
@@ -168,6 +177,7 @@ returned to the model, not raised.
 | `/pets/{id}` | every method on `/pets/{id}` |
 | `/store/*` | every method on every path under `/store/` |
 | `POST *` | every POST |
+| `DELETE *` (in `denyPaths`) | hides every DELETE |
 
 ## 4. Runtime control
 

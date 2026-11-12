@@ -19,7 +19,7 @@ They're not separate products or mandatory dependencies. They're working example
 
 | Module | What | Doc |
 |---|---|---|
-| [jllm-harness](jllm-harness) | the library: framework-free (no Spring, JPA or Micrometer), Jackson, JDK `HttpClient`, jsoup | [README](jllm-harness/README.md) |
+| [jllm-harness](core/jllm-harness) | the library: framework-free (no Spring, JPA or Micrometer), Jackson, JDK `HttpClient`, jsoup | [README](core/jllm-harness/README.md) |
 | [jllm-cli](jllm-cli) | terminal front end, one shaded runnable jar | [README](jllm-cli/README.md) |
 | [jllm-web](jllm-web) | Spring Boot REST + SSE API with a no-build Vue 3 chat UI | [README](jllm-web/README.md) |
 
@@ -64,7 +64,7 @@ surprises.
 |---|---|---|
 | **Your Java code** | a `HarnessTool` (or `SimpleTool` with a lambda): name, description, JSON schema, group, kind | `db_query`, `create_ticket`, ... whatever you register |
 | **MCP servers** | a `mcpServers` entry in the settings file: URL and headers | `mcp__<server>__<tool>`, discovered at startup from the server's `tools/list` |
-| **REST APIs** | a `restApis` entry: OpenAPI URL, base URL, `allowedPaths` | `<api>__<operationId>`, one tool per allowed operation |
+| **REST APIs** | a `restApis` entry: OpenAPI URL, base URL, `allowedPaths` / `denyPaths` | `<api>__<operationId>`, one tool per visible operation |
 
 Your own tool, in a few lines:
 
@@ -89,8 +89,11 @@ MCP servers and REST APIs need no code, only configuration:
 
 - **MCP**: streamable-HTTP servers or stdio child processes (`command`/`args`/`env`), static headers (`${ENV_VAR}` expanded), tools listed at startup. A server that is
   down does not stop the harness. No OAuth.
-- **REST**: the OpenAPI 3 spec is parsed and each operation matching `allowedPaths` becomes a tool whose input schema
-  comes from the spec. Nothing outside the allowlist is reachable. GET/HEAD are read-only, other methods need approval.
+- **REST**: the OpenAPI 3 spec is parsed and each operation that passes `allowedPaths` and `denyPaths` becomes a tool whose
+  input schema comes from the spec. Hidden operations are not reachable. GET/HEAD are read-only, other methods need approval.
+- **Visibility lists**: MCP `allowList`/`denyList` (tool names) and REST `allowedPaths`/`denyPaths` (`METHOD /path`).
+  Absent allow = all, `[]` = none, `["*"]` = all; deny hides matches. Hidden tools never reach the model. Separate from the
+  `permissions` rules, which decide approval of visible tools.
 - **Built-in tools** are also there: files (confined to the working directory), shell, web search and fetch, sub-agents
   (`task`), skills.
 - All sources can be switched on and off at runtime (`/tools`, `/mcp`, `/apis` in any front end, or the `tools()` and
@@ -110,7 +113,7 @@ MCP servers and REST APIs need no code, only configuration:
 - **Isolation**: the default sandbox has none. For untrusted input set `sandbox.backend` to `docker` (CLI
   `--sandbox docker`, optionally `--docker-mode daemon`) or use your own `SandboxExecutor`.
 
-Details: [harness README](jllm-harness/README.md), [EXTENDING](docs/EXTENDING.md) (custom tools, hooks, policies,
+Details: [harness README](core/jllm-harness/README.md), [EXTENDING](docs/EXTENDING.md) (custom tools, hooks, policies,
 providers, stores), [MCP and REST](docs/MCP.md), [TOOLS](docs/TOOLS.md).
 
 ## Models
@@ -134,13 +137,13 @@ java -jar jllm-web/target/jllm-web-1.0.0.jar --provider anthropic
 ```
 
 Set `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`, `GROK_API_KEY`, `QWEN_API_KEY`) first. Embedding the library is shown above and in the
-[harness README](jllm-harness/README.md#embedding).
+[harness README](core/jllm-harness/README.md#embedding).
 
 ## Documentation
 
 | Document | Content |
 |---|---|
-| [jllm-harness](jllm-harness/README.md) | embedding, settings file, hooks, plugins, modes, context strategies, fast model |
+| [jllm-harness](core/jllm-harness/README.md) | embedding, settings file, hooks, plugins, modes, context strategies, fast model |
 | [jllm-cli](jllm-cli/README.md) | flags, directories, interactive session, slash commands, local models |
 | [jllm-pdf](docs/TOOLS.md#document-readers) / [jllm-docs](docs/TOOLS.md#document-readers) | optional `read_file` readers for pdf and docx (plugins: jar in the plugin directory, enabled under `plugins` in the settings) |
 | [jllm-js](docs/JS.md) | optional `run_js` tool: JavaScript (GraalJS, regex supported, synchronous `tools.*` calls without `await`) in a sandbox whose only view of the world is the harness tools; installing it removes `bash` (plugin: jar in the plugin directory, enabled under `plugins`) |
