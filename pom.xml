@@ -20,6 +20,7 @@
     <modules>
         <module>jllm-harness</module>
         <module>jllm-pdf</module>
+        <module>jllm-js</module>
         <module>jllm-docs</module>
         <module>jllm-cli</module>
         <module>jllm-web</module>

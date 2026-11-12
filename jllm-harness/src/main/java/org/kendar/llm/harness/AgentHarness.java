@@ -134,6 +134,11 @@ public final class AgentHarness {
         service.cancel(chatId);
     }
 
+    /** @param kill stop a running script at once instead of letting it clean up first */
+    public void cancel(String chatId, boolean kill) {
+        service.cancel(chatId, kill);
+    }
+
     public boolean isRunning(String chatId) {
         return service.isRunning(chatId);
     }
@@ -356,6 +361,9 @@ public final class AgentHarness {
         private ModelClient modelClient;
         private final List<HarnessTool> tools = new ArrayList<>();
         private boolean standardTools = true;
+        private final java.util.Set<String> removedTools = new java.util.LinkedHashSet<>();
+        private final java.util.Set<String> replacedTools = new java.util.LinkedHashSet<>();
+        private final List<java.util.function.Consumer<java.util.Collection<String>>> nameChecks = new ArrayList<>();
         private ModelClient fastClient;
         private ChatSessionStore sessionStore = new InMemoryChatSessionStore();
         private SubAgentRunLog subAgentRunLog = new InMemorySubAgentRunLog();
@@ -521,6 +529,24 @@ public final class AgentHarness {
                         documentReaders.register(reader);
                         return this;
                     }
+
+                    @Override
+                    public PluginRegistrar replaces(String toolName) {
+                        removedTools.add(toolName);
+                        replacedTools.add(toolName);
+                        return this;
+                    }
+
+                    @Override
+                    public org.kendar.llm.harness.tools.ToolCatalog catalog() {
+                        return new org.kendar.llm.harness.tools.ScopeToolCatalog();
+                    }
+
+                    @Override
+                    public PluginRegistrar toolNameCheck(java.util.function.Consumer<java.util.Collection<String>> check) {
+                        nameChecks.add(java.util.Objects.requireNonNull(check));
+                        return this;
+                    }
                 }, i.settings());
             }
             pluginSummary = r;
@@ -567,6 +593,12 @@ public final class AgentHarness {
         /** Do not register the built-in Files, Shell and Web tools. */
         public Builder withoutStandardTools() {
             this.standardTools = false;
+            return this;
+        }
+
+        /** Removes the named standard tools before the registry is built: they are absent, not hidden. */
+        public Builder withoutTools(java.util.Collection<String> names) {
+            this.removedTools.addAll(names);
             return this;
         }
 
@@ -682,18 +714,24 @@ public final class AgentHarness {
             int maxParallel = settings.maxParallel();
             if (maxParallel > 0) modelClient = new LimitedModelClient(modelClient, maxParallel);
             SandboxExecutor box = sandbox != null ? sandbox : new LocalDirSandboxExecutor(config);
+            box.environmentWhitelist(settings.whitelistedEnvVars());
 
             org.kendar.llm.harness.tools.Checkpoints harnessCheckpoints = new org.kendar.llm.harness.tools.Checkpoints();
             List<HarnessTool> all = new ArrayList<>();
+            List<HarnessTool> fileTools = new ArrayList<>();
+            org.kendar.llm.harness.tools.StorageQuota quota =
+                    new org.kendar.llm.harness.tools.StorageQuota(settings.storageMaxBytes(), box);
             if (standardTools) {
-                all.addAll(new FileSystemAgentTools(documentReaders, harnessCheckpoints).tools());
+                fileTools.addAll(new FileSystemAgentTools(documentReaders, harnessCheckpoints, quota).tools());
+                all.addAll(fileTools);
                 all.addAll(new ShellAgentTools(box, config).tools());
-                all.addAll(new WebAgentTools(config, mapper).tools());
+                all.addAll(new WebAgentTools(config, mapper, quota).tools());
             }
+            all.removeIf(t -> removedTools.contains(t.name()));
             all.addAll(tools);
             SkillCatalog skills = new SkillCatalog(settings.skills());
             if (!skills.isEmpty()) all.add(new SkillTool(skills));
-            HarnessToolRegistry registry = new HarnessToolRegistry(all, approvalPolicy);
+            HarnessToolRegistry registry = new HarnessToolRegistry(all, approvalPolicy, replacedTools, nameChecks);
             PermissionRules permissionRules = settings.permissionRules();
             registry.hideIf(permissionRules::hides);
             ExternalSources sources = new ExternalSources(registry, settings, HttpClient.newHttpClient(), mapper);
@@ -722,6 +760,7 @@ public final class AgentHarness {
                     new PermissionGate(approvalPolicy, permissionRules), approvals, sessions, box, registry, subAgentTool,
                     requestToolGroup, subAgentRunLog, mapper, metrics, prompt, hooks,
                     fast == null ? null : new ToolClassifier(fast, mapper));
+            loop.builtinFileTools(fileTools);
             ref[0] = loop;
             if (!inputValidators.isEmpty() || !defaultInputValidator) {
                 List<org.kendar.llm.harness.tools.ToolInputValidator> chain = new ArrayList<>();

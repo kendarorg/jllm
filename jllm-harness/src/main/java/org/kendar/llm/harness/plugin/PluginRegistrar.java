@@ -18,4 +18,19 @@ public interface PluginRegistrar {
 
     /** Teaches {@code read_file} a binary format such as pdf or docx. */
     PluginRegistrar documentReader(DocumentReader reader);
+
+    /**
+     * Removes the standard tool {@code toolName} before the registry is built, and refuses it later: a
+     * {@code HarnessToolRegistry.setSource} that adds a tool of that name throws {@link IllegalStateException}.
+     */
+    PluginRegistrar replaces(String toolName);
+
+    /**
+     * Called with the full tool name list whenever the registry builds a snapshot. A check that throws aborts the
+     * change and leaves the registry as it was.
+     */
+    PluginRegistrar toolNameCheck(java.util.function.Consumer<java.util.Collection<String>> check);
+
+    /** A lazy handle: sees the tools collected later, including MCP and REST ones. */
+    org.kendar.llm.harness.tools.ToolCatalog catalog();
 }

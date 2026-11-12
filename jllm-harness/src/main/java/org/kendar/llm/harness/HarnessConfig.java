@@ -50,9 +50,14 @@ public record HarnessConfig(String agentId, int maxTurns, int maxTokens, boolean
         }
     }
 
-    public record Web(String searchProvider, String searchApiKey, int fetchMaxChars) {
+    /** @param downloadMaxBytes largest file {@code web_download} accepts */
+    public record Web(String searchProvider, String searchApiKey, int fetchMaxChars, long downloadMaxBytes) {
+        public Web(String searchProvider, String searchApiKey, int fetchMaxChars) {
+            this(searchProvider, searchApiKey, fetchMaxChars, 100_000_000L);
+        }
+
         public static Web defaults() {
-            return new Web("brave", "", 40_000);
+            return new Web("brave", "", 40_000, 100_000_000L);
         }
     }
 
@@ -256,11 +261,15 @@ public record HarnessConfig(String agentId, int maxTurns, int maxTokens, boolean
     }
 
     public HarnessConfig withFetchMaxChars(int max) {
-        return withWeb(new Web(web.searchProvider(), web.searchApiKey(), max));
+        return withWeb(new Web(web.searchProvider(), web.searchApiKey(), max, web.downloadMaxBytes()));
     }
 
     public HarnessConfig withSearchApiKey(String key) {
-        return withWeb(new Web(web.searchProvider(), key, web.fetchMaxChars()));
+        return withWeb(new Web(web.searchProvider(), key, web.fetchMaxChars(), web.downloadMaxBytes()));
+    }
+
+    public HarnessConfig withDownloadMaxBytes(long max) {
+        return withWeb(new Web(web.searchProvider(), web.searchApiKey(), web.fetchMaxChars(), max));
     }
 
     public HarnessConfig withCompaction(Compaction v) {

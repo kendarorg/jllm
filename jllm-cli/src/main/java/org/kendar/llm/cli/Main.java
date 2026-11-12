@@ -62,6 +62,11 @@ public final class Main {
     private static Term term;
     private static Renderer renderer;
     private static volatile boolean running;
+    /** A run_js call of the model is in flight: stopping the run asks how to stop the script. */
+    private static volatile boolean scriptRunning;
+    private static volatile boolean stopPending;
+    private static volatile long stopAsked;
+    private static final long STOP_ANSWER_MILLIS = 30_000;
     private static volatile long runStart;
     private static volatile long lastInterrupt;
 
@@ -291,7 +296,7 @@ public final class Main {
             while (true) {
                 String l = term.readLine("> ", () -> {
                     long now = System.currentTimeMillis();
-                    if (running) harness.cancel(chat.id);
+                    if (running) requestStop(harness, chat.id);
                     else if (now - lastInterrupt < 2000) System.exit(0);
                     else say(Renderer.DIM + "(press ctrl+c again to exit)" + Renderer.RESET);
                     lastInterrupt = now;
@@ -383,10 +388,14 @@ public final class Main {
         events.clear();
         runStart = System.currentTimeMillis();
         running = true;
+        scriptRunning = false;
+        stopPending = false;
         try {
             runLoop(harness, chatId, text, events, in);
         } finally {
             running = false;
+            scriptRunning = false;
+            stopPending = false;
         }
     }
 
@@ -397,6 +406,11 @@ public final class Main {
             // Input typed during the run: a command (/cancel, /followup <text>) runs, any other line steers the agent
             for (String typed = in.poll(); typed != null; typed = in.poll()) {
                 if (typed.equals(EOF) || typed.isBlank()) continue;
+                if (stopPending) {
+                    stopPending = false;
+                    harness.cancel(chatId, typed.strip().toLowerCase().startsWith("k"));
+                    continue;
+                }
                 if (exitPending) {
                     exitPending = false;
                     if (typed.strip().toLowerCase().startsWith("y")) {
@@ -411,14 +425,22 @@ public final class Main {
                     exitPending = true;
                     continue;
                 }
-                if (typed.strip().equals("/cancel")) harness.cancel(chatId);
+                if (typed.strip().equals("/cancel")) requestStop(harness, chatId);
                 else if (typed.strip().startsWith("/expand")) renderer.expand(typed.strip().substring(7));
                 else if (harness.commands().handles(typed.strip())) menu(harness.commands().execute(chatId, typed.strip()));
                 else harness.steer(chatId, typed.strip());
             }
+            if (stopPending && System.currentTimeMillis() - stopAsked > STOP_ANSWER_MILLIS) {
+                stopPending = false; // no answer: kill, with no further question
+                harness.cancel(chatId, true);
+            }
             AgentEvent ev = events.poll(100, TimeUnit.MILLISECONDS);
             if (ev == null) continue;
             JsonNode d = ev.data();
+            if (!d.has("parent") && "run_js".equals(d.path("name").asText())) {
+                if (ev.type().equals("tool_call")) scriptRunning = true;
+                else if (ev.type().equals("tool_result")) scriptRunning = false;
+            }
             switch (ev.type()) {
                 case "approval_request" -> approve(harness, chatId, d, in);
                 case "run_finished" -> {
@@ -427,6 +449,21 @@ public final class Main {
                 default -> renderer.render(ev);
             }
         }
+    }
+
+    /**
+     * Stops the run. While a script is running there are two ways: kill it now, or let it clean up (its next tool
+     * call fails with a catchable error; it is killed after its grace period). No answer within 30 s kills it.
+     */
+    private static void requestStop(AgentHarness harness, String chatId) {
+        if (!scriptRunning) {
+            harness.cancel(chatId);
+            return;
+        }
+        if (stopPending) return;
+        stopPending = true;
+        stopAsked = System.currentTimeMillis();
+        ask("A script is running. Stop it how? [k=kill now / g=let it clean up first (default); no answer in 30 s kills it] ");
     }
 
     private static void approve(AgentHarness harness, String chatId, JsonNode d, BlockingQueue<String> in)
@@ -442,6 +479,14 @@ public final class Main {
             return;
         }
         String writeDir = d.path("writeDir").asText("");
+        if ("host".equals(d.path("type").asText())) {
+            ask("Allow " + d.path("host").asText() + "? [y=once/N/a=this host and its subdomains for this chat] ");
+            String h = in.take();
+            String ha = h.equals(EOF) ? "" : h.strip().toLowerCase();
+            boolean always = ha.startsWith("a");
+            harness.resolveApproval(chatId, d.path("id").asText(), always || ha.startsWith("y"), null, always, false);
+            return;
+        }
         ask("Allow? [y/N/a=allow for this chat"
                 + (writeDir.isEmpty() ? "" : "/d=allow writes in " + writeDir + "/ and subfolders"
                 + ", or 'd <path>' for another folder of the project") + "] ");

@@ -1,5 +1,5 @@
-import {computed} from 'vue';
-import {cancelRun, copyId, setMode, store} from '../store.js';
+import {computed, onUnmounted, ref} from 'vue';
+import {cancelRun, copyId, scriptRunning, setMode, store} from '../store.js';
 
 export default {
   setup() {
@@ -7,7 +7,18 @@ export default {
     const mode = computed({ get: () => store.mode, set: v => setMode(v) });
     const u = computed(() => store.usage);
     const cost = computed(() => (u.value?.estimatedCostUsd || 0).toFixed(4));
-    return { store, fmt, mode, u, cost, cancelRun, copyId };
+    // while a script runs, Cancel asks how to stop it; no answer in 30 s kills it
+    const askStop = ref(false);
+    let timer = null;
+    const clear = () => { askStop.value = false; if (timer) { clearTimeout(timer); timer = null; } };
+    const stop = kill => { clear(); cancelRun(kill); };
+    const cancel = () => {
+      if (!scriptRunning()) return cancelRun(false);
+      askStop.value = true;
+      timer = setTimeout(() => stop(true), 30000);
+    };
+    onUnmounted(clear);
+    return { store, fmt, mode, u, cost, cancel, copyId, askStop, stop, clear };
   },
   template: `
   <div class="toolbar">
@@ -20,7 +31,14 @@ export default {
       <option value="PLAN">Plan (read-only)</option>
       <option value="BYPASS">Bypass (no approvals)</option>
     </select>
-    <button class="btn-sm" :disabled="!store.running" aria-label="Cancel the running turn" @click="cancelRun()">Cancel</button>
+    <button class="btn-sm" :disabled="!store.running" aria-label="Cancel the running turn" @click="cancel()">Cancel</button>
+    <span v-if="askStop" role="alertdialog" aria-label="Stop the running script">
+      A script is running:
+      <button class="btn-danger btn-sm" @click="stop(true)">Kill now</button>
+      <button class="btn-sm" @click="stop(false)">Let it clean up</button>
+      <button class="btn-sm" @click="clear()">Keep running</button>
+      <span style="color:var(--text-muted)">(no answer in 30 s: kill)</span>
+    </span>
     <span class="status" aria-live="polite" style="color:var(--text-muted)">{{ store.running ? 'Running…' : '' }}</span>
     <span v-if="u" class="meter" aria-label="Token usage">
       in <b>{{ fmt(u.inputTokens) }}</b> · out <b>{{ fmt(u.outputTokens) }}</b> ·

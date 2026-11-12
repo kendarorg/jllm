@@ -26,6 +26,7 @@ public class FileSystemAgentTools implements HarnessToolSet {
 
     private final DocumentReaders readers;
     private final Checkpoints checkpoints;
+    private final StorageQuota quota;
 
     public FileSystemAgentTools() {
         this(null, null);
@@ -36,8 +37,13 @@ public class FileSystemAgentTools implements HarnessToolSet {
     }
 
     public FileSystemAgentTools(DocumentReaders readers, Checkpoints checkpoints) {
+        this(readers, checkpoints, StorageQuota.UNLIMITED);
+    }
+
+    public FileSystemAgentTools(DocumentReaders readers, Checkpoints checkpoints, StorageQuota quota) {
         this.readers = readers;
         this.checkpoints = checkpoints;
+        this.quota = quota == null ? StorageQuota.UNLIMITED : quota;
     }
 
     private void checkpoint(ToolContext ctx, Path p) {
@@ -168,22 +174,26 @@ public class FileSystemAgentTools implements HarnessToolSet {
                         "content", "Full file content, or the part to append",
                         "append:boolean?", "Append to the file instead of overwriting it"),
                 GROUP, ToolKind.FILE_EDIT, (ctx, in) -> {
-            if (ctx.files() != null) return RemoteFileTools.write(ctx, in, checkpoints);
+            if (ctx.files() != null) return RemoteFileTools.write(ctx, in, checkpoints, quota);
             Path p = jailWrite(ctx, in.path("path").asText());
-            checkpoint(ctx, p);
-            if (p.getParent() != null) Files.createDirectories(p.getParent());
             String content = in.path("content").asText();
             if (in.path("append").asBoolean(false)) {
-                if (Files.exists(p)) { // keep the file's line endings
-                    TextEdits.TextFile existing = TextEdits.TextFile.read(p);
-                    byte[] part = new TextEdits.TextFile("", false, existing.eol())
-                            .encode(content.replace("\r\n", "\n"));
-                    Files.write(p, part, StandardOpenOption.APPEND);
-                } else {
-                    Files.writeString(p, content, StandardCharsets.UTF_8, StandardOpenOption.CREATE);
-                }
+                boolean exists = Files.exists(p);
+                byte[] part = exists
+                        ? new TextEdits.TextFile("", false, TextEdits.TextFile.read(p).eol())
+                        .encode(content.replace("\r\n", "\n")) // keep the file's line endings
+                        : content.getBytes(StandardCharsets.UTF_8);
+                quota.reserve(ctx.chatId(), p, 0, part.length);
+                checkpoint(ctx, p);
+                if (p.getParent() != null) Files.createDirectories(p.getParent());
+                if (exists) Files.write(p, part, StandardOpenOption.APPEND);
+                else Files.write(p, part, StandardOpenOption.CREATE);
                 return "Appended " + content.length() + " chars to " + in.path("path").asText();
             }
+            quota.reserve(ctx.chatId(), p, Files.exists(p) ? Files.size(p) : 0,
+                    content.getBytes(StandardCharsets.UTF_8).length);
+            checkpoint(ctx, p);
+            if (p.getParent() != null) Files.createDirectories(p.getParent());
             Files.writeString(p, content, StandardCharsets.UTF_8);
             return "Wrote " + content.length() + " chars to " + in.path("path").asText();
         }, (ctx, in) -> {
@@ -219,10 +229,11 @@ public class FileSystemAgentTools implements HarnessToolSet {
                 "Replace text in a file. old_string must occur exactly once unless replace_all is true; small "
                         + "whitespace and quote differences are tolerated. Pass edits to change several places at once.",
                 schema, GROUP, ToolKind.FILE_EDIT, (ctx, in) -> {
-            if (ctx.files() != null) return RemoteFileTools.edit(ctx, in, checkpoints);
+            if (ctx.files() != null) return RemoteFileTools.edit(ctx, in, checkpoints, quota);
             Path p = jailWrite(ctx, in.path("path").asText());
             TextEdits.TextFile file = TextEdits.TextFile.read(p);
             TextEdits.Applied applied = TextEdits.apply(file.text(), parseEdits(in));
+            quota.reserve(ctx.chatId(), p, Files.size(p), file.encode(applied.text()).length);
             checkpoint(ctx, p);
             file.write(p, applied.text());
             return "Edited " + in.path("path").asText() + " (" + applied.replacements() + " replacement(s))\n"

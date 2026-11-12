@@ -79,11 +79,20 @@ public class LocalDirSandboxExecutor implements SandboxExecutor {
     /** Bytes of command output kept in memory; the complete output goes to a log file beyond this. */
     static final int CAPTURE_LIMIT = 50 * 1024;
 
+    private volatile List<String> envWhitelist = org.kendar.llm.harness.util.EnvWhitelist.ALL;
+
+    @Override
+    public void environmentWhitelist(List<String> patterns) {
+        this.envWhitelist = org.kendar.llm.harness.util.EnvWhitelist.orAll(patterns);
+    }
+
     private ExecutionResult run(Path dir, String command, Duration timeout) {
         List<String> cmd = WINDOWS ? List.of("cmd", "/c", command) : List.of("bash", "-c", command);
         Process p = null;
         try {
-            p = new ProcessBuilder(cmd).directory(dir.toFile()).redirectErrorStream(true).start();
+            ProcessBuilder pb = new ProcessBuilder(cmd).directory(dir.toFile()).redirectErrorStream(true);
+            org.kendar.llm.harness.util.EnvWhitelist.apply(pb.environment(), envWhitelist);
+            p = pb.start();
             final Process proc = p;
             p.getOutputStream().close();
             TailCapture capture = new TailCapture(CAPTURE_LIMIT);

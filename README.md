@@ -137,6 +137,7 @@ Set `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`, `GROK_API_KEY`, `QWEN_API_KEY`) fi
 | [jllm-harness](jllm-harness/README.md) | embedding, settings file, hooks, plugins, modes, context strategies, fast model |
 | [jllm-cli](jllm-cli/README.md) | flags, directories, interactive session, slash commands, local models |
 | [jllm-pdf](docs/TOOLS.md#document-readers) / [jllm-docs](docs/TOOLS.md#document-readers) | optional `read_file` readers for pdf and docx (plugins: jar in the plugin directory, enabled under `plugins` in the settings) |
+| [jllm-js](docs/JS.md) | optional `run_js` tool: JavaScript (GraalJS) in a sandbox whose only view of the world is the harness tools; installing it removes `bash` (plugin: jar in the plugin directory, enabled under `plugins`) |
 | [jllm-web](jllm-web/README.md) | `jllm.*` properties, REST and SSE API, frontend structure |
 | [USAGE](docs/USAGE.md) | harness build, permission modes, settings file, embedding, events |
 | [TOOLS](docs/TOOLS.md) | built-in tools, kinds, path jail, per-chat tool set, tool-call pipeline |

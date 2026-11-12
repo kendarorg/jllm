@@ -7,6 +7,7 @@ import org.jsoup.nodes.Document;
 import org.kendar.llm.harness.HarnessConfig;
 
 import java.net.URI;
+import java.nio.file.Path;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -26,21 +27,79 @@ public class WebAgentTools implements HarnessToolSet {
             .connectTimeout(Duration.ofSeconds(10))
             .build();
 
+    /** Redirects are followed by hand, so that every host reached is checked. */
+    private final HttpClient direct = HttpClient.newBuilder()
+            .followRedirects(HttpClient.Redirect.NEVER)
+            .connectTimeout(Duration.ofSeconds(10))
+            .build();
+
+    private static final int MAX_REDIRECTS = 5;
+
     private final String duckDuckGoUrl;
+    private final StorageQuota quota;
 
     public WebAgentTools(HarnessConfig config, ObjectMapper mapper) {
-        this(config, mapper, "https://html.duckduckgo.com/html/");
+        this(config, mapper, "https://html.duckduckgo.com/html/", StorageQuota.UNLIMITED);
+    }
+
+    public WebAgentTools(HarnessConfig config, ObjectMapper mapper, StorageQuota quota) {
+        this(config, mapper, "https://html.duckduckgo.com/html/", quota);
     }
 
     WebAgentTools(HarnessConfig config, ObjectMapper mapper, String duckDuckGoUrl) {
+        this(config, mapper, duckDuckGoUrl, StorageQuota.UNLIMITED);
+    }
+
+    private WebAgentTools(HarnessConfig config, ObjectMapper mapper, String duckDuckGoUrl, StorageQuota quota) {
         this.duckDuckGoUrl = duckDuckGoUrl;
         this.config = config;
         this.mapper = mapper;
+        this.quota = quota == null ? StorageQuota.UNLIMITED : quota;
     }
 
     @Override
     public List<HarnessTool> tools() {
-        return List.of(webSearch(), wikipediaSearch(), webFetch());
+        return List.of(webSearch(), wikipediaSearch(), webFetch(), webDownload());
+    }
+
+    /**
+     * GET with the redirects followed here: every host reached, the first and each redirect target, must be approved
+     * by the context's {@link HostApprover} (none: all allowed).
+     */
+    private <T> HttpResponse<T> get(ToolContext ctx, URI uri, HttpResponse.BodyHandler<T> handler) throws Exception {
+        URI current = uri;
+        for (int hop = 0; ; hop++) {
+            checkHost(ctx, current, hop == 0 ? null : uri);
+            HttpRequest req = HttpRequest.newBuilder(current)
+                    .timeout(Duration.ofSeconds(30))
+                    .header("User-Agent", "jllm-harness/1.0")
+                    .GET().build();
+            HttpResponse<T> resp = direct.send(req, handler);
+            int sc = resp.statusCode();
+            String location = resp.headers().firstValue("Location").orElse(null);
+            if (location == null || !(sc == 301 || sc == 302 || sc == 303 || sc == 307 || sc == 308)) return resp;
+            if (resp.body() instanceof java.io.Closeable c) c.close();
+            if (hop >= MAX_REDIRECTS) throw new IllegalStateException("Too many redirects from " + uri);
+            URI next = current.resolve(location);
+            if (!"http".equalsIgnoreCase(next.getScheme()) && !"https".equalsIgnoreCase(next.getScheme())) {
+                throw new IllegalStateException("Redirect to an unsupported URL: " + next);
+            }
+            if ("https".equalsIgnoreCase(current.getScheme()) && "http".equalsIgnoreCase(next.getScheme())) {
+                throw new IllegalStateException("Redirect from https to http refused: " + next);
+            }
+            current = next;
+        }
+    }
+
+    private static void checkHost(ToolContext ctx, URI uri, URI origin) {
+        HostApprover approver = ctx == null ? null : ctx.hosts();
+        if (approver == null) return;
+        String host = uri.getHost();
+        if (host == null) throw new IllegalArgumentException("URL has no host: " + uri);
+        if (!approver.approve(host, uri.toString())) {
+            throw new IllegalStateException("Access to host '" + host + "' was denied by the user"
+                    + (origin == null ? "" : " (redirect target of " + origin + ")"));
+        }
     }
 
     private HarnessTool webSearch() {
@@ -152,11 +211,7 @@ public class WebAgentTools implements HarnessToolSet {
             if (!"http".equalsIgnoreCase(uri.getScheme()) && !"https".equalsIgnoreCase(uri.getScheme())) {
                 throw new IllegalArgumentException("Only http/https URLs are supported");
             }
-            HttpRequest req = HttpRequest.newBuilder(uri)
-                    .timeout(Duration.ofSeconds(30))
-                    .header("User-Agent", "jllm-harness/1.0")
-                    .GET().build();
-            HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> resp = get(ctx, uri, HttpResponse.BodyHandlers.ofString());
             String body = resp.body();
             String type = resp.headers().firstValue("Content-Type").orElse("");
             if (type.contains("html") || body.stripLeading().startsWith("<")) {
@@ -167,6 +222,65 @@ public class WebAgentTools implements HarnessToolSet {
             int max = config.web().fetchMaxChars();
             String prefix = "HTTP " + resp.statusCode() + "\n";
             return prefix + (body.length() > max ? body.substring(0, max) + "\n[truncated]" : body);
+        });
+    }
+
+    private HarnessTool webDownload() {
+        return new SimpleTool("web_download",
+                "Download a URL as is (no text conversion) to a file in the chat work dir: use it for PDFs, images "
+                        + "and anything web_fetch would truncate. Returns the path, size and content type.",
+                SimpleTool.schema("url", "http(s) URL to download", "path", "File path relative to the work dir"),
+                GROUP, ToolKind.READ_ONLY, (ctx, in) -> {
+            URI uri = URI.create(in.path("url").asText());
+            if (!"http".equalsIgnoreCase(uri.getScheme()) && !"https".equalsIgnoreCase(uri.getScheme())) {
+                throw new IllegalArgumentException("Only http/https URLs are supported");
+            }
+            String shown = in.path("path").asText();
+            long max = config.web().downloadMaxBytes();
+            Path target = ctx.files() != null ? null : FileSystemAgentTools.jailWrite(ctx, shown);
+            HttpResponse<java.io.InputStream> resp = get(ctx, uri, HttpResponse.BodyHandlers.ofInputStream());
+            try (java.io.InputStream body = resp.body()) {
+                if (resp.statusCode() / 100 != 2) throw new IllegalStateException("download failed: HTTP " + resp.statusCode());
+                String type = resp.headers().firstValue("Content-Type").orElse("unknown");
+                long declared = resp.headers().firstValueAsLong("Content-Length").orElse(-1);
+                if (declared > max) throw new IllegalStateException("File too large: " + declared + " bytes, the limit is "
+                        + max + " (web.downloadMaxBytes)");
+                long size;
+                if (target == null) {
+                    byte[] bytes = body.readNBytes((int) Math.min(max + 1, Integer.MAX_VALUE - 8));
+                    if (bytes.length > max) throw new IllegalStateException("File too large: more than " + max
+                            + " bytes (web.downloadMaxBytes)");
+                    var fb = ctx.files();
+                    var t = fb.writeTarget(shown, ctx.readOnlyWork());
+                    var old = fb.stat(t);
+                    quota.reserveRemote(ctx.chatId(), bytes.length - (old.exists() ? old.size() : 0));
+                    fb.write(t, bytes, false);
+                    size = bytes.length;
+                } else {
+                    Path dir = target.getParent();
+                    java.nio.file.Files.createDirectories(dir);
+                    Path tmp = java.nio.file.Files.createTempFile(dir, ".download-", ".tmp");
+                    try {
+                        long n = 0;
+                        try (var out = java.nio.file.Files.newOutputStream(tmp)) {
+                            byte[] buf = new byte[65536];
+                            for (int r; (r = body.read(buf)) >= 0; ) {
+                                n += r;
+                                if (n > max) throw new IllegalStateException("File too large: more than " + max
+                                        + " bytes (web.downloadMaxBytes)");
+                                out.write(buf, 0, r);
+                            }
+                        }
+                        quota.reserve(ctx.chatId(), target,
+                                java.nio.file.Files.exists(target) ? java.nio.file.Files.size(target) : 0, n);
+                        java.nio.file.Files.move(tmp, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                        size = n;
+                    } finally {
+                        java.nio.file.Files.deleteIfExists(tmp);
+                    }
+                }
+                return "Saved " + size + " bytes (" + type + ") to " + shown;
+            }
         });
     }
 }

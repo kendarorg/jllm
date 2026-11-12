@@ -207,6 +207,24 @@ public class ApprovalService {
         return false;
     }
 
+    private static final String HOST = "host:";
+
+    /** Allows the host and its subdomains for this chat. */
+    public void grantHost(String chatId, String host) {
+        String h = org.kendar.llm.harness.tools.HostMatcher.normalize(host);
+        if (!h.isEmpty()) grant(chatId, HOST + h);
+    }
+
+    /** True when a grant covers {@code host}: the same name, or a parent domain on a label boundary. */
+    public boolean hostGranted(String chatId, String host) {
+        for (String g : grantsOf(chatId)) {
+            if (g.startsWith(HOST) && org.kendar.llm.harness.tools.HostMatcher.covers(g.substring(HOST.length()), host)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public void grant(String chatId, String tool) {
         Set<String> g = grantsOf(chatId);
         if (g.add(tool)) {

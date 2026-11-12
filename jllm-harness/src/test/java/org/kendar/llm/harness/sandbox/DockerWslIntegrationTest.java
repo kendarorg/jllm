@@ -126,6 +126,43 @@ class DockerWslIntegrationTest {
         return r.stdout();
     }
 
+    /** The file jail of a script in a container, CLI layout: the agent scratch directory is the whole world. */
+    private static String jailed(RemoteExecSandboxExecutor box, String tool, String chat, String json) throws Exception {
+        ToolContext c = new ToolContext(chat, box.workDir(chat), box.scratchDir(chat, "main"), false, null,
+                PermissionMode.DEFAULT, null, new ScratchJailBackend(box.files(chat, "main")));
+        for (HarnessTool t : new FileSystemAgentTools(null, new Checkpoints()).tools()) {
+            if (t.name().equals(tool)) return t.execute(c, JSON.readTree(json));
+        }
+        throw new IllegalArgumentException(tool);
+    }
+
+    @Test
+    void aScriptFileJailInAContainerSeesOnlyTheAgentScratchDirectory() throws Exception {
+        Path project = Files.createDirectories(tmp.resolve("project"));
+        Files.writeString(project.resolve("secret.txt"), "project data");
+        RemoteExecSandboxExecutor box = cli(project);
+        created.add(RemoteExecSandboxExecutor.containerName(RemoteExecSandboxExecutor.Kind.CLI,
+                RemoteExecSandboxExecutor.hash(project.toAbsolutePath().normalize().toString()).substring(0, 12)));
+        assertTrue(ok(box, "cat secret.txt").contains("project data"));
+        // another agent of the chat has a file of its own
+        run(box, "write_file", "c1", "{\"path\":\"/workspace/.kendhar/scratchpad/other/theirs.txt\",\"content\":\"x\"}");
+
+        jailed(box, "write_file", "c1", "{\"path\":\"mine.txt\",\"content\":\"hello\\n\"}");
+
+        assertTrue(jailed(box, "read_file", "c1", "{\"path\":\"mine.txt\"}").contains("hello"));
+        assertEquals("hello", ok(box, "cat .kendhar/scratchpad/main/mine.txt").strip(), "written in the scratch dir");
+        for (String path : new String[]{"secret.txt", "../../../secret.txt", "/workspace/secret.txt",
+                "../other/theirs.txt", "/workspace/.kendhar/scratchpad/other/theirs.txt"}) {
+            Exception e = assertThrows(Exception.class,
+                    () -> jailed(box, "read_file", "c1", "{\"path\":\"" + path + "\"}"), path);
+            assertNotNull(e.getMessage());
+        }
+        assertEquals("mine.txt", jailed(box, "glob", "c1", "{\"pattern\":\"**/*\"}"));
+        assertThrows(Exception.class, () -> jailed(box, "glob", "c1", "{\"pattern\":\"../../*\"}"));
+        assertThrows(Exception.class, () -> jailed(box, "grep", "c1", "{\"pattern\":\"data\",\"path\":\"..\"}"));
+        assertTrue(jailed(box, "grep", "c1", "{\"pattern\":\"hell\"}").contains("mine.txt"));
+    }
+
     @Test
     void realContainerEndToEnd() throws Exception {
         Path project = Files.createDirectories(tmp.resolve("project"));

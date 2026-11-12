@@ -111,6 +111,21 @@ public class RemoteExecSandboxExecutor implements SandboxExecutor {
     }
 
     @Override
+    public void environmentWhitelist(java.util.List<String> patterns) {
+        layout.environmentWhitelist(patterns); // only the local fallback runs commands on the host
+    }
+
+    @Override
+    public boolean sharedWorkDir() {
+        return layout.sharedWorkDir();
+    }
+
+    @Override
+    public Path chatStorage(String chatId) {
+        return layout.chatStorage(chatId);
+    }
+
+    @Override
     public boolean localFallbackActive(String chatId) {
         return localChats.contains(chatId);
     }

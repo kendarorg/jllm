@@ -58,6 +58,9 @@ The default when the builder is given no sandbox. A command runs as `cmd /c` on 
 the chat's directory as current directory. No network, memory, CPU or process limits. A warning is logged at startup.
 `CwdSandboxExecutor` and `ChatDirSandboxExecutor` extend it and change only the directory layout.
 
+The command inherits the whole environment of the harness process (API keys included) unless the settings key
+`whitelistedEnvVars` narrows it, see [USAGE](USAGE.md#5-settings-file).
+
 ## `DockerSandboxExecutor`: container isolation
 
 Two modes, chosen by `sandbox.docker.mode`:

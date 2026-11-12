@@ -44,7 +44,49 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
                               List<AgentSettings> agents, Execution execution, Sandbox sandbox, Context context,
                               LlmSettings fastModel, Output output, Boolean smallModel, Permissions permissions,
                               List<ProviderSettings> providers, String defaultProvider,
-                              Integer chatRetentionLimit, JsonNode plugins) {
+                              Integer chatRetentionLimit, JsonNode plugins, Storage storage,
+                              List<String> whitelistedEnvVars, List<String> toolsWhitelistedEnvVars) {
+
+    /**
+     * The 17 components before the environment whitelists.
+     */
+    public HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSettings> restApis,
+                           List<SkillSettings> skills, List<String> instructionFiles,
+                           List<AgentSettings> agents, Execution execution, Sandbox sandbox, Context context,
+                           LlmSettings fastModel, Output output, Boolean smallModel, Permissions permissions,
+                           List<ProviderSettings> providers, String defaultProvider,
+                           Integer chatRetentionLimit, JsonNode plugins, Storage storage) {
+        this(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context, fastModel, output,
+                smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, null, null);
+    }
+
+    /** The 16 components before {@code storage}: no limit. */
+    public HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSettings> restApis,
+                           List<SkillSettings> skills, List<String> instructionFiles,
+                           List<AgentSettings> agents, Execution execution, Sandbox sandbox, Context context,
+                           LlmSettings fastModel, Output output, Boolean smallModel, Permissions permissions,
+                           List<ProviderSettings> providers, String defaultProvider,
+                           Integer chatRetentionLimit, JsonNode plugins) {
+        this(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context, fastModel, output,
+                smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, null, null, null);
+    }
+
+    /** @param maxBytes cap of the total size of a chat's storage; null or -1 = no limit (default) */
+    public record Storage(Long maxBytes) {
+    }
+
+    /*
+     * whitelistedEnvVars:      environment variables of the harness process that shell commands (bash) may inherit;
+     *                          patterns with * (any run of characters, case-insensitive: "*key*", "PATH"); default
+     *                          ["*"] = all, [] = none
+     * toolsWhitelistedEnvVars: the same for the processes of tools (MCP stdio servers); the {@code env} of a server
+     *                          in the settings is always added on top
+     */
+
+    /** The storage cap in bytes; -1 = no limit. */
+    public long storageMaxBytes() {
+        return storage == null || storage.maxBytes() == null ? -1 : storage.maxBytes();
+    }
 
     /** The 15 components before {@code plugins}: none listed. */
     public HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSettings> restApis,
@@ -103,7 +145,8 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
         if (pluginSettings != null) e.set("settings", merge(e.has("settings") ? e.get("settings") : pluginSettings,
                 pluginSettings));
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context,
-                fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, copy);
+                fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, copy, storage,
+                whitelistedEnvVars, toolsWhitelistedEnvVars);
     }
 
     /**
@@ -204,7 +247,8 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
         Sandbox s = sandbox == null ? new Sandbox(null, null) : sandbox;
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution,
                 new Sandbox(s.tempDir(), s.timeoutSeconds(), backend.toLowerCase(), s.localFallback(), s.docker()),
-                context, fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins);
+                context, fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
+                toolsWhitelistedEnvVars);
     }
 
     /** Same settings with {@code sandbox.docker.image} replaced (e.g. by a command line flag). */
@@ -215,7 +259,8 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
                 new Sandbox(s.tempDir(), s.timeoutSeconds(), s.backend(), s.localFallback(),
                         new Docker(d.binary(), image, d.memory(), d.cpus(), d.pidsLimit(), d.user(), d.network(),
                                 d.mode(), d.remote(), d.remoteHost())),
-                context, fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins);
+                context, fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
+                toolsWhitelistedEnvVars);
     }
 
     /** Same settings with {@code sandbox.docker.mode} replaced (e.g. by a command line flag). */
@@ -229,7 +274,8 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
                 new Sandbox(s.tempDir(), s.timeoutSeconds(), s.backend(), s.localFallback(),
                         new Docker(d.binary(), d.image(), d.memory(), d.cpus(), d.pidsLimit(), d.user(), d.network(),
                                 mode.toLowerCase(), d.remote(), d.remoteHost())),
-                context, fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins);
+                context, fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
+                toolsWhitelistedEnvVars);
     }
 
     /** Same settings with {@code sandbox.docker.remote} and {@code remoteHost} replaced (command line flags). */
@@ -241,7 +287,8 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
                         new Docker(d.binary(), d.image(), d.memory(), d.cpus(), d.pidsLimit(), d.user(), d.network(),
                                 d.mode(), remote != null ? remote : d.remote(),
                                 remoteHost != null ? remoteHost : d.remoteHost())),
-                context, fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins);
+                context, fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
+                toolsWhitelistedEnvVars);
     }
 
     /** True when the docker backend runs in daemon mode (long-running container). */
@@ -385,7 +432,8 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
         Context c = context == null ? new Context(null, null, null, null, null) : context;
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox,
                 new Context(maxTokens, c.keepRecentTurns(), c.auto(), c.keepTokens(), c.buffer(), c.strategy(),
-                        c.mnemonic(), c.scope(), c.noiseCommands(), c.deferCompactionOnThinkingOverflow()), fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins);
+                        c.mnemonic(), c.scope(), c.noiseCommands(), c.deferCompactionOnThinkingOverflow()), fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
+                toolsWhitelistedEnvVars);
     }
 
     /** Same settings with {@code context.strategy} replaced (e.g. by a command line flag). */
@@ -394,7 +442,8 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
         Context c = context == null ? new Context(null, null, null, null, null) : context;
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox,
                 new Context(c.maxTokens(), c.keepRecentTurns(), c.auto(), c.keepTokens(), c.buffer(), strategy,
-                        c.mnemonic(), c.scope(), c.noiseCommands(), c.deferCompactionOnThinkingOverflow()), fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins);
+                        c.mnemonic(), c.scope(), c.noiseCommands(), c.deferCompactionOnThinkingOverflow()), fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
+                toolsWhitelistedEnvVars);
     }
 
     /** False when {@code context.noiseCommands} is set to false. */
@@ -405,13 +454,15 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
     /** Same settings with {@code smallModel} replaced (e.g. by a command line flag). */
     public HarnessSettings withSmallModel(boolean small) {
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context,
-                fastModel, output, small, permissions, providers, defaultProvider, chatRetentionLimit, plugins);
+                fastModel, output, small, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
+                toolsWhitelistedEnvVars);
     }
 
     /** Same settings with {@code chatRetentionLimit} replaced. */
     public HarnessSettings withChatRetentionLimit(Integer limit) {
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context,
-                fastModel, output, smallModel, permissions, providers, defaultProvider, limit, plugins);
+                fastModel, output, smallModel, permissions, providers, defaultProvider, limit, plugins, storage, whitelistedEnvVars,
+                toolsWhitelistedEnvVars);
     }
 
     /** Concurrency limit: {@code 1} serialized (default), {@code N} bounded, {@code -1} unlimited. */
@@ -457,6 +508,8 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
         instructionFiles = instructionFiles == null ? List.of() : List.copyOf(instructionFiles);
         agents = agents == null ? List.of() : List.copyOf(agents);
         providers = providers == null ? List.of() : List.copyOf(providers);
+        whitelistedEnvVars = org.kendar.llm.harness.util.EnvWhitelist.orAll(whitelistedEnvVars);
+        toolsWhitelistedEnvVars = org.kendar.llm.harness.util.EnvWhitelist.orAll(toolsWhitelistedEnvVars);
         if (permissions != null) {
             PermissionRules.parse(permissions.deny(), permissions.ask(), permissions.allow()); // fail at startup
         }

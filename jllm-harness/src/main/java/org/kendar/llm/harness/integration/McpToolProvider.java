@@ -36,8 +36,14 @@ public final class McpToolProvider {
 
     /** A client for the server's transport, not yet connected. */
     public static McpClient connect(McpServerSettings server, HttpClient http, ObjectMapper mapper) {
+        return connect(server, http, mapper, null);
+    }
+
+    /** @param inheritedEnv patterns of the process variables a stdio server inherits; null: all */
+    public static McpClient connect(McpServerSettings server, HttpClient http, ObjectMapper mapper,
+                                    List<String> inheritedEnv) {
         return server.isStdio()
-                ? new McpStdioClient(mapper, server.name(), server.command(), server.args(), server.env())
+                ? new McpStdioClient(mapper, server.name(), server.command(), server.args(), server.env(), inheritedEnv)
                 : oauth(server, new McpHttpClient(http, mapper, server.url(), server.headers()), http, mapper);
     }
 
