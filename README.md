@@ -4,6 +4,8 @@
 
 Add one library, give it a model, and your application gets a tool-using AI agent that can call **your own Java code**, **MCP servers**, and **REST APIs**, all under a permission system you control.
 
+Includes a **JavaScript sandbox** (`jllm-js`): the agent can run scripts with no host access, reaching your tools only through the secured tools.
+
 Built for Java 21, with a Maven multi-module architecture.
 
 JLLM includes two ready-made front ends built on the same library:
