@@ -52,6 +52,10 @@ h.start(chatId, "Why was invoice 4711 charged twice?");
 `start` returns at once; the run happens on a virtual thread and reports through events, so any front end (a web
 socket, a desktop UI, a message queue) can follow it, answer approvals and cancel.
 
+**Let it script. Keep it contained.** The optional [jllm-js](docs/JS.md) plugin lets the agent write and run
+JavaScript on the fly, in a sandbox with no way out except the tools you allow. Real automation, no shell, no
+surprises.
+
 ### Three ways to give the agent tools
 
 | Source | You write | The agent sees |
@@ -137,7 +141,7 @@ Set `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`, `GROK_API_KEY`, `QWEN_API_KEY`) fi
 | [jllm-harness](jllm-harness/README.md) | embedding, settings file, hooks, plugins, modes, context strategies, fast model |
 | [jllm-cli](jllm-cli/README.md) | flags, directories, interactive session, slash commands, local models |
 | [jllm-pdf](docs/TOOLS.md#document-readers) / [jllm-docs](docs/TOOLS.md#document-readers) | optional `read_file` readers for pdf and docx (plugins: jar in the plugin directory, enabled under `plugins` in the settings) |
-| [jllm-js](docs/JS.md) | optional `run_js` tool: JavaScript (GraalJS) in a sandbox whose only view of the world is the harness tools; installing it removes `bash` (plugin: jar in the plugin directory, enabled under `plugins`) |
+| [jllm-js](docs/JS.md) | optional `run_js` tool: JavaScript (GraalJS, regex supported, synchronous `tools.*` calls without `await`) in a sandbox whose only view of the world is the harness tools; installing it removes `bash` (plugin: jar in the plugin directory, enabled under `plugins`) |
 | [jllm-web](jllm-web/README.md) | `jllm.*` properties, REST and SSE API, frontend structure |
 | [USAGE](docs/USAGE.md) | harness build, permission modes, settings file, embedding, events |
 | [TOOLS](docs/TOOLS.md) | built-in tools, kinds, path jail, per-chat tool set, tool-call pipeline |

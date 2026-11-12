@@ -47,7 +47,8 @@ sandbox and out of its reach:
 - Globals: the ECMAScript built-ins, `console` and `tools`. No `require`, `fetch`, `XMLHttpRequest`, `Java`,
   `Packages`, `Polyglot`, `Graal`, `load`, `print`, no environment, no processes, no threads. `tools` is frozen.
 - `tools.<name>(args)`: one function per tool of the calling agent, the name with `-` replaced by `_`. It takes one
-  object and returns the result, parsed when it is JSON, else a string. Calls are synchronous. A failed call throws
+  object and returns the result, parsed when it is JSON, else a string. Calls are synchronous: no `await`, no
+  promises (`await` outside an async function is a `SyntaxError`). A failed call throws
   an `Error` with the message of the tool (denied by the user, by a rule or a hook, a tool error, bad arguments); an
   uncaught one ends the run with `ok: false`.
 - The library is built for each run from the tools the agent can call at that moment, so a tool disabled with
@@ -57,6 +58,10 @@ sandbox and out of its reach:
 - Tool results are raw (no sanitizing) so parsing sees the real content. They are taint-marked: if any inner call
   returned untrusted data, the chat is tainted, whatever the script did with it. The `run_js` result (value and
   console) is sanitized before it reaches the model.
+- Regular expressions work (`/a/g`, `RegExp`, `match`, `replace`, `split`). GraalJS runs them in the internal `regex`
+  language, so the engine and every context are built with `"js", "regex"`; allowing only `js` makes every regex
+  fail with `No language for id regex found` (covered by `RegexLiteralTest`). `wasm` is deliberately not enabled:
+  `WebAssembly` is unavailable.
 - Nothing survives a run: each call gets a fresh `Context`, closed at the end. State between calls goes in files.
 
 Result: `ok`, `value` (the `return` value as JSON), `console` (`console.log` and `console.error`, capped at 50 KB,
