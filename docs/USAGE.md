@@ -273,6 +273,41 @@ h.start(chatId, "List the files in the workspace");   // asynchronous
 `start` returns at once; the run happens on a virtual thread and reports through events. A second `start` on a busy
 chat throws `AgentService.RunAlreadyActiveException`.
 
+### Multi-user embedding
+
+One server, many users: the embedder attaches a principal to each chat, and the harness uses it for every call made
+for that chat.
+
+```java
+record Staff(String id, Set<String> roles) {}                     // your own user model
+AgentHarness h = AgentHarness.builder()
+        .modelClient(model)
+        // per call, after the chat's principal is known: tokens expire and refresh
+        .credentialResolver((user, source) -> user == null ? Map.of()
+                : Map.of("Authorization", "Bearer " + tokens.current(user.id(), source)))
+        // at each call: the tools and approval policy of the user (the tool set stays fixed per chat)
+        .userPolicyResolver(user -> user != null && user.roles().contains("reader")
+                ? new UserPolicy(t -> t.kind() == ToolKind.READ_ONLY, null)
+                : UserPolicy.ALL)
+        .principalDirectory(id -> new HarnessPrincipal(id, rolesOf(id), Map.of()))
+        .build();
+
+String chat = h.sessions().create("Q3 review", "alice").chatId();   // the principal id is stored with the chat
+String owner = h.sessions().principal(chat);                      // "alice"; read it in hooks too
+```
+
+- `CredentialResolver` adds headers on top of the settings-file headers; without one, nothing changes.
+- `UserPolicy.toolFilter` is applied when the chat's tools are offered and again at dispatch, so a model that names a
+  hidden tool is refused. A `null` filter allows every tool; a `null` approval policy uses the harness one.
+- Calls made by a script (`run_js`) are covered by the `run_js` call the user was allowed to make.
+- Only the principal id is stored with the chat. Roles come from the directory and the policy is resolved on each
+  model call, so a changed role changes the tools offered from the next call on. That changes the tool block, so the prompt
+  cache misses once. The principal must come from your auth layer, never from model input.
+- MCP sessions are kept per principal. The tool list of an MCP server is discovered once, without a principal, so
+  per-user tool lists are not supported yet.
+
+The `jllm-web` sample shows the wiring with a fake sign-in picker (no password, not authentication); see its README.
+
 ### Front-end contract
 
 ```mermaid

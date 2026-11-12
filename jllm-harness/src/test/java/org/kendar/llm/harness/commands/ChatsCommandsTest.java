@@ -34,7 +34,7 @@ class ChatsCommandsTest {
     private String chatAged(String title, int daysAgo) {
         ChatSessionData c = harness.sessions().create(title);
         ChatSessionData aged = new ChatSessionData(c.chatId(), c.agentId(), title, c.mode(), "", null, 0, 0, 0, 0,
-                c.createdAt(), Instant.now().minus(daysAgo, ChronoUnit.DAYS), 0);
+                c.createdAt(), Instant.now().minus(daysAgo, ChronoUnit.DAYS), 0, 0, 0, c.principal());
         store.save(aged);
         return c.chatId();
     }

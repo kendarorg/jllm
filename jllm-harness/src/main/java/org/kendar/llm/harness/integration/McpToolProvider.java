@@ -2,6 +2,7 @@ package org.kendar.llm.harness.integration;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.kendar.llm.harness.auth.Identity;
 import org.kendar.llm.harness.settings.McpServerSettings;
 import org.kendar.llm.harness.tools.HarnessTool;
 import org.kendar.llm.harness.tools.SimpleTool;
@@ -62,6 +63,16 @@ public final class McpToolProvider {
     /** The tools of a connected client, named {@code mcp__<server>__<tool>}; calls go through the client. */
     public static List<HarnessTool> tools(McpServerSettings server, McpClient client, ObjectMapper mapper)
             throws IOException, InterruptedException {
+        return tools(server, client, mapper, Identity.ANONYMOUS);
+    }
+
+    /**
+     * As {@link #tools(McpServerSettings, McpClient, ObjectMapper)}; each call is made for the principal of its chat,
+     * with the credentials that apply to that principal.
+     */
+    public static List<HarnessTool> tools(McpServerSettings server, McpClient client, ObjectMapper mapper,
+                                          Identity identity)
+            throws IOException, InterruptedException {
         List<HarnessTool> out = new ArrayList<>();
         for (JsonNode t : client.listTools()) {
             String remote = t.path("name").asText();
@@ -70,7 +81,11 @@ public final class McpToolProvider {
             out.add(new SimpleTool(ToolNames.of("mcp__" + server.name() + "__" + remote),
                     t.path("description").asText(remote), schema, server.effectiveGroup(),
                     server.isReadOnly() ? ToolKind.READ_ONLY : ToolKind.OTHER,
-                    (ctx, input) -> render(client.callTool(remote, input))));
+                    (ctx, input) -> {
+                        Identity.Caller caller = identity.callerOf(ctx == null ? null : ctx.chatId());
+                        String pid = caller.principal() == null ? null : caller.principal().id();
+                        return render(client.callTool(remote, input, pid, caller.headers("mcp:" + server.name())));
+                    }));
         }
         return out;
     }

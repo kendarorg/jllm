@@ -1,0 +1,4 @@
+{
+  "tools": ["read_file", "ls", "glob", "grep", "grep_code"],
+  "readOnly": true
+}

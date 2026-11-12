@@ -13,20 +13,28 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
-/** Minimal MCP client over streamable HTTP: initialize, tools/list and tools/call. */
+/**
+ * Minimal MCP client over streamable HTTP: initialize, tools/list and tools/call.
+ * Each principal gets its own MCP session (its own {@code Mcp-Session-Id}), so one user's session is never sent
+ * with another user's call.
+ */
 public final class McpHttpClient implements McpClient {
 
     private static final String PROTOCOL_VERSION = "2025-03-26";
+    /** Session key of calls made without a principal. */
+    static final String NO_PRINCIPAL = "";
 
     private final HttpClient http;
     private final ObjectMapper mapper;
     private final URI url;
     private final Map<String, String> headers;
     private final AtomicLong ids = new AtomicLong();
-    private volatile String sessionId;
-    private volatile boolean initialized;
+    private final Map<String, String> sessionIds = new ConcurrentHashMap<>();
+    private final Set<String> initialized = ConcurrentHashMap.newKeySet();
     private volatile org.kendar.llm.harness.auth.AuthProvider auth;
 
     /** Adds the provider's headers (OAuth bearer) to every request; a 401 triggers one retry with a fresh token. */
@@ -43,17 +51,21 @@ public final class McpHttpClient implements McpClient {
     }
 
     @Override
-    public synchronized void initialize() throws IOException, InterruptedException {
-        if (initialized) return;
+    public void initialize() throws IOException, InterruptedException {
+        initialize(NO_PRINCIPAL, Map.of());
+    }
+
+    private synchronized void initialize(String key, Map<String, String> extra) throws IOException, InterruptedException {
+        if (initialized.contains(key)) return;
         ObjectNode params = mapper.createObjectNode();
         params.put("protocolVersion", PROTOCOL_VERSION);
         params.putObject("capabilities");
         params.putObject("clientInfo").put("name", "jllm-harness").put("version", "1");
-        post(request("initialize", params), true);
+        post(request("initialize", params), true, key, extra);
         ObjectNode note = mapper.createObjectNode();
         note.put("jsonrpc", "2.0").put("method", "notifications/initialized");
-        post(note, false);
-        initialized = true;
+        post(note, false, key, extra);
+        initialized.add(key);
     }
 
     @Override
@@ -64,7 +76,7 @@ public final class McpHttpClient implements McpClient {
         do {
             ObjectNode params = mapper.createObjectNode();
             if (cursor != null) params.put("cursor", cursor);
-            JsonNode result = post(request("tools/list", params), true);
+            JsonNode result = post(request("tools/list", params), true, NO_PRINCIPAL, Map.of());
             result.path("tools").forEach(tools::add);
             cursor = result.hasNonNull("nextCursor") ? result.get("nextCursor").asText() : null;
         } while (cursor != null);
@@ -73,11 +85,18 @@ public final class McpHttpClient implements McpClient {
 
     @Override
     public JsonNode callTool(String name, JsonNode arguments) throws IOException, InterruptedException {
-        initialize();
+        return callTool(name, arguments, NO_PRINCIPAL, Map.of());
+    }
+
+    @Override
+    public JsonNode callTool(String name, JsonNode arguments, String principalId, Map<String, String> extraHeaders)
+            throws IOException, InterruptedException {
+        String key = principalId == null ? NO_PRINCIPAL : principalId;
+        initialize(key, extraHeaders);
         ObjectNode params = mapper.createObjectNode();
         params.put("name", name);
         params.set("arguments", arguments == null || arguments.isNull() ? mapper.createObjectNode() : arguments);
-        return post(request("tools/call", params), true);
+        return post(request("tools/call", params), true, key, extraHeaders);
     }
 
     private ObjectNode request(String method, JsonNode params) {
@@ -87,13 +106,14 @@ public final class McpHttpClient implements McpClient {
         return req;
     }
 
-    private JsonNode post(ObjectNode body, boolean expectResult) throws IOException, InterruptedException {
-        HttpResponse<String> resp = send(body);
+    private JsonNode post(ObjectNode body, boolean expectResult, String key, Map<String, String> extra)
+            throws IOException, InterruptedException {
+        HttpResponse<String> resp = send(body, key, extra);
         if (resp.statusCode() == 401 && auth != null) {
             auth.onUnauthorized();
-            resp = send(body);
+            resp = send(body, key, extra);
         }
-        resp.headers().firstValue("Mcp-Session-Id").ifPresent(id -> sessionId = id);
+        resp.headers().firstValue("Mcp-Session-Id").ifPresent(id -> sessionIds.put(key, id));
         if (resp.statusCode() / 100 != 2) {
             throw new IOException("MCP " + url + " answered HTTP " + resp.statusCode() + ": " + resp.body());
         }
@@ -106,12 +126,15 @@ public final class McpHttpClient implements McpClient {
         return message.path("result");
     }
 
-    private HttpResponse<String> send(ObjectNode body) throws IOException, InterruptedException {
+    private HttpResponse<String> send(ObjectNode body, String key, Map<String, String> extra)
+            throws IOException, InterruptedException {
         HttpRequest.Builder b = HttpRequest.newBuilder(url).timeout(Duration.ofSeconds(60))
                 .header("Content-Type", "application/json")
                 .header("Accept", "application/json, text/event-stream");
-        if (sessionId != null) b.header("Mcp-Session-Id", sessionId);
+        String session = sessionIds.get(key);
+        if (session != null) b.header("Mcp-Session-Id", session);
         headers.forEach(b::header);
+        extra.forEach(b::header);
         if (auth != null) {
             try {
                 auth.headers().forEach(b::header);

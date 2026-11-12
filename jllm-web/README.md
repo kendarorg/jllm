@@ -7,7 +7,7 @@ Vue 3 chat UI. The Spring layer is a thin adapter; all agent logic lives in the 
 
 ```sh
 mvn -pl jllm-web -am package -DskipTests
-java -jar jllm-web/target/jllm-web-1.0.0.jar --provider anthropic
+java -jar jllm-web/target/jllm-web-1.1.0-jllm.jar --provider anthropic
 ```
 
 Then open <http://localhost:8080>. The UI is plain static files in `src/main/resources/static`: Vue 3 as an ES module
@@ -49,6 +49,30 @@ Also set: `server.port=8080` and `spring.mvc.async.request-timeout=-1` (SSE stre
 The sandbox, history and scratch directories are the same as in the CLI (`.kendhar/` under the project directory).
 There is **no authentication**, and no isolation unless `--sandbox docker`: shell commands run as the user running the server. Bind it to
 localhost or put it behind your own proxy.
+
+## Sample users and sign-in
+
+The sample serves several users from one server. This is a demonstration of the mechanism, not authentication: the
+picker signs a user in by name, with no password.
+
+Everything lives under one folder, `webauth/` at the project root (property `jllm.webauth-dir`, default `webauth`,
+relative to the start folder; run from the project root, or pass `--jllm.webauth-dir=...`):
+
+- `webauth/users/<id>.json`: one file per user, `{ "name", "role", "credentials" }`.
+- `webauth/permissions/<role>.json`: one file per role, `{ "tools", "readOnly", "approval" }`:
+  - `tools`: array of tool names; `["*"]` means every tool.
+  - `readOnly`: optional; `true` keeps only read-only tools.
+  - `approval`: optional; `"off"` turns approval prompts off, `"ask"` (default) uses the harness policy.
+  - A role without a valid file gets no tools.
+
+The shipped files: `guest` (`run_js` and the web tools; files are reachable only through the JS sandbox), `reader`
+(read-only file tools only), `admin` (every tool, no prompts). Both folders are plain files: edit them by hand, there is
+no UI for it. Files are read on each use, so changes apply without a restart.
+
+- Chats belong to the user who created them. Others get 404; the admin sees all chats.
+- Credentials: a user file can declare headers per source, e.g.
+  `"credentials": { "mcp:docs": { "Authorization": "env:DOCS_TOKEN" } }`. The value is read from the environment on each
+  call. Literal values are ignored, so secrets stay out of the directory.
 
 ## REST API
 
@@ -113,5 +137,10 @@ JavaScript objects with a `template` string, so nothing is compiled or transpile
 | `JllmProperties` | the `jllm.*` properties |
 | `HarnessConfiguration` | builds `ModelClient`, `HarnessPricing` and `AgentHarness` (same wiring and precedence as the CLI) |
 | `ChatController` | the REST and SSE endpoints above |
+| `AuthController` | `/api/users`, `/api/me`, `/api/login`, `/api/logout`: the fake sign-in |
+| `UserInterceptor` | requires a signed-in user on `/api/**`; hides chats that belong to others (404) |
+| `UserDirectory` | reads `webauth/users/<id>.json` |
+| `Permissions` | reads `webauth/permissions/<role>.json` and builds each user's `UserPolicy` |
+| `FileCredentialResolver` | per-call headers from a user's `credentials`, `env:` references only |
 
-Tests: `ChatControllerTest` (`mvn -pl jllm-web -am test`).
+Tests: `ChatControllerTest`, `SampleUsersTest` (`mvn -pl jllm-web -am test`).

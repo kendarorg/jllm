@@ -123,6 +123,7 @@ public class FileChatSessionStore implements ChatSessionStore {
         n.put("messageCount", s.messageCount());
         n.put("qualifierInputTokens", s.qualifierInputTokens());
         n.put("qualifierOutputTokens", s.qualifierOutputTokens());
+        if (s.principal() != null) n.put("principal", s.principal());
         Files.createDirectories(dir);
         Path tmp = dir.resolve(ROW + ".tmp");
         mapper.writerWithDefaultPrettyPrinter().writeValue(tmp.toFile(), n);
@@ -145,7 +146,8 @@ public class FileChatSessionStore implements ChatSessionStore {
                     n.path("inputTokens").asLong(), n.path("outputTokens").asLong(), n.path("cacheReadTokens").asLong(),
                     n.path("cacheCreationTokens").asLong(), Instant.parse(req(n, "createdAt")),
                     Instant.parse(req(n, "updatedAt")), n.path("messageCount").asInt(),
-                    n.path("qualifierInputTokens").asLong(), n.path("qualifierOutputTokens").asLong());
+                    n.path("qualifierInputTokens").asLong(), n.path("qualifierOutputTokens").asLong(),
+                    n.hasNonNull("principal") ? n.get("principal").asText() : null);
         } catch (Exception e) {
             log.warn("Skipping chat in {}: cannot read {}: {}", dir, ROW, e.getMessage());
             return null;

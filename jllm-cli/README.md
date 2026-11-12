@@ -154,6 +154,23 @@ by default (`execution.maxParallel`), which suits one local GPU. `--small-model`
 setting: flag, then settings file, then default. See [USAGE](../docs/USAGE.md) for the settings file and the event
 contract.
 
+### Credentials and user policy
+
+The CLI is single-user, so it does not set the per-user hooks of the harness: no `credentialResolver`, no
+`userPolicyResolver`, no `principalDirectory`. Chats are created with `sessions().create(null)`, so they have no
+principal. What that means for each call:
+
+- **Credentials:** the `Identity` of the harness resolves a caller with no principal, and the credential resolver is
+  `CredentialResolver.NONE`. An MCP or REST call gets only the headers from the settings file (`headers` of the server
+  or API), as before.
+- **Tools and approval:** the user policy is `UserPolicy.ALL`, so every tool is offered and calls go through the
+  harness approval policy (`ToolApprovalPolicy.byKind()` by default, and the permission mode).
+- **Principal:** `sessions().principal(chatId)` returns `null`. Nothing in the CLI reads it.
+
+The resolvers exist for embedders that serve several users from one process (see
+[USAGE, Multi-user embedding](../docs/USAGE.md#multi-user-embedding)). A CLI session could set them, but
+`Main` does not, so the behavior above is fixed.
+
 ## Plugins
 
 Plugin jars are loaded from `--plugin-dir DIR` (default `./plugins` if it exists; `./mvnw install` fills the repository

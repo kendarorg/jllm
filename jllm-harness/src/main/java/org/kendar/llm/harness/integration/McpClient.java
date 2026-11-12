@@ -17,6 +17,17 @@ public interface McpClient extends Closeable {
     /** @return the result object of tools/call */
     JsonNode callTool(String name, JsonNode arguments) throws IOException, InterruptedException;
 
+    /**
+     * A call made for one principal: its headers are added to the request and, where the transport keeps sessions,
+     * the call uses that principal's session. The default ignores both (stdio servers: one process, no headers).
+     *
+     * @param principalId null when the chat has no principal
+     */
+    default JsonNode callTool(String name, JsonNode arguments, String principalId, java.util.Map<String, String> headers)
+            throws IOException, InterruptedException {
+        return callTool(name, arguments);
+    }
+
     @Override
     default void close() throws IOException {
     }

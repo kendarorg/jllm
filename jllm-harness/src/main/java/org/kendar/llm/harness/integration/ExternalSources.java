@@ -64,17 +64,26 @@ public final class ExternalSources {
     private final Map<String, McpClient> connections = new HashMap<>();
     private final java.util.List<String> toolEnv;
 
+    private final org.kendar.llm.harness.auth.Identity identity;
+
     public ExternalSources(HarnessToolRegistry registry, HarnessSettings settings, HttpClient http,
                            ObjectMapper mapper) {
+        this(registry, settings, http, mapper, org.kendar.llm.harness.auth.Identity.ANONYMOUS);
+    }
+
+    /** @param identity who each MCP and REST call is made for; the single-user default is {@code Identity.ANONYMOUS} */
+    public ExternalSources(HarnessToolRegistry registry, HarnessSettings settings, HttpClient http,
+                           ObjectMapper mapper, org.kendar.llm.harness.auth.Identity identity) {
         this.registry = registry;
         this.toolEnv = settings.toolsWhitelistedEnvVars();
         this.http = http;
         this.mapper = mapper;
+        this.identity = identity;
         for (McpServerSettings m : settings.mcpServers()) {
             add(new Source(Kind.MCP, m.name(), () -> mcpDiscover(m), () -> mcpProbe(m)), m.active());
         }
         for (RestApiSettings a : settings.restApis()) {
-            add(new Source(Kind.API, a.name(), () -> RestApiToolProvider.discover(a, http, mapper),
+            add(new Source(Kind.API, a.name(), () -> RestApiToolProvider.discover(a, http, mapper, identity),
                     () -> apiProbe(a)), a.active());
         }
     }
@@ -156,7 +165,7 @@ public final class ExternalSources {
         String key = key(Kind.MCP, m.name());
         McpClient client = McpToolProvider.connect(m, http, mapper, toolEnv);
         try {
-            List<HarnessTool> tools = McpToolProvider.tools(m, client, mapper);
+            List<HarnessTool> tools = McpToolProvider.tools(m, client, mapper, identity);
             closeConnection(key);
             connections.put(key, client);
             return tools;

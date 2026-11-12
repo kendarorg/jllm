@@ -24,6 +24,7 @@ import org.slf4j.LoggerFactory;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
+import org.kendar.llm.harness.auth.Identity;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
@@ -59,6 +60,11 @@ public final class RestApiToolProvider {
 
     /** Reads the spec and builds the tools of the allowed operations. */
     public static List<HarnessTool> discover(RestApiSettings api, HttpClient http, ObjectMapper mapper) {
+        return discover(api, http, mapper, Identity.ANONYMOUS);
+    }
+
+    /** As {@link #discover(RestApiSettings, HttpClient, ObjectMapper)}; each call uses the credentials of its chat's principal. */
+    public static List<HarnessTool> discover(RestApiSettings api, HttpClient http, ObjectMapper mapper, Identity identity) {
         List<HarnessTool> out = new ArrayList<>();
         OpenAPI spec = readSpec(api);
         String baseUrl = baseUrl(api, spec);
@@ -66,7 +72,7 @@ public final class RestApiToolProvider {
         if (spec.getPaths() != null) {
             spec.getPaths().forEach((path, item) -> item.readOperationsMap().forEach((method, op) -> {
                 if (allowed.stream().noneMatch(p -> p.matcher(method + " " + path).matches())) return;
-                out.add(tool(api, baseUrl, path, method, item, op, http, mapper));
+                out.add(tool(api, baseUrl, path, method, item, op, http, mapper, identity));
             }));
         }
         if (out.isEmpty()) log.warn("REST API '{}': no operation matches allowedPaths {}", api.name(), api.allowedPaths());
@@ -120,7 +126,8 @@ public final class RestApiToolProvider {
     }
 
     private static HarnessTool tool(RestApiSettings api, String baseUrl, String path, PathItem.HttpMethod method,
-                                    PathItem item, Operation op, HttpClient http, ObjectMapper mapper) {
+                                    PathItem item, Operation op, HttpClient http, ObjectMapper mapper,
+                                    Identity identity) {
         List<Parameter> params = new ArrayList<>();
         if (item.getParameters() != null) params.addAll(item.getParameters());
         if (op.getParameters() != null) params.addAll(op.getParameters());
@@ -156,7 +163,8 @@ public final class RestApiToolProvider {
         boolean body = hasBody;
         return new SimpleTool(ToolNames.of(api.name() + "__" + opName), description, schema, api.effectiveGroup(),
                 readOnly ? ToolKind.READ_ONLY : ToolKind.OTHER,
-                (ctx, input) -> call(api, baseUrl, path, method, params, body, input, http, mapper));
+                (ctx, input) -> call(api, baseUrl, path, method, params, body, input, http, mapper,
+                        identity.callerOf(ctx == null ? null : ctx.chatId())));
     }
 
     private static MediaType jsonContent(Content content) {
@@ -169,10 +177,11 @@ public final class RestApiToolProvider {
 
     private static String call(RestApiSettings api, String baseUrl, String path, PathItem.HttpMethod method,
                                List<Parameter> params, boolean hasBody, JsonNode input, HttpClient http,
-                               ObjectMapper mapper) throws Exception {
+                               ObjectMapper mapper, Identity.Caller caller) throws Exception {
         String resolved = path;
         Map<String, String> query = new LinkedHashMap<>();
         Map<String, String> headers = new LinkedHashMap<>(api.headers());
+        headers.putAll(caller.headers("api:" + api.name()));
         for (Parameter p : params) {
             JsonNode v = input.get(p.getName());
             if (v == null || v.isNull()) continue;

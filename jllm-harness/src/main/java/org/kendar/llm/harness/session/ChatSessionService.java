@@ -24,8 +24,18 @@ public class ChatSessionService {
 
     /** Every chat gets its own agent instance id: {@code <configured agent id>-<uuid>}; it also names the scratch dir. */
     public ChatSessionData create(String title) {
+        return create(title, null);
+    }
+
+    /** @param principal id of the user the chat belongs to, or null for single-user use */
+    public ChatSessionData create(String title, String principal) {
         return store.save(ChatSessionData.create(Uuids.v7String(), agentId + "-" + Uuids.v7String(),
-                title == null || title.isBlank() ? "New chat" : title));
+                title == null || title.isBlank() ? "New chat" : title, principal));
+    }
+
+    /** The principal id the chat was created for, or null. */
+    public String principal(String chatId) {
+        return get(chatId).principal();
     }
 
     public Optional<ChatSessionData> find(String chatId) {

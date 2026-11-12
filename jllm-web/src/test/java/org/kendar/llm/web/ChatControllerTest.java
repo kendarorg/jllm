@@ -14,6 +14,7 @@ import org.kendar.llm.harness.session.ChatSessionData;
 import org.kendar.llm.harness.session.FileChatSessionStore;
 import org.kendar.llm.harness.session.InMemoryChatSessionStore;
 import org.springframework.http.MediaType;
+import java.util.Map;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
@@ -23,6 +24,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 class ChatControllerTest {
+
+    private static final WebUser ADMIN = new WebUser("admin", "Admin", "admin", Map.of());
 
     private final ObjectMapper mapper = new ObjectMapper();
     private MockMvc mvc;
@@ -51,12 +54,14 @@ class ChatControllerTest {
 
     @Test
     void createListGetDelete() throws Exception {
-        String created = mvc.perform(post("/api/chat").contentType(MediaType.APPLICATION_JSON).content("{}"))
+        String created = mvc.perform(post("/api/chat").contentType(MediaType.APPLICATION_JSON).content("{}")
+                        .requestAttr(UserInterceptor.ATTR, ADMIN))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         String id = mapper.readTree(created).path("chatId").asText();
         assertTrue(!id.isBlank());
 
-        JsonNode list = mapper.readTree(mvc.perform(get("/api/chat")).andReturn().getResponse().getContentAsString());
+        JsonNode list = mapper.readTree(mvc.perform(get("/api/chat").requestAttr(UserInterceptor.ATTR, ADMIN))
+                .andReturn().getResponse().getContentAsString());
         assertEquals(1, list.size());
 
         mvc.perform(get("/api/chat/" + id)).andExpect(status().isOk());
@@ -76,7 +81,7 @@ class ChatControllerTest {
     @Test
     void listsAndLoadsChatsOfAPrePopulatedRoot(@TempDir java.nio.file.Path root) throws Exception {
         String use = "{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"bash\",\"input\":{}}]}";
-        new FileChatSessionStore(root, mapper).save(ChatSessionData.create("c1", "agent-c1", "Fix login")
+        new FileChatSessionStore(root, mapper).save(ChatSessionData.create("c1", "agent-c1", "Fix login", "admin")
                 .withMessagesJson("{\"role\":\"user\",\"content\":\"hi\"}\n" + use));
 
         ModelClient unused = new ModelClient() {
@@ -95,7 +100,8 @@ class ChatControllerTest {
         MockMvc restarted = MockMvcBuilders.standaloneSetup(
                 new ChatController(harness, mapper, new HarnessPricing(0, 0, 0, 0))).build();
 
-        JsonNode list = mapper.readTree(restarted.perform(get("/api/chat")).andReturn().getResponse().getContentAsString());
+        JsonNode list = mapper.readTree(restarted.perform(get("/api/chat").requestAttr(UserInterceptor.ATTR, ADMIN))
+                .andReturn().getResponse().getContentAsString());
         assertEquals(1, list.size());
         assertEquals("c1", list.get(0).path("chatId").asText());
         assertEquals("Fix login", list.get(0).path("title").asText());

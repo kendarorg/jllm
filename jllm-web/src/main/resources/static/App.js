@@ -1,5 +1,7 @@
-import {onMounted} from 'vue';
+import {onMounted, ref} from 'vue';
+import {api, post} from './api.js';
 import {continueOffer, dismissOffer, init, newChat, shortId, store} from './store.js';
+import SignIn from './components/SignIn.js';
 import SessionList from './components/SessionList.js';
 import ChatToolbar from './components/ChatToolbar.js';
 import MessageStream from './components/MessageStream.js';
@@ -11,9 +13,26 @@ import HistoryPanel from './components/HistoryPanel.js';
 const TABS = [['chat', 'Chat'], ['files', 'Files'], ['history', 'History']];
 
 export default {
-  components: { SessionList, ChatToolbar, MessageStream, ChatComposer, ApprovalDialog, FilesPanel, HistoryPanel },
+  components: { SignIn, SessionList, ChatToolbar, MessageStream, ChatComposer, ApprovalDialog, FilesPanel, HistoryPanel },
   setup() {
-    onMounted(init);
+    // undefined: checking; null: signed out (show the picker); otherwise the signed-in user
+    const me = ref(undefined);
+    onMounted(async () => {
+      try {
+        me.value = await api('/api/me');
+        await init();
+      } catch (e) {
+        me.value = null;
+      }
+    });
+    async function onSignedIn(user) {
+      me.value = user;
+      await init();
+    }
+    async function signOut() {
+      await post('/api/logout', {});
+      location.reload();
+    }
     function onKey(e) {
       const i = TABS.findIndex(t => t[0] === store.tab);
       const n = e.key === 'ArrowRight' ? i + 1 : e.key === 'ArrowLeft' ? i - 1 : null;
@@ -21,13 +40,16 @@ export default {
       store.tab = TABS[(n + TABS.length) % TABS.length][0];
       e.preventDefault();
     }
-    return { store, TABS, onKey, continueOffer, dismissOffer, newChat, shortId };
+    return { store, TABS, onKey, continueOffer, dismissOffer, newChat, shortId, me, onSignedIn, signOut };
   },
   template: `
   <header>
     <h1><span class="logo">⬡</span> jllm</h1>
+    <span v-if="me" class="whoami">{{ me.name }} <small>({{ me.role }})</small>
+      <button class="btn-sm" @click="signOut">Sign out</button></span>
   </header>
-  <div class="chat-layout">
+  <SignIn v-if="me === null" @signed-in="onSignedIn" />
+  <div v-else-if="me" class="chat-layout">
     <SessionList />
     <section class="chat-main" aria-label="Workspace">
       <div v-if="!store.chatId && store.resumeOffer" class="resume-banner" role="alert">

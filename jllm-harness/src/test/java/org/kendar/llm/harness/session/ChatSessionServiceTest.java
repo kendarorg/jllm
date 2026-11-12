@@ -28,6 +28,18 @@ class ChatSessionServiceTest {
     }
 
     @Test
+    void principalIsStoredAndSurvivesUpdates() {
+        ChatSessionData a = svc.create("A", "guest");
+        ChatSessionData b = svc.create("B");
+
+        svc.saveMessages(a.chatId(), msgs("hi"));
+        svc.setMode(a.chatId(), PermissionMode.AUTO);
+
+        assertEquals("guest", svc.principal(a.chatId()));
+        assertNull(svc.principal(b.chatId()));
+    }
+
+    @Test
     void sessionsAreIsolatedByChatId() {
         ChatSessionData a = svc.create("A");
         ChatSessionData b = svc.create(null);

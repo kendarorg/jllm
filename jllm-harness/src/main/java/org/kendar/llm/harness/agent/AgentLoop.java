@@ -152,6 +152,14 @@ public class AgentLoop {
     /** Built-in file tools (identity): free from a script. */
     private volatile java.util.Set<HarnessTool> builtinFileTools = java.util.Set.of();
 
+    /** Who the calls of each chat are made for: per-user tools and approval. Default: {@code Identity.ANONYMOUS}. */
+    private volatile org.kendar.llm.harness.auth.Identity identity = org.kendar.llm.harness.auth.Identity.ANONYMOUS;
+
+    public AgentLoop identity(org.kendar.llm.harness.auth.Identity identity) {
+        this.identity = identity;
+        return this;
+    }
+
     public AgentLoop builtinFileTools(java.util.Collection<HarnessTool> tools) {
         java.util.Set<HarnessTool> s = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
         s.addAll(tools);
@@ -414,6 +422,9 @@ public class AgentLoop {
         tools.addAll(context.tools());
         if (requestToolGroup != null && !requestToolGroup.missing(chatId).isEmpty()) tools.add(requestToolGroup);
         tools.add(subAgentTool);
+        // the user's tool filter: applied to every tool offered to the model, including the ones added above
+        org.kendar.llm.harness.auth.UserPolicy policy = identity.policyOf(chatId);
+        tools.removeIf(t -> !policy.allows(t));
         return tools;
     }
 
@@ -1066,7 +1077,14 @@ public class AgentLoop {
                             String label, boolean free) {
         HookResult pre = hooks.run(HookContext.preTool(ctx.chatId(), name, input, ctx.parent()));
         if (pre.modifiedInput() != null) input = pre.modifiedInput();
-        Decision decision = free ? Decision.ALLOW : gate.check(mode, tool);
+        // dispatch check: a call the model makes must be inside the user's tools, even if it names a hidden one.
+        // Calls made by a script are covered by the run_js call that the user was allowed to make.
+        org.kendar.llm.harness.auth.UserPolicy policy = identity.policyOf(ctx.chatId());
+        if (ctx.parent() == null && !policy.allows(tool)) {
+            return new Authz("Not available to this user: " + name, pre, input);
+        }
+        PermissionGate userGate = policy.approval() == null ? gate : new PermissionGate(policy.approval(), gate.rules());
+        Decision decision = free ? Decision.ALLOW : userGate.check(mode, tool);
         if (!free && decision == Decision.ALLOW && mode == PermissionMode.AUTO && classifier != null
                 && tool.kind() != ToolKind.READ_ONLY && !pre.denied()) {
             // auto mode: the fast model may wave the call through; anything else goes to the user

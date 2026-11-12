@@ -50,13 +50,19 @@ public class ChatController {
 // ── sessions ──────────────────────────────────────────────────────────────
 
     @PostMapping("/api/chat")
-    public Map<String, Object> create(@RequestBody(required = false) Map<String, String> body) {
-        return summary(sessions.create(body == null ? null : body.get("title")));
+    public Map<String, Object> create(@RequestBody(required = false) Map<String, String> body,
+                                      @RequestAttribute(value = UserInterceptor.ATTR, required = false) WebUser user) {
+        return summary(sessions.create(body == null ? null : body.get("title"), user == null ? null : user.id()));
     }
 
+    /** The chats of the signed-in user; the admin sees all of them. */
     @GetMapping("/api/chat")
-    public List<Map<String, Object>> list() {
-        return sessions.list().stream().map(this::summary).toList();
+    public List<Map<String, Object>> list(
+            @RequestAttribute(value = UserInterceptor.ATTR, required = false) WebUser user) {
+        if (user == null) return List.of();
+        return sessions.list().stream()
+                .filter(s -> s.principal() != null && (user.admin() || user.id().equals(s.principal())))
+                .map(this::summary).toList();
     }
 
     @GetMapping("/api/chat/{id}")

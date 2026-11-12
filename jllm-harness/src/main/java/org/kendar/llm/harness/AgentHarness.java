@@ -368,6 +368,9 @@ public final class AgentHarness {
         private ChatSessionStore sessionStore = new InMemoryChatSessionStore();
         private SubAgentRunLog subAgentRunLog = new InMemorySubAgentRunLog();
         private ToolApprovalPolicy approvalPolicy = ToolApprovalPolicy.byKind();
+        private org.kendar.llm.harness.auth.CredentialResolver credentials;
+        private org.kendar.llm.harness.auth.UserPolicyResolver userPolicies;
+        private java.util.function.Function<String, org.kendar.llm.harness.auth.HarnessPrincipal> principalDirectory;
         private SandboxExecutor sandbox;
         private HarnessMetrics metrics = HarnessMetrics.noop();
         private HarnessConfig config = HarnessConfig.defaults();
@@ -617,6 +620,27 @@ public final class AgentHarness {
             return this;
         }
 
+        /**
+         * Per-call headers for MCP and REST calls, resolved for the chat's principal. Default: none (the headers of
+         * the settings file are always sent).
+         */
+        public Builder credentialResolver(org.kendar.llm.harness.auth.CredentialResolver resolver) {
+            this.credentials = resolver;
+            return this;
+        }
+
+        /** Tools and approval policy per user, resolved when a call is made. Default: every tool, harness approval. */
+        public Builder userPolicyResolver(org.kendar.llm.harness.auth.UserPolicyResolver resolver) {
+            this.userPolicies = resolver;
+            return this;
+        }
+
+        /** Principal id to principal (roles, attributes). Default: the id alone, with no roles. */
+        public Builder principalDirectory(java.util.function.Function<String, org.kendar.llm.harness.auth.HarnessPrincipal> directory) {
+            this.principalDirectory = directory;
+            return this;
+        }
+
         /** Default: {@link LocalDirSandboxExecutor}, which has no isolation. */
         public Builder sandbox(SandboxExecutor sandbox) {
             this.sandbox = sandbox;
@@ -734,9 +758,12 @@ public final class AgentHarness {
             HarnessToolRegistry registry = new HarnessToolRegistry(all, approvalPolicy, replacedTools, nameChecks);
             PermissionRules permissionRules = settings.permissionRules();
             registry.hideIf(permissionRules::hides);
-            ExternalSources sources = new ExternalSources(registry, settings, HttpClient.newHttpClient(), mapper);
-
             ChatSessionService sessions = new ChatSessionService(sessionStore, config.agentId(), mapper);
+            org.kendar.llm.harness.auth.Identity identity = new org.kendar.llm.harness.auth.Identity(credentials,
+                    userPolicies, principalDirectory,
+                    chatId -> sessions.find(chatId).map(ChatSessionData::principal).orElse(null));
+            ExternalSources sources = new ExternalSources(registry, settings, HttpClient.newHttpClient(), mapper, identity);
+
             ApprovalService approvals = new ApprovalService(config.approvalTimeoutSeconds(), stateStore);
             ModelClient fast = fastClient != null ? fastClient
                     : settings.fastModel() != null ? ModelClients.from(settings.fastModel(), mapper) : null;
@@ -761,6 +788,7 @@ public final class AgentHarness {
                     requestToolGroup, subAgentRunLog, mapper, metrics, prompt, hooks,
                     fast == null ? null : new ToolClassifier(fast, mapper));
             loop.builtinFileTools(fileTools);
+            loop.identity(identity);
             ref[0] = loop;
             if (!inputValidators.isEmpty() || !defaultInputValidator) {
                 List<org.kendar.llm.harness.tools.ToolInputValidator> chain = new ArrayList<>();
