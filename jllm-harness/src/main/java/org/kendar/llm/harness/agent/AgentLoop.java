@@ -110,20 +110,42 @@ public class AgentLoop {
     private org.kendar.llm.harness.tools.HostApprover hostApprover(String chatId, EventSink sink,
                                                                    BooleanSupplier cancelled, boolean interactive,
                                                                    String label) {
-        return (host, url) -> {
-            if (approvals.hostGranted(chatId, host)) return true;
-            if (!interactive) return false;
-            String h = org.kendar.llm.harness.tools.HostMatcher.normalize(host);
-            ApprovalService.ApprovalDecision d = approvals.await(chatId, "host", "Allow web access to " + h,
-                    url, null, a -> {
-                        ObjectNode ev = mapper.valueToTree(a);
-                        if (label != null) ev.put("agent", label);
-                        ev.put("host", h);
-                        sink.emit("approval_request", ev);
-                    }, cancelled, () -> approvals.hostGranted(chatId, host));
-            if (d.approved() && d.remember()) approvals.grantHost(chatId, host);
-            metrics.approval("host", d.approved());
-            return d.approved();
+        return new org.kendar.llm.harness.tools.HostApprover() {
+            @Override
+            public boolean approve(String host, String url) {
+                if (approvals.hostGranted(chatId, host)) return true;
+                if (!interactive) return false;
+                String h = org.kendar.llm.harness.tools.HostMatcher.normalize(host);
+                ApprovalService.ApprovalDecision d = approvals.await(chatId, "host", "Allow web access to " + h,
+                        url, null, a -> {
+                            ObjectNode ev = mapper.valueToTree(a);
+                            if (label != null) ev.put("agent", label);
+                            ev.put("host", h);
+                            sink.emit("approval_request", ev);
+                        }, cancelled, () -> approvals.hostGranted(chatId, host));
+                if (d.approved() && d.remember()) approvals.grantHost(chatId, host);
+                metrics.approval("host", d.approved());
+                return d.approved();
+            }
+
+            /** Per call, never remembered: a bad certificate is asked about every time. */
+            @Override
+            public boolean approveInsecure(String host, String url, String reason) {
+                if (!interactive) return false;
+                String h = org.kendar.llm.harness.tools.HostMatcher.normalize(host);
+                ApprovalService.ApprovalDecision d = approvals.await(chatId, "insecure_cert",
+                        "Invalid certificate for " + h + ": continue anyway?",
+                        "The certificate of " + h + " is not valid:\n" + reason + "\n\nURL: " + url
+                                + "\n\nAllowing sends this one request without checking who is on the other end.",
+                        null, a -> {
+                            ObjectNode ev = mapper.valueToTree(a);
+                            if (label != null) ev.put("agent", label);
+                            ev.put("host", h);
+                            sink.emit("approval_request", ev);
+                        }, cancelled);
+                metrics.approval("insecure_cert", d.approved());
+                return d.approved();
+            }
         };
     }
 

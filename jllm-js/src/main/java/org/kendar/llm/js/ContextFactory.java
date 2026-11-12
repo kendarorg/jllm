@@ -26,7 +26,7 @@ final class ContextFactory implements AutoCloseable {
 
     /** @param debug engine diagnostics (the interpreter-only warning) are written to {@code debugSink}; else dropped */
     ContextFactory(JsSettings settings, boolean debug, OutputStream debugSink) {
-        Engine.Builder b = Engine.newBuilder("js").option("engine.WarnInterpreterOnly", Boolean.toString(debug));
+        Engine.Builder b = Engine.newBuilder("js", "regex").option("engine.WarnInterpreterOnly", Boolean.toString(debug));
         b.logHandler(debug ? debugSink : OutputStream.nullOutputStream());
         this.engine = b.build();
         this.limits = ResourceLimits.newBuilder().statementLimit(settings.statementLimit(), null).build();
@@ -34,7 +34,7 @@ final class ContextFactory implements AutoCloseable {
 
     /** @param out receives console output (stdout and stderr) */
     Context create(OutputStream out) {
-        return Context.newBuilder("js")
+        return Context.newBuilder("js", "regex")
                 .engine(engine)
                 .allowAllAccess(false)
                 .allowIO(IOAccess.NONE)

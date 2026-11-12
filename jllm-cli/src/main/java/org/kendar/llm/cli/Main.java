@@ -479,6 +479,13 @@ public final class Main {
             return;
         }
         String writeDir = d.path("writeDir").asText("");
+        if ("insecure_cert".equals(d.path("type").asText())) {
+            ask("Continue without checking the certificate of " + d.path("host").asText() + " (this call only)? [y/N] ");
+            String c = in.take();
+            harness.resolveApproval(chatId, d.path("id").asText(),
+                    !c.equals(EOF) && c.strip().toLowerCase().startsWith("y"), null, false, false);
+            return;
+        }
         if ("host".equals(d.path("type").asText())) {
             ask("Allow " + d.path("host").asText() + "? [y=once/N/a=this host and its subdomains for this chat] ");
             String h = in.take();

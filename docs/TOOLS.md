@@ -213,3 +213,16 @@ chat".
 - `deny` permission rules on the tools apply first. A run that cannot ask (non-interactive) refuses a host not
   granted, in every permission mode.
 - `ToolContext.hosts()` is the approver; `null` (direct calls in tests or embedding code) allows every host.
+
+### Invalid certificates
+
+When the TLS certificate of a host is not valid (self-signed, expired, wrong name, unknown authority), `web_fetch`
+and `web_download` do not fail at once: they ask, with an `approval_request` of `type: "insecure_cert"` that shows the
+reason, and the call goes on without checking the certificate only if the user says yes.
+
+- The answer covers that one call and that one host, never the chat: the next call asks again. A redirect to another
+  host with a bad certificate asks again for that host.
+- A refusal, a run that cannot ask, or a context without a `HostApprover` fail the call with an error naming the host
+  and the reason.
+- The question comes after the per-host question above, which still applies. Network errors and timeouts are not
+  certificate problems and fail as before.

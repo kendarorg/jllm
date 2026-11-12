@@ -21,7 +21,7 @@ final class RunJsTool {
     static final String DESCRIPTION = "Run JavaScript in a sandbox with no host access: no files, network, processes "
             + "or require. The only way to reach anything is the global `tools` object, one function per tool you "
             + "can call, same name with '-' replaced by '_' (mcp__docs__search is tools.mcp__docs__search). Each "
-            + "takes one object with that tool's arguments and returns its result, parsed when it is JSON; it "
+            + "takes one object with that tool's arguments and returns its result synchronously (no await, no promises), parsed when it is JSON; it "
             + "throws an Error when the call fails or is refused. Files: use the file tools through `tools`, they "
             + "work in the script's own directory (fileRoot in the result). Write the body of a function: use "
             + "`return` for the value, console.log for output. Limits: 30 s by default (timeoutSeconds), a "

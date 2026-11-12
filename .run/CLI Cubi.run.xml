@@ -2,7 +2,7 @@
   <configuration default="false" name="CLI Cubi" type="Application" factoryName="Application">
     <option name="MAIN_CLASS_NAME" value="org.kendar.llm.cli.Main" />
     <module name="jllm-cli" />
-    <option name="PROGRAM_PARAMETERS" value="--context-strategy compaction --small-model --provider llamacpp --model qwen-local --base-url http://192.168.1.96:17001/v1 --api-key none --context-tokens 120000 --mode default --plugin-dir $PROJECT_DIR$/target/plugins --plugins.pdf.enabled=true --plugins.docs.enabled=true --plugins.js.enabled=true" />
+    <option name="PROGRAM_PARAMETERS" value="--context-strategy compaction --small-model --provider llamacpp --model qwen-local --base-url http://192.168.1.96:17001/v1 --api-key none --context-tokens 120000 --mode default --plugin-dir $PROJECT_DIR$/target/plugins --plugins.pdf.enabled=true --plugins.docs.enabled=true" />
     <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/tmp" />
     <method v="2">
       <option name="Make" enabled="true" />

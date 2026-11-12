@@ -68,13 +68,30 @@ public class WebAgentTools implements HarnessToolSet {
      */
     private <T> HttpResponse<T> get(ToolContext ctx, URI uri, HttpResponse.BodyHandler<T> handler) throws Exception {
         URI current = uri;
+        java.util.Set<String> insecure = new java.util.HashSet<>(); // hosts the user let through, for this call only
         for (int hop = 0; ; hop++) {
             checkHost(ctx, current, hop == 0 ? null : uri);
             HttpRequest req = HttpRequest.newBuilder(current)
                     .timeout(Duration.ofSeconds(30))
                     .header("User-Agent", "jllm-harness/1.0")
                     .GET().build();
-            HttpResponse<T> resp = direct.send(req, handler);
+            HttpResponse<T> resp;
+            String host = current.getHost() == null ? "" : HostMatcher.normalize(current.getHost());
+            while (true) {
+                try {
+                    resp = (insecure.contains(host) ? insecureClient() : direct).send(req, handler);
+                    break;
+                } catch (java.io.IOException e) {
+                    String why = insecure.contains(host) ? null : certificateProblem(e);
+                    if (why == null) throw e;
+                    HostApprover approver = ctx == null ? null : ctx.hosts();
+                    if (approver == null || !approver.approveInsecure(current.getHost(), current.toString(), why)) {
+                        throw new IllegalStateException("The certificate of '" + current.getHost() + "' is not valid ("
+                                + why + ") and the call was not allowed to go on without checking it");
+                    }
+                    insecure.add(host);
+                }
+            }
             int sc = resp.statusCode();
             String location = resp.headers().firstValue("Location").orElse(null);
             if (location == null || !(sc == 301 || sc == 302 || sc == 303 || sc == 307 || sc == 308)) return resp;
@@ -89,6 +106,74 @@ public class WebAgentTools implements HarnessToolSet {
             }
             current = next;
         }
+    }
+
+    private volatile HttpClient insecureClient;
+
+    /** A client that accepts any certificate. Only used after the user allowed it for one call and one host. */
+    private HttpClient insecureClient() throws java.io.IOException {
+        HttpClient c = insecureClient;
+        if (c != null) return c;
+        try {
+            javax.net.ssl.SSLContext ssl = javax.net.ssl.SSLContext.getInstance("TLS");
+            ssl.init(null, new javax.net.ssl.TrustManager[]{new TrustAll()}, new java.security.SecureRandom());
+            return insecureClient = HttpClient.newBuilder().sslContext(ssl)
+                    .followRedirects(HttpClient.Redirect.NEVER).connectTimeout(Duration.ofSeconds(10)).build();
+        } catch (java.security.GeneralSecurityException e) {
+            throw new java.io.IOException(e);
+        }
+    }
+
+    /** Trusts every chain and every name; an extended manager also skips the host name check of the JDK. */
+    private static final class TrustAll extends javax.net.ssl.X509ExtendedTrustManager {
+        @Override
+        public void checkClientTrusted(java.security.cert.X509Certificate[] c, String a) {
+        }
+
+        @Override
+        public void checkServerTrusted(java.security.cert.X509Certificate[] c, String a) {
+        }
+
+        @Override
+        public void checkClientTrusted(java.security.cert.X509Certificate[] c, String a, java.net.Socket s) {
+        }
+
+        @Override
+        public void checkServerTrusted(java.security.cert.X509Certificate[] c, String a, java.net.Socket s) {
+        }
+
+        @Override
+        public void checkClientTrusted(java.security.cert.X509Certificate[] c, String a, javax.net.ssl.SSLEngine e) {
+        }
+
+        @Override
+        public void checkServerTrusted(java.security.cert.X509Certificate[] c, String a, javax.net.ssl.SSLEngine e) {
+        }
+
+        @Override
+        public java.security.cert.X509Certificate[] getAcceptedIssuers() {
+            return new java.security.cert.X509Certificate[0];
+        }
+    }
+
+    /** What is wrong with the certificate when the failure is one, else null (a network error, a timeout...). */
+    static String certificateProblem(Throwable e) {
+        boolean tls = false;
+        String detail = null;
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            if (t instanceof java.security.cert.CertificateException || t instanceof javax.net.ssl.SSLPeerUnverifiedException) {
+                tls = true;
+                if (t.getMessage() != null) detail = t.getMessage();
+            } else if (t instanceof javax.net.ssl.SSLHandshakeException) {
+                tls = true;
+                if (detail == null && t.getMessage() != null) detail = t.getMessage();
+            }
+            if (t.getCause() == t) break;
+        }
+        if (!tls) return null;
+        if (detail == null) return "the TLS handshake failed";
+        detail = detail.replaceAll("\\s+", " ").trim();
+        return detail.length() > 200 ? detail.substring(0, 200) + "..." : detail;
     }
 
     private static void checkHost(ToolContext ctx, URI uri, URI origin) {
