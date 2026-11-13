@@ -127,9 +127,9 @@ class FilesControllerTest {
         Path ws = harness.sandbox().workDir(id);
         assertTrue(Files.exists(ws.resolve("mine.txt")));
         harness.sandbox().scratchDir(id, "a");
-        assertTrue(Files.isDirectory(ws.resolve(".kendhar/scratchpad/a")));
+        assertTrue(Files.isDirectory(ws.resolve(".jllm/scratchpad/a")));
         assertEquals(dir.resolve(id), ws);
-        mvc.perform(get(base).param("path", ".kendhar")).andExpect(status().isNotFound());
+        mvc.perform(get(base).param("path", ".jllm")).andExpect(status().isNotFound());
         harness.sandbox().deleteWorkDir(id);
         assertFalse(Files.exists(ws));
         assertTrue(Files.exists(dir.resolve(other).getParent()));

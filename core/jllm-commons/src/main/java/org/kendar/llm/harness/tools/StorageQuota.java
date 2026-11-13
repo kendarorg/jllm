@@ -35,32 +35,58 @@ public final class StorageQuota {
         return maxBytes >= 0;
     }
 
+    /** A recorded change of the counter; {@link #rollback} takes it back when the write then fails. */
+    public interface Reservation {
+        Reservation NONE = () -> {
+        };
+
+        /** Takes the change back; only the first call counts. */
+        void rollback();
+    }
+
     /**
      * A write on the host file system: {@code target} goes from {@code oldSize} to {@code newSize} bytes. Targets
-     * outside the chat storage are not counted.
+     * outside the chat storage are not counted. Call {@link Reservation#rollback} when the write then fails.
      *
-     * @throws IOException when the new total would exceed the limit; nothing is recorded then
+     * @throws IOException when {@code target} is a directory, or the new total would exceed the limit; nothing is
+     *                     recorded then
      */
-    public synchronized void reserve(String chatId, Path target, long oldSize, long newSize) throws IOException {
-        if (!enabled() || chatStorage == null) return;
+    public synchronized Reservation reserve(String chatId, Path target, long oldSize, long newSize) throws IOException {
+        if (Files.isDirectory(target)) throw new IOException("Is a directory: " + target);
+        if (!enabled() || chatStorage == null) return Reservation.NONE;
         Path root = chatStorage.apply(chatId).toAbsolutePath().normalize();
-        if (!target.toAbsolutePath().normalize().startsWith(root)) return;
-        reserveDelta(chatId, root, newSize - oldSize);
+        if (!target.toAbsolutePath().normalize().startsWith(root)) return Reservation.NONE;
+        return reserveDelta(chatId, root, newSize - oldSize);
     }
 
-    /** A write inside a container, where the directory cannot be walked: counted from zero per process. */
-    public synchronized void reserveRemote(String chatId, long delta) throws IOException {
-        if (!enabled()) return;
-        reserveDelta(chatId, null, delta);
+    /**
+     * A write inside a container, where the directory cannot be walked: counted from zero per process. Call
+     * {@link Reservation#rollback} when the write then fails.
+     */
+    public synchronized Reservation reserveRemote(String chatId, long delta) throws IOException {
+        if (!enabled()) return Reservation.NONE;
+        return reserveDelta(chatId, null, delta);
     }
 
-    private void reserveDelta(String chatId, Path root, long delta) throws IOException {
+    private Reservation reserveDelta(String chatId, Path root, long delta) throws IOException {
         long current = used.computeIfAbsent(chatId, c -> root == null ? 0L : size(root));
         if (delta > 0 && current + delta > maxBytes) {
             throw new IOException("Storage quota exceeded: this write needs " + delta + " more bytes, the chat uses "
                     + current + " of " + maxBytes + " allowed (storage.maxBytes)");
         }
-        used.put(chatId, Math.max(0, current + delta));
+        long next = Math.max(0, current + delta);
+        used.put(chatId, next);
+        long applied = next - current;
+        if (applied == 0) return Reservation.NONE;
+        boolean[] done = {false};
+        return () -> {
+            synchronized (StorageQuota.this) {
+                if (done[0]) return;
+                done[0] = true;
+                Long now = used.get(chatId);
+                if (now != null) used.put(chatId, Math.max(0, now - applied));
+            }
+        };
     }
 
     /** Bytes counted for the chat (computes the baseline when needed). */

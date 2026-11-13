@@ -17,8 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.*;
 
 class McpStdioClientTest {
 
@@ -49,6 +48,84 @@ class McpStdioClientTest {
             System.out.println(json);
             System.out.flush();
         }
+    }
+
+    /**
+     * Answers initialize and tools/list in a loop. Modes: {@code crash} exits on tools/call; {@code once <marker>}
+     * does the same but, when the marker file exists, exits at once (every restart fails); {@code hang} never answers.
+     */
+    public static final class LoopServer {
+        public static void main(String[] args) throws Exception {
+            String mode = args[0];
+            if (mode.equals("once")) {
+                java.nio.file.Path marker = java.nio.file.Path.of(args[1]);
+                if (java.nio.file.Files.exists(marker)) System.exit(3);
+                java.nio.file.Files.createFile(marker);
+            }
+            BufferedReader in = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
+            for (String line; (line = in.readLine()) != null; ) {
+                if (mode.equals("hang")) continue;
+                java.util.regex.Matcher id = java.util.regex.Pattern.compile("\"id\":(\\d+)").matcher(line);
+                if (!id.find()) continue;
+                if (line.contains("\"tools/call\"")) System.exit(1);
+                String result = line.contains("\"tools/list\"") ? "{\"tools\":[{\"name\":\"echo\"}]}" : "{}";
+                System.out.println("{\"jsonrpc\":\"2.0\",\"id\":" + id.group(1) + ",\"result\":" + result + "}");
+                System.out.flush();
+            }
+        }
+    }
+
+    private static List<String> loop(String... args) {
+        List<String> out = new java.util.ArrayList<>(List.of("-cp", System.getProperty("java.class.path"),
+                LoopServer.class.getName()));
+        out.addAll(List.of(args));
+        return out;
+    }
+
+    @Test
+    void crashedServerIsRestartedOnTheNextCall() throws Exception {
+        try (McpStdioClient client = new McpStdioClient(MAPPER, "crash", JAVA, loop("crash"), Map.of())) {
+            assertEquals(1, client.listTools().size());
+            IOException crash = assertThrows(IOException.class, () -> client.callTool("echo", null));
+            assertFalse(crash instanceof McpUnavailableException);
+            assertEquals(1, client.listTools().size());
+            assertNull(client.unavailableReason());
+        }
+    }
+
+    @Test
+    void serverThatCannotBeRestartedBecomesUnavailable(@org.junit.jupiter.api.io.TempDir Path tmp) throws Exception {
+        List<String> reasons = new java.util.concurrent.CopyOnWriteArrayList<>();
+        String marker = tmp.resolve("started").toString();
+        try (McpStdioClient client = new McpStdioClient(MAPPER, "once", JAVA, loop("once", marker), Map.of())
+                .onUnavailable(reasons::add)) {
+            assertEquals(1, client.listTools().size());
+            assertThrows(IOException.class, () -> client.callTool("echo", null));
+
+            McpUnavailableException e = assertThrows(McpUnavailableException.class, client::listTools);
+            assertTrue(e.getMessage().contains(McpStdioClient.MAX_RESTART_TRIES + " tries"), e.getMessage());
+            assertThrows(McpUnavailableException.class, client::listTools);
+            assertEquals(1, reasons.size());
+        }
+    }
+
+    @Test
+    void closeDoesNotWaitForAPendingInitialize() throws Exception {
+        McpStdioClient client = new McpStdioClient(MAPPER, "hang", JAVA, loop("hang"), Map.of());
+        java.util.concurrent.CompletableFuture<Throwable> init = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            try {
+                client.initialize();
+                return null;
+            } catch (Exception e) {
+                return e;
+            }
+        });
+        Thread.sleep(1500); // the process is started and the handshake is waiting
+        long start = System.nanoTime();
+        client.close();
+        assertTrue(System.nanoTime() - start < 5_000_000_000L, "close() waited for initialize");
+        Throwable failure = init.get(10, java.util.concurrent.TimeUnit.SECONDS);
+        assertTrue(failure instanceof IOException, String.valueOf(failure));
     }
 
     @Test

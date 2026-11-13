@@ -13,16 +13,25 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Consumer;
 
 /**
  * MCP client over stdio: starts the server as a child process and exchanges newline-delimited JSON-RPC messages on
  * its stdin and stdout. The process is started on the first {@link #initialize()} and stopped by {@link #close()}.
+ * <p>
+ * A server that exits after a successful start is restarted on the next call; when {@value #MAX_RESTART_TRIES}
+ * restarts in a row fail, the client becomes unavailable: it reports the reason once to
+ * {@link #onUnavailable(Consumer)} and every call throws {@link McpUnavailableException}.
  */
 public final class McpStdioClient implements McpClient {
 
     private static final Logger log = LoggerFactory.getLogger(McpStdioClient.class);
     private static final String PROTOCOL_VERSION = "2025-03-26";
     private static final long TIMEOUT_SECONDS = 60;
+    static final int MAX_RESTART_TRIES = 3;
+    private static final long RESTART_DELAY_MS = 500;
 
     private final ObjectMapper mapper;
     private final String name;
@@ -31,10 +40,20 @@ public final class McpStdioClient implements McpClient {
     private final List<String> inheritedEnv;
     private final AtomicLong ids = new AtomicLong();
     private final Map<Long, CompletableFuture<JsonNode>> pending = new ConcurrentHashMap<>();
+    /** Held while starting and initializing the server, which waits for its answer: {@link #close()} never takes it. */
+    private final ReentrantLock lifecycle = new ReentrantLock();
+    /** Guards the process and stdin fields and the writes; only ever held briefly. */
+    private final Object io = new Object();
+    private final AtomicReference<String> unavailable = new AtomicReference<>();
+    private volatile Consumer<String> onUnavailable = reason -> { };
     private volatile boolean closed;
-    private Process process;
-    private BufferedWriter stdin;
-    private boolean initialized;
+    private volatile Process process;
+    /** The last process whose output ended (it exited or closed stdout). */
+    private volatile Process ended;
+    private volatile BufferedWriter stdin;
+    private volatile boolean initialized;
+    /** Whether a start ever succeeded: only a server that worked is restarted. */
+    private volatile boolean started;
 
     public McpStdioClient(ObjectMapper mapper, String name, String executable, List<String> args,
                           Map<String, String> env) {
@@ -56,20 +75,98 @@ public final class McpStdioClient implements McpClient {
         this.env = Map.copyOf(env);
     }
 
+    /**
+     * Called once, with the reason, when the server could not be restarted after it exited. The source of this client
+     * should then be disabled. The callback runs on the calling thread, outside the locks of this client.
+     */
+    public McpStdioClient onUnavailable(Consumer<String> callback) {
+        this.onUnavailable = callback == null ? reason -> { } : callback;
+        return this;
+    }
+
+    /** Why the client gave up, null while it is usable. */
+    public String unavailableReason() {
+        return unavailable.get();
+    }
+
     @Override
-    public synchronized void initialize() throws IOException, InterruptedException {
-        if (initialized) return;
-        if (closed) throw new IOException("MCP server '" + name + "' is closed");
-        start();
-        ObjectNode params = mapper.createObjectNode();
-        params.put("protocolVersion", PROTOCOL_VERSION);
-        params.putObject("capabilities");
-        params.putObject("clientInfo").put("name", "jllm-harness").put("version", "1");
-        request("initialize", params);
-        ObjectNode note = mapper.createObjectNode();
-        note.put("jsonrpc", "2.0").put("method", "notifications/initialized");
-        write(note);
-        initialized = true;
+    public void initialize() throws IOException, InterruptedException {
+        checkUsable();
+        String gaveUp = null;
+        IOException last = null;
+        lifecycle.lockInterruptibly();
+        try {
+            checkUsable();
+            if (initialized && alive()) return;
+            if (!started) {
+                startAndInitialize();
+                started = true;
+                return;
+            }
+            for (int attempt = 1; attempt <= MAX_RESTART_TRIES; attempt++) {
+                log.warn("MCP server '{}' is not running; restarting it (try {} of {})", name, attempt,
+                        MAX_RESTART_TRIES);
+                try {
+                    startAndInitialize();
+                    return;
+                } catch (IOException e) {
+                    if (closed) throw closedException();
+                    last = e;
+                    log.warn("MCP server '{}' restart failed: {}", name, e.getMessage());
+                    if (attempt < MAX_RESTART_TRIES) Thread.sleep(RESTART_DELAY_MS * attempt);
+                }
+            }
+            String reason = "could not be restarted after " + MAX_RESTART_TRIES + " tries: "
+                    + (last == null ? "unknown error" : last.getMessage());
+            if (unavailable.compareAndSet(null, reason)) gaveUp = reason;
+        } finally {
+            lifecycle.unlock();
+        }
+        if (gaveUp != null) {
+            log.warn("MCP server '{}' is unavailable: {}", name, gaveUp);
+            try {
+                onUnavailable.accept(gaveUp);
+            } catch (RuntimeException e) {
+                log.warn("MCP server '{}': unavailable callback failed: {}", name, e.toString());
+            }
+        }
+        throw new McpUnavailableException("MCP server '" + name + "' is unavailable: " + unavailable.get(), last);
+    }
+
+    /** Starts a fresh process and runs the handshake; on failure the process is stopped. Lifecycle lock held. */
+    private void startAndInitialize() throws IOException, InterruptedException {
+        initialized = false;
+        stopProcess();
+        try {
+            start();
+            ObjectNode params = mapper.createObjectNode();
+            params.put("protocolVersion", PROTOCOL_VERSION);
+            params.putObject("capabilities");
+            params.putObject("clientInfo").put("name", "jllm-harness").put("version", "1");
+            request("initialize", params);
+            ObjectNode note = mapper.createObjectNode();
+            note.put("jsonrpc", "2.0").put("method", "notifications/initialized");
+            write(note);
+            initialized = true;
+        } catch (IOException | InterruptedException | RuntimeException e) {
+            stopProcess();
+            throw e;
+        }
+    }
+
+    private void checkUsable() throws IOException {
+        if (closed) throw closedException();
+        String reason = unavailable.get();
+        if (reason != null) throw new McpUnavailableException("MCP server '" + name + "' is unavailable: " + reason);
+    }
+
+    private IOException closedException() {
+        return new IOException("MCP server '" + name + "' is closed");
+    }
+
+    private boolean alive() {
+        Process p = process;
+        return p != null && p.isAlive();
     }
 
     @Override
@@ -96,30 +193,51 @@ public final class McpStdioClient implements McpClient {
         return request("tools/call", params);
     }
 
+    /** Never waits for a pending start or handshake: it fails them and stops the process. */
     @Override
-    public synchronized void close() {
+    public void close() {
         closed = true;
         initialized = false;
+        Process running = process;
+        if (running != null) running.destroy(); // also unblocks a write stuck on a full pipe
         failPending("MCP server '" + name + "' was closed");
-        if (process == null) return;
-        process.destroy();
+        stopProcess();
+    }
+
+    private void stopProcess() {
+        Process p;
+        synchronized (io) {
+            p = process;
+            process = null;
+            stdin = null;
+        }
+        if (p == null) return;
+        failPending("MCP server '" + name + "' was stopped");
+        p.destroy();
         try {
-            if (!process.waitFor(2, TimeUnit.SECONDS)) process.destroyForcibly();
+            if (!p.waitFor(2, TimeUnit.SECONDS)) p.destroyForcibly();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            process.destroyForcibly();
+            p.destroyForcibly();
         }
-        process = null;
     }
 
     private void start() throws IOException {
         ProcessBuilder pb = new ProcessBuilder(command);
         org.kendar.llm.harness.util.EnvWhitelist.apply(pb.environment(), inheritedEnv);
         pb.environment().putAll(env);
-        process = pb.start();
-        stdin = new BufferedWriter(new OutputStreamWriter(process.getOutputStream(), StandardCharsets.UTF_8));
-        startDaemon("mcp-stdout-" + name, () -> readStdout(process));
-        startDaemon("mcp-stderr-" + name, () -> drainStderr(process));
+        Process p = pb.start();
+        BufferedWriter w = new BufferedWriter(new OutputStreamWriter(p.getOutputStream(), StandardCharsets.UTF_8));
+        synchronized (io) {
+            if (closed) {
+                p.destroyForcibly();
+                throw closedException();
+            }
+            process = p;
+            stdin = w;
+        }
+        startDaemon("mcp-stdout-" + name, () -> readStdout(p));
+        startDaemon("mcp-stderr-" + name, () -> drainStderr(p));
     }
 
     private void startDaemon(String threadName, Runnable body) {
@@ -137,7 +255,12 @@ public final class McpStdioClient implements McpClient {
         } catch (IOException e) {
             log.debug("MCP server '{}' output failed: {}", name, e.toString());
         }
-        closed = true;
+        ended = p; // every answer it sent has been dispatched
+        synchronized (io) {
+            if (process != p) return; // stopped or replaced: whoever did it handled the pending calls
+            initialized = false;
+        }
+        if (!closed) log.warn("MCP server '{}' exited; it will be restarted on the next call", name);
         failPending("MCP server '" + name + "' exited");
     }
 
@@ -167,15 +290,16 @@ public final class McpStdioClient implements McpClient {
     }
 
     private void failPending(String reason) {
-        pending.values().forEach(f -> f.completeExceptionally(new IOException(reason)));
-        pending.clear();
+        for (Long id : new ArrayList<>(pending.keySet())) {
+            CompletableFuture<JsonNode> f = pending.remove(id);
+            if (f != null) f.completeExceptionally(new IOException(reason));
+        }
     }
 
     private JsonNode request(String method, JsonNode params) throws IOException, InterruptedException {
         long id = ids.incrementAndGet();
         CompletableFuture<JsonNode> waiting = new CompletableFuture<>();
         pending.put(id, waiting);
-        if (closed) failPending("MCP server '" + name + "' exited");
         ObjectNode req = mapper.createObjectNode();
         req.put("jsonrpc", "2.0").put("id", id).put("method", method);
         req.set("params", params);
@@ -184,6 +308,13 @@ public final class McpStdioClient implements McpClient {
         } catch (IOException e) {
             pending.remove(id);
             throw e;
+        }
+        // The output may have ended before this call was registered: nobody would answer or fail it.
+        Process p = process;
+        if (closed || p == null || p == ended) {
+            pending.remove(id);
+            waiting.completeExceptionally(new IOException("MCP server '" + name + "' "
+                    + (closed ? "was closed" : "exited")));
         }
         JsonNode message;
         try {
@@ -202,10 +333,14 @@ public final class McpStdioClient implements McpClient {
         return message.path("result");
     }
 
-    private synchronized void write(JsonNode message) throws IOException {
-        if (stdin == null) throw new IOException("MCP server '" + name + "' is not running");
-        stdin.write(mapper.writeValueAsString(message));
-        stdin.write('\n');
-        stdin.flush();
+    private void write(JsonNode message) throws IOException {
+        String line = mapper.writeValueAsString(message);
+        synchronized (io) {
+            BufferedWriter w = stdin;
+            if (w == null) throw new IOException("MCP server '" + name + "' is not running");
+            w.write(line);
+            w.write('\n');
+            w.flush();
+        }
     }
 }

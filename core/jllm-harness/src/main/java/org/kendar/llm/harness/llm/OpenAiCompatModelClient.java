@@ -254,8 +254,17 @@ public class OpenAiCompatModelClient implements ModelClient {
     // ---------------------------------------------------------------- response translation
 
     ModelResponse parseResponse(JsonNode json) {
+        // gateways (OpenRouter, LiteLLM...) report some failures as 200 with an error object or no choices
+        JsonNode error = json.path("error");
+        if (!error.isMissingNode() && !error.isNull()) {
+            throw new ModelException(cfg.name() + " returned an error: " + truncate(errorText(error)));
+        }
+        JsonNode choices = json.path("choices");
+        if (!choices.isArray() || choices.isEmpty()) {
+            throw new ModelException(cfg.name() + " returned no choices: " + truncate(json.toString()));
+        }
         ArrayNode content = mapper.createArrayNode();
-        JsonNode choice = json.path("choices").path(0);
+        JsonNode choice = choices.path(0);
         JsonNode message = choice.path("message");
 
         String text = flatten(message.path("content"));
@@ -285,6 +294,7 @@ public class OpenAiCompatModelClient implements ModelClient {
         String stop = switch (finish) {
             case "tool_calls", "function_call" -> "tool_use";
             case "length" -> "max_tokens";
+            case "content_filter" -> "refusal";
             default -> "end_turn";
         };
         if (hasCalls && "end_turn".equals(stop)) stop = "tool_use"; // some local servers report "stop"
@@ -292,6 +302,26 @@ public class OpenAiCompatModelClient implements ModelClient {
         if ("max_tokens".equals(stop) && !hasCalls) content = recoverCutTextCall(content, text);
 
         return new ModelResponse(content, stop, parseUsage(json.path("usage")));
+    }
+
+    /** The message of an {@code error} field: an object with {@code message} (and maybe {@code code}), or plain text. */
+    private static String errorText(JsonNode error) {
+        if (error.isTextual()) return error.asText();
+        String message = error.path("message").asText("");
+        if (message.isBlank()) return error.toString();
+        JsonNode code = error.path("code");
+        return code.isMissingNode() || code.isNull() ? message : message + " (code " + code.asText() + ")";
+    }
+
+    /** A 200 body must be a JSON object; anything else (HTML from a proxy or a wrong baseUrl) fails at once. */
+    private JsonNode readJson(String body) {
+        try {
+            JsonNode json = body == null ? null : mapper.readTree(body);
+            if (json != null && json.isObject()) return json;
+        } catch (IOException e) {
+            // not JSON: reported below
+        }
+        throw new ModelException(cfg.name() + " returned a non-JSON response (check baseUrl): " + truncate(body));
     }
 
     /**
@@ -380,7 +410,7 @@ public class OpenAiCompatModelClient implements ModelClient {
                 HttpResponse<String> resp = cancel.send(http, request);
                 int status = resp.statusCode();
                 if (status == 200) {
-                    return mapper.readTree(resp.body());
+                    return readJson(resp.body());
                 }
                 if (status == 401 && auth != null && !authRetried) {
                     authRetried = true;

@@ -411,7 +411,7 @@ public interface SandboxExecutor {
 |---|---|---|
 | `LocalDirSandboxExecutor` (default) | `<sandbox.baseDir>/<chatId>` | none (warning at startup) |
 | `CwdSandboxExecutor` (CLI) | the project directory for every chat | none |
-| `ChatDirSandboxExecutor` (web) | `<base>/<chatId>`, with its own `.kendhar` | none |
+| `ChatDirSandboxExecutor` (web) | `<base>/<chatId>`, with its own `.jllm` | none |
 | `RemoteExecSandboxExecutor(config, runner, layoutExecutor, Kind, projectDir)` (settings `sandbox.backend: docker`, `sandbox.docker.mode: daemon`) | `/workspace` in a long-running container; bind mount (CLI) or volume (web) | as `Docker…`, plus a per-container token; default docker network |
 | `DockerSandboxExecutor(config, new ProcessDockerCommandRunner()[, layoutExecutor])` (settings `sandbox.backend: docker`) | that of the layout executor, mounted into the container | `--network none`, memory/cpu/pids limits, user `1000:1000`, work dir mounted read-only in plan mode |
 

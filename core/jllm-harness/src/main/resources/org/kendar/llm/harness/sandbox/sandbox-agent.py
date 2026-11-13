@@ -6,7 +6,8 @@ Standard library only. Configuration (environment):
   JLLM_PORT       listen port (default 8080)
   JLLM_BIND       listen address (default 0.0.0.0; the host publishes the port on 127.0.0.1 only)
   JLLM_WORKSPACE  work root (default /workspace)
-  JLLM_SCRATCH    scratch root (default <workspace>/.kendhar/scratchpad)
+  JLLM_SCRATCH    scratch root (default <workspace>/.jllm/scratchpad)
+  JLLM_LOG_MAX_BYTES  cap of a command's spill log when the request gives none (default 51200; 0: unlimited)
   JLLM_ALIAS      tests only: absolute paths under this prefix (e.g. /workspace) are mapped onto the workspace
 
 Endpoints: see docs/SANDBOX.md. A request with a missing or wrong token gets an empty 401 and nothing is executed.
@@ -30,10 +31,12 @@ from urllib.parse import parse_qs, urlparse
 
 TOKEN = os.environ.get("JLLM_TOKEN", "")
 WORKSPACE = os.environ.get("JLLM_WORKSPACE", "/workspace")
-SCRATCH = os.environ.get("JLLM_SCRATCH", os.path.join(WORKSPACE, ".kendhar", "scratchpad"))
+SCRATCH = os.environ.get("JLLM_SCRATCH", os.path.join(WORKSPACE, ".jllm", "scratchpad"))
 ALIAS = os.environ.get("JLLM_ALIAS", "")
 
 CAPTURE_LIMIT = 50 * 1024      # bytes of command output kept in memory
+LOG_MAX_BYTES = int(os.environ.get("JLLM_LOG_MAX_BYTES") or 50 * 1024)  # spill log cap (0: unlimited)
+READER_GRACE = 2.0             # seconds the output is still read after the shell exited
 MAX_FILE_BYTES = 1_000_000     # grep skips larger files
 MAX_RESULTS = 200              # glob / grep hits
 MAX_ENTRIES = 1000             # list / tree entries
@@ -125,15 +128,39 @@ def glob_regex(pattern):
             if j < 0:
                 out.append(re.escape(c))
             else:
-                cls = pattern[i + 1:j]
-                if cls.startswith("!"):
-                    cls = "^" + cls[1:]
-                out.append("[" + cls.replace("\\", "\\\\") + "]")
+                out.append(glob_class(pattern[i + 1:j]))
                 i = j
         else:
             out.append(re.escape(c))
         i += 1
-    return re.compile("^" + "".join(out) + "$")
+    try:
+        return re.compile("^" + "".join(out) + "$")
+    except re.error as e:
+        raise HttpError(400, "bad glob: %s" % e)
+
+
+def glob_class(body):
+    """A [..] class as a regex class built from escaped characters, so nothing in it can leak into the rest of the
+    regex. [!..] negates; a-z ranges are kept; / is refused (a class never crosses a path segment)."""
+    neg = body.startswith("!")
+    if neg:
+        body = body[1:]
+    if not body:
+        raise HttpError(400, "bad glob: empty character class")
+    if "/" in body:
+        raise HttpError(400, "bad glob: '/' in a character class")
+    parts, k = [], 0
+    while k < len(body):
+        if k + 2 < len(body) and body[k + 1] == "-":
+            lo, hi = body[k], body[k + 2]
+            if lo > hi:
+                raise HttpError(400, "bad glob: range %s-%s" % (lo, hi))
+            parts.append(re.escape(lo) + "-" + re.escape(hi))
+            k += 3
+        else:
+            parts.append(re.escape(body[k]))
+            k += 1
+    return "[" + ("^/" if neg else "") + "".join(parts) + "]"
 
 
 def walk_files(start, root):
@@ -150,7 +177,7 @@ def walk_files(start, root):
 # ── commands ──────────────────────────────────────────────────────────────────
 
 class Exec:
-    def __init__(self, command, cwd, timeout, log_dir):
+    def __init__(self, command, cwd, timeout, log_dir, log_max=None):
         self.id = uuid.uuid4().hex
         self.command = command
         self.timeout = timeout
@@ -165,12 +192,18 @@ class Exec:
         self.newlines = 0
         self.log_path = None
         self.log_file = None
+        self.log_max = LOG_MAX_BYTES if log_max is None else log_max
+        self.logged = 0
+        self.log_truncated = False
+        self.detached = False  # the shell exited but a background job holds the pipe: later output is discarded
+        self.reader_done = threading.Event()
         env = {k: v for k, v in os.environ.items() if not k.startswith("JLLM_")}
         self.proc = subprocess.Popen(
             ["sh", "-c", command], cwd=cwd, env=env, stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             **({"start_new_session": True} if os.name == "posix" else {}))
         threading.Thread(target=self._read, daemon=True).start()
+        threading.Thread(target=self._wait, daemon=True).start()
         threading.Thread(target=self._watch, daemon=True).start()
 
     def _open_log(self):
@@ -182,6 +215,24 @@ class Exec:
             self.log_path = os.path.join(self.log_dir, "bash-%d.log" % n)
             self.log_file = open(self.log_path, "wb")
 
+    def _write_log(self, data):
+        if self.log_truncated or self.log_file is None:
+            return
+        room = self.log_max - self.logged if self.log_max > 0 else len(data)
+        if len(data) <= room:
+            self.log_file.write(data)
+            self.logged += len(data)
+            return
+        self.log_file.write(data[:room])
+        self.logged += room
+        self.log_file.write(b"\n[log truncated at %d bytes]\n" % self.log_max)
+        self.log_truncated = True
+        self._close_log()
+
+    def _close_log(self):
+        if self.log_file is not None and not self.log_file.closed:
+            self.log_file.close()
+
     def _read(self):
         try:
             while True:
@@ -189,21 +240,34 @@ class Exec:
                 if not chunk:
                     break
                 with self.lock:
+                    if self.detached:
+                        continue  # keep draining so the background job does not block, but discard
                     self.newlines += chunk.count(b"\n")
-                    if self.log_file is None and self.total + len(chunk) > CAPTURE_LIMIT:
+                    if self.log_path is None and self.total + len(chunk) > CAPTURE_LIMIT:
                         self._open_log()
-                        self.log_file.write(self.ring)
-                    if self.log_file is not None:
-                        self.log_file.write(chunk)
+                        self._write_log(self.ring)
+                    self._write_log(chunk)
                     self.ring = (self.ring + chunk)[-CAPTURE_LIMIT:]
                     self.total += len(chunk)
+        except (OSError, ValueError):
+            pass
         finally:
-            code = self.proc.wait()
             with self.lock:
-                if self.log_file is not None:
-                    self.log_file.close()
-                self.exit_code = -1 if (self.timed_out or self.killed) else code
-            self.done.set()
+                self._close_log()
+            self.reader_done.set()
+
+    def _wait(self):
+        """Finishes when the shell exits, not when the pipe closes: a background job (cmd &) that inherited the
+        output would otherwise keep the command running until its timeout. Its later output is discarded; the job
+        itself is killed with the process group when the harness releases the command (DELETE /exec/{id})."""
+        code = self.proc.wait()
+        self.reader_done.wait(READER_GRACE)
+        with self.lock:
+            if not self.reader_done.is_set():
+                self.detached = True
+                self._close_log()
+            self.exit_code = -1 if (self.timed_out or self.killed) else code
+        self.done.set()
 
     def _watch(self):
         if not self.done.wait(self.timeout):
@@ -247,7 +311,8 @@ def start_exec(body):
         raise HttpError(400, "cwd is not a directory")
     timeout = max(1, min(int(body.get("timeoutSeconds") or 120), 3600))
     log_dir = resolve(WORKSPACE, body.get("logDir") or SCRATCH)
-    ex = Exec(command, cwd, timeout, log_dir)
+    log_max = body.get("logMaxBytes")
+    ex = Exec(command, cwd, timeout, log_dir, None if log_max is None else max(0, int(log_max)))
     with EXECS_LOCK:
         EXECS[ex.id] = ex
         finished = [k for k, v in EXECS.items() if v.done.is_set()]
@@ -354,7 +419,7 @@ def move_path(root, src, dst):
 
 EXEC_MANIFEST = ".jllm-exec"
 # harness-private data that is never copied: the scratchpad is disposable, the history lives on the host
-BACKUP_EXCLUDE = (".kendhar/scratchpad", ".kendhar/history")
+BACKUP_EXCLUDE = (".jllm/scratchpad", ".jllm/history")
 
 
 def excluded(rel_path):
@@ -443,10 +508,17 @@ def do_grep(body):
     hits = []
     if os.path.isfile(start):
         files = [(start, rel(root, start))]
+        base = os.path.dirname(start)
     else:
         files = walk_files(start, root)
+        base = start
+
+    def glob_ok(r_):
+        return grx.match(r_) or (gtop is not None and gtop.match(r_))
+
     for full, r in files:
-        if grx is not None and not (grx.match(r) or (gtop is not None and gtop.match(r))):
+        # the glob matches relative to the searched path; one written relative to the root is accepted too
+        if grx is not None and not (glob_ok(os.path.relpath(full, base).replace(os.sep, "/")) or glob_ok(r)):
             continue
         try:
             if os.path.getsize(full) > MAX_FILE_BYTES:
@@ -559,13 +631,20 @@ class Handler(BaseHTTPRequestHandler):
         if body:
             self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
+        if self.close_connection:
+            self.send_header("Connection", "close")
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(body)
 
     def _body(self):
-        n = int(self.headers.get("Content-Length") or 0)
-        if n > MAX_BODY:
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            self.close_connection = True
+            raise HttpError(400, "bad Content-Length")
+        if n < 0 or n > MAX_BODY:
+            self.close_connection = True  # the body is not read: the connection cannot be reused
             raise HttpError(413, "body too large")
         return self.rfile.read(n) if n else b""
 
@@ -578,9 +657,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def _dispatch(self):
         if not self._authorized():
+            # nothing of an unauthenticated request is read, its body included: answer and close the connection
             self.log_message('"%s %s" 401', self.command, urlparse(self.path).path)
-            self.rfile.read(int(self.headers.get("Content-Length") or 0))
-            return self._send(401)
+            self.close_connection = True
+            self.send_response(401)
+            self.send_header("Content-Length", "0")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            return
         try:
             u = urlparse(self.path)
             q = {k: v[0] for k, v in parse_qs(u.query, keep_blank_values=True).items()}

@@ -28,16 +28,35 @@ public class ChatController {
 
     private static final int MAX_FILES = 50;
     private static final long SSE_TIMEOUT_MS = 30 * 60 * 1000L;
+    /** A comment line sent this often on an idle event stream: a closed client is noticed at the next write. */
+    static final long HEARTBEAT_MS = 15_000L;
+    /** Directory depth of the {@code @}-file suggestions. */
+    private static final int MAX_DEPTH = 8;
+    private static final String HIDDEN_DIR = ".jllm";
+
+    private static final java.util.concurrent.ScheduledExecutorService HEARTBEATS =
+            java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "sse-heartbeat");
+                t.setDaemon(true);
+                return t;
+            });
 
     private final AgentHarness agentService;
     private final ChatSessionService sessions;
     private final HarnessToolRegistry toolRegistry;
     private final SandboxExecutor sandbox;
-    private final SubAgentRunLog subAgentRuns;
     private final ObjectMapper mapper;
     private final HarnessPricing pricing;
+    private final UserInterceptor users;
+    private final SubAgentRunLog subAgentRuns;
 
     public ChatController(AgentHarness harness, ObjectMapper mapper, HarnessPricing pricing) {
+        this(harness, mapper, pricing, null);
+    }
+
+    /** @param users resolves the signed-in user on the open {@code /api/chat/commands} endpoint; may be null */
+    @org.springframework.beans.factory.annotation.Autowired
+    public ChatController(AgentHarness harness, ObjectMapper mapper, HarnessPricing pricing, UserInterceptor users) {
         this.agentService = harness;
         this.sessions = harness.sessions();
         this.toolRegistry = harness.tools();
@@ -45,6 +64,13 @@ public class ChatController {
         this.subAgentRuns = harness.subAgentRuns();
         this.mapper = mapper;
         this.pricing = pricing;
+        this.users = users;
+    }
+
+    /** The slash-command caller of a web request: the user's id, admin flag; no user = no rights. */
+    static org.kendar.llm.harness.commands.SlashCommands.Caller caller(WebUser user) {
+        return user == null ? org.kendar.llm.harness.commands.SlashCommands.Caller.web(null, false)
+                : org.kendar.llm.harness.commands.SlashCommands.Caller.web(user.id(), user.admin());
     }
 
 // ── sessions ──────────────────────────────────────────────────────────────
@@ -52,7 +78,9 @@ public class ChatController {
     @PostMapping("/api/chat")
     public Map<String, Object> create(@RequestBody(required = false) Map<String, String> body,
                                       @RequestAttribute(value = UserInterceptor.ATTR, required = false) WebUser user) {
-        return summary(sessions.create(body == null ? null : body.get("title"), user == null ? null : user.id()));
+        ChatSessionData s = sessions.create(body == null ? null : body.get("title"), user == null ? null : user.id());
+        agentService.commands().captureChatTools(s.chatId()); // /tools, /mcp, ... toggle within this set
+        return summary(sessions.get(s.chatId()));
     }
 
     /** The chats of the signed-in user; the admin sees all of them. */
@@ -86,9 +114,7 @@ public class ChatController {
     @DeleteMapping("/api/chat/{id}")
     public ResponseEntity<Void> delete(@PathVariable String id) {
         if (sessions.find(id).isEmpty()) return ResponseEntity.notFound().build();
-        agentService.cancel(id);
-        sessions.delete(id);
-        subAgentRuns.deleteChat(id);
+        agentService.deleteChat(id); // cancel, context state, sub-agent runs, the chat row and log
         sandbox.deleteWorkDir(id);
         return ResponseEntity.noContent().build();
     }
@@ -155,7 +181,9 @@ public class ChatController {
     // ── runs ──────────────────────────────────────────────────────────────────
 
     @PostMapping("/api/chat/{id}/messages")
-    public ResponseEntity<Map<String, Object>> send(@PathVariable String id, @RequestBody Map<String, String> body) {
+    public ResponseEntity<Map<String, Object>> send(@PathVariable String id, @RequestBody Map<String, String> body,
+                                                    @RequestAttribute(value = UserInterceptor.ATTR, required = false)
+                                                    WebUser user) {
         String text = body.get("text");
         if (text == null || text.isBlank()) {
             return ResponseEntity.badRequest().body(Map.of("error", "text is required"));
@@ -163,8 +191,14 @@ public class ChatController {
         if (sessions.find(id).isEmpty()) return ResponseEntity.notFound().build();
         boolean inMenu = agentService.commands().menuActive(id);
         if (inMenu || agentService.commands().handles(text.strip())) {
-            var r = inMenu ? agentService.commands().menuInput(id, text.strip())
-                    : agentService.commands().execute(id, text.strip());
+            var caller = caller(user);
+            org.kendar.llm.harness.commands.SlashCommands.Result r;
+            try {
+                r = inMenu ? agentService.commands().menuInput(id, text.strip(), caller)
+                        : agentService.commands().execute(id, text.strip(), caller);
+            } catch (RuntimeException e) {
+                return ResponseEntity.badRequest().body(Map.of("error", String.valueOf(e.getMessage())));
+            }
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("command", true);
             m.put("menu", r.menu());
@@ -199,22 +233,51 @@ public class ChatController {
     @GetMapping(value = "/api/chat/{id}/events", produces = "text/event-stream")
     public SseEmitter events(@PathVariable String id, @RequestParam(defaultValue = "0") long after) {
         SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MS);
-        Runnable[] unsubscribe = {() -> { }};
-        Runnable cleanup = () -> unsubscribe[0].run();
+        java.util.concurrent.atomic.AtomicBoolean closed = new java.util.concurrent.atomic.AtomicBoolean();
+        java.util.concurrent.atomic.AtomicReference<Runnable> unsubscribe = new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.concurrent.atomic.AtomicReference<java.util.concurrent.ScheduledFuture<?>> heartbeat =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        // runs once, whichever comes first: completion, timeout, error, failed write (closed client)
+        Runnable cleanup = () -> {
+            if (!closed.compareAndSet(false, true)) return;
+            var hb = heartbeat.get();
+            if (hb != null) hb.cancel(false);
+            Runnable u = unsubscribe.getAndSet(() -> { });
+            if (u != null) u.run();
+        };
         emitter.onCompletion(cleanup);
-        emitter.onTimeout(cleanup);
+        emitter.onTimeout(() -> {
+            cleanup.run();
+            emitter.complete();
+        });
         emitter.onError(e -> cleanup.run());
-        unsubscribe[0] = agentService.subscribe(id, after, ev -> {
+        Runnable subscription = agentService.subscribe(id, after, ev -> {
+            if (closed.get()) return;
             try {
                 emitter.send(SseEmitter.event()
                         .id(String.valueOf(ev.seq()))
                         .name(ev.type())
                         .data(mapper.writeValueAsString(ev)));
-            } catch (IOException e) {
+            } catch (IOException | IllegalStateException e) {
                 cleanup.run();
                 emitter.completeWithError(e);
             }
         });
+        if (!unsubscribe.compareAndSet(null, subscription)) subscription.run(); // closed while subscribing
+        heartbeat.set(HEARTBEATS.scheduleAtFixedRate(() -> {
+            if (closed.get()) return;
+            try {
+                emitter.send(SseEmitter.event().comment("ping"));
+            } catch (IOException | IllegalStateException e) {
+                cleanup.run();
+                try {
+                    emitter.completeWithError(e);
+                } catch (RuntimeException ignored) {
+                    // already completed
+                }
+            }
+        }, HEARTBEAT_MS, HEARTBEAT_MS, java.util.concurrent.TimeUnit.MILLISECONDS));
+        if (closed.get()) heartbeat.get().cancel(false);
         return emitter;
     }
 
@@ -233,6 +296,12 @@ public class ChatController {
         String edited = body.get("editedText") instanceof String s ? s : null;
         boolean remember = Boolean.TRUE.equals(body.get("remember"));
         boolean rememberDir = Boolean.TRUE.equals(body.get("rememberDir"));
+        // "allow writes in this folder" with a typed folder: an invalid one must not approve the call at all
+        if (approved && rememberDir && edited != null && !edited.isBlank()
+                && org.kendar.llm.harness.permission.ApprovalService.grantDirOf(agentService.workDir(id), edited) == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Invalid folder '" + edited
+                    + "': give a folder inside the project, relative to it, without '..' and not inside .git"));
+        }
         if (!agentService.resolveApproval(id, approvalId, approved, edited, remember, rememberDir)) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Approval no longer pending"));
         }
@@ -247,25 +316,60 @@ public class ChatController {
         var fb = sandbox.files(id, null);
         if (fb != null) { // docker daemon mode: the files are in the container
             try {
-                return fb.glob("**/*").stream().filter(p -> !p.startsWith(".kendhar/"))
+                return fb.glob("**/*").stream().filter(p -> !p.startsWith(".jllm/"))
                         .filter(p -> needle.isEmpty() || p.toLowerCase().contains(needle)).limit(MAX_FILES).toList();
             } catch (IOException | RuntimeException e) {
                 return List.of();
             }
         }
         Path root = sandbox.workDir(id).toAbsolutePath().normalize();
-        try (Stream<Path> s = Files.walk(root, 8)) {
-            return s.filter(Files::isRegularFile)
-                    .map(p -> root.relativize(p.toAbsolutePath().normalize()))
-                    .filter(p -> !p.startsWith(".."))
-                    .map(p -> p.toString().replace('\\', '/'))
-                    .filter(p -> needle.isEmpty() || p.toLowerCase().contains(needle))
-                    .sorted()
-                    .limit(MAX_FILES)
-                    .toList();
-        } catch (IOException e) {
-            return List.of();
+        return suggestions(root, needle);
+    }
+
+    /**
+     * Files below {@code root} whose relative path contains {@code needle}: the harness directory is skipped,
+     * unreadable directories and files are left out instead of failing the request.
+     */
+    static List<String> suggestions(Path root, String needle) {
+        List<String> found = new ArrayList<>();
+        if (!Files.isDirectory(root)) return found;
+        try {
+            Files.walkFileTree(root, EnumSet.noneOf(java.nio.file.FileVisitOption.class), MAX_DEPTH,
+                    new java.nio.file.SimpleFileVisitor<>() {
+                        @Override
+                        public java.nio.file.FileVisitResult preVisitDirectory(Path dir,
+                                                                               java.nio.file.attribute.BasicFileAttributes a) {
+                            if (!dir.equals(root) && HIDDEN_DIR.equalsIgnoreCase(String.valueOf(dir.getFileName()))) {
+                                return java.nio.file.FileVisitResult.SKIP_SUBTREE;
+                            }
+                            return java.nio.file.FileVisitResult.CONTINUE;
+                        }
+
+                        @Override
+                        public java.nio.file.FileVisitResult visitFile(Path file,
+                                                                       java.nio.file.attribute.BasicFileAttributes a) {
+                            if (!a.isRegularFile()) return java.nio.file.FileVisitResult.CONTINUE;
+                            Path rel = root.relativize(file.toAbsolutePath().normalize());
+                            if (rel.startsWith("..")) return java.nio.file.FileVisitResult.CONTINUE;
+                            String p = rel.toString().replace('\\', '/');
+                            if (needle.isEmpty() || p.toLowerCase().contains(needle)) found.add(p);
+                            return java.nio.file.FileVisitResult.CONTINUE;
+                        }
+
+                        @Override
+                        public java.nio.file.FileVisitResult visitFileFailed(Path file, IOException e) {
+                            return java.nio.file.FileVisitResult.CONTINUE; // unreadable: left out
+                        }
+
+                        @Override
+                        public java.nio.file.FileVisitResult postVisitDirectory(Path dir, IOException e) {
+                            return java.nio.file.FileVisitResult.CONTINUE;
+                        }
+                    });
+        } catch (IOException | RuntimeException e) {
+            // whatever was found so far
         }
+        return found.stream().sorted().limit(MAX_FILES).toList();
     }
 
     @GetMapping("/api/chat/{id}/usage")
@@ -274,9 +378,11 @@ public class ChatController {
     }
 
     @GetMapping("/api/chat/commands")
-    public List<Map<String, String>> commands() {
+    public List<Map<String, String>> commands(jakarta.servlet.http.HttpServletRequest request) {
+        WebUser user = request.getAttribute(UserInterceptor.ATTR) instanceof WebUser u ? u
+                : users == null ? null : users.signedIn(request).orElse(null);
         List<Map<String, String>> out = new ArrayList<>();
-        for (var c : agentService.commands().list()) out.add(command(c.name(), c.description(), "server"));
+        for (var c : agentService.commands().list(caller(user))) out.add(command(c.name(), c.description(), "server"));
         Set<String> groups = new TreeSet<>();
         for (HarnessTool t : toolRegistry.all()) groups.add(t.group());
         for (String g : groups) {

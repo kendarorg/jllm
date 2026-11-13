@@ -104,8 +104,12 @@ public final class Main {
         ObjectMapper mapper = new ObjectMapper();
         Path projectDir = Path.of(a.getOrDefault("workdir", "")).toAbsolutePath().normalize();
         // global ~/.jllm/settings.json, then project .jllm/settings.json, then --settings; later wins
+        // a stdio MCP server defined only by the project file starts a local process: ask once (answer remembered)
+        boolean canAsk = !a.containsKey("prompt") && System.in.available() == 0;
         HarnessSettings settings = HarnessSettings.loadLayered(
-                a.containsKey("settings") ? Path.of(a.get("settings")) : null, projectDir);
+                a.containsKey("settings") ? Path.of(a.get("settings")) : null, projectDir,
+                (dir, server, cmd) -> canAsk ? askYesNo("The project settings of " + dir + " define the MCP server '"
+                        + server + "', which runs the local command:\n  " + cmd + "\nRun it?") : null);
         var promptFiles = org.kendar.llm.harness.instructions.SystemPromptFiles.load(projectDir);
         String promptReplace = a.containsKey("system-prompt-replace")
                 ? org.kendar.llm.harness.instructions.SystemPromptFiles.readFile(Path.of(a.get("system-prompt-replace")))
@@ -231,6 +235,7 @@ public final class Main {
             }
             String line = in.take();
             if (line.equals(EOF)) break;
+            if (line.equals(INTERRUPTED)) continue;
             if (isExitCommand(line)) {
                 ask("Stop the whole process and exit? [y/N] ");
                 String answer = in.take();
@@ -246,6 +251,12 @@ public final class Main {
                 renderer.expand(line.strip().substring("/expand".length()));
                 continue;
             }
+            // nothing to steer or follow up while idle: the text is a normal prompt, and the run is followed here
+            String queued = idleQueuedText(line);
+            if (queued != null) {
+                runTurn(harness, chat.id, queued, events, in);
+                continue;
+            }
             if (harness.commands().handles(line.strip())) {
                 command(harness, chat, line.strip(), events);
                 continue;
@@ -255,7 +266,22 @@ public final class Main {
         System.exit(0);
     }
 
+    /** The text of {@code /steer <text>} or {@code /followup <text>}; null for any other line or an empty text. */
+    static String idleQueuedText(String line) {
+        String s = line.strip();
+        for (String c : new String[]{"/steer", "/followup"}) {
+            if (s.equals(c) || !s.startsWith(c + " ")) continue;
+            String text = s.substring(c.length()).strip();
+            return text.isEmpty() ? null : text;
+        }
+        return null;
+    }
+
     private static final String EOF = "<eof>";
+    /** Put in the input queue by ctrl+c during an approval question: the question was answered "no". */
+    private static final String INTERRUPTED = "<interrupted>";
+    /** Chat and id of the approval the CLI is asking about now, or null. */
+    private static volatile String[] pendingApproval;
 
     private static boolean isExitCommand(String line) {
         String s = line.strip();
@@ -296,6 +322,10 @@ public final class Main {
             while (true) {
                 String l = term.readLine("> ", () -> {
                     long now = System.currentTimeMillis();
+                    if (rejectPendingApproval(harness, in)) {
+                        lastInterrupt = 0; // a second ctrl+c stops the run, it does not exit
+                        return;
+                    }
                     if (running) requestStop(harness, chat.id);
                     else if (now - lastInterrupt < 2000) System.exit(0);
                     else say(Renderer.DIM + "(press ctrl+c again to exit)" + Renderer.RESET);
@@ -341,6 +371,33 @@ public final class Main {
         java.io.ByteArrayOutputStream line = new java.io.ByteArrayOutputStream();
         for (int b = System.in.read(); b != -1 && b != '\n'; b = System.in.read()) line.write(b);
         return line.toString(StandardCharsets.UTF_8).strip();
+    }
+
+    /**
+     * Asks a yes/no question before the chat starts: true for y/yes, false for anything else, null when stdin ended.
+     * The plain line is read byte by byte (as {@link #askToken}) so the chat's own stdin reader loses nothing.
+     */
+    static Boolean askYesNo(String question) {
+        try {
+            java.io.Console console = System.console();
+            String answer;
+            if (console != null) {
+                answer = console.readLine("%s [y/N] ", question);
+            } else {
+                System.out.print(question + " [y/N] ");
+                System.out.flush();
+                java.io.ByteArrayOutputStream line = new java.io.ByteArrayOutputStream();
+                int b = System.in.read();
+                if (b == -1) return null;
+                for (; b != -1 && b != '\n'; b = System.in.read()) line.write(b);
+                answer = line.toString(StandardCharsets.UTF_8);
+            }
+            if (answer == null) return null;
+            String t = answer.strip().toLowerCase(java.util.Locale.ROOT);
+            return t.equals("y") || t.equals("yes");
+        } catch (IOException e) {
+            return null;
+        }
     }
 
     private static BlockingQueue<String> stdin() {
@@ -401,11 +458,17 @@ public final class Main {
 
     private static void runLoop(AgentHarness harness, String chatId, String text, BlockingQueue<AgentEvent> events,
                                 BlockingQueue<String> in) throws InterruptedException {
-        harness.start(chatId, text);
+        try {
+            harness.start(chatId, text);
+        } catch (org.kendar.llm.harness.agent.AgentService.RunAlreadyActiveException e) {
+            sayErr(Renderer.RED + "[error] " + e.getMessage() + " (/cancel stops it)" + Renderer.RESET);
+            return;
+        }
+        int open = 0; // runs started and not finished: a late steer or follow-up can start the next one
         while (true) {
             // Input typed during the run: a command (/cancel, /followup <text>) runs, any other line steers the agent
             for (String typed = in.poll(); typed != null; typed = in.poll()) {
-                if (typed.equals(EOF) || typed.isBlank()) continue;
+                if (typed.equals(EOF) || typed.equals(INTERRUPTED) || typed.isBlank()) continue;
                 if (stopPending) {
                     stopPending = false;
                     harness.cancel(chatId, typed.strip().toLowerCase().startsWith("k"));
@@ -443,8 +506,11 @@ public final class Main {
             }
             switch (ev.type()) {
                 case "approval_request" -> approve(harness, chatId, d, in);
+                case "run_started" -> open++;
                 case "run_finished" -> {
-                    return;
+                    open--;
+                    // a message typed as the run ended started another one: follow it too
+                    if (open <= 0 && !harness.isRunning(chatId) && events.isEmpty()) return;
                 }
                 default -> renderer.render(ev);
             }
@@ -468,36 +534,76 @@ public final class Main {
 
     private static void approve(AgentHarness harness, String chatId, JsonNode d, BlockingQueue<String> in)
             throws InterruptedException {
-        say(Renderer.YELLOW + "[approval] " + d.path("type").asText() + " " + d.path("title").asText() + Renderer.RESET
-                + "\n" + d.path("preview").asText());
+        String id = d.path("id").asText();
+        pendingApproval = new String[]{chatId, id};
+        try {
+            askApproval(harness, chatId, id, d, in);
+        } finally {
+            pendingApproval = null;
+        }
+    }
+
+    /**
+     * Ctrl+C while an approval question is open: the call is rejected and whatever was typed for it is dropped.
+     *
+     * @return whether there was a question to reject
+     */
+    private static boolean rejectPendingApproval(AgentHarness harness, BlockingQueue<String> in) {
+        String[] p = pendingApproval;
+        if (p == null) return false;
+        pendingApproval = null;
+        harness.resolveApproval(p[0], p[1], false, null, false, false);
+        in.clear();
+        in.add(INTERRUPTED);
+        say(Renderer.YELLOW + "[approval] rejected (ctrl+c again stops the run)" + Renderer.RESET);
+        return true;
+    }
+
+    /** The next typed answer; null when the question was interrupted (already rejected). */
+    private static String answer(BlockingQueue<String> in) throws InterruptedException {
+        String a = in.take();
+        return a.equals(INTERRUPTED) ? null : a;
+    }
+
+    private static void askApproval(AgentHarness harness, String chatId, String id, JsonNode d,
+                                    BlockingQueue<String> in) throws InterruptedException {
+        // title and preview carry model and tool text: no terminal control sequences from them
+        say(Renderer.YELLOW + "[approval] " + Renderer.clean(d.path("type").asText()) + " "
+                + Renderer.clean(d.path("title").asText()) + Renderer.RESET + "\n"
+                + Renderer.clean(d.path("preview").asText()));
         if ("continue".equals(d.path("type").asText())) {
-            ask("Turns to allow [" + d.path("proposed").asText() + ", n = stop] ");
-            String t = in.take();
+            ask("Turns to allow [" + Renderer.clean(d.path("proposed").asText()) + ", n = stop] ");
+            String t = answer(in);
+            if (t == null) return;
             String v = t.equals(EOF) ? "n" : t.strip();
             boolean stop = v.toLowerCase().startsWith("n");
-            harness.resolveApproval(chatId, d.path("id").asText(), !stop, v.isEmpty() ? null : v, false, false);
+            harness.resolveApproval(chatId, id, !stop, v.isEmpty() ? null : v, false, false);
             return;
         }
-        String writeDir = d.path("writeDir").asText("");
+        String writeDir = Renderer.clean(d.path("writeDir").asText(""));
+        String host = Renderer.clean(d.path("host").asText());
         if ("insecure_cert".equals(d.path("type").asText())) {
-            ask("Continue without checking the certificate of " + d.path("host").asText() + " (this call only)? [y/N] ");
-            String c = in.take();
-            harness.resolveApproval(chatId, d.path("id").asText(),
-                    !c.equals(EOF) && c.strip().toLowerCase().startsWith("y"), null, false, false);
+            ask("Continue without checking the certificate of " + host + " (this call only)? [y/N] ");
+            String c = answer(in);
+            if (c == null) return;
+            harness.resolveApproval(chatId, id, !c.equals(EOF) && c.strip().toLowerCase().startsWith("y"), null,
+                    false, false);
             return;
         }
         if ("host".equals(d.path("type").asText())) {
-            ask("Allow " + d.path("host").asText() + "? [y=once/N/a=this host and its subdomains for this chat] ");
-            String h = in.take();
+            ask("Allow " + host + "? [y=once/N/a=this host and its subdomains for this chat] ");
+            String h = answer(in);
+            if (h == null) return;
             String ha = h.equals(EOF) ? "" : h.strip().toLowerCase();
             boolean always = ha.startsWith("a");
-            harness.resolveApproval(chatId, d.path("id").asText(), always || ha.startsWith("y"), null, always, false);
+            harness.resolveApproval(chatId, id, always || ha.startsWith("y"), null, always, false);
             return;
         }
         ask("Allow? [y/N/a=allow for this chat"
                 + (writeDir.isEmpty() ? "" : "/d=allow writes in " + writeDir + "/ and subfolders"
                 + ", or 'd <path>' for another folder of the project") + "] ");
-        String answer = in.take();
+        String answer = answer(in);
+        if (answer == null) return;
         String raw = answer.equals(EOF) ? "" : answer.strip();
         String a = raw.toLowerCase();
         boolean remember = a.startsWith("a");
@@ -509,7 +615,7 @@ public final class Main {
             say("[warning] Path not allowed (absolute, '..' or .git): no folder granted");
         }
         boolean ok = remember || rememberDir || a.startsWith("y");
-        harness.resolveApproval(chatId, d.path("id").asText(), ok, typedDir, remember, rememberDir);
+        harness.resolveApproval(chatId, id, ok, typedDir, remember, rememberDir);
     }
 
     /** A question: above the prompt on a terminal (the answer comes from the input line), inline otherwise. */
@@ -563,7 +669,7 @@ public final class Main {
                 : org.kendar.llm.harness.sandbox.RemoteExecSandboxExecutor.cleanStartupDir(config, runner, projectDir);
         if (removed.isEmpty()) System.out.println("No sandbox container to remove" + (all ? "." : " for " + projectDir));
         else removed.forEach(n -> System.out.println("removed " + n));
-        System.out.println("Project files and .kendhar are untouched.");
+        System.out.println("Project files and .jllm are untouched.");
     }
 
     /** A boolean flag: bare ({@code --small-model}) or with a value ({@code --small-model=false}). */

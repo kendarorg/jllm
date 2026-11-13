@@ -86,9 +86,9 @@ class JsLifecycleAndJailTest {
         assertTrue(out.contains("ok: true"), out);
         assertTrue(out.contains("\\\"plain\\\":\\\"blocked\\\"") || out.contains("\"plain\":\"blocked\""), out);
         assertFalse(out.contains("visible"), out);
-        assertTrue(out.contains("fileRoot: .kendhar/scratchpad/"), out);
+        assertTrue(out.contains("fileRoot: .jllm/scratchpad/"), out);
         assertFalse(Files.exists(project.resolve("mine.txt")), "nothing written to the project");
-        try (var s = Files.walk(project.resolve(".kendhar/scratchpad"))) {
+        try (var s = Files.walk(project.resolve(".jllm/scratchpad"))) {
             assertTrue(s.anyMatch(p -> p.getFileName().toString().equals("mine.txt")));
         }
     }

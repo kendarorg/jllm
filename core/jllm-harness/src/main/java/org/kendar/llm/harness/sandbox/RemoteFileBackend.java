@@ -29,7 +29,7 @@ public final class RemoteFileBackend implements FileBackend {
     private final String agentId;
 
     /**
-     * @param scratchBase container path of the scratchpad ({@code /workspace/.kendhar/scratchpad})
+     * @param scratchBase container path of the scratchpad ({@code /workspace/.jllm/scratchpad})
      * @param agentId     the agent whose scratch directory {@link Root#SCRATCH} means; null: the whole scratchpad
      */
     public RemoteFileBackend(ClientSupplier client, String workRoot, String scratchBase, String agentId) {

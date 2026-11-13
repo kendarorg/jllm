@@ -17,7 +17,11 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class DocxReaderTest {
 
-    private static final String NS = "xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"";
+    private static final String NS = "xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\""
+            + " xmlns:mc=\"http://schemas.openxmlformats.org/markup-compatibility/2006\""
+            + " xmlns:wps=\"http://schemas.microsoft.com/office/word/2010/wordprocessingShape\""
+            + " xmlns:v=\"urn:schemas-microsoft-com:vml\""
+            + " xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"";
 
     @TempDir
     Path dir;
@@ -60,6 +64,33 @@ class DocxReaderTest {
                 + "<w:del><w:r><w:delText>removed</w:delText></w:r></w:del></w:p>";
 
         assertEquals("keep added\n", new DocxReader().extract(docx(body)));
+    }
+
+    @Test
+    void textBoxKeepsOuterTextAndFallbackIsNotDuplicated() throws Exception {
+        String box = "<w:txbxContent><w:p><w:r><w:t>in box</w:t></w:r></w:p></w:txbxContent>";
+        String body = "<w:p><w:r><w:t>before </w:t></w:r><w:r><mc:AlternateContent>"
+                + "<mc:Choice Requires=\"wps\"><w:drawing><wps:wsp><wps:txbx>" + box + "</wps:txbx></wps:wsp></w:drawing></mc:Choice>"
+                + "<mc:Fallback><w:pict><v:shape><v:textbox>" + box + "</v:textbox></v:shape></w:pict></mc:Fallback>"
+                + "</mc:AlternateContent></w:r><w:r><w:t>after</w:t></w:r></w:p>";
+
+        assertEquals("in box\nbefore after\n", new DocxReader().extract(docx(body)));
+    }
+
+    @Test
+    void tabStopsAreNotTabsButRunTabsAre() throws Exception {
+        String body = "<w:p><w:pPr><w:tabs><w:tab w:val=\"left\" w:pos=\"720\"/></w:tabs></w:pPr>"
+                + "<w:r><w:t>a</w:t><w:tab/><w:t>b</w:t></w:r></w:p>";
+
+        assertEquals("a\tb\n", new DocxReader().extract(docx(body)));
+    }
+
+    @Test
+    void drawingMlTextIsIgnored() throws Exception {
+        String body = "<w:p><w:r><w:t>text</w:t><w:drawing><a:graphic><a:p><a:r><a:t>chart label</a:t></a:r></a:p>"
+                + "</a:graphic></w:drawing></w:r></w:p>";
+
+        assertEquals("text\n", new DocxReader().extract(docx(body)));
     }
 
     @Test

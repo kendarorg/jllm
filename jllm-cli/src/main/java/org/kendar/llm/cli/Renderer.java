@@ -42,28 +42,28 @@ final class Renderer {
     synchronized void render(AgentEvent ev) {
         JsonNode d = ev.data();
         switch (ev.type()) {
-            case "text" -> out.accept(fancy ? CYAN + "● " + RESET + d.path("text").asText() : d.path("text").asText());
+            case "text" -> out.accept(fancy ? CYAN + "● " + RESET + clean(d.path("text").asText()) : clean(d.path("text").asText()));
             case "tool_call" -> {
                 if (fancy) pending.put(d.path("id").asText(), new JsonNode[]{d.path("input")});
-                else out.accept("[tool] " + d.path("name").asText() + " " + d.path("input"));
+                else out.accept("[tool] " + clean(d.path("name").asText()) + " " + clean(d.path("input").toString()));
             }
             case "tool_result" -> toolResult(d);
-            case "warning" -> out.accept(color(YELLOW, "[warning] " + d.path("message").asText()));
-            case "retry" -> out.accept(color(YELLOW, "[retry] " + d.path("message").asText()));
-            case "error" -> err.accept(color(RED, "[error] " + d.path("message").asText()));
-            case "compaction" -> out.accept(color(DIM, "[compaction] " + d));
-            case "plan_ready" -> out.accept("[plan] " + d.path("message").asText());
+            case "warning" -> out.accept(color(YELLOW, "[warning] " + clean(d.path("message").asText())));
+            case "retry" -> out.accept(color(YELLOW, "[retry] " + clean(d.path("message").asText())));
+            case "error" -> err.accept(color(RED, "[error] " + clean(d.path("message").asText())));
+            case "compaction" -> out.accept(color(DIM, "[compaction] " + clean(d.toString())));
+            case "plan_ready" -> out.accept("[plan] " + clean(d.path("message").asText()));
             case "cancelled" -> out.accept(color(YELLOW, "[cancelled]"));
-            case "steer_queued" -> out.accept(color(DIM, "[queued " + d.path("kind").asText() + "] " + d.path("text").asText()));
-            case "steer_applied" -> out.accept(color(DIM, "[applied] " + d.path("text").asText()));
+            case "steer_queued" -> out.accept(color(DIM, "[queued " + clean(d.path("kind").asText()) + "] " + clean(d.path("text").asText())));
+            case "steer_applied" -> out.accept(color(DIM, "[applied] " + clean(d.path("text").asText())));
             default -> { }
         }
     }
 
     private void toolResult(JsonNode d) {
-        String name = d.path("name").asText();
+        String name = clean(d.path("name").asText());
         boolean error = d.path("isError").asBoolean();
-        String output = d.path("output").asText();
+        String output = clean(d.path("output").asText());
         if (!fancy) {
             out.accept("[result" + (error ? ", error" : "") + "] " + abbreviate(output));
             return;
@@ -105,21 +105,48 @@ final class Renderer {
             out.accept("No such tool call (" + calls.get(0).n() + ".." + calls.get(calls.size() - 1).n() + " kept).");
             return;
         }
-        out.accept(header(c) + "\n" + DIM + "  input: " + RESET + c.input() + "\n" + DIM + "  output:" + RESET + "\n"
+        out.accept(header(c) + "\n" + DIM + "  input: " + RESET + clean(String.valueOf(c.input())) + "\n" + DIM + "  output:" + RESET + "\n"
                 + (c.error() ? RED : "") + c.output() + RESET);
     }
 
     /** The most useful argument of a call, one line. */
     static String argSummary(JsonNode input) {
         for (String k : ARG_KEYS) {
-            if (input.hasNonNull(k) && input.get(k).isValueNode()) return cut(input.get(k).asText());
+            if (input.hasNonNull(k) && input.get(k).isValueNode()) return cut(clean(input.get(k).asText()));
         }
-        return cut(input.toString());
+        return cut(clean(input.toString()));
     }
 
     private static String cut(String s) {
         String one = s.replace('\n', ' ');
         return one.length() > ARG_MAX ? one.substring(0, ARG_MAX) + "…" : one;
+    }
+
+    /** ESC sequences (CSI, OSC, DCS/APC/PM/SOS strings, two-byte escapes). */
+    private static final java.util.regex.Pattern ESCAPES = java.util.regex.Pattern.compile(
+            "\u001b\\[[0-?]*[ -/]*[@-~]"                         // CSI
+                    + "|\u001b[\\]PX^_][^\u0007\u001b]*(?:\u0007|\u001b\\\\)?" // OSC, DCS, SOS, PM, APC
+                    + "|\u001b[ -/]*[0-~]?");                     // other escapes, a lone ESC
+
+    /**
+     * Model and tool text without terminal control: escape sequences and C0/C1 control characters are removed
+     * (newlines and tabs stay; a CR is kept only before a newline), so output cannot move the cursor, retitle the
+     * window, hide text or forge the prompt.
+     */
+    static String clean(String s) {
+        if (s == null || s.isEmpty()) return s == null ? "" : s;
+        String t = ESCAPES.matcher(s).replaceAll("");
+        StringBuilder b = new StringBuilder(t.length());
+        for (int i = 0; i < t.length(); i++) {
+            char c = t.charAt(i);
+            if (c == '\n' || c == '\t') b.append(c);
+            else if (c == '\r') {
+                if (i + 1 < t.length() && t.charAt(i + 1) == '\n') b.append(c);
+            } else if (c < 0x20 || c == 0x7f || (c >= 0x80 && c <= 0x9f)) {
+                continue;
+            } else b.append(c);
+        }
+        return b.toString();
     }
 
     private String color(String c, String s) {

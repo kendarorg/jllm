@@ -102,7 +102,9 @@ public class ScopeStrategy implements ContextStrategy {
     @Override
     public ContextView prepare(ContextTurn t) {
         boolean changed = false;
-        if (config.compaction().auto()) {
+        // rewriting history voids the signed thinking blocks of the turn in progress: optionally wait for it to end
+        boolean defer = config.compaction().deferOnThinkingOverflow() && ContextManager.currentTurnHasThinking(t.log());
+        if (config.compaction().auto() && !defer) {
             long budget = budget(t.prefix());
             if (estimate(t.log(), t.prefix(), t.lastUsage()) > budget) {
                 changed = shrink(t, budget, options.offloadChars(), config.keepRecentTurns(), false);
@@ -120,8 +122,10 @@ public class ScopeStrategy implements ContextStrategy {
     @Override
     public CompactResult compactNow(ContextTurn t, String focus) {
         long before = estimate(t.log(), null, null);
+        ArrayNode beforeClear = t.log().deepCopy();
         int cleared = clearOld(t.log(), 1);
-        boolean summarized = summarize(t, focus);
+        boolean summarized = summarize(t, focus, beforeClear);
+        if (cleared > 0 || summarized) ContextManager.stripThinking(t.log(), true);
         return new CompactResult(cleared > 0 || summarized, before, estimate(t.log(), null, null), cleared);
     }
 
@@ -132,32 +136,33 @@ public class ScopeStrategy implements ContextStrategy {
 
     // ---- budget -------------------------------------------------------------------------------------------------
 
-    /** Window minus the answer reserve and the safety margin minus the fixed part of the request. */
+    /**
+     * Window minus the answer reserve and the safety margin. The fixed part of the request (system prompt, tool
+     * schemas) is counted once, on the usage side: see {@link #estimate}.
+     */
     long budget(RequestPrefix prefix) {
         long window = config.contextBudgetTokens();
         long reserve = Math.min(window / 8, Math.min(options.reserveCap(), config.maxTokens()));
         long safety = window * options.safetyPercent() / 100;
-        return window - reserve - safety - fixedTokens(prefix);
+        return window - reserve - safety;
     }
 
-    private static long fixedTokens(RequestPrefix prefix) {
-        if (prefix == null) return 0;
-        long chars = (prefix.pinned() == null ? 0 : prefix.pinned().length())
-                + (prefix.extra() == null ? 0 : prefix.extra().length());
-        for (HarnessTool tool : prefix.tools()) {
-            chars += tool.name().length() + tool.description().length() + tool.inputSchema().toString().length();
-        }
-        return chars / 4;
-    }
-
-    private static long estimate(ArrayNode messages, RequestPrefix prefix, org.kendar.llm.harness.llm.Usage last) {
-        long chars = messages.toString().length() / 4 + fixedTokens(prefix);
+    /** The whole request: messages plus the fixed part, or the measured usage (which includes it) when larger. */
+    static long estimate(ArrayNode messages, RequestPrefix prefix, org.kendar.llm.harness.llm.Usage last) {
+        long chars = messages.toString().length() / 4 + ContextManager.fixedTokens(prefix);
         return last == null ? chars : Math.max(chars, last.contextTokens());
     }
 
     // ---- the trim order -----------------------------------------------------------------------------------------
 
     private boolean shrink(ContextTurn t, long budget, int offloadChars, int keepTurns, boolean force) {
+        boolean changed = trim(t, budget, offloadChars, keepTurns, force);
+        // earlier content was rewritten: the thinking signatures bound to it are void
+        if (changed) ContextManager.stripThinking(t.log(), true);
+        return changed;
+    }
+
+    private boolean trim(ContextTurn t, long budget, int offloadChars, int keepTurns, boolean force) {
         ArrayNode msgs = t.log();
         boolean changed = false;
         // 1. offload: first outside the latest turn, then everywhere
@@ -165,12 +170,13 @@ public class ScopeStrategy implements ContextStrategy {
         if (!force && estimate(msgs, t.prefix(), null) <= budget) return changed;
         changed |= offload(t, offloadChars, msgs.size());
         if (!force && estimate(msgs, t.prefix(), null) <= budget) return changed;
-        // 2. clear old tool results
+        // 2. clear old tool results (the summary is made from the log as it was before)
+        ArrayNode beforeClear = msgs.deepCopy();
         changed |= clearOld(msgs, keepTurns) > 0;
         if (!force && estimate(msgs, t.prefix(), null) <= budget) return changed;
         // 3. summarize
         try {
-            changed |= summarize(t, null);
+            changed |= summarize(t, null, beforeClear);
         } catch (RuntimeException e) {
             log.warn("Summarization failed: {}", e.getMessage());
             t.sink().emit("warning", mapper.createObjectNode().put("message",
@@ -250,13 +256,22 @@ public class ScopeStrategy implements ContextStrategy {
         return cleared;
     }
 
-    /** Summarizes everything but the pinned first message and the latest turn. */
-    private boolean summarize(ContextTurn t, String focus) {
+    /**
+     * Summarizes everything but the pinned first message and the latest turn.
+     *
+     * @param beforeClear the log before old tool results were cleared (same indexes): what the summary is made from
+     */
+    private boolean summarize(ContextTurn t, String focus, ArrayNode beforeClear) {
         ArrayNode msgs = t.log();
         int head = headSize(msgs);
         ArrayNode rest = mapper.createArrayNode();
         for (int i = head; i < msgs.size(); i++) rest.add(msgs.get(i));
-        CompactResult r = manager.compactNow(rest, focus, t.usageSink());
+        ArrayNode original = null;
+        if (beforeClear != null && beforeClear.size() == msgs.size()) {
+            original = mapper.createArrayNode();
+            for (int i = head; i < beforeClear.size(); i++) original.add(beforeClear.get(i));
+        }
+        CompactResult r = manager.compactNow(rest, focus, t.usageSink(), null, original);
         if (!r.changed()) return false;
         ArrayNode out = mapper.createArrayNode();
         if (head > 0) {

@@ -95,8 +95,23 @@ class AuthTest {
             assertEquals("abc", ok.awaitCode(Duration.ofSeconds(5)));
         }
         try (LoopbackCallbackServer bad = new LoopbackCallbackServer(0, "st")) {
-            get(bad.redirectUri() + "?state=other&code=abc");
-            assertEquals("invalid_state", assertThrows(OAuthException.class, () -> bad.awaitCode(Duration.ofSeconds(5))).code());
+            // stray requests with a wrong or missing state are rejected and the real redirect still completes
+            assertEquals(400, status(bad.redirectUri() + "?state=other&code=abc"));
+            assertEquals(400, status(bad.redirectUri() + "?error=access_denied"));
+            assertEquals(200, status(bad.redirectUri() + "?state=st&code=real"));
+            assertEquals("real", bad.awaitCode(Duration.ofSeconds(5)));
+        }
+        try (LoopbackCallbackServer stray = new LoopbackCallbackServer(0, "st")) {
+            get(stray.redirectUri() + "?state=other&code=abc");
+            assertEquals("timeout", assertThrows(OAuthException.class, () -> stray.awaitCode(Duration.ofMillis(200))).code());
+        }
+        try (LoopbackCallbackServer denied = new LoopbackCallbackServer(0, "st")) {
+            get(denied.redirectUri() + "?state=st&error=access_denied");
+            assertEquals("access_denied", assertThrows(OAuthException.class, () -> denied.awaitCode(Duration.ofSeconds(5))).code());
+        }
+        try (LoopbackCallbackServer noCode = new LoopbackCallbackServer(0, "st")) {
+            get(noCode.redirectUri() + "?state=st");
+            assertEquals("invalid_response", assertThrows(OAuthException.class, () -> noCode.awaitCode(Duration.ofSeconds(5))).code());
         }
         try (LoopbackCallbackServer slow = new LoopbackCallbackServer(0, "st")) {
             assertEquals("timeout", assertThrows(OAuthException.class, () -> slow.awaitCode(Duration.ofMillis(50))).code());
@@ -118,6 +133,52 @@ class AuthTest {
         assertTrue(store.remove("a"));
         assertFalse(store.remove("a"));
         assertFalse(a.toString().contains("acc"));
+    }
+
+    @Test
+    void separateStoresOnTheSameFileDoNotOverlapTheirFileLocks() throws Exception {
+        Files.createDirectories(tmp.resolve("x"));
+        TokenStore a = new TokenStore(tmp.resolve("auth.json"));
+        TokenStore b = new TokenStore(tmp.resolve("x").resolve("..").resolve("auth.json"));
+        // nested across stores on one file: re-entrant instead of OverlappingFileLockException
+        assertEquals(List.of("n"), a.locked(() -> {
+            b.put("n", new OAuthToken("v", null, 0, null));
+            return b.names();
+        }));
+        List<Throwable> errors = java.util.Collections.synchronizedList(new ArrayList<>());
+        List<Thread> threads = new ArrayList<>();
+        for (int i = 0; i < 8; i++) {
+            TokenStore s = i % 2 == 0 ? a : b;
+            String name = "t" + i;
+            threads.add(Thread.ofPlatform().start(() -> {
+                try {
+                    for (int j = 0; j < 20; j++) {
+                        String v = "v" + j;
+                        s.locked(() -> {
+                            s.put(name, new OAuthToken(v, null, 0, null));
+                            return s.get(name);
+                        });
+                    }
+                } catch (Throwable t) {
+                    errors.add(t);
+                }
+            }));
+        }
+        for (Thread t : threads) t.join();
+        assertEquals(List.of(), errors);
+        assertEquals(9, a.names().size());
+    }
+
+    @Test
+    void defaultStoreIsSharedPerFile() {
+        String old = System.getProperty("jllm.home");
+        System.setProperty("jllm.home", tmp.toString());
+        try {
+            assertSame(TokenStore.defaultStore(), TokenStore.defaultStore());
+        } finally {
+            if (old == null) System.clearProperty("jllm.home");
+            else System.setProperty("jllm.home", old);
+        }
     }
 
     @Test
@@ -209,5 +270,10 @@ class AuthTest {
 
     private void get(String url) throws Exception {
         http.send(HttpRequest.newBuilder(URI.create(url)).GET().build(), HttpResponse.BodyHandlers.ofString());
+    }
+
+    private int status(String url) throws Exception {
+        return http.send(HttpRequest.newBuilder(URI.create(url)).GET().build(), HttpResponse.BodyHandlers.ofString())
+                .statusCode();
     }
 }

@@ -42,11 +42,49 @@ class DockerSandboxExecutorTest {
         ex = executor(null);
     }
 
+    /** Endpoint the fake {@code docker context inspect} prints; those calls are not recorded in {@link #calls}. */
+    String contextEndpoint = "npipe:////./pipe/docker_engine";
+    int contextCalls;
+
     private DockerSandboxExecutor executor(String dockerHost) {
         return new DockerSandboxExecutor(p, (argv, t) -> {
+            if (argv.size() > 1 && argv.get(1).equals("context")) {
+                contextCalls++;
+                return ok(contextEndpoint + "\n");
+            }
             calls.add(argv);
             return handler.apply(argv, t);
         }, dockerHost);
+    }
+
+    @Test
+    void remoteDockerContextIsRemoteWhenDockerHostIsUnset() {
+        p = p.withLocalDirSandboxAllowed(false);
+        contextEndpoint = "ssh://user@build-box";
+        DockerSandboxExecutor d = executor(null);
+        assertTrue(d.remoteDaemon());
+        ExecutionResult r = d.execute("ctx1", "echo hi", Duration.ofSeconds(5));
+        assertEquals(127, r.exitCode());
+        assertTrue(r.stderr().contains("docker context") && r.stderr().contains("ssh://user@build-box"), r.stderr());
+        assertTrue(calls.isEmpty(), "docker run must not be invoked for a remote context");
+        assertEquals(1, contextCalls, "the context is read once");
+    }
+
+    @Test
+    void dockerHostWinsOverTheContext() {
+        contextEndpoint = "tcp://10.0.0.9:2375";
+        assertFalse(executor("unix:///var/run/docker.sock").remoteDaemon());
+        assertEquals(0, contextCalls);
+    }
+
+    @Test
+    void localContextOrUnreadableContextIsLocal() {
+        contextEndpoint = "unix:///var/run/docker.sock";
+        assertFalse(executor(null).remoteDaemon());
+        DockerSandboxExecutor broken = new DockerSandboxExecutor(p, (argv, t) -> {
+            throw new IOException("no docker");
+        }, (String) null);
+        assertFalse(broken.remoteDaemon());
     }
 
     @Test

@@ -34,7 +34,7 @@ public final class Permissions {
 
     private static final Logger log = LoggerFactory.getLogger(Permissions.class);
     private static final Pattern ROLE = Pattern.compile("[a-z0-9_-]{1,64}");
-    private static final UserPolicy NOTHING = new UserPolicy(t -> false, null);
+    private static final UserPolicy NOTHING = UserPolicy.NONE;
 
     private final Path dir;
     private final ObjectMapper mapper;
@@ -57,9 +57,13 @@ public final class Permissions {
         }
     }
 
-    /** Resolves the policy of the chat's user from the file of their role. */
+    /**
+     * Resolves the policy of the chat's user from the file of their role. A chat without a principal (ownerless, e.g.
+     * created outside the web API) gets no tools: on the web there is no single-user default.
+     */
     public UserPolicyResolver resolver() {
-        return user -> forRole(user.roles().stream().findFirst().orElse(null)).orElse(NOTHING);
+        return user -> user == null ? NOTHING
+                : forRole(user.roles().stream().findFirst().orElse(null)).orElse(NOTHING);
     }
 
     private static Set<String> names(JsonNode tools) {

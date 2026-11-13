@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import org.kendar.llm.harness.sandbox.FileBackend;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
@@ -11,7 +12,6 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -21,18 +21,15 @@ import java.util.stream.Collectors;
  */
 final class RemoteFileTools {
 
-    private static final long MAX_READ_BYTES = 1_000_000;
     private static final long MAX_DOCUMENT_BYTES = 50_000_000;
     private static final int MAX_RESULTS = 200;
-    private static final int EOL_PROBE_BYTES = 64 * 1024;
-    private static final Set<String> BINARY_EXTENSIONS = Set.of(
-            "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "zip", "jar", "class", "exe", "dll", "png", "jpg",
-            "jpeg", "gif", "bmp", "ico", "mp3", "mp4", "7z", "gz", "tar");
+    /** Bytes fetched per call when streaming a file for {@code read_file}. */
+    private static final int READ_CHUNK = 256 * 1024;
 
     private RemoteFileTools() {
     }
 
-    static String read(ToolContext ctx, JsonNode in, DocumentReaders readers) throws IOException {
+    static String read(ToolContext ctx, JsonNode in, DocumentReaders readers, long maxReadBytes) throws IOException {
         FileBackend fb = ctx.files();
         FileBackend.Target t = fb.readTarget(in.path("path").asText());
         FileBackend.Stat st = fb.stat(t);
@@ -40,7 +37,6 @@ final class RemoteFileTools {
         if (!st.isFile()) throw new IllegalArgumentException("Not a file: " + in.path("path").asText());
         String ext = extension(in.path("path").asText());
         DocumentReader reader = readers == null ? null : readers.get(ext);
-        List<String> lines;
         if (reader != null) {
             if (st.size() > MAX_DOCUMENT_BYTES) {
                 throw new IllegalArgumentException("File too large (" + st.size() + " bytes)");
@@ -48,23 +44,48 @@ final class RemoteFileTools {
             Path tmp = Files.createTempFile("jllm-doc-", "." + ext);
             try {
                 Files.write(tmp, fb.read(t, 0, -1));
-                lines = DocumentReaders.extractLines(reader, tmp);
+                return FileSystemAgentTools.formatRead(DocumentReaders.extractLines(reader, tmp), in, maxReadBytes);
             } finally {
                 Files.deleteIfExists(tmp);
             }
-        } else {
-            if (BINARY_EXTENSIONS.contains(ext)) {
-                throw new IllegalArgumentException("No reader for ." + ext + "; add the "
-                        + (ext.equals("pdf") ? "jllm-pdf" : ext.startsWith("doc") ? "jllm-docs" : "matching reader")
-                        + " module");
-            }
-            if (st.size() > MAX_READ_BYTES) {
-                throw new IllegalArgumentException("File too large (" + st.size()
-                        + " bytes); use grep or a line range");
-            }
-            lines = splitLines(new String(fb.read(t, 0, -1), StandardCharsets.UTF_8));
         }
-        return FileSystemAgentTools.formatRead(lines, in);
+        FileSystemAgentTools.checkNotBinary(ext);
+        return FileSystemAgentTools.readText(() -> chunked(fb, t), in, maxReadBytes);
+    }
+
+    /** The file as a stream fetched in {@link #READ_CHUNK} pieces, so only the lines asked for are kept. */
+    private static InputStream chunked(FileBackend fb, FileBackend.Target t) {
+        return new InputStream() {
+            private long pos;
+            private byte[] buf = new byte[0];
+            private int i;
+            private boolean eof;
+
+            private boolean fill() throws IOException {
+                if (i < buf.length) return true;
+                if (eof) return false;
+                buf = fb.read(t, pos, READ_CHUNK);
+                i = 0;
+                pos += buf.length;
+                if (buf.length < READ_CHUNK) eof = true;
+                return buf.length > 0;
+            }
+
+            @Override
+            public int read() throws IOException {
+                return fill() ? buf[i++] & 0xFF : -1;
+            }
+
+            @Override
+            public int read(byte[] b, int off, int len) throws IOException {
+                if (len == 0) return 0;
+                if (!fill()) return -1;
+                int n = Math.min(len, buf.length - i);
+                System.arraycopy(buf, i, b, off, n);
+                i += n;
+                return n;
+            }
+        };
     }
 
     /** Like {@link Files#readAllLines}: a trailing line end does not add an empty line. */
@@ -84,31 +105,58 @@ final class RemoteFileTools {
         return out;
     }
 
+    /** Where a tool write goes; checkpoint data is refused. */
+    private static FileBackend.Target writeTarget(ToolContext ctx, String shown) {
+        FileBackend fb = ctx.files();
+        FileBackend.Target t = fb.writeTarget(shown, ctx.readOnlyWork());
+        if (Checkpoints.isCheckpointPath(fb, t)) {
+            throw new IllegalArgumentException("Checkpoint data cannot be written: " + shown);
+        }
+        return t;
+    }
+
+    private static PathLocks.Held lock(ToolContext ctx, FileBackend.Target t) {
+        return PathLocks.lockKey("remote:" + ctx.chatId() + ":" + t.root() + ":" + t.path());
+    }
+
+    private static void checkpoint(ToolContext ctx, FileBackend.Target t, Checkpoints checkpoints, StorageQuota quota) {
+        if (checkpoints != null) checkpoints.record(ctx, t, quota);
+    }
+
     static String write(ToolContext ctx, JsonNode in, Checkpoints checkpoints, StorageQuota quota)
             throws IOException {
         FileBackend fb = ctx.files();
         String shown = in.path("path").asText();
-        FileBackend.Target t = fb.writeTarget(shown, ctx.readOnlyWork());
-        if (checkpoints != null) checkpoints.record(ctx, t);
+        FileBackend.Target t = writeTarget(ctx, shown);
         String content = in.path("content").asText();
-        if (in.path("append").asBoolean(false)) {
-            byte[] part;
-            if (fb.stat(t).exists()) { // keep the file's line endings
-                byte[] head = fb.read(t, 0, EOL_PROBE_BYTES);
-                TextEdits.TextFile existing = TextEdits.TextFile.decode(head);
-                part = new TextEdits.TextFile("", false, existing.eol()).encode(content.replace("\r\n", "\n"));
-            } else {
-                part = content.getBytes(StandardCharsets.UTF_8);
+        try (PathLocks.Held ignored = lock(ctx, t)) {
+            FileBackend.Stat old = fb.stat(t);
+            if (old.isDir()) throw new IllegalArgumentException("Is a directory: " + shown);
+            if (in.path("append").asBoolean(false)) {
+                byte[] part = old.exists() // keep the file's line endings and charset
+                        ? TextEdits.TextFile.probe(fb.read(t, 0, TextEdits.EOL_PROBE_BYTES)).encodeAppend(content)
+                        : content.getBytes(StandardCharsets.UTF_8);
+                StorageQuota.Reservation r = quota.reserveRemote(ctx.chatId(), part.length);
+                try {
+                    checkpoint(ctx, t, checkpoints, quota);
+                    fb.write(t, part, true);
+                } catch (IOException | RuntimeException e) {
+                    r.rollback();
+                    throw e;
+                }
+                return "Appended " + content.length() + " chars to " + shown;
             }
-            quota.reserveRemote(ctx.chatId(), part.length);
-            fb.write(t, part, true);
-            return "Appended " + content.length() + " chars to " + shown;
+            byte[] bytes = content.getBytes(StandardCharsets.UTF_8);
+            StorageQuota.Reservation r = quota.reserveRemote(ctx.chatId(), bytes.length - (old.exists() ? old.size() : 0));
+            try {
+                checkpoint(ctx, t, checkpoints, quota);
+                fb.write(t, bytes, false);
+            } catch (IOException | RuntimeException e) {
+                r.rollback();
+                throw e;
+            }
+            return "Wrote " + content.length() + " chars to " + shown;
         }
-        byte[] bytes = content.getBytes(StandardCharsets.UTF_8);
-        FileBackend.Stat old = fb.stat(t);
-        quota.reserveRemote(ctx.chatId(), bytes.length - (old.exists() ? old.size() : 0));
-        fb.write(t, bytes, false);
-        return "Wrote " + content.length() + " chars to " + shown;
     }
 
     static String writePreview(ToolContext ctx, JsonNode in) {
@@ -117,26 +165,38 @@ final class RemoteFileTools {
         try {
             FileBackend.Target t = fb.writeTarget(in.path("path").asText(), ctx.readOnlyWork());
             if (!in.path("append").asBoolean(false) && fb.stat(t).isFile()) {
-                old = new String(fb.read(t, 0, MAX_READ_BYTES), StandardCharsets.UTF_8);
+                old = TextEdits.TextFile.probe(fb.read(t, 0, FileSystemAgentTools.DEFAULT_MAX_READ_BYTES)).text();
             }
-        } catch (IOException ignored) {
+        } catch (IOException | RuntimeException ignored) {
             // preview only
         }
         return "--- " + in.path("path").asText() + "\n" + FileSystemAgentTools.diff(old, in.path("content").asText());
     }
 
-    static String edit(ToolContext ctx, JsonNode in, Checkpoints checkpoints, StorageQuota quota)
+    static String edit(ToolContext ctx, JsonNode in, Checkpoints checkpoints, StorageQuota quota, long maxReadBytes)
             throws IOException {
         FileBackend fb = ctx.files();
-        FileBackend.Target t = fb.writeTarget(in.path("path").asText(), ctx.readOnlyWork());
-        TextEdits.TextFile file = TextEdits.TextFile.decode(fb.read(t, 0, -1));
-        TextEdits.Applied applied = TextEdits.apply(file.text(), FileSystemAgentTools.parseEdits(in));
-        if (checkpoints != null) checkpoints.record(ctx, t);
-        byte[] out = file.encode(applied.text());
-        quota.reserveRemote(ctx.chatId(), out.length - fb.stat(t).size());
-        fb.write(t, out, false);
-        return "Edited " + in.path("path").asText() + " (" + applied.replacements() + " replacement(s))\n"
-                + applied.diff();
+        String shown = in.path("path").asText();
+        FileBackend.Target t = writeTarget(ctx, shown);
+        List<TextEdits.Edit> edits = FileSystemAgentTools.parseEdits(in);
+        try (PathLocks.Held ignored = lock(ctx, t)) { // read, change and write as one step
+            FileBackend.Stat st = fb.stat(t);
+            if (!st.exists()) throw new NoSuchFileException(shown);
+            if (!st.isFile()) throw new IllegalArgumentException("Not a file: " + shown);
+            FileSystemAgentTools.checkEditSize(shown, st.size(), maxReadBytes);
+            TextEdits.TextFile file = TextEdits.TextFile.decode(fb.read(t, 0, -1));
+            TextEdits.Applied applied = TextEdits.apply(file.text(), edits);
+            byte[] out = file.encode(applied);
+            StorageQuota.Reservation r = quota.reserveRemote(ctx.chatId(), out.length - st.size());
+            try {
+                checkpoint(ctx, t, checkpoints, quota);
+                fb.write(t, out, false);
+            } catch (IOException | RuntimeException e) {
+                r.rollback();
+                throw e;
+            }
+            return "Edited " + shown + " (" + applied.replacements() + " replacement(s))\n" + applied.diff();
+        }
     }
 
     static String glob(ToolContext ctx, JsonNode in) throws IOException {

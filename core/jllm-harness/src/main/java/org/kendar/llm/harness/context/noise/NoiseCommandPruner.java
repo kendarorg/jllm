@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.kendar.llm.harness.context.ContextStrategyKind;
 import org.kendar.llm.harness.session.ChatSessionService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -60,6 +61,15 @@ public final class NoiseCommandPruner {
 
     public NoiseCommandPruner(ChatSessionService sessions, NoiseQualifier qualifier, ObjectMapper mapper) {
         this(sessions, qualifier, mapper, DEFAULT_MIN_SAVED_TOKENS);
+    }
+
+    /**
+     * Whether the pruner may run with a context strategy. Not with {@link ContextStrategyKind#MNEMONIC}: its decisions
+     * are keyed by message index and content hash, so rewriting a message in place drops every later mask and segment
+     * (moved-out history comes back, recall ids break). Compaction and Scope only lose some prompt cache.
+     */
+    public static boolean appliesTo(ContextStrategyKind kind) {
+        return kind != ContextStrategyKind.MNEMONIC;
     }
 
     /**

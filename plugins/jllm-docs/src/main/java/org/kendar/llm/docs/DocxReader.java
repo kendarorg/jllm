@@ -8,8 +8,11 @@ import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InterruptedIOException;
 import java.nio.file.Path;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.List;
 import java.util.Set;
 import java.util.zip.ZipEntry;
@@ -18,6 +21,7 @@ import java.util.zip.ZipFile;
 /**
  * Reads {@code word/document.xml} of a docx: paragraphs, headings ({@code #}), list items ({@code -}) and tables (rows as
  * {@code a | b | c}). Headers, footers and comments are skipped; tracked insertions are kept and deletions dropped.
+ * Text-box paragraphs are emitted before the paragraph that anchors them; {@code mc:Fallback} copies are skipped.
  * A legacy {@code .doc} is refused.
  */
 public final class DocxReader implements DocumentReader {
@@ -48,34 +52,72 @@ public final class DocxReader implements DocumentReader {
         }
     }
 
-    static String parse(InputStream in) throws XMLStreamException {
+    /** WordprocessingML namespaces (transitional and strict). DrawingML ({@code a:p}, {@code a:t}) is not matched. */
+    private static final Set<String> W_NS = Set.of("http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+            "http://purl.oclc.org/ooxml/wordprocessingml/main");
+    private static final String MC_NS = "http://schemas.openxmlformats.org/markup-compatibility/2006";
+
+    /** One open {@code w:p}; text-box paragraphs nest inside the paragraph that anchors them. */
+    private static final class Para {
+        final StringBuilder text = new StringBuilder();
+        String style;
+        boolean numbered;
+        /** Open {@code w:r} of this paragraph (not of an enclosing one). */
+        int runDepth;
+    }
+
+    static String parse(InputStream in) throws XMLStreamException, IOException {
         XMLInputFactory f = XMLInputFactory.newFactory();
         f.setProperty(XMLInputFactory.SUPPORT_DTD, false);
         f.setProperty(XMLInputFactory.IS_SUPPORTING_EXTERNAL_ENTITIES, false);
+        f.setProperty(XMLInputFactory.IS_NAMESPACE_AWARE, true);
         XMLStreamReader r = f.createXMLStreamReader(in);
         StringBuilder out = new StringBuilder();
-        StringBuilder para = new StringBuilder();
-        String style = null;
-        boolean numbered = false;
+        Deque<Para> paras = new ArrayDeque<>();
         boolean inText = false;
+        int fallbackDepth = 0;
         int tableDepth = 0;
         List<String> row = null;
         StringBuilder cell = null;
+        long events = 0;
         while (r.hasNext() && out.length() < MAX_CHARS) {
             int ev = r.next();
+            // The caller cancels a slow read by interrupting the thread.
+            if ((++events & 0xFFF) == 0 && Thread.currentThread().isInterrupted()) {
+                throw new InterruptedIOException("docx extraction interrupted");
+            }
+            if (fallbackDepth > 0) {
+                // mc:Fallback repeats the mc:Choice content (e.g. a VML copy of a text box): skip it entirely.
+                if (ev == XMLStreamConstants.START_ELEMENT) fallbackDepth++;
+                else if (ev == XMLStreamConstants.END_ELEMENT) fallbackDepth--;
+                continue;
+            }
             if (ev == XMLStreamConstants.START_ELEMENT) {
+                if (MC_NS.equals(r.getNamespaceURI())) {
+                    if (r.getLocalName().equals("Fallback")) fallbackDepth = 1;
+                    continue;
+                }
+                if (!W_NS.contains(r.getNamespaceURI())) continue;
+                Para para = paras.peek();
                 switch (r.getLocalName()) {
-                    case "p" -> {
-                        para.setLength(0);
-                        style = null;
-                        numbered = false;
+                    case "p" -> paras.push(new Para());
+                    case "pStyle" -> {
+                        if (para != null) para.style = attr(r, "val");
                     }
-                    case "pStyle" -> style = r.getAttributeValue(null, "val") != null ? r.getAttributeValue(null, "val")
-                            : attr(r, "val");
-                    case "numPr" -> numbered = true;
-                    case "t" -> inText = true;
-                    case "tab" -> para.append('\t');
-                    case "br", "cr" -> para.append(' ');
+                    case "numPr" -> {
+                        if (para != null) para.numbered = true;
+                    }
+                    case "r" -> {
+                        if (para != null) para.runDepth++;
+                    }
+                    case "t" -> inText = para != null && para.runDepth > 0;
+                    // w:tab inside w:pPr/w:tabs is a tab-stop definition, not a tab character.
+                    case "tab" -> {
+                        if (para != null && para.runDepth > 0) para.text.append('\t');
+                    }
+                    case "br", "cr" -> {
+                        if (para != null && para.runDepth > 0) para.text.append(' ');
+                    }
                     case "tbl" -> tableDepth++;
                     case "tr" -> row = tableDepth == 1 ? new ArrayList<>() : row;
                     case "tc" -> cell = tableDepth == 1 ? new StringBuilder() : cell;
@@ -83,19 +125,27 @@ public final class DocxReader implements DocumentReader {
                     }
                 }
             } else if (ev == XMLStreamConstants.CHARACTERS && inText) {
-                para.append(r.getText());
+                Para para = paras.peek();
+                if (para != null) para.text.append(r.getText());
             } else if (ev == XMLStreamConstants.END_ELEMENT) {
+                if (!W_NS.contains(r.getNamespaceURI())) continue;
                 switch (r.getLocalName()) {
                     case "t" -> inText = false;
+                    case "r" -> {
+                        Para para = paras.peek();
+                        if (para != null && para.runDepth > 0) para.runDepth--;
+                    }
                     case "p" -> {
-                        String text = para.toString();
+                        Para para = paras.poll();
+                        if (para == null) continue;
+                        String text = para.text.toString();
                         if (tableDepth > 0) {
                             if (cell != null && !text.isBlank()) {
                                 if (!cell.isEmpty()) cell.append(' ');
                                 cell.append(text.strip());
                             }
                         } else if (!text.isBlank() || out.isEmpty() || out.charAt(out.length() - 1) != '\n') {
-                            out.append(prefix(style, numbered)).append(text).append('\n');
+                            out.append(prefix(para.style, para.numbered)).append(text).append('\n');
                         }
                     }
                     case "tc" -> {

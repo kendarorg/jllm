@@ -145,14 +145,14 @@ class DockerWslIntegrationTest {
                 RemoteExecSandboxExecutor.hash(project.toAbsolutePath().normalize().toString()).substring(0, 12)));
         assertTrue(ok(box, "cat secret.txt").contains("project data"));
         // another agent of the chat has a file of its own
-        run(box, "write_file", "c1", "{\"path\":\"/workspace/.kendhar/scratchpad/other/theirs.txt\",\"content\":\"x\"}");
+        run(box, "write_file", "c1", "{\"path\":\"/workspace/.jllm/scratchpad/other/theirs.txt\",\"content\":\"x\"}");
 
         jailed(box, "write_file", "c1", "{\"path\":\"mine.txt\",\"content\":\"hello\\n\"}");
 
         assertTrue(jailed(box, "read_file", "c1", "{\"path\":\"mine.txt\"}").contains("hello"));
-        assertEquals("hello", ok(box, "cat .kendhar/scratchpad/main/mine.txt").strip(), "written in the scratch dir");
+        assertEquals("hello", ok(box, "cat .jllm/scratchpad/main/mine.txt").strip(), "written in the scratch dir");
         for (String path : new String[]{"secret.txt", "../../../secret.txt", "/workspace/secret.txt",
-                "../other/theirs.txt", "/workspace/.kendhar/scratchpad/other/theirs.txt"}) {
+                "../other/theirs.txt", "/workspace/.jllm/scratchpad/other/theirs.txt"}) {
             Exception e = assertThrows(Exception.class,
                     () -> jailed(box, "read_file", "c1", "{\"path\":\"" + path + "\"}"), path);
             assertNotNull(e.getMessage());
@@ -220,13 +220,13 @@ class DockerWslIntegrationTest {
         assertEquals("up", ok(box, "echo up").strip());
 
         // backup brings the files home (scratchpad is not copied)
-        ok(box, "mkdir -p .kendhar/scratchpad/main && echo s > .kendhar/scratchpad/main/s.txt; printf '#!/bin/sh\\necho hi' > bin/run.sh; chmod +x bin/run.sh");
+        ok(box, "mkdir -p .jllm/scratchpad/main && echo s > .jllm/scratchpad/main/s.txt; printf '#!/bin/sh\\necho hi' > bin/run.sh; chmod +x bin/run.sh");
         String done = box.backup("c1");
         assertTrue(done.startsWith("Backed up"), done);
         assertEquals("42", Files.readString(project.resolve("state.txt")).strip());
         assertEquals("class Main {}", Files.readString(project.resolve("src/App.java")).strip());
         assertTrue(Files.exists(project.resolve("bin/run.sh")));
-        assertFalse(Files.exists(project.resolve(".kendhar/scratchpad/main/s.txt")));
+        assertFalse(Files.exists(project.resolve(".jllm/scratchpad/main/s.txt")));
 
         // reuse: a second executor finds the running container (no create) and sees the same files
         box.close();

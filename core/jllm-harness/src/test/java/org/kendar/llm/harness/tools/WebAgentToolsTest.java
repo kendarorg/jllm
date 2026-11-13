@@ -99,6 +99,53 @@ class WebAgentToolsTest {
         assertEquals("HTTP 200\n".length() + 100 + "\n[truncated]".length(), out.length());
     }
 
+    private void serveBytes(String path, String type, byte[] body) {
+        server.createContext(path, ex -> {
+            if (type != null) ex.getResponseHeaders().add("Content-Type", type);
+            ex.sendResponseHeaders(200, body.length);
+            ex.getResponseBody().write(body);
+            ex.close();
+        });
+    }
+
+    @Test
+    void bodyIsReadOnlyUpToFetchMaxBytes() throws Exception {
+        web = new WebAgentTools(config, MAPPER, StorageQuota.UNLIMITED, 100);
+
+        String out = fetch("/big");
+
+        assertTrue(out.startsWith("HTTP 200\n" + "z".repeat(100) + "\n[truncated: only the first 100 bytes of 500"),
+                out);
+        assertTrue(out.endsWith("(web.fetchMaxBytes)]"), out);
+    }
+
+    @Test
+    void binaryContentIsRefusedWithAHintToDownload() {
+        serveBytes("/img", "image/png", new byte[]{(byte) 0x89, 'P', 'N', 'G', 0, 0});
+        serveBytes("/untyped", null, new byte[]{1, 2, 0, 3});
+        for (String path : new String[]{"/img", "/untyped"}) {
+            IllegalStateException e = assertThrows(IllegalStateException.class, () -> fetch(path), path);
+            assertTrue(e.getMessage().contains("web_download"), e.getMessage());
+        }
+    }
+
+    @Test
+    void charsetOfTheContentTypeIsUsed() throws Exception {
+        serveBytes("/latin", "text/plain; charset=ISO-8859-1", "caffè".getBytes(StandardCharsets.ISO_8859_1));
+        assertEquals("HTTP 200\ncaffè", fetch("/latin"));
+    }
+
+    @Test
+    void textTypesAreRecognized() {
+        assertTrue(WebAgentTools.isTextType("application/json"));
+        assertTrue(WebAgentTools.isTextType("application/vnd.api+json"));
+        assertTrue(WebAgentTools.isTextType("image/svg+xml"));
+        assertTrue(WebAgentTools.isTextType("text/csv"));
+        assertFalse(WebAgentTools.isTextType("application/pdf"));
+        assertFalse(WebAgentTools.isTextType("application/octet-stream"));
+        assertEquals("text/html", WebAgentTools.mimeType("Text/HTML; charset=utf-8"));
+    }
+
     @Test
     void httpErrorStatusIsReportedNotThrown() throws Exception {
         assertEquals("HTTP 404\nnope", fetch("/missing"));

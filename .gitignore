@@ -41,6 +41,7 @@ build/
 .idea
 
 ### jllm ###
-.kendhar/
+.jllm/
 node_modules/
 /jllm-web/tmp/
+todo.md

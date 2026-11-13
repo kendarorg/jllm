@@ -13,6 +13,7 @@ import org.kendar.llm.harness.llm.ModelClient;
 import org.kendar.llm.harness.llm.ModelException;
 import org.kendar.llm.harness.llm.Usage;
 import org.kendar.llm.harness.permission.ApprovalService;
+import org.kendar.llm.harness.tools.HarnessTool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -34,6 +35,11 @@ public class ContextManager {
     private static final Logger log = LoggerFactory.getLogger(ContextManager.class);
     static final String CLEARED = "[tool result cleared to save context]";
     private static final String SUMMARY_PREFIX = "[Summary of the earlier conversation]\n";
+    /** Starts the summary of the older tool rounds of the turn in progress (see {@link #compactOverflow}). */
+    static final String TURN_SUMMARY_PREFIX = "[Summary of the earlier steps of this request]\n";
+    /** Stands in for an assistant message that held nothing but reasoning once the reasoning is dropped. */
+    static final String REASONING_OMITTED = "[reasoning omitted]";
+    private static final String OMITTED = "[earlier history omitted]\n";
     private static final int SUMMARY_TOKENS = 3000;
     /** Highest {@link #render(ArrayNode, int)} level: user text only. */
     private static final int MAX_SHRINK = 3;
@@ -65,6 +71,25 @@ public class ContextManager {
     public long estimateTokens(ArrayNode messages, Usage lastUsage) {
         long chars = messages.toString().length() / 4;
         return lastUsage == null ? chars : Math.max(chars, lastUsage.contextTokens());
+    }
+
+    /** Tokens of the fixed part of a request (system text and tool schemas), estimated as chars / 4. */
+    public static long fixedTokens(RequestPrefix prefix) {
+        if (prefix == null) return 0;
+        long chars = (prefix.pinned() == null ? 0 : prefix.pinned().length())
+                + (prefix.extra() == null ? 0 : prefix.extra().length());
+        if (prefix.tools() != null) {
+            for (HarnessTool tool : prefix.tools()) {
+                chars += tool.name().length() + tool.description().length() + tool.inputSchema().toString().length();
+            }
+        }
+        return chars / 4;
+    }
+
+    /** The whole request: messages plus the fixed part, or the measured usage (which includes it) when larger. */
+    private long requestTokens(ArrayNode messages, Usage lastUsage, RequestPrefix prefix) {
+        long est = estimateTokens(messages, null) + fixedTokens(prefix);
+        return lastUsage == null ? est : Math.max(est, lastUsage.contextTokens());
     }
 
     /** Rewrites {@code messages} in place when over budget. @return true if anything changed. */
@@ -111,17 +136,38 @@ public class ContextManager {
      */
     public boolean compactInherited(String chatId, ArrayNode messages, int[] inherited, Usage lastUsage, EventSink sink,
                                     java.util.function.Consumer<Usage> usageSink, RequestPrefix prefix) {
-        if (!config.compaction().auto() || inherited[0] <= 0) {
+        return compactInherited(chatId, messages, inherited, lastUsage, sink, usageSink, prefix, false);
+    }
+
+    /**
+     * @param force compact even under the ceiling (provider overflow, manual compaction): the agent's own messages get
+     *              the {@link #compactOverflow overflow} treatment, and the copy is summarized too when that changed
+     *              nothing or was not enough. The copy boundary is kept either way.
+     */
+    public boolean compactInherited(String chatId, ArrayNode messages, int[] inherited, Usage lastUsage, EventSink sink,
+                                    java.util.function.Consumer<Usage> usageSink, RequestPrefix prefix, boolean force) {
+        if ((!force && !config.compaction().auto()) || inherited[0] <= 0) {
             return compactIfNeeded(chatId, messages, lastUsage, sink, () -> false, usageSink, false, prefix);
         }
+        if (!force && config.compaction().deferOnThinkingOverflow() && currentTurnHasThinking(messages)) return false;
         long ceiling = config.compaction().ceiling(config.contextBudgetTokens());
-        if (estimateTokens(messages, lastUsage) <= ceiling) return false;
+        long fixed = fixedTokens(prefix);
+        if (!force && requestTokens(messages, lastUsage, prefix) <= ceiling) return false;
         ArrayNode copy = slice(messages, 0, inherited[0]);
         ArrayNode own = slice(messages, inherited[0], messages.size());
         boolean changed = false;
-        long room = ceiling - estimateTokens(copy, null);
-        if (room > 0) changed = compactTo(chatId, own, null, sink, () -> false, usageSink, false, room, null);
-        if (estimateTokens(copy, null) + estimateTokens(own, null) > ceiling) {
+        long room = ceiling - fixed - estimateTokens(copy, null);
+        if (room > 0) {
+            try {
+                changed = force ? compactOverflow(own, room, usageSink).changed()
+                        : compactTo(chatId, own, null, sink, () -> false, usageSink, false, room, null);
+            } catch (RuntimeException e) {
+                log.warn("Compaction of the agent's own messages failed: {}", e.getMessage());
+            }
+        }
+        boolean copyIsSummary = copy.size() == 2 && startsWithSummary(copy);
+        if (estimateTokens(copy, null) + estimateTokens(own, null) + fixed > ceiling
+                || (force && !changed && !copyIsSummary)) {
             try {
                 String summary = summarizeSpan(copy, copy.size(), null, usageSink, null, null);
                 if (summary == null) throw new IllegalStateException("Nothing to compact yet");
@@ -142,17 +188,23 @@ public class ContextManager {
             messages.removeAll();
             messages.addAll(copy);
             messages.addAll(own);
+            // the copy's thinking signatures were bound to a history that is now rewritten
+            stripThinking(messages, true);
         }
         return changed;
     }
 
+    /**
+     * @param budget the whole request (messages + the fixed part of {@code prefix}) must fit in this
+     */
     private boolean compactTo(String chatId, ArrayNode messages, Usage lastUsage, EventSink sink,
                               BooleanSupplier cancelled, java.util.function.Consumer<Usage> usageSink,
                               boolean allowRewrite, long budget, RequestPrefix prefix) {
-        long before = estimateTokens(messages, lastUsage);
-        if (before <= budget) return false;
-        // the unclipped log is what the provider has cached: the summary request is built from it
-        ArrayNode original = usable(prefix) ? messages.deepCopy() : null;
+        if (requestTokens(messages, lastUsage, prefix) <= budget) return false;
+        // what the messages alone may take: the checks below measure messages only
+        long room = budget - fixedTokens(prefix);
+        // the log before tier 1: the provider has it cached, and the summaries must see the tool results tier 1 blanks
+        ArrayNode original = messages.deepCopy();
 
         boolean changed = false;
         // tier 1
@@ -163,12 +215,14 @@ public class ContextManager {
             sink.emit("compaction", obj("tier", 1, "cleared", cleared));
         }
         // after tier 1 the old usage figure is stale: rely on the size estimate
-        if (estimateTokens(messages, null) <= budget) return changed;
+        if (estimateTokens(messages, null) <= room) return changed;
 
         // tier 2
+        boolean summarized = false;
         try {
             if (summarize(messages, config.keepRecentTurns(), usageSink, prefix, original)) {
                 changed = true;
+                summarized = true;
                 metrics.compaction(2);
                 sink.emit("compaction", obj("tier", 2, "estimatedTokens", estimateTokens(messages, null)));
             }
@@ -177,7 +231,7 @@ public class ContextManager {
             sink.emit("warning", obj("message", "Context summarization failed: " + e.getMessage()));
         }
         long size = estimateTokens(messages, null);
-        if (size <= budget) return changed;
+        if (size <= room) return changed;
 
         // tier 3: user-approved aggressive rewrite
         if (!allowRewrite) return changed;
@@ -186,7 +240,8 @@ public class ContextManager {
         int cut = cutIndex(messages, 1);
         if (cut <= 0) return changed;
         try {
-            String proposed = summarizeSpan(messages, cut, null, usageSink, null, null);
+            // without a tier-2 rewrite the indexes still match the uncleared log
+            String proposed = summarizeSpan(messages, cut, null, usageSink, null, summarized ? null : original);
             if (proposed == null) return changed;
             ArrayNode preview = slice(messages, 0, cut);
             ApprovalService.ApprovalDecision d = approvals.await(chatId, "context",
@@ -221,8 +276,18 @@ public class ContextManager {
     /** As above; with {@code prefix} the summary request reuses the normal request prefix (prompt cache). */
     public CompactResult compactNow(ArrayNode messages, String focus, java.util.function.Consumer<Usage> usageSink,
                                     RequestPrefix prefix) {
+        return compactNow(messages, focus, usageSink, prefix, null);
+    }
+
+    /**
+     * @param original the same messages before the caller cleared tool results in them (same indexes), so the summary
+     *                 sees the results; null: {@code messages} as they are now
+     */
+    public CompactResult compactNow(ArrayNode messages, String focus, java.util.function.Consumer<Usage> usageSink,
+                                    RequestPrefix prefix, ArrayNode original) {
         long before = estimateTokens(messages, null);
-        ArrayNode original = usable(prefix) ? messages.deepCopy() : null;
+        // summarized from the log as it was before the tool results are cleared (same indexes)
+        if (original == null || original.size() != messages.size()) original = messages.deepCopy();
         int cleared = microcompact(messages, 1);
         boolean summarized = false;
         int cut = cutIndex(messages, 1);
@@ -236,6 +301,90 @@ public class ContextManager {
         }
         if (cleared > 0 || summarized) stripThinking(messages, true);
         return new CompactResult(cleared > 0 || summarized, before, estimateTokens(messages, null), cleared);
+    }
+
+    /**
+     * The provider rejected the request as too long. Like {@link #compactNow}, and when there is nothing before the
+     * current prompt or what is left is still over {@code room}, the older tool rounds of the current turn are
+     * summarized too: the prompt and the newest rounds stay verbatim, the summary goes in front of the first kept
+     * round (an assistant message), so a tool call is never separated from its results.
+     *
+     * @param room tokens the messages may take
+     */
+    public CompactResult compactOverflow(ArrayNode messages, long room, java.util.function.Consumer<Usage> usageSink) {
+        long before = estimateTokens(messages, null);
+        ArrayNode original = messages.deepCopy();
+        int cleared = microcompact(messages, 1);
+        boolean summarized = false;
+        int cut = cutIndex(messages, 1);
+        if (cut > 0) {
+            try {
+                String summary = summarizeSpan(messages, cut, null, usageSink, null, original);
+                if (summary != null) {
+                    replaceSpan(messages, cut, summary);
+                    summarized = true;
+                    metrics.compaction(2);
+                }
+            } catch (RuntimeException e) {
+                log.warn("Summary of the earlier turns failed: {}", e.getMessage());
+            }
+        }
+        if (!summarized || estimateTokens(messages, null) > room) {
+            if (cutInsideTurn(messages, room, usageSink)) {
+                summarized = true;
+                metrics.compaction(2);
+            }
+        }
+        boolean changed = cleared > 0 || summarized;
+        if (changed) stripThinking(messages, true);
+        return new CompactResult(changed, before, estimateTokens(messages, null), cleared);
+    }
+
+    /**
+     * Summarizes the older tool rounds of the current turn: {@code [prompt+1, k)} where {@code k} is the earliest
+     * assistant message after a user message whose tail fits both {@code keepTokens} and what {@code room} leaves,
+     * else the latest such message. The summary becomes the first block of message {@code k}.
+     *
+     * @return true if the log was rewritten
+     */
+    boolean cutInsideTurn(ArrayNode messages, long room, java.util.function.Consumer<Usage> usageSink) {
+        int p = cutIndex(messages, 1);
+        int n = messages.size();
+        if (p >= n || !isPlainUserText(messages.get(p))) return false;
+        long head = 0;
+        for (int i = 0; i <= p; i++) head += messages.get(i).toString().length() / 4;
+        long target = Math.min(config.compaction().keepTokens(), room - head - SUMMARY_TOKENS);
+        long[] suffix = new long[n + 1];
+        for (int i = n - 1; i > p; i--) suffix[i] = suffix[i + 1] + messages.get(i).toString().length() / 4;
+        int k = -1;
+        int latest = -1;
+        for (int i = p + 2; i < n; i++) {
+            if (!"assistant".equals(messages.get(i).path("role").asText())
+                    || !"user".equals(messages.get(i - 1).path("role").asText())) continue;
+            latest = i;
+            if (k < 0 && suffix[i] <= target) k = i;
+        }
+        if (k < 0) k = latest;
+        if (k < 0) return false; // a single tool round: nothing to cut inside the turn
+        ArrayNode span = slice(messages, p, k); // the prompt gives the rounds their context
+        String summary;
+        try {
+            summary = summarizeSpan(span, span.size(), "the steps already taken for the request in progress, their "
+                    + "findings and what is left to do; the request itself stays verbatim", usageSink, null, null);
+        } catch (RuntimeException e) {
+            log.warn("Summary of the current turn failed: {}", e.getMessage());
+            return false;
+        }
+        if (summary == null) return false;
+        ObjectNode first = (ObjectNode) messages.get(k);
+        ArrayNode blocks = mapper.createArrayNode();
+        blocks.addObject().put("type", "text").put("text", TURN_SUMMARY_PREFIX + summary);
+        JsonNode c = first.path("content");
+        if (c.isTextual()) blocks.addObject().put("type", "text").put("text", c.asText());
+        else if (c.isArray()) blocks.addAll((ArrayNode) c);
+        first.set("content", blocks);
+        for (int i = k - 1; i > p; i--) messages.remove(i);
+        return true;
     }
 
     /** Blanks tool_result bodies older than the last {@code keepTurns} turns. @return number of blocks cleared. */
@@ -265,15 +414,21 @@ public class ContextManager {
      * @param includeCurrent also drop the blocks of the turn in progress; the caller must then stop requesting
      *                       thinking for the rest of that turn (the API wants them in a tool loop while it is on)
      */
-    static void stripThinking(ArrayNode messages, boolean includeCurrent) {
+    public static void stripThinking(ArrayNode messages, boolean includeCurrent) {
         int cut = includeCurrent ? messages.size() : cutIndex(messages, 1);
         for (int i = 0; i < cut; i++) {
             JsonNode m = messages.get(i);
             if (!"assistant".equals(m.path("role").asText()) || !m.path("content").isArray()) continue;
             ArrayNode content = (ArrayNode) m.path("content");
-            for (int j = content.size() - 1; j >= 0 && content.size() > 1; j--) {
-                if (isThinkingBlock(content.get(j))) content.remove(j);
+            boolean dropped = false;
+            for (int j = content.size() - 1; j >= 0; j--) {
+                if (isThinkingBlock(content.get(j))) {
+                    content.remove(j);
+                    dropped = true;
+                }
             }
+            // an assistant message cannot be empty: one that only held reasoning keeps a placeholder
+            if (dropped && content.isEmpty()) content.addObject().put("type", "text").put("text", REASONING_OMITTED);
         }
     }
 
@@ -310,31 +465,38 @@ public class ContextManager {
      * Summary of the first {@code cut} messages. When an earlier summary starts the span the "update" prompt merges it
      * with the newer history. A conversation too long for the model is sent in a shorter form (see
      * {@link #render(ArrayNode, int)}), up to user text only.
+     *
+     * @param original when not null, the log the span is taken from (same indexes as {@code messages}): the log
+     *                 before tool results were cleared, also what the provider has cached
      */
     private String summarizeSpan(ArrayNode messages, int cut, String focus, java.util.function.Consumer<Usage> usageSink,
                                  RequestPrefix prefix, ArrayNode original) {
-        ArrayNode span = slice(messages, 0, cut);
+        ArrayNode span = slice(original != null ? original : messages, 0, cut);
         String instruction = startsWithSummary(span) ? CompactionPrompt.update(focus) : CompactionPrompt.create(focus);
         long rejected = -1; // size in chars of the first request the provider refused as too long
         int first = 0;
         if (usable(prefix) && original != null) {
-            ArrayNode cached = slice(original, 0, cut);
             try {
-                String s = summaryOnPrefix(prefix, cached, instruction, usageSink);
+                String s = summaryOnPrefix(prefix, span, instruction, usageSink);
                 if (s != null) return s;
             } catch (ModelException e) {
                 if (!ModelException.isContextOverflow(e)) throw e;
-                rejected = cached.toString().length() + instruction.length();
+                rejected = span.toString().length() + instruction.length();
                 first = 1;
             }
         }
         // plain text requests, each shorter than the last: clip outputs, drop outputs, user text only, and cut the
-        // oldest history down to 85/70/50/35% of the first refused size
+        // oldest history down to 85/70/50/35% of the first refused size (an earlier summary is always kept whole)
         for (int attempt = first; attempt < SHRINK.length; attempt++) {
-            String body = render(span, Math.min(attempt, MAX_SHRINK));
+            int level = Math.min(attempt, MAX_SHRINK);
+            String body = render(span, level);
             if (rejected > 0) {
                 int cap = (int) (rejected * SHRINK[attempt]);
-                if (body.length() > cap) body = "[earlier history omitted]\n" + body.substring(body.length() - cap);
+                if (body.length() > cap) body = shorten(span, level, cap);
+                if (body == null) {
+                    log.warn("The previous summary alone is over the size the model accepts: it is kept unchanged");
+                    return null;
+                }
             }
             String user = instruction + "\n\n<conversation>\n" + body + "</conversation>";
             try {
@@ -345,6 +507,23 @@ public class ContextManager {
             }
         }
         return null; // mostly fixed instructions and tool schemas: shortening the history cannot help
+    }
+
+    /**
+     * {@code span} rendered within {@code cap} chars: an earlier summary that starts the span whole, then the newest
+     * history that fits, starting on a line boundary. @return null when the earlier summary alone does not fit
+     */
+    String shorten(ArrayNode span, int level, int cap) {
+        boolean prior = startsWithSummary(span);
+        String head = prior ? render(slice(span, 0, 1), level) : "";
+        String rest = render(prior ? slice(span, 1, span.size()) : span, level);
+        int avail = cap - head.length();
+        if (avail <= 0) return null;
+        if (rest.length() <= avail) return head + rest;
+        String tail = rest.substring(rest.length() - avail);
+        int nl = tail.indexOf('\n');
+        if (nl >= 0) tail = tail.substring(nl + 1); // no half line at the start
+        return head + OMITTED + tail;
     }
 
     /** The agent's own request with the summary instruction as one more user turn; null if no text came back. */

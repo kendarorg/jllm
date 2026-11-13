@@ -23,7 +23,7 @@ import java.util.zip.ZipOutputStream;
 final class RemoteFs {
 
     static final long MAX_TEXT_BYTES = 2L * 1024 * 1024;
-    private static final String HIDDEN_DIR = ".kendhar";
+    private static final String HIDDEN_DIR = ".jllm";
     private static final int MAX_CHAIN = 16;
     private static final int MAX_ZIP_ENTRIES = 20_000;
 
@@ -210,6 +210,11 @@ final class RemoteFs {
     }
 
     String upload(String parent, String name, byte[] data, boolean overwrite) {
+        return upload(parent, name, new java.io.ByteArrayInputStream(data), overwrite);
+    }
+
+    /** Sends the upload to the daemon in chunks of {@link #CHUNK} bytes (first write replaces, the next ones append). */
+    String upload(String parent, String name, java.io.InputStream data, boolean overwrite) {
         String p = clean(parent);
         if (!io(() -> fb.stat(new Target(root, p.isEmpty() ? "." : p))).isDir()) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Not a directory");
@@ -220,11 +225,21 @@ final class RemoteFs {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Already exists: " + name);
         }
         io(() -> {
-            fb.write(t, data, false);
+            boolean append = false;
+            while (true) {
+                byte[] chunk = data.readNBytes(CHUNK);
+                if (chunk.length == 0 && append) break;
+                fb.write(t, chunk, append);
+                append = true;
+                if (chunk.length < CHUNK) break;
+            }
             return null;
         });
         return rel;
     }
+
+    /** Bytes moved per daemon call by downloads, zips and uploads. */
+    static final int CHUNK = 1024 * 1024;
 
     String rename(String path, String newName) {
         String src = clean(path);
@@ -266,6 +281,21 @@ final class RemoteFs {
         return io(() -> fb.read(t, 0, -1));
     }
 
+    /** Streams a file of {@code size} bytes to {@code out}, {@link #CHUNK} bytes per daemon call. */
+    void copyTo(String path, long size, OutputStream out) throws IOException {
+        copy(target(path), size, out);
+    }
+
+    private void copy(Target t, long size, OutputStream out) throws IOException {
+        long offset = 0;
+        while (offset < size) {
+            byte[] chunk = fb.read(t, offset, Math.min(CHUNK, size - offset));
+            if (chunk.length == 0) break; // the file shrank meanwhile
+            out.write(chunk);
+            offset += chunk.length;
+        }
+    }
+
     /** Zip of a directory: hidden entries and symbolic links are left out. */
     void zip(String path, OutputStream out) throws IOException {
         String base = clean(path);
@@ -288,7 +318,8 @@ final class RemoteFs {
                 addDir(zip, rel, prefix + name + "/", count);
             } else {
                 zip.putNextEntry(new ZipEntry(prefix + name));
-                zip.write(fb.read(new Target(root, rel), 0, -1));
+                Target t = new Target(root, rel);
+                copy(t, e.hasNonNull("size") ? e.get("size").asLong() : fb.stat(t).size(), zip);
                 zip.closeEntry();
             }
         }

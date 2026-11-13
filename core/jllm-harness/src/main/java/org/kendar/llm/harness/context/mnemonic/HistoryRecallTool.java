@@ -115,29 +115,15 @@ final class HistoryRecallTool implements HarnessTool {
         return sb.toString().stripTrailing();
     }
 
-    /** Word-for-word content of a recall id. */
+    /**
+     * Word-for-word content of a recall id: the agent's own, else (a sub-agent) its parent's, whose receipts and
+     * recall index came with the copied context.
+     */
     private String get(String chatId, MnemonicStrategy.Agent a, String id, int offset) {
-        if (a != null && a.log != null) {
-            synchronized (a) {
-                Mask m = a.state.byId(id);
-                if (m != null && m.index() < a.log.size()) {
-                    JsonNode block = a.log.get(m.index()).path("content").path(m.block());
-                    String text = switch (m.kind()) {
-                        case MnemonicState.TOOL_RESULT -> Messages.resultText(block);
-                        case MnemonicState.TOOL_INPUT -> Messages.pretty(block.path("input"));
-                        default -> block.path("thinking").asText("");
-                    };
-                    return page(text, offset, id);
-                }
-                if (id.startsWith("m")) {
-                    for (int i = 0; i < a.log.size(); i++) {
-                        if (SegmentSwitcher.messageId(i, a.log.get(i)).equals(id)) {
-                            return page(Messages.role(a.log.get(i)) + ":\n" + Messages.text(a.log.get(i)), offset, id);
-                        }
-                    }
-                }
-            }
-        }
+        String own = fromAgent(a, id, offset);
+        if (own != null) return own;
+        String inherited = fromAgent(strategy.parentOf(chatId, a), id, offset);
+        if (inherited != null) return inherited;
         SubAgentRunData run = run(chatId, id);
         if (run != null) {
             StringBuilder sb = new StringBuilder("Sub-agent run ").append(id).append(" (").append(run.status())
@@ -147,6 +133,32 @@ final class HistoryRecallTool implements HarnessTool {
             return page(sb.toString(), offset, id);
         }
         return "Unknown recall id " + id + ".";
+    }
+
+    /** The content of {@code id} among the masks and messages of agent {@code a}; null when it is not there. */
+    private String fromAgent(MnemonicStrategy.Agent a, String id, int offset) {
+        if (a == null || a.log == null) return null;
+        synchronized (a) {
+            ArrayNode log = a.log;
+            Mask m = a.state.byId(id);
+            if (m != null && m.index() < log.size()) {
+                JsonNode block = log.get(m.index()).path("content").path(m.block());
+                String text = switch (m.kind()) {
+                    case MnemonicState.TOOL_RESULT -> Messages.resultText(block);
+                    case MnemonicState.TOOL_INPUT -> Messages.pretty(block.path("input"));
+                    default -> block.path("thinking").asText("");
+                };
+                return page(text, offset, id);
+            }
+            if (id.startsWith("m")) {
+                for (int i = 0; i < log.size(); i++) {
+                    if (SegmentSwitcher.messageId(i, log.get(i)).equals(id)) {
+                        return page(Messages.role(log.get(i)) + ":\n" + Messages.text(log.get(i)), offset, id);
+                    }
+                }
+            }
+        }
+        return null;
     }
 
     /** Timeline of a file: every tool call whose input names it. */

@@ -16,13 +16,13 @@ import java.util.zip.ZipOutputStream;
 /**
  * The zip format of the exec daemon's {@code GET /backup} and {@code POST /setup}: the workspace as regular files and
  * directories (symbolic links are skipped), plus a {@value #EXEC_MANIFEST} entry listing the executable files, because
- * a zip written by the JDK cannot carry permissions. {@code .kendhar/scratchpad} and {@code .kendhar/history} are never
+ * a zip written by the JDK cannot carry permissions. {@code .jllm/scratchpad} and {@code .jllm/history} are never
  * packed or unpacked: the scratchpad is disposable and the history stays on the host.
  */
 public final class WorkspaceArchive {
 
     static final String EXEC_MANIFEST = ".jllm-exec";
-    private static final List<String> EXCLUDED = List.of(".kendhar/scratchpad", ".kendhar/history");
+    private static final List<String> EXCLUDED = List.of(".jllm/scratchpad", ".jllm/history");
 
     private WorkspaceArchive() {
     }
@@ -40,7 +40,8 @@ public final class WorkspaceArchive {
             @Override
             public FileVisitResult preVisitDirectory(Path d, BasicFileAttributes a) {
                 String rel = rel(dir, d);
-                return !rel.isEmpty() && excluded(rel) ? FileVisitResult.SKIP_SUBTREE : FileVisitResult.CONTINUE;
+                if (rel.isEmpty()) return FileVisitResult.CONTINUE;
+                return excluded(rel) || Links.isLink(d, a) ? FileVisitResult.SKIP_SUBTREE : FileVisitResult.CONTINUE;
             }
 
             @Override
@@ -65,7 +66,7 @@ public final class WorkspaceArchive {
                 public FileVisitResult preVisitDirectory(Path d, BasicFileAttributes a) throws IOException {
                     String rel = rel(dir, d);
                     if (rel.isEmpty()) return FileVisitResult.CONTINUE;
-                    if (excluded(rel)) return FileVisitResult.SKIP_SUBTREE;
+                    if (excluded(rel) || Links.isLink(d, a)) return FileVisitResult.SKIP_SUBTREE; // junctions too
                     zip.putNextEntry(new ZipEntry(rel + "/"));
                     zip.closeEntry();
                     return FileVisitResult.CONTINUE;
@@ -111,11 +112,11 @@ public final class WorkspaceArchive {
                     throw new IOException("Refusing archive entry " + name);
                 }
                 if (e.isDirectory()) {
-                    Files.createDirectories(target);
+                    makeDirs(root, target, name);
                     continue;
                 }
-                if (target.getParent() != null) Files.createDirectories(target.getParent());
-                if (Files.isSymbolicLink(target)) Files.delete(target);
+                makeDirs(root, target.getParent(), name);
+                if (Links.isLink(target)) Files.delete(target); // replace the link itself, never write through it
                 copy(zip, target);
                 written.add(name);
             }
@@ -126,8 +127,33 @@ public final class WorkspaceArchive {
         return written.size();
     }
 
+    /**
+     * Creates {@code dir} (under {@code root}) one component at a time, refusing the entry when an existing component
+     * is a symbolic link or a junction: following it would write outside the root (e.g. {@code shared -> ../other}).
+     */
+    private static void makeDirs(Path root, Path dir, String entry) throws IOException {
+        Path p = root;
+        for (Path part : root.relativize(dir)) {
+            if (part.toString().isEmpty()) continue;
+            p = p.resolve(part);
+            if (Links.isLink(p)) throw new IOException("Refusing archive entry " + entry + ": " + p + " is a link");
+            if (!Files.exists(p, LinkOption.NOFOLLOW_LINKS)) {
+                Files.createDirectory(p);
+            } else if (!Files.isDirectory(p, LinkOption.NOFOLLOW_LINKS)) {
+                throw new IOException("Refusing archive entry " + entry + ": " + p + " is not a directory");
+            }
+        }
+    }
+
+    /** Writes to a temp file next to the target, then moves it in place: the target is replaced, never followed. */
     private static void copy(InputStream in, Path target) throws IOException {
-        Files.copy(in, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        Path tmp = Files.createTempFile(target.getParent(), ".jllm-unpack", ".tmp");
+        try {
+            Files.copy(in, tmp, StandardCopyOption.REPLACE_EXISTING);
+            Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
+        } finally {
+            Files.deleteIfExists(tmp);
+        }
     }
 
     private static boolean posix(Path f) {

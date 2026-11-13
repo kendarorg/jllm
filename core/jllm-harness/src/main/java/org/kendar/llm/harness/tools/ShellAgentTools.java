@@ -34,7 +34,10 @@ public class ShellAgentTools implements HarnessToolSet {
             sb.append("exit code: ").append(r.exitCode());
             if (r.timedOut()) sb.append(" (timed out)");
             if (r.logFile() != null) {
-                sb.append("\n[output truncated: ").append(r.omittedLines()).append(" lines omitted; full log: ")
+                // the log is capped too (sandbox.outputLogMaxBytes): say so when it hit the cap
+                boolean logCut = logTruncated(r.logFile());
+                sb.append("\n[output truncated: ").append(r.omittedLines()).append(" lines omitted; log")
+                        .append(logCut ? " (itself truncated)" : "").append(": ")
                         .append(ctx.files() != null ? sandbox.displayPath(r.logFile()) : keepLog(ctx, r.logFile())).append("]");
             }
             if (!r.stdout().isBlank()) sb.append("\n[stdout]\n").append(r.stdout());
@@ -58,5 +61,22 @@ public class ShellAgentTools implements HarnessToolSet {
         } catch (java.io.IOException ignored) {
         }
         return log.toString();
+    }
+
+    /** True when a local spill log ends with the cap marker written by the capture; false when unreadable. */
+    static boolean logTruncated(java.nio.file.Path log) {
+        try (var ch = java.nio.channels.FileChannel.open(log, java.nio.file.StandardOpenOption.READ)) {
+            long size = ch.size();
+            int n = (int) Math.min(size, 128);
+            java.nio.ByteBuffer buf = java.nio.ByteBuffer.allocate(n);
+            ch.position(size - n);
+            while (buf.hasRemaining() && ch.read(buf) > 0) {
+                // read the tail
+            }
+            String tail = new String(buf.array(), 0, buf.position(), java.nio.charset.StandardCharsets.UTF_8);
+            return tail.contains("[log truncated at ");
+        } catch (Exception e) {
+            return false;
+        }
     }
 }

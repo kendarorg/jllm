@@ -2,6 +2,7 @@ package org.kendar.llm.harness.permission;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
@@ -25,12 +26,20 @@ public final class PermissionRules {
     public record Match(Kind kind, String rule) {
     }
 
-    private record Rule(Kind kind, String text, Pattern tool, Pattern arg) {
-        boolean matches(String toolName, JsonNode input) {
+    /** @param argFolded the argument pattern, case-insensitive: used for paths on Windows */
+    private record Rule(Kind kind, String text, Pattern tool, Pattern arg, Pattern argFolded) {
+        boolean matches(String toolName, JsonNode input, Path workDir, boolean windows) {
             if (!tool.matcher(toolName).matches()) return false;
-            return arg == null || arg.matcher(mainArgument(toolName, input)).find();
+            if (arg == null) return true;
+            boolean path = isPathTool(toolName) && input != null && input.hasNonNull("path");
+            String value = path ? normalizePath(input.get("path").asText(), workDir, windows)
+                    : mainArgument(toolName, input);
+            return (path && windows ? argFolded : arg).matcher(value).find();
         }
     }
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(PermissionRules.class);
+    private static final boolean WINDOWS = System.getProperty("os.name", "").toLowerCase().startsWith("windows");
 
     private static final PermissionRules NONE = new PermissionRules(List.of());
 
@@ -61,13 +70,20 @@ public final class PermissionRules {
             String text = texts.get(i);
             String where = "permissions." + kind.name().toLowerCase() + "[" + i + "]";
             if (text == null || text.isBlank()) throw new IllegalArgumentException(where + ": empty rule");
+            int open = text.indexOf('(');
+            if (open == 0) {
+                // "(...)" has no tool pattern: as a regex it would only match a tool named like the argument
+                log.warn("{} '{}' ignored: a rule is toolPattern or toolPattern(argPattern), the tool pattern is "
+                        + "missing", where, text);
+                continue;
+            }
             try {
-                int open = text.indexOf('(');
                 if (open > 0 && text.endsWith(")")) {
-                    out.add(new Rule(kind, text, Pattern.compile(text.substring(0, open)),
-                            Pattern.compile(text.substring(open + 1, text.length() - 1))));
+                    String a = text.substring(open + 1, text.length() - 1);
+                    out.add(new Rule(kind, text, Pattern.compile(text.substring(0, open)), Pattern.compile(a),
+                            Pattern.compile(a, Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE)));
                 } else {
-                    out.add(new Rule(kind, text, Pattern.compile(text), null));
+                    out.add(new Rule(kind, text, Pattern.compile(text), null, null));
                 }
             } catch (PatternSyntaxException e) {
                 throw new IllegalArgumentException(where + " '" + text + "': " + e.getDescription(), e);
@@ -79,10 +95,23 @@ public final class PermissionRules {
         return rules.isEmpty();
     }
 
-    /** First matching rule in deny, ask, allow order; null when none matches. */
+    /** First matching rule in deny, ask, allow order; null when none matches. Paths are normalized lexically only. */
     public Match match(String toolName, JsonNode input) {
+        return match(toolName, input, null);
+    }
+
+    /**
+     * As {@link #match(String, JsonNode)}, with path arguments made relative to {@code workDir} (when inside it) after
+     * normalization; on Windows they are also matched case-insensitively, with trailing dots/spaces of each segment
+     * dropped and 8.3 short names expanded for paths that exist.
+     */
+    public Match match(String toolName, JsonNode input, Path workDir) {
+        return match(toolName, input, workDir, WINDOWS);
+    }
+
+    Match match(String toolName, JsonNode input, Path workDir, boolean windows) {
         for (Rule r : rules) {
-            if (r.matches(toolName, input)) return new Match(r.kind(), r.text());
+            if (r.matches(toolName, input, workDir, windows)) return new Match(r.kind(), r.text());
         }
         return null;
     }
@@ -100,6 +129,72 @@ public final class PermissionRules {
         List<String> out = new ArrayList<>();
         for (Rule r : rules) out.add(r.kind().name().toLowerCase() + "  " + r.text());
         return out;
+    }
+
+    private static boolean isPathTool(String tool) {
+        return switch (tool) {
+            case "read_file", "write_file", "edit_file" -> true;
+            default -> false;
+        };
+    }
+
+    /**
+     * The form of a path argument the rules see: '/'-separated, {@code .} and {@code ..} segments resolved, repeated
+     * separators collapsed, relative to {@code workDir} when it lies inside it (an absolute path elsewhere stays
+     * absolute). On Windows each segment loses its trailing dots and spaces ({@code .git.} is {@code .git}) and an
+     * existing path is replaced by its real path, which expands 8.3 short names ({@code GIT~1}).
+     */
+    static String normalizePath(String raw, Path workDir, boolean windows) {
+        if (raw == null) return "";
+        String s = raw.replace('\\', '/');
+        boolean absolute = s.startsWith("/") || s.matches("^[A-Za-z]:.*");
+        String drive = "";
+        if (s.matches("^[A-Za-z]:.*")) {
+            drive = s.substring(0, 2);
+            s = s.substring(2);
+        }
+        java.util.Deque<String> segs = new java.util.ArrayDeque<>();
+        for (String seg : s.split("/")) {
+            String g = windows ? stripTrailingDotsAndSpaces(seg) : seg;
+            if (g.isEmpty() || g.equals(".")) continue;
+            if (g.equals("..")) {
+                if (!segs.isEmpty() && !segs.peekLast().equals("..")) segs.removeLast();
+                else if (!absolute) segs.addLast("..");
+                continue;
+            }
+            segs.addLast(g);
+        }
+        String joined = String.join("/", segs);
+        String result = absolute ? drive + "/" + joined : joined;
+        if (workDir == null) return result.isEmpty() ? "." : result;
+        try {
+            Path root = workDir.toAbsolutePath().normalize();
+            Path p = absolute ? Path.of(result) : root.resolve(joined);
+            p = p.toAbsolutePath().normalize();
+            if (windows) p = realIfExists(p);
+            Path realRoot = windows ? realIfExists(root) : root;
+            Path base = p.startsWith(realRoot) ? realRoot : p.startsWith(root) ? root : null;
+            if (base == null) return p.toString().replace('\\', '/');
+            String rel = base.relativize(p).toString().replace('\\', '/');
+            return rel.isEmpty() ? "." : rel;
+        } catch (RuntimeException e) {
+            return result.isEmpty() ? "." : result;
+        }
+    }
+
+    private static String stripTrailingDotsAndSpaces(String seg) {
+        if (seg.equals(".") || seg.equals("..")) return seg;
+        int end = seg.length();
+        while (end > 0 && (seg.charAt(end - 1) == '.' || seg.charAt(end - 1) == ' ')) end--;
+        return end == 0 ? seg : seg.substring(0, end);
+    }
+
+    private static Path realIfExists(Path p) {
+        try {
+            return java.nio.file.Files.exists(p) ? p.toRealPath() : p;
+        } catch (java.io.IOException | SecurityException e) {
+            return p;
+        }
     }
 
     static String mainArgument(String tool, JsonNode input) {

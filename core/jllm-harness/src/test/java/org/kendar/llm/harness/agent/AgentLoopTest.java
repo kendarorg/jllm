@@ -208,7 +208,8 @@ class AgentLoopTest {
 
         assertEquals(5, rig.model.requests.size()); // 3 turns, then the 2 the user typed
         assertEquals(2, ev.ofType("approval_request").size());
-        assertTrue(ev.ofType("warning").get(0).get("message").asText().contains("Stopped after 3 turns"));
+        // the limit the user extended to, not the configured one
+        assertTrue(ev.ofType("warning").get(0).get("message").asText().contains("Stopped after 5 turns"));
     }
 
     @Test

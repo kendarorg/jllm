@@ -55,7 +55,7 @@ public class FileChatSessionStore implements ChatSessionStore {
     /** One root holding a directory per chat. */
     public FileChatSessionStore(Path root, ObjectMapper mapper) {
         Path r = root.toAbsolutePath().normalize();
-        this.chatRoot = id -> r.resolve(safe(id));
+        this.chatRoot = id -> chatDir(r, id);
         this.chatDirs = () -> {
             if (!Files.isDirectory(r)) return List.of();
             try (Stream<Path> s = Files.list(r)) {
@@ -80,10 +80,11 @@ public class FileChatSessionStore implements ChatSessionStore {
     @Override
     public synchronized ChatSessionData save(ChatSessionData session) {
         String id = session.chatId();
+        if (!validId(id)) throw new IllegalArgumentException("Invalid chat id '" + id + "'");
         String messages = session.messagesJson() == null ? "" : session.messagesJson();
         try {
             Path dir = chatRoot.apply(id);
-            Path logFile = dir.resolve(safe(session.agentId())).resolve(LOG);
+            Path logFile = agentDir(dir, session.agentId()).resolve(LOG);
             Files.createDirectories(logFile.getParent());
             String known = logs.get(id);
             if (known == null && Files.isRegularFile(logFile)) known = Files.readString(logFile, StandardCharsets.UTF_8);
@@ -91,19 +92,43 @@ public class FileChatSessionStore implements ChatSessionStore {
             logs.put(id, messages);
             writeRow(dir, session);
         } catch (IOException e) {
+            logs.remove(id); // the file may hold anything now: read it again on the next save or load
             throw new UncheckedIOException("Cannot save chat " + id, e);
+        } catch (RuntimeException e) {
+            logs.remove(id);
+            throw e;
         }
         rows.put(id, session.withoutMessages());
         return session;
     }
 
+    /**
+     * Appends when the new log extends the stored one (a crash then leaves at most a partial last line, dropped on
+     * load); any other change rewrites the whole file through a temporary file and an atomic move.
+     */
     private static void writeLog(Path file, String known, String messages) throws IOException {
         if (known != null && !known.isEmpty() && messages.length() > known.length() && messages.startsWith(known)
                 && Files.isRegularFile(file)) {
             Files.writeString(file, messages.substring(known.length()), StandardCharsets.UTF_8,
                     StandardOpenOption.APPEND);
         } else {
-            Files.writeString(file, messages, StandardCharsets.UTF_8);
+            replace(file, messages);
+        }
+    }
+
+    /** Writes {@code <file>.tmp}, then moves it over {@code file} (atomically when the file system can). */
+    static void replace(Path file, String content) throws IOException {
+        Path tmp = file.resolveSibling(file.getFileName() + ".tmp");
+        try (var ch = java.nio.channels.FileChannel.open(tmp, StandardOpenOption.CREATE, StandardOpenOption.WRITE,
+                StandardOpenOption.TRUNCATE_EXISTING)) {
+            java.nio.ByteBuffer buf = java.nio.ByteBuffer.wrap(content.getBytes(StandardCharsets.UTF_8));
+            while (buf.hasRemaining()) ch.write(buf);
+            ch.force(true);
+        }
+        try {
+            Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        } catch (java.nio.file.AtomicMoveNotSupportedException e) {
+            Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING);
         }
     }
 
@@ -124,6 +149,10 @@ public class FileChatSessionStore implements ChatSessionStore {
         n.put("qualifierInputTokens", s.qualifierInputTokens());
         n.put("qualifierOutputTokens", s.qualifierOutputTokens());
         if (s.principal() != null) n.put("principal", s.principal());
+        if (s.chatTools() != null) n.put("chatTools", s.chatTools());
+        if (s.taintedToolUses() != null && !s.taintedToolUses().isEmpty()) {
+            n.put("taintedToolUses", s.taintedToolUses());
+        }
         Files.createDirectories(dir);
         Path tmp = dir.resolve(ROW + ".tmp");
         mapper.writerWithDefaultPrettyPrinter().writeValue(tmp.toFile(), n);
@@ -147,7 +176,9 @@ public class FileChatSessionStore implements ChatSessionStore {
                     n.path("cacheCreationTokens").asLong(), Instant.parse(req(n, "createdAt")),
                     Instant.parse(req(n, "updatedAt")), n.path("messageCount").asInt(),
                     n.path("qualifierInputTokens").asLong(), n.path("qualifierOutputTokens").asLong(),
-                    n.hasNonNull("principal") ? n.get("principal").asText() : null);
+                    n.hasNonNull("principal") ? n.get("principal").asText() : null,
+                    n.hasNonNull("chatTools") ? n.get("chatTools").asText() : null,
+                    n.hasNonNull("taintedToolUses") ? n.get("taintedToolUses").asText() : null);
         } catch (Exception e) {
             log.warn("Skipping chat in {}: cannot read {}: {}", dir, ROW, e.getMessage());
             return null;
@@ -161,6 +192,7 @@ public class FileChatSessionStore implements ChatSessionStore {
 
     @Override
     public synchronized Optional<ChatSessionData> find(String chatId) {
+        if (!validId(chatId)) return Optional.empty();
         ChatSessionData row = rows.get(chatId);
         if (row == null) {
             Path dir = chatRoot.apply(chatId);
@@ -170,22 +202,33 @@ public class FileChatSessionStore implements ChatSessionStore {
         }
         String text = logs.get(chatId);
         if (text == null) {
-            Path f = chatRoot.apply(chatId).resolve(safe(row.agentId())).resolve(LOG);
+            Path f = agentDir(chatRoot.apply(chatId), row.agentId()).resolve(LOG);
             try {
                 text = Files.isRegularFile(f) ? Files.readString(f, StandardCharsets.UTF_8) : "";
             } catch (IOException e) {
                 log.warn("Cannot read the log of chat {}: {}", chatId, e.getMessage());
                 return Optional.empty();
             }
+            String original = text;
+            String trimmed = InterruptedTurnRepair.dropPartialLastLine(text, mapper);
+            if (trimmed != null) {
+                log.warn("Chat {}: dropped the partial last line of {} (the process stopped while writing it)",
+                        chatId, f);
+                text = trimmed;
+            }
             String fixed = InterruptedTurnRepair.repair(text, mapper);
             if (fixed != null) {
+                repaired.put(chatId, Boolean.TRUE);
+                text = fixed;
+            }
+            if (!text.equals(original)) {
                 try {
-                    writeLog(f, text, fixed);
-                    repaired.put(chatId, Boolean.TRUE);
+                    if (trimmed == null) writeLog(f, original, text);
+                    else replace(f, text);
                 } catch (IOException e) {
                     log.warn("Cannot repair the log of chat {}: {}", chatId, e.getMessage());
+                    return Optional.of(row.withLoadedMessages(text)); // repaired in memory; the file is read again
                 }
-                text = fixed;
             }
             logs.put(chatId, text);
         }
@@ -213,6 +256,7 @@ public class FileChatSessionStore implements ChatSessionStore {
 
     @Override
     public synchronized void delete(String chatId) {
+        if (!validId(chatId)) return; // never the root, never outside it
         rows.remove(chatId);
         logs.remove(chatId);
         repaired.remove(chatId);
@@ -221,12 +265,72 @@ public class FileChatSessionStore implements ChatSessionStore {
 
     /** {@code <root>/<chatId>/<agentId>} */
     public Path historyDir(String chatId, String agentId) {
-        return chatRoot.apply(chatId).resolve(safe(agentId));
+        return agentDir(chatRoot.apply(chatId), agentId);
     }
 
+    /** Chat ids name directories: no blank, {@code .}, {@code ..}, separators or NUL. */
+    static boolean validId(String id) {
+        return id != null && !id.isBlank() && !id.equals(".") && !id.equals("..") && id.indexOf('/') < 0
+                && id.indexOf('\\') < 0 && id.indexOf('\0') < 0;
+    }
+
+    /**
+     * Reversible file name of an id: {@code [A-Za-z0-9_-]} and inner dots are kept, every other byte (UTF-8) becomes
+     * {@code %XX}; a trailing dot is encoded too (Windows drops it). {@code a/b} and {@code a_b} no longer collide.
+     *
+     * @throws IllegalArgumentException for null, empty, {@code .} and {@code ..}
+     */
     static String safe(String name) {
+        if (name == null || name.isEmpty() || name.equals(".") || name.equals("..")) {
+            throw new IllegalArgumentException("Invalid name '" + name + "'");
+        }
+        StringBuilder sb = new StringBuilder();
+        byte[] bytes = name.getBytes(StandardCharsets.UTF_8);
+        for (int i = 0; i < bytes.length; i++) {
+            int b = bytes[i] & 0xff;
+            boolean keep = (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') || (b >= '0' && b <= '9') || b == '_'
+                    || b == '-' || (b == '.' && i < bytes.length - 1);
+            if (keep) sb.append((char) b);
+            else sb.append('%').append(String.format("%02X", b));
+        }
+        return sb.toString();
+    }
+
+    /** The lossy name used by earlier versions: only to find (and rename) directories they wrote. */
+    static String legacySafe(String name) {
         String s = name == null ? "" : name.replaceAll("[^A-Za-z0-9._-]", "_").replace("..", "_");
         return s.isEmpty() ? "_" : s;
+    }
+
+    /** {@code <root>/<safe(chatId)>}; a directory of this same chat under its old name is renamed first. */
+    private Path chatDir(Path root, String chatId) {
+        Path dir = root.resolve(safe(chatId));
+        String legacy = legacySafe(chatId);
+        if (legacy.equals(dir.getFileName().toString()) || Files.exists(dir)) return dir;
+        Path old = root.resolve(legacy);
+        ChatSessionData row = Files.isDirectory(old) ? readRow(old) : null;
+        if (row == null || !chatId.equals(row.chatId())) return dir; // another chat's directory (old names collided)
+        return migrate(old, dir);
+    }
+
+    /** {@code <chatDir>/<safe(agentId)>}; a directory under the old name is renamed first. */
+    private static Path agentDir(Path chatDir, String agentId) {
+        Path dir = chatDir.resolve(safe(agentId));
+        String legacy = legacySafe(agentId);
+        if (legacy.equals(dir.getFileName().toString()) || Files.exists(dir)) return dir;
+        Path old = chatDir.resolve(legacy);
+        return Files.isDirectory(old) ? migrate(old, dir) : dir;
+    }
+
+    private static Path migrate(Path old, Path dir) {
+        try {
+            Files.move(old, dir, StandardCopyOption.ATOMIC_MOVE);
+            log.info("Renamed {} to {}", old, dir);
+            return dir;
+        } catch (IOException e) {
+            log.warn("Cannot rename {} to {} ({}); using the old name", old, dir, e.toString());
+            return old;
+        }
     }
 
     static void deleteTree(Path dir) {

@@ -16,7 +16,8 @@ public class FileSystemAgentTools implements HarnessToolSet {
 
     private static final String GROUP = "Files";
     private static final int MAX_RESULTS = 200;
-    private static final long MAX_READ_BYTES = 1_000_000;
+    /** Default of {@code files.maxReadBytes}: the most text one {@code read_file} returns and the largest file edited. */
+    public static final long DEFAULT_MAX_READ_BYTES = 1_000_000;
     private static final long MAX_DOCUMENT_BYTES = 50_000_000;
     static final int MAX_READ_LINES = 2000;
     static final int MAX_READ_OUTPUT_BYTES = 50 * 1024;
@@ -27,6 +28,7 @@ public class FileSystemAgentTools implements HarnessToolSet {
     private final DocumentReaders readers;
     private final Checkpoints checkpoints;
     private final StorageQuota quota;
+    private final long maxReadBytes;
 
     public FileSystemAgentTools() {
         this(null, null);
@@ -41,13 +43,23 @@ public class FileSystemAgentTools implements HarnessToolSet {
     }
 
     public FileSystemAgentTools(DocumentReaders readers, Checkpoints checkpoints, StorageQuota quota) {
+        this(readers, checkpoints, quota, DEFAULT_MAX_READ_BYTES);
+    }
+
+    /**
+     * @param maxReadBytes {@code files.maxReadBytes}: the most text one {@code read_file} returns (larger files are
+     *                     read by line range), the largest file {@code edit_file} changes and {@code grep} searches;
+     *                     {@code <= 0}: the default
+     */
+    public FileSystemAgentTools(DocumentReaders readers, Checkpoints checkpoints, StorageQuota quota, long maxReadBytes) {
         this.readers = readers;
         this.checkpoints = checkpoints;
         this.quota = quota == null ? StorageQuota.UNLIMITED : quota;
+        this.maxReadBytes = maxReadBytes > 0 ? maxReadBytes : DEFAULT_MAX_READ_BYTES;
     }
 
     private void checkpoint(ToolContext ctx, Path p) {
-        if (checkpoints != null) checkpoints.record(ctx, p);
+        if (checkpoints != null) checkpoints.record(ctx, p, quota);
     }
 
     @Override
@@ -69,13 +81,21 @@ public class FileSystemAgentTools implements HarnessToolSet {
      * absolute paths must already be inside it.
      */
     public static Path jailWrite(ToolContext ctx, String path) {
-        if (!ctx.readOnlyWork()) return jail(ctx, path);
-        Path scratch = scratchRoot(ctx);
-        if (Path.of(path).isAbsolute() && !Path.of(path).normalize().startsWith(scratch)) {
-            throw new IllegalArgumentException("Plan mode: the working directory is read-only; write under "
-                    + scratch + " instead");
+        Path p;
+        if (!ctx.readOnlyWork()) {
+            p = jail(ctx, path);
+        } else {
+            Path scratch = scratchRoot(ctx);
+            if (Path.of(path).isAbsolute() && !Path.of(path).normalize().startsWith(scratch)) {
+                throw new IllegalArgumentException("Plan mode: the working directory is read-only; write under "
+                        + scratch + " instead");
+            }
+            p = resolveIn(scratch, path);
         }
-        return resolveIn(scratch, path);
+        if (Checkpoints.isCheckpointPath(ctx.workDir(), p)) {
+            throw new IllegalArgumentException("Checkpoint data cannot be written: " + path);
+        }
+        return p;
     }
 
     private static Path scratchRoot(ToolContext ctx) {
@@ -112,51 +132,73 @@ public class FileSystemAgentTools implements HarnessToolSet {
                         "offset:integer?", "First line to return (1-based)",
                         "limit:integer?", "Maximum number of lines"),
                 GROUP, ToolKind.READ_ONLY, (ctx, in) -> {
-            if (ctx.files() != null) return RemoteFileTools.read(ctx, in, readers);
+            if (ctx.files() != null) return RemoteFileTools.read(ctx, in, readers, maxReadBytes);
             Path p = jail(ctx, in.path("path").asText());
-            return formatRead(readLines(p), in);
+            if (Files.isDirectory(p)) throw new IllegalArgumentException("Not a file: " + in.path("path").asText());
+            String ext = extension(p);
+            DocumentReader reader = readers == null ? null : readers.get(ext);
+            if (reader != null) {
+                if (Files.size(p) > MAX_DOCUMENT_BYTES) {
+                    throw new IllegalArgumentException("File too large (" + Files.size(p) + " bytes)");
+                }
+                return formatRead(DocumentReaders.extractLines(reader, p), in, maxReadBytes);
+            }
+            checkNotBinary(ext);
+            return readText(() -> Files.newInputStream(p), in, maxReadBytes);
         });
     }
 
-    /** The {@code read_file} output for the lines of a file: numbered, offset/limit applied, capped. */
-    static String formatRead(List<String> lines, JsonNode in) {
-        int from = Math.max(1, in.path("offset").asInt(1)) - 1;
-        int to = in.has("limit") ? Math.min(lines.size(), from + in.path("limit").asInt()) : lines.size();
-        int cap = Math.min(to, from + MAX_READ_LINES);
-        StringBuilder sb = new StringBuilder();
-        int shown = from;
-        for (int i = from; i < cap; i++) {
-            String line = lines.get(i);
-            if (sb.length() + line.length() + 8 > MAX_READ_OUTPUT_BYTES && i > from) break;
-            sb.append(i + 1).append('\t').append(line).append('\n');
-            shown = i + 1;
-        }
-        if (shown < to) {
-            sb.append("[showing lines ").append(from + 1).append('-').append(shown).append(" of ")
-                    .append(lines.size()).append("; continue with offset=").append(shown + 1).append("]\n");
-        }
-        return sb.toString();
-    }
-
-    /** Reads a text file as lines; a binary format with no registered reader is refused, not decoded as garbage. */
-    private List<String> readLines(Path p) throws IOException {
-        String ext = extension(p);
-        DocumentReader reader = readers == null ? null : readers.get(ext);
-        if (reader != null) {
-            if (Files.size(p) > MAX_DOCUMENT_BYTES) {
-                throw new IllegalArgumentException("File too large (" + Files.size(p) + " bytes)");
-            }
-            return DocumentReaders.extractLines(reader, p);
-        }
+    /** A binary format with no registered reader is refused, not decoded as garbage. */
+    static void checkNotBinary(String ext) {
         if (BINARY_EXTENSIONS.contains(ext)) {
             throw new IllegalArgumentException("No reader for ." + ext + "; add the "
                     + (ext.equals("pdf") ? "jllm-pdf" : ext.startsWith("doc") ? "jllm-docs" : "matching reader")
                     + " module");
         }
-        if (Files.size(p) > MAX_READ_BYTES) {
-            throw new IllegalArgumentException("File too large (" + Files.size(p) + " bytes); use grep or a line range");
+    }
+
+    /** The {@code read_file} output of a text file, streamed: only the requested lines are kept in memory. */
+    static String readText(TextEdits.Source source, JsonNode in, long maxReadBytes) throws IOException {
+        long from = Math.max(1, in.path("offset").asLong(1)) - 1;
+        long limit = in.has("limit") ? Math.max(0, in.path("limit").asLong()) : Long.MAX_VALUE;
+        TextEdits.Window w = TextEdits.readWindow(source, from, (int) Math.min(limit, MAX_READ_LINES), maxReadBytes);
+        long requestedTo = limit == Long.MAX_VALUE ? Long.MAX_VALUE : from + limit;
+        long to = w.total() < 0 ? requestedTo : Math.min(w.total(), requestedTo);
+        return formatWindow(w.lines(), from, to, w.total(), maxReadBytes);
+    }
+
+    /** The {@code read_file} output for all the lines of a file: numbered, offset/limit applied, capped. */
+    static String formatRead(List<String> lines, JsonNode in, long maxReadBytes) {
+        int from = (int) Math.min(lines.size(), Math.max(1, in.path("offset").asLong(1)) - 1);
+        long to = in.has("limit") ? Math.min(lines.size(), from + Math.max(0, in.path("limit").asLong())) : lines.size();
+        int cap = (int) Math.min(to, from + MAX_READ_LINES);
+        return formatWindow(lines.subList(from, Math.max(from, cap)), from, to, lines.size(), maxReadBytes);
+    }
+
+    /**
+     * Numbers the lines of {@code window} (line {@code from + 1} onwards) up to line {@code to}, at most
+     * {@link #MAX_READ_LINES} lines and {@code min(MAX_READ_OUTPUT_BYTES, maxReadBytes)} characters (a single longer
+     * line is cut at {@code maxReadBytes}), and tells how to continue. {@code total < 0}: unknown.
+     */
+    static String formatWindow(List<String> window, long from, long to, long total, long maxReadBytes) {
+        long page = Math.min(MAX_READ_OUTPUT_BYTES, maxReadBytes);
+        StringBuilder sb = new StringBuilder();
+        long shown = from;
+        for (int i = 0; i < window.size() && i < MAX_READ_LINES && from + i < to; i++) {
+            String line = window.get(i);
+            if (sb.length() + line.length() + 8 > page && i > 0) break;
+            if (line.length() > maxReadBytes) {
+                line = line.substring(0, (int) maxReadBytes) + " [line cut at " + maxReadBytes + " characters]";
+            }
+            sb.append(from + i + 1).append('\t').append(line).append('\n');
+            shown = from + i + 1;
         }
-        return Files.readAllLines(p, StandardCharsets.UTF_8);
+        if (shown < to) {
+            sb.append("[showing lines ").append(from + 1).append('-').append(shown)
+                    .append(total < 0 ? "; more follow" : " of " + total)
+                    .append("; continue with offset=").append(shown + 1).append("]\n");
+        }
+        return sb.toString();
     }
 
     private static String extension(Path p) {
@@ -175,34 +217,51 @@ public class FileSystemAgentTools implements HarnessToolSet {
                         "append:boolean?", "Append to the file instead of overwriting it"),
                 GROUP, ToolKind.FILE_EDIT, (ctx, in) -> {
             if (ctx.files() != null) return RemoteFileTools.write(ctx, in, checkpoints, quota);
-            Path p = jailWrite(ctx, in.path("path").asText());
+            String shown = in.path("path").asText();
+            Path p = jailWrite(ctx, shown);
             String content = in.path("content").asText();
-            if (in.path("append").asBoolean(false)) {
-                boolean exists = Files.exists(p);
-                byte[] part = exists
-                        ? new TextEdits.TextFile("", false, TextEdits.TextFile.read(p).eol())
-                        .encode(content.replace("\r\n", "\n")) // keep the file's line endings
-                        : content.getBytes(StandardCharsets.UTF_8);
-                quota.reserve(ctx.chatId(), p, 0, part.length);
-                checkpoint(ctx, p);
-                if (p.getParent() != null) Files.createDirectories(p.getParent());
-                if (exists) Files.write(p, part, StandardOpenOption.APPEND);
-                else Files.write(p, part, StandardOpenOption.CREATE);
-                return "Appended " + content.length() + " chars to " + in.path("path").asText();
+            try (PathLocks.Held ignored = PathLocks.lock(p)) {
+                if (Files.isDirectory(p)) throw new IllegalArgumentException("Is a directory: " + shown);
+                if (in.path("append").asBoolean(false)) {
+                    boolean exists = Files.exists(p);
+                    byte[] part = exists
+                            ? TextEdits.TextFile.probe(readHead(p, TextEdits.EOL_PROBE_BYTES)).encodeAppend(content)
+                            : content.getBytes(StandardCharsets.UTF_8); // keep the file's line endings and charset
+                    StorageQuota.Reservation r = quota.reserve(ctx.chatId(), p, 0, part.length);
+                    try {
+                        checkpoint(ctx, p);
+                        if (p.getParent() != null) Files.createDirectories(p.getParent());
+                        if (exists) Files.write(p, part, StandardOpenOption.APPEND);
+                        else Files.write(p, part, StandardOpenOption.CREATE);
+                    } catch (IOException | RuntimeException e) {
+                        r.rollback();
+                        throw e;
+                    }
+                    return "Appended " + content.length() + " chars to " + shown;
+                }
+                byte[] bytes = content.getBytes(StandardCharsets.UTF_8);
+                StorageQuota.Reservation r = quota.reserve(ctx.chatId(), p, Files.exists(p) ? Files.size(p) : 0,
+                        bytes.length);
+                try {
+                    checkpoint(ctx, p);
+                    if (p.getParent() != null) Files.createDirectories(p.getParent());
+                    AtomicFiles.write(p, bytes);
+                } catch (IOException | RuntimeException e) {
+                    r.rollback();
+                    throw e;
+                }
+                return "Wrote " + content.length() + " chars to " + shown;
             }
-            quota.reserve(ctx.chatId(), p, Files.exists(p) ? Files.size(p) : 0,
-                    content.getBytes(StandardCharsets.UTF_8).length);
-            checkpoint(ctx, p);
-            if (p.getParent() != null) Files.createDirectories(p.getParent());
-            Files.writeString(p, content, StandardCharsets.UTF_8);
-            return "Wrote " + content.length() + " chars to " + in.path("path").asText();
         }, (ctx, in) -> {
             if (ctx.files() != null) return RemoteFileTools.writePreview(ctx, in);
             Path p = jailWrite(ctx, in.path("path").asText());
             String old = "";
             try {
-                if (Files.exists(p) && !in.path("append").asBoolean(false)) old = Files.readString(p, StandardCharsets.UTF_8);
-            } catch (IOException ignored) {
+                if (Files.isRegularFile(p) && Files.size(p) <= maxReadBytes && !in.path("append").asBoolean(false)) {
+                    old = TextEdits.TextFile.read(p).text();
+                }
+            } catch (IOException | RuntimeException ignored) {
+                // preview only
             }
             return "--- " + in.path("path").asText() + "\n" + diff(old, in.path("content").asText());
         });
@@ -229,15 +288,27 @@ public class FileSystemAgentTools implements HarnessToolSet {
                 "Replace text in a file. old_string must occur exactly once unless replace_all is true; small "
                         + "whitespace and quote differences are tolerated. Pass edits to change several places at once.",
                 schema, GROUP, ToolKind.FILE_EDIT, (ctx, in) -> {
-            if (ctx.files() != null) return RemoteFileTools.edit(ctx, in, checkpoints, quota);
-            Path p = jailWrite(ctx, in.path("path").asText());
-            TextEdits.TextFile file = TextEdits.TextFile.read(p);
-            TextEdits.Applied applied = TextEdits.apply(file.text(), parseEdits(in));
-            quota.reserve(ctx.chatId(), p, Files.size(p), file.encode(applied.text()).length);
-            checkpoint(ctx, p);
-            file.write(p, applied.text());
-            return "Edited " + in.path("path").asText() + " (" + applied.replacements() + " replacement(s))\n"
-                    + applied.diff();
+            if (ctx.files() != null) return RemoteFileTools.edit(ctx, in, checkpoints, quota, maxReadBytes);
+            String shown = in.path("path").asText();
+            Path p = jailWrite(ctx, shown);
+            List<TextEdits.Edit> requested = parseEdits(in);
+            try (PathLocks.Held ignored = PathLocks.lock(p)) { // read, change and write as one step
+                if (Files.isDirectory(p)) throw new IllegalArgumentException("Is a directory: " + shown);
+                long size = Files.size(p);
+                checkEditSize(shown, size, maxReadBytes);
+                TextEdits.TextFile file = TextEdits.TextFile.read(p);
+                TextEdits.Applied applied = TextEdits.apply(file.text(), requested);
+                byte[] out = file.encode(applied);
+                StorageQuota.Reservation r = quota.reserve(ctx.chatId(), p, size, out.length);
+                try {
+                    checkpoint(ctx, p);
+                    AtomicFiles.write(p, out);
+                } catch (IOException | RuntimeException e) {
+                    r.rollback();
+                    throw e;
+                }
+                return "Edited " + shown + " (" + applied.replacements() + " replacement(s))\n" + applied.diff();
+            }
         }, (ctx, in) -> {
             StringBuilder sb = new StringBuilder("--- " + in.path("path").asText() + "\n");
             for (TextEdits.Edit e : parseEdits(in)) sb.append(diff(e.oldString(), e.newString()));
@@ -245,15 +316,38 @@ public class FileSystemAgentTools implements HarnessToolSet {
         });
     }
 
+    /** Edits load the whole file: above {@code files.maxReadBytes} they are refused. */
+    static void checkEditSize(String shown, long size, long maxReadBytes) {
+        if (size > maxReadBytes) {
+            throw new IllegalArgumentException("File too large to edit (" + size + " bytes, the limit is " + maxReadBytes
+                    + ", files.maxReadBytes): " + shown + "; change it with a shell command (e.g. sed) instead");
+        }
+    }
+
+    /** The first {@code max} bytes of a file. */
+    static byte[] readHead(Path p, int max) throws IOException {
+        try (var s = Files.newInputStream(p)) {
+            return s.readNBytes(max);
+        }
+    }
+
     static List<TextEdits.Edit> parseEdits(JsonNode in) {
         List<TextEdits.Edit> edits = new ArrayList<>();
         if (in.hasNonNull("old_string")) {
-            edits.add(new TextEdits.Edit(in.path("old_string").asText(), in.path("new_string").asText(""),
+            if (!in.hasNonNull("new_string")) {
+                throw new IllegalArgumentException("new_string is missing (use \"\" to delete the text)");
+            }
+            edits.add(new TextEdits.Edit(in.path("old_string").asText(), in.path("new_string").asText(),
                     in.path("replace_all").asBoolean(false)));
         }
         if (in.has("edits") && in.get("edits").isArray()) {
+            int i = 0;
             for (JsonNode e : in.get("edits")) {
-                edits.add(new TextEdits.Edit(e.path("old_string").asText(""), e.path("new_string").asText(""),
+                i++;
+                if (!e.hasNonNull("new_string")) {
+                    throw new IllegalArgumentException("edit " + i + ": new_string is missing (use \"\" to delete the text)");
+                }
+                edits.add(new TextEdits.Edit(e.path("old_string").asText(""), e.path("new_string").asText(),
                         e.path("replace_all").asBoolean(false)));
             }
         }
@@ -269,6 +363,32 @@ public class FileSystemAgentTools implements HarnessToolSet {
         return p -> full.matches(p) || topLevel.matches(p);
     }
 
+    /**
+     * A glob matches a file relative to the searched {@code path} ({@code base}); a pattern written relative to the
+     * work dir ({@code root}) is accepted too.
+     */
+    private static boolean globMatches(PathMatcher matcher, Path base, Path root, Path f) {
+        if (base != null && f.startsWith(base) && matcher.matches(base.relativize(f))) return true;
+        return f.startsWith(root) && matcher.matches(root.relativize(f));
+    }
+
+    /** Real path of the jail root {@code start} was resolved in: the scratch dir when it is there, else the work dir. */
+    private static Path realJailRoot(ToolContext ctx, Path start) throws IOException {
+        Path work = ctx.workDir().toAbsolutePath().normalize();
+        Path scratch = scratchRoot(ctx);
+        Path root = !start.startsWith(work) && scratch != null && start.startsWith(scratch) ? scratch : work;
+        return root.toRealPath();
+    }
+
+    /** Whether a walked entry really is inside the jail: a symlink or junction to elsewhere is not followed. */
+    private static boolean insideReal(Path p, Path realRoot) {
+        try {
+            return p.toRealPath().startsWith(realRoot);
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
     private HarnessTool ls() {
         return new SimpleTool("ls",
                 "List one directory (not recursive): directories first, then files, with type and size in bytes.",
@@ -278,10 +398,11 @@ public class FileSystemAgentTools implements HarnessToolSet {
             Path dir = in.hasNonNull("path") && !in.path("path").asText().isBlank()
                     ? jail(ctx, in.path("path").asText()) : ctx.workDir().toAbsolutePath().normalize();
             if (!Files.isDirectory(dir)) return "Not a directory: " + in.path("path").asText();
+            Path realRoot = realJailRoot(ctx, dir);
             List<String> dirs = new ArrayList<>();
             List<String> files = new ArrayList<>();
             try (Stream<Path> s = Files.list(dir)) {
-                for (Path p : (Iterable<Path>) s.sorted()::iterator) {
+                for (Path p : (Iterable<Path>) s.filter(e -> insideReal(e, realRoot)).sorted()::iterator) {
                     String name = p.getFileName().toString();
                     if (Files.isDirectory(p)) dirs.add("d " + name + "/");
                     else {
@@ -314,9 +435,11 @@ public class FileSystemAgentTools implements HarnessToolSet {
                 GROUP, ToolKind.READ_ONLY, (ctx, in) -> {
             if (ctx.files() != null) return RemoteFileTools.glob(ctx, in);
             Path root = ctx.workDir().toAbsolutePath().normalize();
+            Path realRoot = root.toRealPath();
             PathMatcher matcher = globMatcher(in.path("pattern").asText());
             try (Stream<Path> s = Files.walk(root)) {
                 return s.filter(Files::isRegularFile)
+                        .filter(f -> insideReal(f, realRoot))
                         .map(root::relativize)
                         .filter(matcher::matches)
                         .map(p -> p.toString().replace('\\', '/'))
@@ -333,21 +456,24 @@ public class FileSystemAgentTools implements HarnessToolSet {
                 SimpleTool.schema(
                         "pattern", "Java regular expression",
                         "path?", "Subdirectory or file relative to the work dir (default: whole dir)",
-                        "glob?", "Only search files matching this glob"),
+                        "glob?", "Only search files matching this glob (relative to path)"),
                 GROUP, ToolKind.READ_ONLY, (ctx, in) -> {
             if (ctx.files() != null) return RemoteFileTools.grep(ctx, in);
             Path root = ctx.workDir().toAbsolutePath().normalize();
             Path start = in.hasNonNull("path") ? jail(ctx, in.path("path").asText()) : root;
+            Path realRoot = realJailRoot(ctx, start);
             Pattern pattern = Pattern.compile(in.path("pattern").asText());
             PathMatcher matcher = in.hasNonNull("glob") ? globMatcher(in.path("glob").asText()) : null;
+            Path globBase = Files.isDirectory(start) ? start : start.getParent();
             List<String> hits = new ArrayList<>();
             try (Stream<Path> s = Files.walk(start)) {
                 for (Path f : (Iterable<Path>) s.filter(Files::isRegularFile)::iterator) {
+                    if (!insideReal(f, realRoot)) continue; // a link to a file outside the jail
                     Path rel = root.relativize(f);
-                    if (matcher != null && !matcher.matches(rel)) continue;
+                    if (matcher != null && !globMatches(matcher, globBase, root, f)) continue;
                     List<String> lines;
                     try {
-                        if (Files.size(f) > MAX_READ_BYTES) continue;
+                        if (Files.size(f) > maxReadBytes) continue;
                         lines = Files.readAllLines(f, StandardCharsets.UTF_8);
                     } catch (IOException e) {
                         continue; // binary / unreadable
@@ -386,27 +512,30 @@ public class FileSystemAgentTools implements HarnessToolSet {
                         + "the definitions you care about. Skips build, vendor and binary files.",
                 SimpleTool.schema(
                         "path?", "File or directory relative to the work dir (default: the work dir)",
-                        "glob?", "Only files matching this glob, e.g. src/main/**/*.go",
+                        "glob?", "Only files matching this glob (relative to path), e.g. src/main/**/*.go",
                         "pattern?", "Java regex for the definition lines (default: language-neutral block openers)"),
                 GROUP, ToolKind.READ_ONLY, (ctx, in) -> {
             if (ctx.files() != null) return "grep_code is not available on a remote work dir; use glob, grep and read_file";
             Path root = ctx.workDir().toAbsolutePath().normalize();
             Path start = in.hasNonNull("path") ? jail(ctx, in.path("path").asText()) : root;
+            Path realRoot = realJailRoot(ctx, start);
             PathMatcher matcher = in.hasNonNull("glob") ? globMatcher(in.path("glob").asText()) : null;
+            Path globBase = Files.isDirectory(start) ? start : start.getParent();
             Pattern pattern = in.hasNonNull("pattern") ? Pattern.compile(in.path("pattern").asText()) : null;
             StringBuilder sb = new StringBuilder();
             int files = 0;
             boolean more = false;
             try (Stream<Path> s = Files.walk(start)) {
                 for (Path f : (Iterable<Path>) s.filter(Files::isRegularFile).sorted()::iterator) {
+                    if (!insideReal(f, realRoot)) continue; // a link to a file outside the jail
                     Path rel = root.relativize(f);
                     boolean skipped = false;
                     for (Path seg : rel) if (CODE_SKIP_DIRS.contains(seg.toString())) skipped = true;
                     if (skipped || BINARY_EXTENSIONS.contains(extension(f))) continue;
-                    if (matcher != null && !matcher.matches(rel)) continue;
+                    if (matcher != null && !globMatches(matcher, globBase, root, f)) continue;
                     List<String> lines;
                     try {
-                        if (Files.size(f) > MAX_READ_BYTES) continue;
+                        if (Files.size(f) > maxReadBytes) continue;
                         lines = Files.readAllLines(f, StandardCharsets.UTF_8);
                     } catch (IOException e) {
                         continue; // binary / unreadable

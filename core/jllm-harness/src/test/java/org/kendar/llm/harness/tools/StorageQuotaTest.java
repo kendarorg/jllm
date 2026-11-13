@@ -83,6 +83,58 @@ class StorageQuotaTest {
     }
 
     @Test
+    void failedWriteGivesItsReservationBack() throws Exception {
+        HarnessTool w = write(10);
+        ToolContext c = ctx("c1");
+        w.execute(c, in("a.txt", "12345", false));
+
+        // a.txt is a file, so its "directory" cannot be created: the write fails after the reservation
+        assertThrows(Exception.class, () -> w.execute(c, in("a.txt/b.txt", "12345", false)));
+        w.execute(c, in("b.txt", "12345", false)); // exactly at the limit: the failed write was taken back
+    }
+
+    @Test
+    void directoryTargetIsRejected() throws Exception {
+        HarnessTool w = write(100);
+        ToolContext c = ctx("c1");
+        Exception e = assertThrows(Exception.class, () -> w.execute(c, in(".", "x", false)));
+        assertTrue(e.getMessage().contains("directory"), e.getMessage());
+
+        StorageQuota q = new StorageQuota(100, box::chatStorage);
+        assertThrows(java.io.IOException.class, () -> q.reserve("c1", c.workDir(), 0, 1));
+        assertEquals(0, q.used("c1"));
+    }
+
+    @Test
+    void checkpointBackupsAreCounted() throws Exception {
+        box = new LocalDirSandboxExecutor(config(base));
+        StorageQuota quota = new StorageQuota(25, box::chatStorage);
+        Checkpoints cp = new Checkpoints();
+        FileSystemAgentTools fs = new FileSystemAgentTools(null, cp, quota);
+        HarnessTool w = fs.tools().stream().filter(t -> t.name().equals("write_file")).findFirst().orElseThrow();
+        ToolContext c = ctx("c1");
+        w.execute(c, in("a.txt", "1234567890", false)); // 10
+        long before = quota.used("c1");
+
+        cp.beginTurn("c1", c.workDir());
+        w.execute(c, in("a.txt", "x", false)); // -9, plus a 10-byte backup
+
+        assertEquals(before + 1, quota.used("c1"));
+        assertThrows(Exception.class, () -> w.execute(c, in("b.txt", "123456789012345", false)));
+        assertEquals(before + 1, quota.used("c1"));
+    }
+
+    @Test
+    void reservationRollbackIsCountedOnce() throws Exception {
+        StorageQuota q = new StorageQuota(10, null);
+        StorageQuota.Reservation r = q.reserveRemote("c1", 6);
+        r.rollback();
+        r.rollback();
+        q.reserveRemote("c1", 10);
+        assertThrows(java.io.IOException.class, () -> q.reserveRemote("c1", 1));
+    }
+
+    @Test
     void settingsReadStorageMaxBytes() throws Exception {
         Path f = base.resolve("settings.json");
         Files.writeString(f, "{\"storage\":{\"maxBytes\":123}}");

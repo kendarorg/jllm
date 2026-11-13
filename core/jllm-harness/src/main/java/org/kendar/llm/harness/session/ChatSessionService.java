@@ -48,11 +48,19 @@ public class ChatSessionService {
 
     /** A chat by full id or unique id prefix. @throws IllegalArgumentException when unknown or ambiguous */
     public ChatSessionData resolve(String idOrPrefix) {
+        return resolve(idOrPrefix, null);
+    }
+
+    /**
+     * As {@link #resolve(String)}, among the chats of {@code owner} only; a null owner sees every chat (admin, CLI).
+     * A chat of another owner answers "Unknown chat", as if it did not exist.
+     */
+    public ChatSessionData resolve(String idOrPrefix, String owner) {
         String p = idOrPrefix == null ? "" : idOrPrefix.strip();
-        Optional<ChatSessionData> exact = p.isEmpty() ? Optional.empty() : store.find(p);
+        Optional<ChatSessionData> exact = p.isEmpty() ? Optional.empty() : store.find(p).filter(c -> owns(owner, c));
         if (exact.isPresent()) return exact.get();
         List<ChatSessionData> hits = p.isEmpty() ? List.of()
-                : store.list().stream().filter(c -> c.chatId().startsWith(p)).toList();
+                : list(owner).stream().filter(c -> c.chatId().startsWith(p)).toList();
         if (hits.isEmpty()) throw new IllegalArgumentException("Unknown chat " + idOrPrefix);
         if (hits.size() > 1) throw new IllegalArgumentException("Ambiguous chat id prefix " + idOrPrefix);
         return get(hits.get(0).chatId());
@@ -62,8 +70,35 @@ public class ChatSessionService {
         return store.list();
     }
 
+    /** The chats of {@code owner}; null = every chat (admin, CLI). */
+    public List<ChatSessionData> list(String owner) {
+        if (owner == null) return store.list();
+        return store.list().stream().filter(c -> owns(owner, c)).toList();
+    }
+
+    /** True when {@code owner} may see the chat: a null owner sees everything, anyone else only their own chats. */
+    public static boolean owns(String owner, ChatSessionData chat) {
+        return owner == null || owner.equals(chat.principal());
+    }
+
+    private final List<java.util.function.Consumer<String>> deleteListeners =
+            new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    /** Called with the chat id after every {@link #delete}, whatever the path (REST, /chats, retention). */
+    public void onDelete(java.util.function.Consumer<String> listener) {
+        deleteListeners.add(listener);
+    }
+
     public void delete(String chatId) {
         store.delete(chatId);
+        for (var l : deleteListeners) {
+            try {
+                l.accept(chatId);
+            } catch (RuntimeException e) {
+                org.slf4j.LoggerFactory.getLogger(ChatSessionService.class)
+                        .warn("Cleanup of deleted chat {} failed: {}", chatId, e.toString());
+            }
+        }
     }
 
     /** Deterministic and independent of conversation content, so it is always a cache hit. */
@@ -193,6 +228,57 @@ public class ChatSessionService {
         if (current == null) return;
         current.addAll(groups);
         setToolGroups(chatId, current);
+    }
+
+    /** The per-chat tool set (web callers), or null when the chat uses the global set. */
+    public ChatToolSet chatToolSet(String chatId) {
+        return store.find(chatId).map(c -> ChatToolSet.parse(c.chatTools())).orElse(null);
+    }
+
+    public synchronized void setChatToolSet(String chatId, ChatToolSet set) {
+        store.save(get(chatId).withChatTools(set == null ? null : set.toJson()));
+    }
+
+    /** Stores {@code captured} unless the chat already has a set; returns the chat's set. */
+    public synchronized ChatToolSet captureChatToolSet(String chatId, java.util.function.Supplier<ChatToolSet> captured) {
+        ChatToolSet current = chatToolSet(chatId);
+        if (current != null) return current;
+        ChatToolSet s = captured.get();
+        setChatToolSet(chatId, s);
+        return s;
+    }
+
+    /**
+     * True when the chat's own tool set lets the model see and call the tool; always true without one. Meant for the
+     * agent loop, when it builds the tools of a chat and again at dispatch.
+     */
+    public boolean chatAllowsTool(String chatId, String toolName) {
+        ChatToolSet s = chatToolSet(chatId);
+        return s == null || s.allowsTool(toolName);
+    }
+
+    /** As {@link #chatAllowsTool} for a skill. */
+    public boolean chatAllowsSkill(String chatId, String skill) {
+        ChatToolSet s = chatToolSet(chatId);
+        return s == null || s.allowsSkill(skill);
+    }
+
+    /** The tool_use ids of the chat whose results carried untrusted output; empty when none or the chat is unknown. */
+    public Set<String> taintedToolUses(String chatId) {
+        String raw = store.find(chatId).map(ChatSessionData::taintedToolUses).orElse(null);
+        Set<String> out = new LinkedHashSet<>();
+        if (raw == null || raw.isBlank()) return out;
+        for (String id : raw.split(",")) if (!id.isBlank()) out.add(id.strip());
+        return out;
+    }
+
+    /** Stores the tainted tool_use ids of the chat; a no-op for an unknown (deleted) chat or an unchanged set. */
+    public synchronized void setTaintedToolUses(String chatId, Collection<String> ids) {
+        Optional<ChatSessionData> current = store.find(chatId);
+        if (current.isEmpty()) return;
+        String v = ids == null || ids.isEmpty() ? null : String.join(",", new TreeSet<>(ids));
+        if (Objects.equals(v, current.get().taintedToolUses())) return;
+        store.save(current.get().withTaintedToolUses(v));
     }
 
     public synchronized void setTitle(String chatId, String title) {

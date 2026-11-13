@@ -19,6 +19,8 @@ import java.util.Map;
 final class Renderer {
 
     static final String HANDOFF_ACK = "Understood. Continuing from the handoff notes.";
+    /** Introduces the user instruction in progress when the segment cut falls after it. */
+    static final String INSTRUCTION_NOTE = "[The request currently being worked on:]";
 
     private final ObjectMapper mapper;
 
@@ -84,15 +86,19 @@ final class Renderer {
         return copy;
     }
 
-    /** First user request verbatim, then the handoff notes and the recall index. */
+    /** First user request verbatim, the instruction in progress if it was moved out, the notes and the recall index. */
     private ObjectNode head(ArrayNode log, Segment seg, int number) {
         ObjectNode head = mapper.createObjectNode();
         head.put("role", "user");
         ArrayNode content = head.putArray("content");
         if (seg.firstUser() >= 0 && seg.firstUser() < seg.cut() && seg.firstUser() < log.size()) {
-            JsonNode c = log.get(seg.firstUser()).path("content");
-            if (c.isTextual()) content.addObject().put("type", "text").put("text", c.asText());
-            else for (JsonNode b : c) if ("text".equals(b.path("type").asText())) content.add(b.deepCopy());
+            copyText(log.get(seg.firstUser()), content);
+        }
+        Integer instruction = seg.instruction();
+        if (instruction != null && instruction >= 0 && instruction != seg.firstUser() && instruction < seg.cut()
+                && instruction < log.size()) {
+            content.addObject().put("type", "text").put("text", INSTRUCTION_NOTE);
+            copyText(log.get(instruction), content);
         }
         StringBuilder sb = new StringBuilder();
         sb.append("[Context segment ").append(number).append(". The earlier conversation was moved out of the prompt. ")
@@ -103,5 +109,11 @@ final class Renderer {
         }
         content.addObject().put("type", "text").put("text", sb.toString());
         return head;
+    }
+
+    private static void copyText(JsonNode msg, ArrayNode into) {
+        JsonNode c = msg.path("content");
+        if (c.isTextual()) into.addObject().put("type", "text").put("text", c.asText());
+        else for (JsonNode b : c) if ("text".equals(b.path("type").asText())) into.add(b.deepCopy());
     }
 }

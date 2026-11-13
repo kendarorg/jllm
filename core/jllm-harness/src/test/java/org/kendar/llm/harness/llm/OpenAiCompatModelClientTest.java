@@ -233,6 +233,43 @@ class OpenAiCompatModelClientTest {
     }
 
     @Test
+    void nonJson200FailsAtOnceWithTheBody() {
+        okBody = "<html><body>Sign in to the network</body></html>";
+        ModelException e = assertThrows(ModelException.class, () -> client("k", 3, true).simpleComplete("s", "u", 10));
+        assertTrue(e.getMessage().contains("non-JSON"), e.getMessage());
+        assertTrue(e.getMessage().contains("Sign in to the network"), e.getMessage());
+        assertEquals(1, calls.get());
+    }
+
+    @Test
+    void errorInside200IsReported() {
+        okBody = "{\"error\":{\"message\":\"Provider returned error\",\"code\":502}}";
+        ModelException e = assertThrows(ModelException.class, () -> client("k", 3, true).simpleComplete("s", "u", 10));
+        assertTrue(e.getMessage().contains("Provider returned error"), e.getMessage());
+        assertTrue(e.getMessage().contains("502"), e.getMessage());
+        assertEquals(1, calls.get());
+        okBody = "{\"error\":\"rate limited\"}";
+        assertTrue(assertThrows(ModelException.class, () -> client("k", 0, true).simpleComplete("s", "u", 10))
+                .getMessage().contains("rate limited"));
+    }
+
+    @Test
+    void emptyChoicesIsAnError() {
+        okBody = "{\"id\":\"x\",\"choices\":[]}";
+        ModelException e = assertThrows(ModelException.class, () -> client("k", 0, true).simpleComplete("s", "u", 10));
+        assertTrue(e.getMessage().contains("no choices"), e.getMessage());
+        okBody = "{}";
+        assertThrows(ModelException.class, () -> client("k", 0, true).simpleComplete("s", "u", 10));
+    }
+
+    @Test
+    void contentFilterIsARefusal() throws Exception {
+        okBody = "{\"choices\":[{\"message\":{\"content\":\"\"},\"finish_reason\":\"content_filter\"}]}";
+        ModelResponse r = client("k", 0, true).complete(new ModelRequest("p", "", messages("[]"), List.of(), 0));
+        assertEquals("refusal", r.stopReason());
+    }
+
+    @Test
     void missingKeyFailsFastWhenRequired() {
         OpenAiCompatModelClient c = new OpenAiCompatModelClient(
                 new LlmSettings("openai", baseUrl(), "", "m", 10, 0, 5, true, true), mapper, 1);

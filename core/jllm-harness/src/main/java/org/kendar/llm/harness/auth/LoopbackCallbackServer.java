@@ -27,11 +27,13 @@ public final class LoopbackCallbackServer implements AutoCloseable {
         server.createContext("/callback", ex -> {
             Map<String, String> q = query(ex.getRequestURI().getRawQuery());
             String page;
+            int status = 200;
             if (code.isDone()) {
                 page = "Already handled.";
             } else if (!expectedState.equals(q.get("state"))) {
-                page = "Invalid state. Close this tab and try again.";
-                code.completeExceptionally(new OAuthException("invalid_state", "The state of the redirect does not match"));
+                // a stray request (old tab, prefetch, local probe): reject it and keep waiting for the real redirect
+                status = 400;
+                page = "Invalid state. If a login is in progress, finish it in the tab that started it.";
             } else if (q.containsKey("error")) {
                 page = "Login failed: " + escape(q.get("error")) + ". You can close this tab.";
                 code.completeExceptionally(new OAuthException(q.get("error"), q.get("error_description")));
@@ -45,7 +47,7 @@ public final class LoopbackCallbackServer implements AutoCloseable {
             byte[] b = ("<!doctype html><meta charset=\"utf-8\"><title>jllm</title><p>" + page + "</p>")
                     .getBytes(StandardCharsets.UTF_8);
             ex.getResponseHeaders().add("Content-Type", "text/html; charset=utf-8");
-            ex.sendResponseHeaders(200, b.length);
+            ex.sendResponseHeaders(status, b.length);
             ex.getResponseBody().write(b);
             ex.close();
         });
@@ -56,7 +58,10 @@ public final class LoopbackCallbackServer implements AutoCloseable {
         return "http://127.0.0.1:" + server.getAddress().getPort() + "/callback";
     }
 
-    /** Waits for the redirect. @throws OAuthException on a bad state, an error redirect or a timeout (code {@code timeout}) */
+    /**
+     * Waits for the redirect carrying the expected state; requests with another state are answered 400 and ignored.
+     * @throws OAuthException on an error redirect, a redirect without code or a timeout (code {@code timeout})
+     */
     public String awaitCode(Duration timeout) {
         try {
             return code.get(timeout.toMillis(), TimeUnit.MILLISECONDS);

@@ -17,6 +17,9 @@ public record UserPolicy(Predicate<HarnessTool> toolFilter, ToolApprovalPolicy a
     /** Every tool, the harness approval policy: the single-user default. */
     public static final UserPolicy ALL = new UserPolicy(null, null);
 
+    /** No tool at all: for a caller who cannot be identified where identification is required. */
+    public static final UserPolicy NONE = new UserPolicy(t -> false, null);
+
     public boolean allows(HarnessTool tool) {
         return toolFilter == null || toolFilter.test(tool);
     }

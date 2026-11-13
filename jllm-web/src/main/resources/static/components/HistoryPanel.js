@@ -41,7 +41,8 @@ function events(messages, runsByTool) {
 
 function subAgent(run) {
   const n = node('sub', 'sub-agent: ' + clip(run.prompt, 60), {
-    run, error: run.status !== 'ok', raw: run,
+    // failed is an error; partial, refused and cancelled ended without a final answer: a warning
+    run, error: run.status === 'failed', warn: !!run.status && !['ok', 'failed'].includes(run.status), raw: run,
     tokens: (run.inputTokens || 0) + (run.outputTokens || 0),
   });
   n.children = events(run.messages || [], {});
@@ -180,7 +181,7 @@ export default {
       </div>
       <div class="hist-rows" ref="treeEl" role="tree" tabindex="0" aria-label="Agent history" @keydown="key">
         <div v-if="!rows.length" class="empty">{{ loading ? 'Loading…' : 'No completed turns yet.' }}</div>
-        <div v-for="r in rows" :key="r.n.id" class="hrow" :class="{ sel: r.n === selected, err: r.n.error }" role="treeitem"
+        <div v-for="r in rows" :key="r.n.id" class="hrow" :class="{ sel: r.n === selected, err: r.n.error, warn: r.n.warn }" role="treeitem"
              :aria-level="r.depth + 1" :aria-selected="r.n === selected"
              :aria-expanded="r.n.children.length ? isOpen(r.n) : undefined"
              :style="{ paddingLeft: (0.5 + r.depth * 1.1) + 'rem' }" @click="selected = r.n">
@@ -218,7 +219,8 @@ export default {
           <h4>Output <span v-if="selected.error" class="gstatus-err">(error)</span></h4><pre>{{ selected.output || '(none)' }}</pre>
         </template>
         <template v-else-if="selected.kind === 'sub'">
-          <p>Status: <b :class="selected.error ? 'gstatus-err' : ''">{{ selected.run.status }}</b> ·
+          <p>Status: <b :class="selected.error ? 'gstatus-err' : selected.warn ? 'gstatus-warn' : ''">{{ selected.run.status }}</b>
+             <span v-if="selected.warn"> (ended without a final answer)</span> ·
              in {{ fmt(selected.run.inputTokens) }} · out {{ fmt(selected.run.outputTokens) }} ·
              cache read {{ fmt(selected.run.cacheReadTokens) }}</p>
           <h4>Prompt</h4><pre>{{ selected.run.prompt }}</pre>

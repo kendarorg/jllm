@@ -45,7 +45,54 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
                               LlmSettings fastModel, Output output, Boolean smallModel, Permissions permissions,
                               List<ProviderSettings> providers, String defaultProvider,
                               Integer chatRetentionLimit, JsonNode plugins, Storage storage,
-                              List<String> whitelistedEnvVars, List<String> toolsWhitelistedEnvVars) {
+                              List<String> whitelistedEnvVars, List<String> toolsWhitelistedEnvVars,
+                              FileLimits files, WebLimits web) {
+
+    /** The 19 components before {@code files} and {@code web}: default limits. */
+    public HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSettings> restApis,
+                           List<SkillSettings> skills, List<String> instructionFiles,
+                           List<AgentSettings> agents, Execution execution, Sandbox sandbox, Context context,
+                           LlmSettings fastModel, Output output, Boolean smallModel, Permissions permissions,
+                           List<ProviderSettings> providers, String defaultProvider,
+                           Integer chatRetentionLimit, JsonNode plugins, Storage storage,
+                           List<String> whitelistedEnvVars, List<String> toolsWhitelistedEnvVars) {
+        this(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context, fastModel, output,
+                smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage,
+                whitelistedEnvVars, toolsWhitelistedEnvVars, null, null);
+    }
+
+    /** Default of {@code files.maxReadBytes}. */
+    public static final long DEFAULT_FILES_MAX_READ_BYTES = 1_000_000;
+    /** Default of {@code web.fetchMaxBytes}: 5 MB. */
+    public static final long DEFAULT_WEB_FETCH_MAX_BYTES = 5L * 1024 * 1024;
+    /** Default of {@code sandbox.outputLogMaxBytes}: 50 KB. */
+    public static final long DEFAULT_SANDBOX_OUTPUT_LOG_MAX_BYTES = 51_200;
+
+    /** @param maxReadBytes largest file the file tools read whole; null or {@code <= 0} = default (1 000 000) */
+    public record FileLimits(Long maxReadBytes) {
+    }
+
+    /** @param fetchMaxBytes largest response body {@code web_fetch} reads; null or {@code <= 0} = default (5 MB) */
+    public record WebLimits(Long fetchMaxBytes) {
+    }
+
+    /** {@code files.maxReadBytes}, or its default. */
+    public long filesMaxReadBytes() {
+        return files == null || files.maxReadBytes() == null || files.maxReadBytes() <= 0
+                ? DEFAULT_FILES_MAX_READ_BYTES : files.maxReadBytes();
+    }
+
+    /** {@code web.fetchMaxBytes}, or its default. */
+    public long webFetchMaxBytes() {
+        return web == null || web.fetchMaxBytes() == null || web.fetchMaxBytes() <= 0
+                ? DEFAULT_WEB_FETCH_MAX_BYTES : web.fetchMaxBytes();
+    }
+
+    /** {@code sandbox.outputLogMaxBytes}, or its default; 0 = unlimited (a negative value is the default too). */
+    public long sandboxOutputLogMaxBytes() {
+        Long v = sandbox == null ? null : sandbox.outputLogMaxBytes();
+        return v == null || v < 0 ? DEFAULT_SANDBOX_OUTPUT_LOG_MAX_BYTES : v;
+    }
 
     /**
      * The 17 components before the environment whitelists.
@@ -146,7 +193,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
                 pluginSettings));
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context,
                 fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, copy, storage,
-                whitelistedEnvVars, toolsWhitelistedEnvVars);
+                whitelistedEnvVars, toolsWhitelistedEnvVars, files, web);
     }
 
     /**
@@ -199,12 +246,17 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
      * @param backend            {@code local} (default, no isolation) or {@code docker}
      * @param localFallback      with the docker backend: run locally when docker is unavailable (default true)
      * @param docker             docker backend settings; unset values keep the defaults
+     * @param outputLogMaxBytes  cap of the spill log of a long shell output; default 51200, 0 = unlimited
      */
     public record Sandbox(String tempDir, Integer timeoutSeconds, String backend, Boolean localFallback,
-                          Docker docker) {
+                          Docker docker, Long outputLogMaxBytes) {
+
+        public Sandbox(String tempDir, Integer timeoutSeconds, String backend, Boolean localFallback, Docker docker) {
+            this(tempDir, timeoutSeconds, backend, localFallback, docker, null);
+        }
 
         public Sandbox(String tempDir, Integer timeoutSeconds) {
-            this(tempDir, timeoutSeconds, null, null, null);
+            this(tempDir, timeoutSeconds, null, null, null, null);
         }
     }
 
@@ -246,9 +298,9 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
         }
         Sandbox s = sandbox == null ? new Sandbox(null, null) : sandbox;
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution,
-                new Sandbox(s.tempDir(), s.timeoutSeconds(), backend.toLowerCase(), s.localFallback(), s.docker()),
+                new Sandbox(s.tempDir(), s.timeoutSeconds(), backend.toLowerCase(), s.localFallback(), s.docker(), s.outputLogMaxBytes()),
                 context, fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
-                toolsWhitelistedEnvVars);
+                toolsWhitelistedEnvVars, files, web);
     }
 
     /** Same settings with {@code sandbox.docker.image} replaced (e.g. by a command line flag). */
@@ -258,9 +310,9 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution,
                 new Sandbox(s.tempDir(), s.timeoutSeconds(), s.backend(), s.localFallback(),
                         new Docker(d.binary(), image, d.memory(), d.cpus(), d.pidsLimit(), d.user(), d.network(),
-                                d.mode(), d.remote(), d.remoteHost())),
+                                d.mode(), d.remote(), d.remoteHost()), s.outputLogMaxBytes()),
                 context, fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
-                toolsWhitelistedEnvVars);
+                toolsWhitelistedEnvVars, files, web);
     }
 
     /** Same settings with {@code sandbox.docker.mode} replaced (e.g. by a command line flag). */
@@ -273,9 +325,9 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution,
                 new Sandbox(s.tempDir(), s.timeoutSeconds(), s.backend(), s.localFallback(),
                         new Docker(d.binary(), d.image(), d.memory(), d.cpus(), d.pidsLimit(), d.user(), d.network(),
-                                mode.toLowerCase(), d.remote(), d.remoteHost())),
+                                mode.toLowerCase(), d.remote(), d.remoteHost()), s.outputLogMaxBytes()),
                 context, fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
-                toolsWhitelistedEnvVars);
+                toolsWhitelistedEnvVars, files, web);
     }
 
     /** Same settings with {@code sandbox.docker.remote} and {@code remoteHost} replaced (command line flags). */
@@ -286,9 +338,9 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
                 new Sandbox(s.tempDir(), s.timeoutSeconds(), s.backend(), s.localFallback(),
                         new Docker(d.binary(), d.image(), d.memory(), d.cpus(), d.pidsLimit(), d.user(), d.network(),
                                 d.mode(), remote != null ? remote : d.remote(),
-                                remoteHost != null ? remoteHost : d.remoteHost())),
+                                remoteHost != null ? remoteHost : d.remoteHost()), s.outputLogMaxBytes()),
                 context, fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
-                toolsWhitelistedEnvVars);
+                toolsWhitelistedEnvVars, files, web);
     }
 
     /** True when the docker backend runs in daemon mode (long-running container). */
@@ -433,7 +485,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox,
                 new Context(maxTokens, c.keepRecentTurns(), c.auto(), c.keepTokens(), c.buffer(), c.strategy(),
                         c.mnemonic(), c.scope(), c.noiseCommands(), c.deferCompactionOnThinkingOverflow()), fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
-                toolsWhitelistedEnvVars);
+                toolsWhitelistedEnvVars, files, web);
     }
 
     /** Same settings with {@code context.strategy} replaced (e.g. by a command line flag). */
@@ -443,7 +495,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox,
                 new Context(c.maxTokens(), c.keepRecentTurns(), c.auto(), c.keepTokens(), c.buffer(), strategy,
                         c.mnemonic(), c.scope(), c.noiseCommands(), c.deferCompactionOnThinkingOverflow()), fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
-                toolsWhitelistedEnvVars);
+                toolsWhitelistedEnvVars, files, web);
     }
 
     /** False when {@code context.noiseCommands} is set to false. */
@@ -455,14 +507,14 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
     public HarnessSettings withSmallModel(boolean small) {
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context,
                 fastModel, output, small, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
-                toolsWhitelistedEnvVars);
+                toolsWhitelistedEnvVars, files, web);
     }
 
     /** Same settings with {@code chatRetentionLimit} replaced. */
     public HarnessSettings withChatRetentionLimit(Integer limit) {
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context,
                 fastModel, output, smallModel, permissions, providers, defaultProvider, limit, plugins, storage, whitelistedEnvVars,
-                toolsWhitelistedEnvVars);
+                toolsWhitelistedEnvVars, files, web);
     }
 
     /** Concurrency limit: {@code 1} serialized (default), {@code N} bounded, {@code -1} unlimited. */
@@ -525,7 +577,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
 
     /** @throws IllegalStateException if a referenced environment variable is not set */
     public static HarnessSettings load(Path file, Function<String, String> env) {
-        ObjectMapper mapper = new ObjectMapper().configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        ObjectMapper mapper = mapper(LOG::warn);
         try {
             JsonNode tree = expand(mapper.readTree(file.toFile()), env);
             return mapper.treeToValue(tree, HarnessSettings.class);
@@ -544,21 +596,72 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
         return projectDir.resolve(".jllm").resolve("settings.json");
     }
 
+    private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(HarnessSettings.class);
+
+    /**
+     * A lenient settings mapper: an unknown property is skipped and reported to {@code warn} as
+     * {@code Unknown setting '<name>' at <json-pointer> (ignored)}.
+     */
+    static ObjectMapper mapper(java.util.function.Consumer<String> warn) {
+        ObjectMapper mapper = new ObjectMapper().configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.addHandler(new com.fasterxml.jackson.databind.deser.DeserializationProblemHandler() {
+            @Override
+            public boolean handleUnknownProperty(com.fasterxml.jackson.databind.DeserializationContext ctxt,
+                                                 com.fasterxml.jackson.core.JsonParser p,
+                                                 com.fasterxml.jackson.databind.JsonDeserializer<?> deserializer,
+                                                 Object beanOrClass, String propertyName) throws IOException {
+                String at;
+                try {
+                    at = p.getParsingContext().pathAsPointer().toString();
+                } catch (RuntimeException e) {
+                    at = "?";
+                }
+                warn.accept("Unknown setting '" + propertyName + "' at " + (at.isEmpty() ? "/" : at) + " (ignored)");
+                p.skipChildren();
+                return true;
+            }
+        });
+        return mapper;
+    }
+
     /**
      * Global, then project, then explicit file: later wins, objects merged per key, other values (including arrays)
-     * replaced. Missing files are skipped; {@code explicit} and {@code projectDir} may be null.
+     * replaced, except {@code permissions.deny}: the union of every layer (a later file can only add denials). A file
+     * whose root is not a JSON object is ignored with a warning. Missing files are skipped; {@code explicit} and
+     * {@code projectDir} may be null. Stdio MCP servers that come from the project file run only when trusted, see
+     * {@link ProjectMcpTrust}; here no one is asked, only remembered answers count.
      */
     public static HarnessSettings loadLayered(Path explicit, Path projectDir) {
         return loadLayered(explicit, projectDir, System::getenv);
     }
 
     public static HarnessSettings loadLayered(Path explicit, Path projectDir, Function<String, String> env) {
+        return loadLayered(explicit, projectDir, env, ProjectMcpTrust.Prompt.NONE);
+    }
+
+    /** As {@link #loadLayered(Path, Path)}; {@code prompt} asks about project stdio MCP servers not answered before. */
+    public static HarnessSettings loadLayered(Path explicit, Path projectDir, ProjectMcpTrust.Prompt prompt) {
+        return loadLayered(explicit, projectDir, System::getenv, prompt);
+    }
+
+    public static HarnessSettings loadLayered(Path explicit, Path projectDir, Function<String, String> env,
+                                              ProjectMcpTrust.Prompt prompt) {
+        return loadLayered(explicit, projectDir, env, prompt, ProjectMcpTrust.user(), LOG::warn);
+    }
+
+    static HarnessSettings loadLayered(Path explicit, Path projectDir, Function<String, String> env,
+                                       ProjectMcpTrust.Prompt prompt, ProjectMcpTrust trust,
+                                       java.util.function.Consumer<String> warn) {
         List<Path> files = new ArrayList<>();
         files.add(globalFile());
-        if (projectDir != null) files.add(projectFile(projectDir));
+        Path projectFile = projectDir == null ? null : projectFile(projectDir);
+        if (projectFile != null) files.add(projectFile);
         if (explicit != null) files.add(explicit);
-        ObjectMapper mapper = new ObjectMapper().configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        ObjectMapper mapper = mapper(warn);
         JsonNode merged = null;
+        List<JsonNode> deny = new ArrayList<>();
+        JsonNode projectTree = null;
+        List<JsonNode> otherTrees = new ArrayList<>();
         try {
             for (Path f : files) {
                 if (!java.nio.file.Files.isRegularFile(f)) {
@@ -567,12 +670,67 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
                     continue;
                 }
                 JsonNode tree = mapper.readTree(f.toFile());
+                if (!(tree instanceof ObjectNode)) {
+                    warn.accept("Settings file " + f + " ignored: its root must be a JSON object, not "
+                            + (tree == null || tree.isMissingNode() ? "empty" : tree.getNodeType().name().toLowerCase()));
+                    continue;
+                }
+                for (JsonNode d : tree.path("permissions").path("deny")) {
+                    if (!deny.contains(d)) deny.add(d.deepCopy());
+                }
+                if (f.equals(projectFile) && !f.equals(explicit)) projectTree = tree.deepCopy();
+                else otherTrees.add(tree.deepCopy());
                 merged = merged == null ? tree : merge(merged, tree);
             }
             if (merged == null) return empty();
+            if (!deny.isEmpty()) {
+                ObjectNode perms = merged.get("permissions") instanceof ObjectNode o ? o
+                        : ((ObjectNode) merged).putObject("permissions");
+                ArrayNode union = perms.putArray("deny");
+                deny.forEach(union::add);
+            }
+            if (projectTree != null) dropUntrustedProjectServers((ObjectNode) merged, projectTree, otherTrees,
+                    projectDir, prompt == null ? ProjectMcpTrust.Prompt.NONE : prompt, trust, warn);
             return mapper.treeToValue(expand(merged, env), HarnessSettings.class);
         } catch (IOException e) {
             throw new UncheckedIOException("Cannot read settings", e);
+        }
+    }
+
+    /**
+     * Removes from {@code merged} the stdio MCP servers that only the project file defines (same definition not in
+     * another layer) and that the user did not trust: asked once per project and definition, answer remembered.
+     */
+    private static void dropUntrustedProjectServers(ObjectNode merged, JsonNode projectTree, List<JsonNode> others,
+                                                    Path projectDir, ProjectMcpTrust.Prompt prompt,
+                                                    ProjectMcpTrust trust, java.util.function.Consumer<String> warn) {
+        if (!(merged.get("mcpServers") instanceof ArrayNode servers)) return;
+        List<JsonNode> fromProject = new ArrayList<>();
+        projectTree.path("mcpServers").forEach(fromProject::add);
+        if (fromProject.isEmpty()) return;
+        for (Iterator<JsonNode> it = servers.iterator(); it.hasNext(); ) {
+            JsonNode s = it.next();
+            String command = s.path("command").asText("");
+            if (command.isBlank() || !fromProject.contains(s)) continue;
+            boolean elsewhere = false;
+            for (JsonNode t : others) {
+                for (JsonNode o : t.path("mcpServers")) elsewhere |= o.equals(s);
+            }
+            if (elsewhere) continue;
+            String name = s.path("name").asText("?");
+            Boolean ok = trust.lookup(projectDir, name, s);
+            if (ok == null) {
+                StringBuilder line = new StringBuilder(command);
+                s.path("args").forEach(a -> line.append(' ').append(a.asText()));
+                ok = prompt.ask(projectDir, name, line.toString());
+                if (ok != null) trust.remember(projectDir, name, s, ok);
+            }
+            if (!Boolean.TRUE.equals(ok)) {
+                warn.accept("MCP server '" + name + "' from the project settings skipped: "
+                        + (ok == null ? "it starts a local process and was never trusted (no prompt available here)"
+                        : "not trusted"));
+                it.remove();
+            }
         }
     }
 

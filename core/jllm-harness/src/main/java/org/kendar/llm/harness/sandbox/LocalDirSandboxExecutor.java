@@ -5,6 +5,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -79,31 +80,48 @@ public class LocalDirSandboxExecutor implements SandboxExecutor {
     /** Bytes of command output kept in memory; the complete output goes to a log file beyond this. */
     static final int CAPTURE_LIMIT = 50 * 1024;
 
+    /**
+     * How long the output is still read after the command exited. A background child that inherited the output pipe
+     * keeps it open: past this the result is returned with the output read so far (the child keeps running).
+     */
+    static final Duration READER_GRACE = Duration.ofSeconds(2);
+
     private volatile List<String> envWhitelist = org.kendar.llm.harness.util.EnvWhitelist.ALL;
+    private volatile long logLimit = TailCapture.DEFAULT_LOG_LIMIT;
 
     @Override
     public void environmentWhitelist(List<String> patterns) {
         this.envWhitelist = org.kendar.llm.harness.util.EnvWhitelist.orAll(patterns);
     }
 
+    @Override
+    public void outputLogLimit(long maxBytes) {
+        this.logLimit = maxBytes;
+    }
+
+    /** Current cap of the spill log ({@link #outputLogLimit}). */
+    long outputLogLimit() {
+        return logLimit;
+    }
+
     private ExecutionResult run(Path dir, String command, Duration timeout) {
         List<String> cmd = WINDOWS ? List.of("cmd", "/c", command) : List.of("bash", "-c", command);
         Process p = null;
+        TailCapture capture = new TailCapture(CAPTURE_LIMIT, logLimit);
         try {
             ProcessBuilder pb = new ProcessBuilder(cmd).directory(dir.toFile()).redirectErrorStream(true);
             org.kendar.llm.harness.util.EnvWhitelist.apply(pb.environment(), envWhitelist);
             p = pb.start();
-            final Process proc = p;
             p.getOutputStream().close();
-            TailCapture capture = new TailCapture(CAPTURE_LIMIT);
-            CompletableFuture<TailCapture> out = CompletableFuture.supplyAsync(() -> capture.read(proc.getInputStream()));
+            InputStream stdout = p.getInputStream();
+            CompletableFuture<TailCapture> out = capture.start(stdout);
             boolean finished = p.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
             if (!finished) {
                 p.descendants().forEach(ProcessHandle::destroyForcibly);
                 p.destroyForcibly();
                 p.waitFor(5, TimeUnit.SECONDS);
             }
-            out.get(5, TimeUnit.SECONDS);
+            capture.await(out, stdout, finished ? READER_GRACE : Duration.ofSeconds(5));
             return new ExecutionResult(capture.text(), "", finished ? p.exitValue() : -1, !finished,
                     capture.omittedLines(), capture.log());
         } catch (InterruptedException e) {
@@ -111,9 +129,11 @@ public class LocalDirSandboxExecutor implements SandboxExecutor {
                 p.descendants().forEach(ProcessHandle::destroyForcibly);
                 p.destroyForcibly();
             }
+            capture.detach();
             Thread.currentThread().interrupt();
             return new ExecutionResult("", "Interrupted", -1, false);
         } catch (Exception e) {
+            capture.detach();
             return new ExecutionResult("", "Execution failed: " + e.getMessage(), -1, false);
         }
     }

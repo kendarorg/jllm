@@ -107,6 +107,7 @@ public class MnemonicStrategy implements ContextStrategy {
         Agent a = agent(t.chatId(), t.agentKey(), t.main());
         synchronized (a) {
             a.log = t.log();
+            reportStoreWarning(a, t);
             boolean changed = validate(a.state, t.log());
             calibrate(a, t.lastUsage() == null ? -1 : t.lastUsage().contextTokens());
             long window = config.contextBudgetTokens();
@@ -126,7 +127,7 @@ public class MnemonicStrategy implements ContextStrategy {
                     est = after;
                 }
             }
-            if (est + config.maxTokens() > ceiling && switchSegment(a, t, view, from)) {
+            if (est + config.maxTokens() > ceiling && switchSegment(a, t, view, from, false)) {
                 changed = true;
                 view = renderer.render(t.log(), a.state);
                 long after = estimate(a, view, t.prefix());
@@ -155,6 +156,7 @@ public class MnemonicStrategy implements ContextStrategy {
         Agent a = agent(t.chatId(), t.agentKey(), t.main());
         synchronized (a) {
             a.log = t.log();
+            reportStoreWarning(a, t);
             validate(a.state, t.log());
             // the estimate was too low: trust it less from now on
             a.ratio = Math.min(2.0, Math.max(a.ratio, 1.0) * 1.3);
@@ -168,7 +170,7 @@ public class MnemonicStrategy implements ContextStrategy {
             if (batch.isEmpty()) {
                 kind = "segment";
                 count = 0;
-                if (!switchSegment(a, t, view, from)) {
+                if (!switchSegment(a, t, view, from, true)) {
                     kind = "emergency";
                     List<Mask> em = planner.emergency(t.log(), a.state, 1);
                     if (em.isEmpty()) return null;
@@ -225,6 +227,16 @@ public class MnemonicStrategy implements ContextStrategy {
         return agent(chatId, agentKey, true).state;
     }
 
+    /**
+     * The agent whose context a sub-agent copied: the chat's persistent (main) agent. Receipts and recall ids in the
+     * copy are that agent's. Null for a persistent agent or when none is known.
+     */
+    Agent parentOf(String chatId, Agent child) {
+        if (child != null && child.persistent) return null;
+        Agent p = agentFor(chatId, null);
+        return p == child ? null : p;
+    }
+
     /** The agent whose tool call this is: by key, else the first known agent of the chat. */
     Agent agentFor(String chatId, String agentKey) {
         if (agentKey != null) {
@@ -265,7 +277,11 @@ public class MnemonicStrategy implements ContextStrategy {
         return batch;
     }
 
-    private boolean switchSegment(Agent a, ContextTurn t, ArrayNode view, int from) {
+    /**
+     * @param from       where the agent's own messages start (after an inherited copy)
+     * @param overflowed the provider just refused {@code view} as too long: the notes request must be shorter
+     */
+    private boolean switchSegment(Agent a, ContextTurn t, ArrayNode view, int from, boolean overflowed) {
         MnemonicState st = a.state;
         int start = Math.max(from, st.start());
         List<JsonNode> applied = renderer.applied(t.log(), st, start);
@@ -274,7 +290,8 @@ public class MnemonicStrategy implements ContextStrategy {
         if (cut <= 0) return false;
         String notes;
         try {
-            notes = switcher.notes(t.prefix(), view, config.mnemonic().notesMaxTokens(), t.usageSink());
+            notes = switcher.notes(t.prefix(), notesView(a, view, t.prefix(), overflowed),
+                    config.mnemonic().notesMaxTokens(), t.usageSink());
         } catch (RuntimeException e) {
             log.warn("Handoff notes failed: {}", e.getMessage());
             t.sink().emit("warning", mapper.createObjectNode()
@@ -282,10 +299,32 @@ public class MnemonicStrategy implements ContextStrategy {
             notes = "(handoff notes could not be written; use history_recall)";
         }
         String index = SegmentSwitcher.index(t.log(), st, cut, config.mnemonic().indexMaxTokens());
-        st.segments.add(SegmentSwitcher.segment(t.log(), cut, notes, index));
+        st.segments.add(SegmentSwitcher.segment(t.log(), from, cut, notes, index));
         st.frontier = Math.max(st.frontier, cut);
         metrics.context("segment");
         return true;
+    }
+
+    /**
+     * The view the handoff notes are asked on, trimmed so that it and the notes fit the context window (it is the
+     * overflowing request otherwise); after a provider overflow it is cut to at most 3/4 of its estimated size.
+     */
+    private ArrayNode notesView(Agent a, ArrayNode view, RequestPrefix prefix, boolean overflowed) {
+        long window = config.contextBudgetTokens();
+        long fixed = (long) Math.ceil(chars(mapper.createArrayNode(), prefix) / Messages.CHARS_PER_TOKEN);
+        // the handoff instruction is appended to the request, plus a little for its block wrapper
+        long max = Math.round((window - config.mnemonic().notesMaxTokens()) / a.ratio) - fixed
+                - Messages.tokens(SegmentSwitcher.HANDOFF) - 20;
+        if (overflowed) max = Math.min(max, Math.round(Messages.tokens(view) * 0.75));
+        return switcher.fit(view, Math.max(0, max));
+    }
+
+    /** A store that could not read the saved decisions started over: tell the user once. */
+    private void reportStoreWarning(Agent a, ContextTurn t) {
+        String w = a.state.warning;
+        if (w == null) return;
+        a.state.warning = null;
+        t.sink().emit("warning", mapper.createObjectNode().put("message", w));
     }
 
     /** Drops decisions about messages that changed since. @return true if any was dropped */
@@ -303,6 +342,11 @@ public class MnemonicStrategy implements ContextStrategy {
             if (s.firstUser() >= 0 && (s.firstUser() >= log.size()
                     || !Messages.hash(s.firstUser(), log.get(s.firstUser())).equals(s.firstUserHash()))) {
                 bad = Math.min(bad, s.firstUser());
+            }
+            Integer ins = s.instruction();
+            if (ins != null && ins >= 0 && (ins >= log.size()
+                    || !Messages.hash(ins, log.get(ins)).equals(s.instructionHash()))) {
+                bad = Math.min(bad, ins);
             }
         }
         if (st.frontier > log.size()) bad = Math.min(bad, log.size());

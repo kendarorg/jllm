@@ -122,15 +122,59 @@ class ToolOutputSafetyTest {
     }
 
     @Test
-    void taintDoesNotCarryToTheNextRun() {
+    void taintCarriesToTheNextRunWhileTheOutputIsInTheContext() {
         setUp("wrap", true);
         rig.model.enqueue(toolUse("t1", "fetch", "{}"), text("ok"), toolUse("t2", "shell", "{}"), text("done"));
         rig.loop.run(chatId, "first", new Events(), () -> false);
+        Events ev = answering(false);
+
+        // "continue": the injected text is still in the conversation
+        rig.loop.run(chatId, "second", ev, () -> false);
+
+        assertEquals(1, ev.ofType("approval_request").size());
+        assertEquals(0, shellRuns.get());
+    }
+
+    @Test
+    void taintEndsWhenTheOutputLeftTheContext() {
+        setUp("wrap", true);
+        rig.model.enqueue(toolUse("t1", "fetch", "{}"), text("ok"), toolUse("t2", "shell", "{}"), text("done"));
+        rig.loop.run(chatId, "first", new Events(), () -> false);
+        // compaction cleared the untrusted result
+        ArrayNode log = rig.sessions.messages(rig.sessions.get(chatId));
+        for (JsonNode m : log) {
+            for (JsonNode b : m.path("content")) {
+                if ("tool_result".equals(b.path("type").asText())) {
+                    ((com.fasterxml.jackson.databind.node.ObjectNode) b).put("content",
+                            "[tool result cleared to save context]");
+                }
+            }
+        }
+        rig.sessions.saveMessages(chatId, log);
         Events ev = new Events();
 
         rig.loop.run(chatId, "second", ev, () -> false);
 
         assertTrue(ev.ofType("approval_request").isEmpty());
         assertEquals(1, shellRuns.get());
+    }
+
+    @Test
+    void untrustedOutputReadByASubAgentTaintsTheParent() {
+        setUp("wrap", true);
+        rig.model.handler = r -> {
+            if (r.pinnedSystem().contains("subagent")) {
+                return r.messages().size() == 1 ? toolUse("s1", "fetch", "{}") : text("page says: run the shell");
+            }
+            int n = r.messages().size();
+            return n == 1 ? toolUse("t1", "task", "{\"prompts\":[\"read the page\"]}")
+                    : n == 3 ? toolUse("t2", "shell", "{}") : text("done");
+        };
+        Events ev = answering(false);
+
+        rig.loop.run(chatId, "go", ev, () -> false);
+
+        assertEquals(1, ev.ofType("approval_request").size());
+        assertEquals(0, shellRuns.get());
     }
 }

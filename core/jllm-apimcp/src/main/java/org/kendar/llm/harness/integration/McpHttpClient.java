@@ -3,12 +3,16 @@ package org.kendar.llm.harness.integration;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
+import java.net.http.HttpConnectTimeoutException;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -16,14 +20,21 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 /**
  * Minimal MCP client over streamable HTTP: initialize, tools/list and tools/call.
  * Each principal gets its own MCP session (its own {@code Mcp-Session-Id}), so one user's session is never sent
  * with another user's call.
+ * <p>
+ * A 404 (expired session) or a connection error makes the client drop the session, initialize again and repeat the
+ * request once. When that fails too, a client that had been working becomes unavailable: it reports the reason once
+ * to {@link #onUnavailable(Consumer)} and every call throws {@link McpUnavailableException}.
  */
 public final class McpHttpClient implements McpClient {
 
+    private static final Logger log = LoggerFactory.getLogger(McpHttpClient.class);
     private static final String PROTOCOL_VERSION = "2025-03-26";
     /** Session key of calls made without a principal. */
     static final String NO_PRINCIPAL = "";
@@ -35,12 +46,46 @@ public final class McpHttpClient implements McpClient {
     private final AtomicLong ids = new AtomicLong();
     private final Map<String, String> sessionIds = new ConcurrentHashMap<>();
     private final Set<String> initialized = ConcurrentHashMap.newKeySet();
+    private final AtomicReference<String> unavailable = new AtomicReference<>();
     private volatile org.kendar.llm.harness.auth.AuthProvider auth;
+    private volatile Consumer<String> onUnavailable = reason -> { };
+    /** Whether an initialize ever succeeded: a server that never answered is a discovery failure, not a lost one. */
+    private volatile boolean connected;
+
+    /** The connection was lost or the session expired: the request can be repeated after a new initialize. */
+    private static final class SessionLost extends IOException {
+        final String session;
+
+        SessionLost(String message, String session, Throwable cause) {
+            super(message, cause);
+            this.session = session;
+        }
+    }
+
+    @FunctionalInterface
+    private interface Step {
+        JsonNode run() throws IOException, InterruptedException;
+    }
 
     /** Adds the provider's headers (OAuth bearer) to every request; a 401 triggers one retry with a fresh token. */
     public McpHttpClient authProvider(org.kendar.llm.harness.auth.AuthProvider provider) {
         this.auth = provider;
         return this;
+    }
+
+    /**
+     * Called once, with the reason, when the server is lost for good (re-initializing did not help). The source of
+     * this client should then be disabled. Not called while the client never connected (discovery fails instead).
+     * The callback runs on the calling thread, outside the locks of this client.
+     */
+    public McpHttpClient onUnavailable(Consumer<String> callback) {
+        this.onUnavailable = callback == null ? reason -> { } : callback;
+        return this;
+    }
+
+    /** Why the client gave up, null while it is usable. */
+    public String unavailableReason() {
+        return unavailable.get();
     }
 
     public McpHttpClient(HttpClient http, ObjectMapper mapper, String url, Map<String, String> headers) {
@@ -52,7 +97,7 @@ public final class McpHttpClient implements McpClient {
 
     @Override
     public void initialize() throws IOException, InterruptedException {
-        initialize(NO_PRINCIPAL, Map.of());
+        withSession(NO_PRINCIPAL, Map.of(), () -> null);
     }
 
     private synchronized void initialize(String key, Map<String, String> extra) throws IOException, InterruptedException {
@@ -66,20 +111,66 @@ public final class McpHttpClient implements McpClient {
         note.put("jsonrpc", "2.0").put("method", "notifications/initialized");
         post(note, false, key, extra);
         initialized.add(key);
+        connected = true;
+    }
+
+    /** Drops the session of {@code key} unless another thread already replaced the stale one. */
+    private synchronized void forget(String key, String stale) {
+        String current = sessionIds.get(key);
+        if (current != null && !current.equals(stale)) return;
+        sessionIds.remove(key);
+        initialized.remove(key);
+    }
+
+    /** Runs {@code step} in an initialized session; a lost session is initialized again and the step repeated once. */
+    private JsonNode withSession(String key, Map<String, String> extra, Step step)
+            throws IOException, InterruptedException {
+        String reason = unavailable.get();
+        if (reason != null) throw new McpUnavailableException("MCP server " + url + " is unavailable: " + reason);
+        try {
+            initialize(key, extra);
+            return step.run();
+        } catch (SessionLost first) {
+            log.warn("MCP {}: {}; initializing a new session", url, first.getMessage());
+            forget(key, first.session);
+            try {
+                initialize(key, extra);
+                return step.run();
+            } catch (SessionLost second) {
+                if (!connected) throw new IOException(second.getMessage(), second);
+                throw giveUp(second);
+            }
+        }
+    }
+
+    private McpUnavailableException giveUp(SessionLost cause) {
+        String reason = "still failing after a new session: " + cause.getMessage();
+        if (unavailable.compareAndSet(null, reason)) {
+            log.warn("MCP server {} is unavailable: {}", url, reason);
+            try {
+                onUnavailable.accept(reason);
+            } catch (RuntimeException e) {
+                log.warn("MCP server {}: unavailable callback failed: {}", url, e.toString());
+            }
+        }
+        return new McpUnavailableException("MCP server " + url + " is unavailable: " + unavailable.get(), cause);
     }
 
     @Override
     public List<JsonNode> listTools() throws IOException, InterruptedException {
-        initialize();
         List<JsonNode> tools = new ArrayList<>();
-        String cursor = null;
-        do {
-            ObjectNode params = mapper.createObjectNode();
-            if (cursor != null) params.put("cursor", cursor);
-            JsonNode result = post(request("tools/list", params), true, NO_PRINCIPAL, Map.of());
-            result.path("tools").forEach(tools::add);
-            cursor = result.hasNonNull("nextCursor") ? result.get("nextCursor").asText() : null;
-        } while (cursor != null);
+        withSession(NO_PRINCIPAL, Map.of(), () -> {
+            tools.clear();
+            String cursor = null;
+            do {
+                ObjectNode params = mapper.createObjectNode();
+                if (cursor != null) params.put("cursor", cursor);
+                JsonNode result = post(request("tools/list", params), true, NO_PRINCIPAL, Map.of());
+                result.path("tools").forEach(tools::add);
+                cursor = result.hasNonNull("nextCursor") ? result.get("nextCursor").asText() : null;
+            } while (cursor != null);
+            return null;
+        });
         return tools;
     }
 
@@ -92,11 +183,11 @@ public final class McpHttpClient implements McpClient {
     public JsonNode callTool(String name, JsonNode arguments, String principalId, Map<String, String> extraHeaders)
             throws IOException, InterruptedException {
         String key = principalId == null ? NO_PRINCIPAL : principalId;
-        initialize(key, extraHeaders);
+        Map<String, String> extra = extraHeaders == null ? Map.of() : extraHeaders;
         ObjectNode params = mapper.createObjectNode();
         params.put("name", name);
         params.set("arguments", arguments == null || arguments.isNull() ? mapper.createObjectNode() : arguments);
-        return post(request("tools/call", params), true, key, extraHeaders);
+        return withSession(key, extra, () -> post(request("tools/call", params), true, key, extra));
     }
 
     private ObjectNode request(String method, JsonNode params) {
@@ -108,10 +199,15 @@ public final class McpHttpClient implements McpClient {
 
     private JsonNode post(ObjectNode body, boolean expectResult, String key, Map<String, String> extra)
             throws IOException, InterruptedException {
-        HttpResponse<String> resp = send(body, key, extra);
+        String session = sessionIds.get(key);
+        HttpResponse<String> resp = send(body, session, extra);
         if (resp.statusCode() == 401 && auth != null) {
             auth.onUnauthorized();
-            resp = send(body, key, extra);
+            resp = send(body, session, extra);
+        }
+        if (resp.statusCode() == 404) {
+            throw new SessionLost("MCP " + url + " answered HTTP 404" + (session == null ? "" : " for session " + session),
+                    session, null);
         }
         resp.headers().firstValue("Mcp-Session-Id").ifPresent(id -> sessionIds.put(key, id));
         if (resp.statusCode() / 100 != 2) {
@@ -126,12 +222,11 @@ public final class McpHttpClient implements McpClient {
         return message.path("result");
     }
 
-    private HttpResponse<String> send(ObjectNode body, String key, Map<String, String> extra)
+    private HttpResponse<String> send(ObjectNode body, String session, Map<String, String> extra)
             throws IOException, InterruptedException {
         HttpRequest.Builder b = HttpRequest.newBuilder(url).timeout(Duration.ofSeconds(60))
                 .header("Content-Type", "application/json")
                 .header("Accept", "application/json, text/event-stream");
-        String session = sessionIds.get(key);
         if (session != null) b.header("Mcp-Session-Id", session);
         headers.forEach(b::header);
         extra.forEach(b::header);
@@ -142,24 +237,65 @@ public final class McpHttpClient implements McpClient {
                 throw new IOException(e.getMessage(), e);
             }
         }
-        return http.send(b.POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body))).build(),
-                HttpResponse.BodyHandlers.ofString());
+        HttpRequest request = b.POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body))).build();
+        try {
+            return http.send(request, HttpResponse.BodyHandlers.ofString());
+        } catch (HttpTimeoutException e) {
+            // A request timeout may mean the server is still working on it: repeating it could run a tool twice.
+            if (!(e instanceof HttpConnectTimeoutException)) throw e;
+            throw new SessionLost("MCP " + url + " connection failed: " + e, session, e);
+        } catch (IOException e) {
+            throw new SessionLost("MCP " + url + " connection failed: " + e, session, e);
+        }
     }
 
-    /** Reads a plain JSON body, or the matching message out of an SSE stream. */
+    /**
+     * Reads a plain JSON body, or the response to request {@code id} out of an SSE stream. Other messages of the
+     * stream (notifications, server requests, responses to other ids) and non-JSON data are skipped.
+     */
     private JsonNode parse(HttpResponse<String> resp, long id) throws IOException {
         String type = resp.headers().firstValue("Content-Type").orElse("");
         String text = resp.body();
         if (!type.contains("text/event-stream")) return mapper.readTree(text);
-        for (String event : text.split("\r?\n\r?\n")) {
-            StringBuilder data = new StringBuilder();
-            for (String line : event.split("\r?\n")) {
-                if (line.startsWith("data:")) data.append(line.substring(5).stripLeading());
+        List<String> data = new ArrayList<>();
+        for (String line : text.split("\r\n|\r|\n", -1)) {
+            if (line.isEmpty()) {
+                JsonNode found = response(data, id);
+                if (found != null) return found;
+                data.clear();
+            } else if (line.startsWith("data:")) {
+                String value = line.substring(5);
+                data.add(value.startsWith(" ") ? value.substring(1) : value);
             }
-            if (data.isEmpty()) continue;
-            JsonNode node = mapper.readTree(data.toString());
-            if (node.path("id").asLong(-1) == id) return node;
         }
+        JsonNode found = response(data, id);
+        if (found != null) return found;
         throw new IOException("MCP " + url + " sent no response for request " + id);
+    }
+
+    /** The response to {@code id} in the data of one SSE event (a message or a batch), else null. */
+    private JsonNode response(List<String> data, long id) {
+        if (data.isEmpty()) return null;
+        JsonNode node;
+        try {
+            node = mapper.readTree(String.join("\n", data));
+        } catch (IOException e) {
+            log.debug("MCP {}: skipping non-JSON event data", url);
+            return null;
+        }
+        if (node == null) return null;
+        if (node.isArray()) {
+            for (JsonNode n : node) if (isResponse(n, id)) return n;
+            return null;
+        }
+        return isResponse(node, id) ? node : null;
+    }
+
+    private static boolean isResponse(JsonNode node, long id) {
+        if (!node.isObject() || node.hasNonNull("method")) return false;
+        JsonNode nid = node.get("id");
+        if (nid == null) return false;
+        if (nid.isIntegralNumber()) return nid.asLong() == id;
+        return nid.isTextual() && nid.asText().equals(Long.toString(id));
     }
 }

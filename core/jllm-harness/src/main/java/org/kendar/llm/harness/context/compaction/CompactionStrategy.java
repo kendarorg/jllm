@@ -45,7 +45,14 @@ public class CompactionStrategy implements ContextStrategy {
     public ContextView onOverflow(ContextTurn t) {
         if (!config.compaction().auto()) return null;
         try {
-            CompactResult r = manager.compactNow(t.log(), null, t.usageSink());
+            CompactResult r;
+            if (inheritsCopy(t)) {
+                r = compactInherited(t);
+            } else {
+                long room = config.compaction().ceiling(config.contextBudgetTokens())
+                        - ContextManager.fixedTokens(t.prefix());
+                r = manager.compactOverflow(t.log(), room, t.usageSink());
+            }
             if (!r.changed()) return null;
             t.sink().emit("compaction", mapper.createObjectNode().put("tier", 2)
                     .put("estimatedTokens", r.tokensAfter()).put("reason", "overflow"));
@@ -58,7 +65,21 @@ public class CompactionStrategy implements ContextStrategy {
 
     @Override
     public CompactResult compactNow(ContextTurn t, String focus) {
+        if (inheritsCopy(t)) return compactInherited(t);
         return manager.compactNow(t.log(), focus, t.usageSink(), t.prefix());
+    }
+
+    /** A sub-agent that started from a copy of its parent's context: compaction must keep the copy boundary. */
+    private static boolean inheritsCopy(ContextTurn t) {
+        return !t.main() && t.inherited()[0] > 0;
+    }
+
+    /** Forced compaction of a sub-agent with an inherited copy; updates {@code t.inherited()[0]}. */
+    private CompactResult compactInherited(ContextTurn t) {
+        long before = manager.estimateTokens(t.log(), null);
+        boolean changed = manager.compactInherited(t.chatId(), t.log(), t.inherited(), null, t.sink(), t.usageSink(),
+                t.prefix(), true);
+        return new CompactResult(changed, before, manager.estimateTokens(t.log(), null), 0);
     }
 
     @Override

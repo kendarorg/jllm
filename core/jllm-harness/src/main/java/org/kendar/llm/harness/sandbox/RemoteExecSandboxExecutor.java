@@ -44,7 +44,7 @@ public class RemoteExecSandboxExecutor implements SandboxExecutor {
     /** Work directory in the container. */
     public static final String WORKSPACE = "/workspace";
     /** Scratchpad in the container; each agent has a directory below it. */
-    public static final String SCRATCHPAD = "/workspace/.kendhar/scratchpad";
+    public static final String SCRATCHPAD = "/workspace/.jllm/scratchpad";
     static final int DAEMON_PORT = 8080;
     private static final String AGENT_RESOURCE = "sandbox-agent.py";
     private static final Duration CONTROL_TIMEOUT = Duration.ofSeconds(60);
@@ -65,8 +65,15 @@ public class RemoteExecSandboxExecutor implements SandboxExecutor {
     private volatile Consumer<String> warn = log::warn;
     private final java.util.Set<String> localChats = ConcurrentHashMap.newKeySet();
     private volatile boolean verified;
+    private volatile long logLimit = TailCapture.DEFAULT_LOG_LIMIT;
+    /** The endpoint of the current docker context when DOCKER_HOST is unset; null until read. */
+    private volatile String contextHost;
 
     private record Container(String name, DaemonClient client) {
+    }
+
+    /** What a backup did; {@code ok} false when the container's files may not be safe on the host. */
+    private record Backup(boolean ok, String message) {
     }
 
     /**
@@ -113,6 +120,23 @@ public class RemoteExecSandboxExecutor implements SandboxExecutor {
     @Override
     public void environmentWhitelist(java.util.List<String> patterns) {
         layout.environmentWhitelist(patterns); // only the local fallback runs commands on the host
+    }
+
+    @Override
+    public void outputLogLimit(long maxBytes) {
+        this.logLimit = maxBytes;
+        layout.outputLogLimit(maxBytes);
+    }
+
+    /** DOCKER_HOST, or when it is unset the endpoint of the current docker context (cached once read). */
+    private String effectiveHost() {
+        if (dockerHost != null && !dockerHost.isBlank()) return dockerHost;
+        String h = contextHost;
+        if (h == null) {
+            h = DockerSandboxExecutor.contextHost(runner, config.sandbox().docker().binary());
+            if (h != null) contextHost = h;
+        }
+        return h == null || h.isEmpty() ? null : h;
     }
 
     @Override
@@ -163,8 +187,9 @@ public class RemoteExecSandboxExecutor implements SandboxExecutor {
     public String shellEnvironment() {
         return "The bash tool runs sh -c (POSIX sh, not bash) in a long-running Linux container ("
                 + config.sandbox().docker().image() + ") with the working directory at " + WORKSPACE
-                + ". Files, installed tools and background processes persist between commands; each command is a "
-                + "fresh shell, so cd and exported variables do not carry over. The file tools work in the same "
+                + ". Files and installed tools persist between commands; each command is a fresh shell, so cd and "
+                + "exported variables do not carry over. Background jobs a command starts (cmd &) are killed when "
+                + "it ends: start a server and use it within the same command. The file tools work in the same "
                 + "container. Network: docker's default.";
     }
 
@@ -201,7 +226,7 @@ public class RemoteExecSandboxExecutor implements SandboxExecutor {
         try {
             c = client(chatId);
             Map<String, Object> body = Map.of("command", command, "cwd", cwd, "logDir", logDir,
-                    "timeoutSeconds", Math.max(1, timeout.toSeconds()));
+                    "timeoutSeconds", Math.max(1, timeout.toSeconds()), "logMaxBytes", Math.max(0, logLimit));
             DaemonClient.Response r = c.call("POST", "/exec", null, JSON.writeValueAsBytes(body),
                     "application/json", CONTROL_TIMEOUT);
             if (r.status() != 200) return new ExecutionResult("", "Sandbox error " + r.status() + ": " + r.text(), -1, false);
@@ -303,10 +328,11 @@ public class RemoteExecSandboxExecutor implements SandboxExecutor {
     private String daemonHost() {
         String set = config.sandbox().docker().remoteHost();
         if (set != null && !set.isBlank()) return set.strip();
-        if (remote() && DockerSandboxExecutor.isRemote(dockerHost)) {
-            String h = java.net.URI.create(dockerHost.strip()).getHost();
+        String effective = remote() ? effectiveHost() : null;
+        if (remote() && DockerSandboxExecutor.isRemote(effective)) {
+            String h = java.net.URI.create(effective.strip()).getHost();
             if (h != null) return h;
-            throw new SandboxUnavailableException("Cannot read a host from DOCKER_HOST=" + dockerHost
+            throw new SandboxUnavailableException("Cannot read a host from the docker endpoint " + effective
                     + "; set sandbox.docker.remoteHost.");
         }
         return "127.0.0.1";
@@ -320,7 +346,7 @@ public class RemoteExecSandboxExecutor implements SandboxExecutor {
     }
 
     private Path backupFile(String chatId) {
-        return layout.location().resolve(chatId).resolve(".kendhar").resolve("workspace-backup.zip");
+        return layout.location().resolve(chatId).resolve(".jllm").resolve("workspace-backup.zip");
     }
 
     private Container create(String chatId, String owner, String name, String configHash) throws IOException {
@@ -394,27 +420,51 @@ public class RemoteExecSandboxExecutor implements SandboxExecutor {
     @Override
     public String backup(String chatId) {
         if (!remote()) return null;
-        Container c = containers.get(owner(chatId));
-        if (c == null) return "No running sandbox container to back up.";
+        return doBackup(chatId, containers.get(owner(chatId))).message();
+    }
+
+    private Backup doBackup(String chatId, Container c) {
+        if (c == null) return new Backup(false, "No running sandbox container to back up.");
         try {
             DaemonClient.Response r = c.client().call("GET", "/backup", null, null, null, TRANSFER_TIMEOUT);
-            if (r.status() != 200) return "Backup failed: " + r.status() + " " + r.text();
+            if (r.status() != 200) return new Backup(false, "Backup failed: " + r.status() + " " + r.text());
             if (kind == Kind.CLI) {
                 int files = WorkspaceArchive.unpack(r.body(), startupDir);
-                return "Backed up " + files + " file(s) from " + c.name() + " into " + startupDir + ".";
+                return new Backup(true, "Backed up " + files + " file(s) from " + c.name() + " into " + startupDir + ".");
             }
             Path f = backupFile(chatId);
             Files.createDirectories(f.getParent());
             Path tmp = Files.createTempFile(f.getParent(), "backup", ".tmp");
             Files.write(tmp, r.body());
             Files.move(tmp, f, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-            return "Backed up " + r.body().length / 1024 + " KB from " + c.name() + " to " + f + ".";
+            return new Backup(true, "Backed up " + r.body().length / 1024 + " KB from " + c.name() + " to " + f + ".");
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            return "Backup interrupted.";
+            return new Backup(false, "Backup interrupted.");
         } catch (IOException | RuntimeException e) {
-            return "Backup failed: " + e.getMessage();
+            return new Backup(false, "Backup failed: " + e.getMessage());
         }
+    }
+
+    /** How to get the files out of a container that was kept because its backup failed. */
+    private String keptMessage(String name) {
+        return "The container " + name + " was kept so its files are not lost. Fix the problem and back up again "
+                + "(/sandbox backup or /sandbox clean), or copy the files out with: "
+                + config.sandbox().docker().binary() + " cp " + name + ":" + WORKSPACE + " <directory>. "
+                + "--sandbox-clean removes it without a backup.";
+    }
+
+    /**
+     * The client of an existing container this executor is not connected to yet (a new session): started if stopped,
+     * reached with the token in its environment. Null when it does not answer. Unlike {@link #start} it never
+     * recreates the container, whatever its settings.
+     */
+    private Container attach(String name, JsonNode existing) throws IOException {
+        String token = tokenOf(existing);
+        if (token == null) return null;
+        if (!existing.path("State").path("Running").asBoolean(false)) docker("start", name);
+        Container c = new Container(name, new DaemonClient(daemonHost(), hostPort(name), token));
+        return waitHealthy(c, name, Duration.ofSeconds(20)) ? c : null;
     }
 
     private static String agentPayload() throws IOException {
@@ -515,8 +565,10 @@ public class RemoteExecSandboxExecutor implements SandboxExecutor {
 
     /** @throws SandboxUnavailableException when docker cannot be used; the agent loop offers to run locally instead */
     private void requireDocker() throws IOException {
-        if (!remote() && DockerSandboxExecutor.isRemote(dockerHost)) {
-            throw new SandboxUnavailableException("Docker daemon mode needs a local docker daemon: DOCKER_HOST=" + dockerHost
+        if (!remote() && DockerSandboxExecutor.isRemote(effectiveHost())) {
+            String where = dockerHost != null && !dockerHost.isBlank() ? "DOCKER_HOST=" + dockerHost
+                    : "the docker context endpoint " + effectiveHost();
+            throw new SandboxUnavailableException("Docker daemon mode needs a local docker daemon: " + where
                     + " is remote (its published port and bind mounts would not be reachable). "
                     + "Allow it with sandbox.docker.remote (--docker-remote): the workspace is then uploaded and backed up.");
         }
@@ -557,14 +609,25 @@ public class RemoteExecSandboxExecutor implements SandboxExecutor {
         if (kind != Kind.CLI) return "Not available for web chats: deleting the chat removes its container and files.";
         String owner = owner(chatId);
         String name = containerName(kind, owner);
-        String saved = remote() ? backup(chatId) : null; // nothing is mounted: keep the files before removing
-        containers.remove(owner);
+        String saved = null;
         try {
             requireDocker();
-            if (inspect(name) == null) return "No sandbox container for " + startupDir;
+            JsonNode existing = inspect(name);
+            if (existing == null) {
+                containers.remove(owner);
+                return "No sandbox container for " + startupDir;
+            }
+            if (remote()) { // nothing is mounted: keep the files before removing, and keep the container if that fails
+                Container c = containers.get(owner);
+                if (c == null) c = attach(name, existing);
+                Backup b = doBackup(chatId, c);
+                if (!b.ok()) return b.message() + "\n" + keptMessage(name);
+                saved = b.message();
+            }
         } catch (IOException | RuntimeException e) {
             return "Cannot clean the sandbox: " + e.getMessage();
         }
+        containers.remove(owner);
         removeContainer(name);
         return (saved == null ? "" : saved + "\n") + "Removed sandbox container " + name
                 + (remote() ? "." : " (project files untouched).");
@@ -573,15 +636,23 @@ public class RemoteExecSandboxExecutor implements SandboxExecutor {
     /** Web: removes the containers this executor started. CLI containers are kept for the next run. */
     @Override
     public void close() {
+        Set<String> keep = new HashSet<>();
         if (remote()) { // nothing is mounted: bring the files home before the session (or the web container) ends
-            for (String owner : new ArrayList<>(containers.keySet())) {
-                String chatId = kind == Kind.WEB ? owner : "-";
-                String done = backup(chatId);
-                if (done != null) log.info(done);
+            for (Map.Entry<String, Container> e : new ArrayList<>(containers.entrySet())) {
+                String chatId = kind == Kind.WEB ? e.getKey() : "-";
+                Backup b = doBackup(chatId, e.getValue());
+                if (b.ok()) {
+                    log.info(b.message());
+                } else {
+                    keep.add(e.getKey());
+                    warn.accept(b.message() + " " + keptMessage(e.getValue().name()));
+                }
             }
         }
         if (kind != Kind.WEB) return;
-        for (Container c : new ArrayList<>(containers.values())) removeContainer(c.name());
+        for (Map.Entry<String, Container> e : new ArrayList<>(containers.entrySet())) {
+            if (!keep.contains(e.getKey())) removeContainer(e.getValue().name());
+        }
         containers.clear();
     }
 

@@ -53,9 +53,19 @@ public final class Identity {
         return new Caller(principalOf(chatId), credentials);
     }
 
+    /**
+     * The policy of the chat's user. Without a resolver every chat gets {@link UserPolicy#ALL} (single user). With
+     * one, the resolver decides, also for a chat without principal (a multi-user embedder maps that to no tools); a
+     * resolver that fails gives {@link UserPolicy#NONE}: never more than it would have allowed.
+     */
     public UserPolicy policyOf(String chatId) {
         if (policies == null) return UserPolicy.ALL;
-        UserPolicy p = policies.resolve(principalOf(chatId));
+        UserPolicy p;
+        try {
+            p = policies.resolve(principalOf(chatId));
+        } catch (RuntimeException e) {
+            return UserPolicy.NONE;
+        }
         return p == null ? UserPolicy.ALL : p;
     }
 }

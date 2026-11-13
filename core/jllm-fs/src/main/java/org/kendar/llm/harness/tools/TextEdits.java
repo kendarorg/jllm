@@ -1,6 +1,16 @@
 package org.kendar.llm.harness.tools;
 
+import java.io.BufferedInputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.Reader;
+import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.Charset;
+import java.nio.charset.CharsetDecoder;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -8,23 +18,78 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
-/** Text file reading/writing that preserves BOM and line endings, plus lenient string replacement. */
+/**
+ * Text file reading/writing that preserves charset, BOM and line endings, plus lenient string replacement.
+ * <p>
+ * Charset: strict UTF-8 (with or without BOM); a file that is not valid UTF-8 is read as windows-1252 (ISO-8859-1 when
+ * it uses bytes windows-1252 leaves undefined) and written back in the same charset. A file with NUL bytes is binary
+ * and refused.
+ */
 public final class TextEdits {
+
+    /** Bytes read from the start of a file to learn its line ending and charset before an append. */
+    public static final int EOL_PROBE_BYTES = 64 * 1024;
+    /** Bytes checked for NUL to tell a binary file from text when reading. */
+    static final int BINARY_PROBE_BYTES = 8000;
+    /** Characters scanned past the requested window to count the lines of the file. */
+    static final long MAX_COUNT_SCAN = 64L * 1024 * 1024;
+
+    private static final byte[] UTF8_BOM = {(byte) 0xEF, (byte) 0xBB, (byte) 0xBF};
+    private static final Charset WINDOWS_1252 = windows1252();
 
     private TextEdits() {
     }
 
-    /** A file decoded to LF-normalized text, remembering how to write it back. */
-    public record TextFile(String text, boolean bom, String eol) {
+    private static Charset windows1252() {
+        try {
+            return Charset.forName("windows-1252");
+        } catch (RuntimeException e) {
+            return StandardCharsets.ISO_8859_1;
+        }
+    }
+
+    /**
+     * A decoded text file, remembering how to write it back.
+     *
+     * @param raw     the content with its original line endings, without BOM
+     * @param charset the charset it was decoded with (and is written back with)
+     * @param bom     whether it starts with a UTF-8 BOM
+     * @param eol     the dominant line ending, used for new lines that have no surrounding line
+     */
+    public record TextFile(String raw, Charset charset, boolean bom, String eol) {
 
         public static TextFile read(Path p) throws IOException {
             return decode(Files.readAllBytes(p));
         }
 
+        /** Decodes a whole file. */
         public static TextFile decode(byte[] bytes) {
-            boolean bom = bytes.length >= 3 && (bytes[0] & 0xFF) == 0xEF && (bytes[1] & 0xFF) == 0xBB
-                    && (bytes[2] & 0xFF) == 0xBF;
-            String s = new String(bytes, bom ? 3 : 0, bytes.length - (bom ? 3 : 0), StandardCharsets.UTF_8);
+            return decode(bytes, false);
+        }
+
+        /** Decodes the first bytes of a file: a character cut at the end does not count as malformed. */
+        public static TextFile probe(byte[] head) {
+            return decode(head, true);
+        }
+
+        private static TextFile decode(byte[] bytes, boolean truncated) {
+            for (byte b : bytes) {
+                if (b == 0) throw new IllegalArgumentException("Binary file (contains NUL bytes); not changed");
+            }
+            boolean bom = startsWithBom(bytes);
+            int off = bom ? 3 : 0;
+            int len = bytes.length - off;
+            if (truncated) len -= incompleteUtf8Tail(bytes, off, len);
+            String s;
+            Charset cs;
+            try {
+                s = strictDecoder(StandardCharsets.UTF_8).decode(ByteBuffer.wrap(bytes, off, len)).toString();
+                cs = StandardCharsets.UTF_8;
+            } catch (CharacterCodingException e) {
+                cs = singleByteCharset(bytes);
+                s = new String(bytes, cs); // a BOM-like prefix stays as text and round-trips
+                bom = false;
+            }
             int crlf = 0, lf = 0;
             for (int i = 0; i < s.length(); i++) {
                 if (s.charAt(i) == '\n') {
@@ -32,24 +97,200 @@ public final class TextEdits {
                     else lf++;
                 }
             }
-            String eol = crlf > lf ? "\r\n" : "\n";
-            return new TextFile(s.replace("\r\n", "\n"), bom, eol);
+            return new TextFile(s, cs, bom, crlf > lf ? "\r\n" : "\n");
         }
 
+        /** The content with every CRLF turned into LF: the text edits work on. */
+        public String text() {
+            return raw.replace("\r\n", "\n");
+        }
+
+        /** New content (LF line ends) in the file's charset, BOM and dominant line ending. */
         public byte[] encode(String lfText) {
-            String s = "\n".equals(eol) ? lfText : lfText.replace("\n", eol);
-            byte[] body = s.getBytes(StandardCharsets.UTF_8);
+            return withBom(encodeStrict("\n".equals(eol) ? lfText : lfText.replace("\n", eol)));
+        }
+
+        /** Text to add at the end of the file: the dominant line ending, the charset, no BOM. */
+        public byte[] encodeAppend(String text) {
+            String lf = text.replace("\r\n", "\n");
+            return encodeStrict("\n".equals(eol) ? lf : lf.replace("\n", eol));
+        }
+
+        /**
+         * The file with {@code applied} (computed on {@link #text()}) put in: untouched lines keep their own line
+         * ending, new lines take the ending of the line they are inserted in.
+         */
+        public byte[] encode(Applied applied) {
+            int[] map = new int[raw.length() + 1]; // LF-normalized offset -> raw offset
+            int n = 0;
+            for (int i = 0; i < raw.length(); i++) {
+                map[n++] = i;
+                if (raw.charAt(i) == '\r' && i + 1 < raw.length() && raw.charAt(i + 1) == '\n') i++;
+            }
+            map[n] = raw.length();
+            StringBuilder out = new StringBuilder(raw.length() + 64);
+            int pos = 0;
+            for (Range r : applied.ranges()) {
+                int s = map[r.start()];
+                out.append(raw, pos, s);
+                String eolHere = eolAt(s);
+                out.append("\n".equals(eolHere) ? r.replacement() : r.replacement().replace("\n", eolHere));
+                pos = map[r.end()];
+            }
+            out.append(raw, pos, raw.length());
+            return withBom(encodeStrict(out.toString()));
+        }
+
+        /** Ending of the line at raw offset {@code at}; the previous line's when it is the last one; else the dominant. */
+        private String eolAt(int at) {
+            int nl = raw.indexOf('\n', at);
+            if (nl < 0) nl = at > 0 ? raw.lastIndexOf('\n', at - 1) : -1;
+            if (nl < 0) return eol;
+            return nl > 0 && raw.charAt(nl - 1) == '\r' ? "\r\n" : "\n";
+        }
+
+        private byte[] encodeStrict(String s) {
+            if (charset.equals(StandardCharsets.UTF_8)) return s.getBytes(StandardCharsets.UTF_8);
+            try {
+                ByteBuffer b = charset.newEncoder().onMalformedInput(CodingErrorAction.REPORT)
+                        .onUnmappableCharacter(CodingErrorAction.REPORT).encode(CharBuffer.wrap(s));
+                byte[] out = new byte[b.remaining()];
+                b.get(out);
+                return out;
+            } catch (CharacterCodingException e) {
+                throw new IllegalArgumentException("The file is " + charset.name() + ", which cannot store some "
+                        + "characters of the new text; use characters of that charset, or convert the file to UTF-8 "
+                        + "first");
+            }
+        }
+
+        private byte[] withBom(byte[] body) {
             if (!bom) return body;
             byte[] out = new byte[body.length + 3];
-            out[0] = (byte) 0xEF;
-            out[1] = (byte) 0xBB;
-            out[2] = (byte) 0xBF;
+            System.arraycopy(UTF8_BOM, 0, out, 0, 3);
             System.arraycopy(body, 0, out, 3, body.length);
             return out;
         }
+    }
 
-        public void write(Path p, String lfText) throws IOException {
-            Files.write(p, encode(lfText));
+    private static boolean startsWithBom(byte[] b) {
+        return b.length >= 3 && b[0] == UTF8_BOM[0] && b[1] == UTF8_BOM[1] && b[2] == UTF8_BOM[2];
+    }
+
+    private static CharsetDecoder strictDecoder(Charset cs) {
+        return cs.newDecoder().onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT);
+    }
+
+    /** windows-1252 when every byte is defined there, else ISO-8859-1 (which maps every byte, so it round-trips). */
+    private static Charset singleByteCharset(byte[] bytes) {
+        try {
+            strictDecoder(WINDOWS_1252).decode(ByteBuffer.wrap(bytes));
+            return WINDOWS_1252;
+        } catch (CharacterCodingException e) {
+            return StandardCharsets.ISO_8859_1;
+        }
+    }
+
+    /** Number of bytes at the end of {@code b[off, off+len)} that start a UTF-8 sequence cut short (0..3). */
+    private static int incompleteUtf8Tail(byte[] b, int off, int len) {
+        for (int back = 1; back <= Math.min(3, len); back++) {
+            int c = b[off + len - back] & 0xFF;
+            if ((c & 0xC0) == 0x80) continue; // continuation byte: look further back
+            int need = c >= 0xF0 ? 4 : c >= 0xE0 ? 3 : c >= 0xC0 ? 2 : 1;
+            return need > back ? back : 0;
+        }
+        return 0;
+    }
+
+    /** Opens the bytes to read again from the start. */
+    @FunctionalInterface
+    public interface Source {
+        InputStream open() throws IOException;
+    }
+
+    /**
+     * Some lines of a text file.
+     *
+     * @param lines the lines from the first requested one, each cut to {@code maxChars + 1} characters
+     * @param total lines in the file; -1 when the file is too long to count them all
+     */
+    public record Window(List<String> lines, long total) {
+    }
+
+    /**
+     * Streams a text file and keeps lines {@code from} (0-based) to {@code from + count}, at most {@code maxChars}
+     * characters in all (the first line is always kept, cut to {@code maxChars + 1} characters so the caller sees it
+     * was cut). Line ends are LF, CRLF or CR; a trailing line end does not add an empty line. UTF-8 is tried first and
+     * windows-1252 used when the file is not UTF-8. A file with NUL bytes near the start is refused as binary.
+     */
+    public static Window readWindow(Source source, long from, int count, long maxChars) throws IOException {
+        try {
+            return scan(source, from, count, maxChars, true);
+        } catch (CharacterCodingException e) {
+            return scan(source, from, count, maxChars, false);
+        }
+    }
+
+    private static Window scan(Source source, long from, int count, long maxChars, boolean utf8) throws IOException {
+        try (InputStream raw = source.open(); BufferedInputStream in = new BufferedInputStream(raw, 65536)) {
+            in.mark(BINARY_PROBE_BYTES + 1);
+            byte[] head = in.readNBytes(BINARY_PROBE_BYTES);
+            for (byte b : head) {
+                if (b == 0) throw new IllegalArgumentException("Binary file (contains NUL bytes); not shown");
+            }
+            in.reset();
+            if (startsWithBom(head)) in.skipNBytes(3);
+            CharsetDecoder dec = utf8 ? strictDecoder(StandardCharsets.UTF_8)
+                    : WINDOWS_1252.newDecoder().onMalformedInput(CodingErrorAction.REPLACE)
+                    .onUnmappableCharacter(CodingErrorAction.REPLACE);
+            Reader r = new InputStreamReader(in, dec);
+            List<String> lines = new ArrayList<>();
+            long end = from + count;
+            long line = 0;
+            long used = 0;
+            long scannedAfter = 0;
+            boolean closed = count <= 0; // no more lines are collected
+            boolean open = false; // characters seen after the last line end
+            boolean prevCr = false;
+            StringBuilder cur = new StringBuilder();
+            char[] buf = new char[8192];
+            for (int n; (n = r.read(buf)) > 0; ) {
+                if (closed || line >= end) {
+                    scannedAfter += n;
+                    if (scannedAfter > MAX_COUNT_SCAN) return new Window(lines, -1);
+                }
+                for (int i = 0; i < n; i++) {
+                    char c = buf[i];
+                    if (prevCr) {
+                        prevCr = false;
+                        if (c == '\n') continue;
+                    }
+                    if (c == '\n' || c == '\r') {
+                        if (!closed && line >= from && line < end) {
+                            if (lines.isEmpty() || used + cur.length() <= maxChars) {
+                                lines.add(cur.toString());
+                                used += cur.length();
+                            } else {
+                                closed = true;
+                            }
+                            cur.setLength(0);
+                        }
+                        line++;
+                        open = false;
+                        prevCr = c == '\r';
+                        continue;
+                    }
+                    open = true;
+                    if (!closed && line >= from && line < end && cur.length() <= maxChars) cur.append(c);
+                }
+            }
+            if (open) {
+                if (!closed && line >= from && line < end && (lines.isEmpty() || used + cur.length() <= maxChars)) {
+                    lines.add(cur.toString());
+                }
+                line++;
+            }
+            return new Window(lines, line);
         }
     }
 
@@ -57,11 +298,12 @@ public final class TextEdits {
     public record Edit(String oldString, String newString, boolean replaceAll) {
     }
 
-    private record Range(int start, int end, String replacement) {
+    /** A replaced range of the LF-normalized text. */
+    public record Range(int start, int end, String replacement) {
     }
 
-    /** Result of applying edits: the new text and a short diff. */
-    public record Applied(String text, String diff, int replacements) {
+    /** Result of applying edits: the new text, a short diff and the replaced ranges (sorted, on the original text). */
+    public record Applied(String text, String diff, int replacements, List<Range> ranges) {
     }
 
     /** Applies all edits to the original text or none; throws IllegalArgumentException describing the first failure. */
@@ -87,7 +329,7 @@ public final class TextEdits {
             Range r = ranges.get(i);
             sb.replace(r.start(), r.end(), r.replacement());
         }
-        return new Applied(sb.toString(), unifiedDiff(text, ranges), ranges.size());
+        return new Applied(sb.toString(), unifiedDiff(text, ranges), ranges.size(), List.copyOf(ranges));
     }
 
     private static String normalizeEol(String s) {

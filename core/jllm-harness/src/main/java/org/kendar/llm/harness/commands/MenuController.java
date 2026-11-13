@@ -4,6 +4,7 @@ import org.kendar.llm.harness.AgentHarness;
 import org.kendar.llm.harness.integration.ExternalSources;
 import org.kendar.llm.harness.integration.ExternalSources.Kind;
 import org.kendar.llm.harness.permission.PermissionMode;
+import org.kendar.llm.harness.session.ChatToolSet;
 import org.kendar.llm.harness.skills.SkillCatalog;
 import org.kendar.llm.harness.tools.HarnessTool;
 
@@ -41,12 +42,15 @@ final class MenuController {
 
     private static final class State {
         final Target target;
+        /** Toggles change the chat's own set ({@link ChatToolSet}), not the global state (web callers). */
+        final boolean perChat;
         Entry selected;
         /** Provider waiting for the answer to "compact first?". */
         String pendingModel;
 
-        State(Target target) {
+        State(Target target, boolean perChat) {
             this.target = target;
+            this.perChat = perChat;
         }
     }
 
@@ -62,8 +66,83 @@ final class MenuController {
     }
 
     SlashCommands.Result open(String chatId, Target target) {
-        states.put(chatId, new State(target));
+        return open(chatId, target, false);
+    }
+
+    SlashCommands.Result open(String chatId, Target target, boolean perChat) {
+        states.put(chatId, new State(target, perChat));
         return render(chatId, null);
+    }
+
+    // ---- per-chat set
+
+    /** What is globally enabled now: the chat's set when it starts. */
+    ChatToolSet captureNow() {
+        List<String> tools = harness.tools().all().stream().map(HarnessTool::name).toList();
+        List<String> mcp = harness.sources().list(Kind.MCP).stream().filter(ExternalSources.Status::enabled)
+                .map(ExternalSources.Status::name).toList();
+        List<String> apis = harness.sources().list(Kind.API).stream().filter(ExternalSources.Status::enabled)
+                .map(ExternalSources.Status::name).toList();
+        List<String> skills = harness.skills().enabled().stream().map(SkillCatalog.Skill::name).toList();
+        return ChatToolSet.capture(tools, mcp, apis, skills);
+    }
+
+    private ChatToolSet chatSet(String chatId) {
+        return harness.sessions().captureChatToolSet(chatId, this::captureNow);
+    }
+
+    private static ChatToolSet.Kind kindOf(Target target) {
+        return switch (target) {
+            case TOOLS -> ChatToolSet.Kind.TOOL;
+            case MCP -> ChatToolSet.Kind.MCP;
+            case API -> ChatToolSet.Kind.API;
+            case SKILL -> ChatToolSet.Kind.SKILL;
+            default -> throw new IllegalArgumentException("No per-chat set for " + target);
+        };
+    }
+
+    private void setInChat(String chatId, ChatToolSet.Kind kind, List<String> names, boolean on) {
+        ChatToolSet s = chatSet(chatId);
+        for (String n : names) s = s.with(kind, n, on);
+        harness.sessions().setChatToolSet(chatId, s);
+    }
+
+    /** Typed per-chat form: {@code enable|disable <name>} (tool or group for /tools), {@code check [name]} for sources. */
+    String scriptedInChat(String chatId, Target target, String verb, String name) {
+        try {
+            ChatToolSet set = chatSet(chatId);
+            ChatToolSet.Kind kind = kindOf(target);
+            if (verb.equals("check") && (target == Target.MCP || target == Target.API)) {
+                Kind k = target == Target.MCP ? Kind.MCP : Kind.API;
+                List<String> names = name != null ? List.of(name) : List.copyOf(set.base(kind));
+                StringBuilder sb = new StringBuilder();
+                for (String n : names) {
+                    if (!set.base(kind).contains(n)) {
+                        sb.append("'").append(n).append("' is not available in this chat\n");
+                        continue;
+                    }
+                    sb.append(describe(n, harness.sources().check(k, n))).append('\n');
+                }
+                return sb.isEmpty() ? "(none)" : sb.toString().stripTrailing();
+            }
+            if (!verb.equals("enable") && !verb.equals("disable")) {
+                return "usage: /" + target.name().toLowerCase() + " enable|disable <name>";
+            }
+            boolean on = verb.equals("enable");
+            List<String> names = target == Target.TOOLS
+                    ? set.base(kind).stream().filter(n -> n.equals(name) || name.equals(groupOf(n))).toList()
+                    : set.base(kind).contains(name) ? List.of(name) : List.of();
+            if (names.isEmpty()) return "'" + name + "' is not available in this chat";
+            setInChat(chatId, kind, names, on);
+            return (on ? "Enabled for this chat: " : "Disabled for this chat: ") + String.join(", ", names);
+        } catch (IllegalArgumentException e) {
+            return e.getMessage();
+        }
+    }
+
+    private String groupOf(String tool) {
+        HarnessTool t = harness.tools().get(tool);
+        return t == null || t.group() == null ? "(no group)" : t.group();
     }
 
     /** Modes offered by the mode menu, in order ({@link PermissionMode#DEFAULT} is only reachable by name). */
@@ -76,12 +155,16 @@ final class MenuController {
             if (number < 1 || number > MODES.size()) return render(chatId, "No mode " + number);
             states.remove(chatId);
             PermissionMode m = MODES.get(number - 1);
-            harness.sessions().setMode(chatId, m);
+            try {
+                harness.sessions().setMode(chatId, m);
+            } catch (RuntimeException e) {
+                return SlashCommands.Result.text("error: " + e.getMessage());
+            }
             return new SlashCommands.Result("Mode: " + m.name(), null, true);
         }
         if (st.target == Target.MODEL) return selectModel(chatId, st, number);
         if (st.selected == null) {
-            List<Entry> entries = entries(st.target);
+            List<Entry> entries = entries(chatId, st);
             if (number < 1 || number > entries.size()) return render(chatId, "No item " + number);
             st.selected = entries.get(number - 1);
             return render(chatId, null);
@@ -89,7 +172,12 @@ final class MenuController {
         List<Action> actions = actions(st);
         if (number < 1 || number > actions.size()) return render(chatId, "No action " + number);
         Action action = actions.get(number - 1);
-        String message = run(st, action);
+        String message;
+        try {
+            message = st.perChat ? runInChat(chatId, st, action) : run(st, action);
+        } catch (RuntimeException e) {
+            message = "error: " + e.getMessage();
+        }
         st.selected = null;
         return render(chatId, message);
     }
@@ -99,7 +187,11 @@ final class MenuController {
             String name = st.pendingModel;
             st.pendingModel = null;
             if (number != 1) return render(chatId, "Model unchanged");
-            return finishSwitch(chatId, harness.switchModel(chatId, name, true));
+            try {
+                return finishSwitch(chatId, harness.switchModel(chatId, name, true));
+            } catch (RuntimeException e) {
+                return render(chatId, "error: " + e.getMessage());
+            }
         }
         List<String> names = harness.providers().names();
         if (number < 1 || number > names.size()) return render(chatId, "No model " + number);
@@ -210,8 +302,9 @@ final class MenuController {
                 }
             }
         } else if (st.selected == null) {
-            sb.append(st.target.title).append("  (number + Enter to select, Esc to close)\n");
-            List<Entry> entries = entries(st.target);
+            sb.append(st.target.title).append(st.perChat ? " of this chat" : "")
+                    .append("  (number + Enter to select, Esc to close)\n");
+            List<Entry> entries = entries(chatId, st);
             if (entries.isEmpty()) sb.append("  (none)\n");
             for (int i = 0; i < entries.size(); i++) {
                 Entry e = entries.get(i);
@@ -229,6 +322,53 @@ final class MenuController {
     }
 
     // ---- content
+
+    private List<Entry> entries(String chatId, State st) {
+        return st.perChat ? chatEntries(chatId, st.target) : entries(st.target);
+    }
+
+    /** The chat's own set: only what was enabled when the chat started, on/off for this chat. */
+    private List<Entry> chatEntries(String chatId, Target target) {
+        if (target == Target.MODE || target == Target.MODEL) return List.of();
+        ChatToolSet set = chatSet(chatId);
+        ChatToolSet.Kind kind = kindOf(target);
+        List<Entry> out = new ArrayList<>();
+        if (target != Target.TOOLS) {
+            for (String n : set.base(kind)) {
+                boolean on = set.isOn(kind, n);
+                out.add(new Entry(n, false, n, on, on ? "on" : "off"));
+            }
+            return out;
+        }
+        Map<String, List<String>> byGroup = new LinkedHashMap<>();
+        for (HarnessTool t : harness.tools().every()) {
+            if (set.base(kind).contains(t.name())) {
+                byGroup.computeIfAbsent(groupOf(t.name()), g -> new ArrayList<>()).add(t.name());
+            }
+        }
+        byGroup.forEach((group, tools) -> {
+            long on = tools.stream().filter(n -> set.isOn(kind, n)).count();
+            out.add(new Entry(group, true, group, on == tools.size(), on + "/" + tools.size() + " on"));
+            for (String n : tools) {
+                boolean enabled = set.isOn(kind, n);
+                out.add(new Entry(n, false, n, enabled, enabled ? "on" : "off"));
+            }
+        });
+        return out;
+    }
+
+    private String runInChat(String chatId, State st, Action action) {
+        Entry e = st.selected;
+        ChatToolSet.Kind kind = kindOf(st.target);
+        if (action.op() == Op.CHECK) {
+            return describe(e.label(), harness.sources().check(st.target == Target.MCP ? Kind.MCP : Kind.API, e.key()));
+        }
+        List<String> names = st.target == Target.TOOLS && e.group()
+                ? chatSet(chatId).base(kind).stream().filter(n -> groupOf(n).equals(e.key())).toList()
+                : List.of(e.key());
+        setInChat(chatId, kind, names, !e.on());
+        return action.label() + " for this chat: " + e.label();
+    }
 
     private List<Entry> entries(Target target) {
         return switch (target) {

@@ -26,7 +26,7 @@ public class FilesController {
     private static final long MAX_TEXT_BYTES = 2L * 1024 * 1024;
 
     /** Internal harness data (history, checkpoints, scratch); never exposed through the web UI. */
-    private static final String HIDDEN_DIR = ".kendhar";
+    private static final String HIDDEN_DIR = ".jllm";
 
     private final AgentHarness harness;
 
@@ -162,12 +162,14 @@ public class FilesController {
                                       @RequestParam(defaultValue = "false") boolean overwrite,
                                       @RequestParam(name = "root", defaultValue = "workspace") String rootName) throws IOException {
         RemoteFs rfs = remote(chatId, rootName);
+        List<String> names = new ArrayList<>();
+        for (MultipartFile mf : files) names.add(uploadName(mf.getOriginalFilename()));
         if (rfs != null) {
             List<String> saved = new ArrayList<>();
-            for (MultipartFile mf : files) {
-                String orig = mf.getOriginalFilename();
-                String name = orig == null ? "" : Paths.get(orig.replace('\\', '/')).getFileName().toString();
-                saved.add(rfs.upload(path, name, mf.getBytes(), overwrite));
+            for (int i = 0; i < files.size(); i++) {
+                try (var in = files.get(i).getInputStream()) {
+                    saved.add(rfs.upload(path, names.get(i), in, overwrite));
+                }
             }
             return Map.of("saved", saved);
         }
@@ -175,9 +177,9 @@ public class FilesController {
         Path dir = resolve(root, path);
         if (!Files.isDirectory(dir)) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Not a directory");
         List<String> saved = new ArrayList<>();
-        for (MultipartFile mf : files) {
-            String orig = mf.getOriginalFilename();
-            String name = orig == null ? "" : Paths.get(orig.replace('\\', '/')).getFileName().toString();
+        for (int i = 0; i < files.size(); i++) {
+            MultipartFile mf = files.get(i);
+            String name = names.get(i);
             Path target = child(root, dir, name);
             if (!overwrite && Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "Already exists: " + name);
@@ -188,6 +190,26 @@ public class FilesController {
             saved.add(rel(root, target));
         }
         return Map.of("saved", saved);
+    }
+
+    /** Characters no file name may hold (Windows rules, applied everywhere: the same project may be used on both). */
+    private static final java.util.regex.Pattern RESERVED = java.util.regex.Pattern.compile("[<>:\"|?*\\x00-\\x1f]");
+    private static final java.util.regex.Pattern WINDOWS_DEVICE =
+            java.util.regex.Pattern.compile("(?i)(con|prn|aux|nul|com[0-9]|lpt[0-9])(\\..*)?");
+
+    /**
+     * The file name of an upload: the last segment of the client's name (browsers may send a path), refused with 400
+     * when nothing usable is left or it holds reserved characters ({@code a:b}), is a device name or ends with a dot or
+     * space.
+     */
+    static String uploadName(String original) {
+        String o = original == null ? "" : original.replace('\\', '/');
+        String name = o.substring(o.lastIndexOf('/') + 1).strip();
+        if (name.isEmpty() || name.equals(".") || name.equals("..") || RESERVED.matcher(name).find()
+                || WINDOWS_DEVICE.matcher(name).matches() || name.endsWith(".") || name.length() > 255) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid file name '" + original + "'");
+        }
+        return name;
     }
 
     // ── rename / delete ───────────────────────────────────────────────────────
@@ -295,12 +317,11 @@ public class FilesController {
         String name = path == null ? "" : path.replace('\\', '/');
         name = name.substring(name.lastIndexOf('/') + 1);
         if (st.isFile()) {
-            byte[] data = rfs.bytes(path);
             return ResponseEntity.ok()
                     .header(HttpHeaders.CONTENT_DISPOSITION, attachment(name))
                     .contentType(MediaType.APPLICATION_OCTET_STREAM)
-                    .contentLength(data.length)
-                    .body(out -> out.write(data));
+                    .contentLength(st.size())
+                    .body(out -> rfs.copyTo(path, st.size(), out)); // chunk by chunk, never the whole file in memory
         }
         if (!st.isDir()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Not found");
         String base = name.isEmpty() ? "project" : name;

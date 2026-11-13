@@ -63,8 +63,8 @@ On startup the CLI prints three directories:
 | Directory | Location | Content |
 |---|---|---|
 | project dir | `--workdir` | the files the agent works on |
-| scratch dir | `<project>/.kendhar/scratchpad/<chatId>/<agentId>` | throwaway files, always writable |
-| history dir | `<project>/.kendhar/history/<chatId>/<agentId>/` | `messages.jsonl`, sub-agent runs, `mnemonic.json` |
+| scratch dir | `<project>/.jllm/scratchpad/<chatId>/<agentId>` | throwaway files, always writable |
+| history dir | `<project>/.jllm/history/<chatId>/<agentId>/` | `messages.jsonl`, sub-agent runs, `mnemonic.json` |
 
 When the project directory is not writable, scratch and history go under `sandbox.tempDir`
 (default `${java.io.tmpdir}/agent-harness`). Chats persist there. At startup the CLI offers to continue the newest saved chat (`--resume prompt|no|<id>`, default `prompt`; `--prompt` and piped input never ask), see [USAGE](../docs/USAGE.md#saved-chats-and-restarting).

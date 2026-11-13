@@ -5,8 +5,6 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.util.Comparator;
-import java.util.stream.Stream;
 
 /**
  * Isolation seam for command execution. Only the local-directory backend exists today;
@@ -33,6 +31,13 @@ public interface SandboxExecutor {
      * ignore it: the container has an environment of its own.
      */
     default void environmentWhitelist(java.util.List<String> patterns) {
+    }
+
+    /**
+     * Cap in bytes of the log a command's full output spills to once it exceeds what the result keeps ({@code <= 0}:
+     * unlimited); past the cap the log ends with a truncation marker. Default 50 KB.
+     */
+    default void outputLogLimit(long maxBytes) {
     }
 
     /**
@@ -133,13 +138,14 @@ public interface SandboxExecutor {
     /** Per-chat working directory, created on demand. Also the root of the file tools' path jail. */
     Path workDir(String chatId);
 
-    /** Deletes the per-chat working directory and everything in it (symlinks are removed, never followed). */
+    /**
+     * Deletes the per-chat working directory and everything in it (symlinks and junctions are removed, never
+     * followed).
+     */
     default void deleteWorkDir(String chatId) {
         Path dir = workDir(chatId);
-        try (Stream<Path> s = Files.walk(dir)) {
-            for (Path p : s.sorted(Comparator.reverseOrder()).toList()) {
-                Files.deleteIfExists(p);
-            }
+        try {
+            Links.deleteTree(dir);
         } catch (IOException e) {
             throw new UncheckedIOException("Cannot delete work dir " + dir, e);
         }

@@ -6,12 +6,10 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Comparator;
-import java.util.stream.Stream;
 
 /**
  * Command line sandbox: the work dir is the real project directory (every chat), scratch directories live in
- * {@code <cwd>/.kendhar/scratchpad}; when the project directory is not writable they fall back to the configured sandbox base dir
+ * {@code <cwd>/.jllm/scratchpad}; when the project directory is not writable they fall back to the configured sandbox base dir
  * (the system temp dir by default), still under the chat id. No isolation: commands run as this process's user.
  */
 public class CwdSandboxExecutor extends LocalDirSandboxExecutor {
@@ -19,7 +17,7 @@ public class CwdSandboxExecutor extends LocalDirSandboxExecutor {
     private final Path cwd;
     private final Path scratchRoot;
 
-    static final String SCRATCH_DIR = ".kendhar/scratchpad";
+    static final String SCRATCH_DIR = ".jllm/scratchpad";
 
     public CwdSandboxExecutor(HarnessConfig config, Path cwd) {
         super(config);
@@ -27,7 +25,7 @@ public class CwdSandboxExecutor extends LocalDirSandboxExecutor {
         this.scratchRoot = projectScratch(this.cwd, super.location());
     }
 
-    /** {@code <cwd>/.kendhar/scratchpad} when it can be created and written, else the fallback root. */
+    /** {@code <cwd>/.jllm/scratchpad} when it can be created and written, else the fallback root. */
     private static Path projectScratch(Path cwd, Path fallback) {
         Path dir = cwd.resolve(SCRATCH_DIR);
         try {
@@ -49,11 +47,11 @@ public class CwdSandboxExecutor extends LocalDirSandboxExecutor {
     }
 
     /**
-     * Root of the chat histories ({@code <chatId>/<agentId>}): {@code <cwd>/.kendhar/history}, or {@code history}
+     * Root of the chat histories ({@code <chatId>/<agentId>}): {@code <cwd>/.jllm/history}, or {@code history}
      * under the fallback root when the project directory is not writable.
      */
     public Path historyRoot() {
-        return scratchRoot.startsWith(cwd) ? cwd.resolve(".kendhar").resolve("history") : scratchRoot.resolve("history");
+        return scratchRoot.startsWith(cwd) ? cwd.resolve(".jllm").resolve("history") : scratchRoot.resolve("history");
     }
 
     /** The project directory. */
@@ -96,11 +94,8 @@ public class CwdSandboxExecutor extends LocalDirSandboxExecutor {
     @Override
     public void deleteWorkDir(String chatId) {
         Path dir = chatScratch(chatId);
-        if (!Files.exists(dir)) return;
-        try (Stream<Path> s = Files.walk(dir)) {
-            for (Path p : s.sorted(Comparator.reverseOrder()).toList()) {
-                Files.deleteIfExists(p);
-            }
+        try {
+            Links.deleteTree(dir); // junctions and symlinks are removed, never followed
         } catch (IOException e) {
             throw new UncheckedIOException("Cannot delete scratch dir " + dir, e);
         }

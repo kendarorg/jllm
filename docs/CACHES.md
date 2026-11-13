@@ -199,7 +199,7 @@ flowchart LR
 ```
 
 State is kept per `(chatId, agentKey)`: the main agent's in the `MnemonicStore` (`FileMnemonicStore` in the CLI:
-`.kendhar/history/<chat>/<agent>/mnemonic.json`, written atomically); a sub-agent's in memory only, released when it
+`.jllm/history/<chat>/<agent>/mnemonic.json`, written atomically); a sub-agent's in memory only, released when it
 ends.
 
 ### Decisions

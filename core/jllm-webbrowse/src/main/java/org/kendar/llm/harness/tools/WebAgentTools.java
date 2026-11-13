@@ -35,26 +35,37 @@ public class WebAgentTools implements HarnessToolSet {
 
     private static final int MAX_REDIRECTS = 5;
 
+    /** Default of {@code web.fetchMaxBytes}: the most bytes of a body web_fetch reads. */
+    public static final long DEFAULT_FETCH_MAX_BYTES = 5L * 1024 * 1024;
+
     private final String duckDuckGoUrl;
     private final StorageQuota quota;
+    private final long fetchMaxBytes;
 
     public WebAgentTools(HarnessConfig config, ObjectMapper mapper) {
-        this(config, mapper, "https://html.duckduckgo.com/html/", StorageQuota.UNLIMITED);
+        this(config, mapper, "https://html.duckduckgo.com/html/", StorageQuota.UNLIMITED, DEFAULT_FETCH_MAX_BYTES);
     }
 
     public WebAgentTools(HarnessConfig config, ObjectMapper mapper, StorageQuota quota) {
-        this(config, mapper, "https://html.duckduckgo.com/html/", quota);
+        this(config, mapper, "https://html.duckduckgo.com/html/", quota, DEFAULT_FETCH_MAX_BYTES);
+    }
+
+    /** @param fetchMaxBytes {@code web.fetchMaxBytes}: the most bytes of a body web_fetch reads; 0 or less: default */
+    public WebAgentTools(HarnessConfig config, ObjectMapper mapper, StorageQuota quota, long fetchMaxBytes) {
+        this(config, mapper, "https://html.duckduckgo.com/html/", quota, fetchMaxBytes);
     }
 
     WebAgentTools(HarnessConfig config, ObjectMapper mapper, String duckDuckGoUrl) {
-        this(config, mapper, duckDuckGoUrl, StorageQuota.UNLIMITED);
+        this(config, mapper, duckDuckGoUrl, StorageQuota.UNLIMITED, DEFAULT_FETCH_MAX_BYTES);
     }
 
-    private WebAgentTools(HarnessConfig config, ObjectMapper mapper, String duckDuckGoUrl, StorageQuota quota) {
+    private WebAgentTools(HarnessConfig config, ObjectMapper mapper, String duckDuckGoUrl, StorageQuota quota,
+                          long fetchMaxBytes) {
         this.duckDuckGoUrl = duckDuckGoUrl;
         this.config = config;
         this.mapper = mapper;
         this.quota = quota == null ? StorageQuota.UNLIMITED : quota;
+        this.fetchMaxBytes = fetchMaxBytes > 0 ? fetchMaxBytes : DEFAULT_FETCH_MAX_BYTES;
     }
 
     @Override
@@ -289,25 +300,93 @@ public class WebAgentTools implements HarnessToolSet {
 
     private HarnessTool webFetch() {
         return new SimpleTool("web_fetch",
-                "Fetch a URL and return its text content (HTML is reduced to plain text).",
+                "Fetch a URL and return its text content (HTML is reduced to plain text). Binary content (PDF, "
+                        + "images...) is refused: use web_download for it.",
                 SimpleTool.schema("url", "http(s) URL to fetch"),
                 GROUP, ToolKind.READ_ONLY, (ctx, in) -> {
             URI uri = URI.create(in.path("url").asText());
             if (!"http".equalsIgnoreCase(uri.getScheme()) && !"https".equalsIgnoreCase(uri.getScheme())) {
                 throw new IllegalArgumentException("Only http/https URLs are supported");
             }
-            HttpResponse<String> resp = get(ctx, uri, HttpResponse.BodyHandlers.ofString());
-            String body = resp.body();
+            HttpResponse<java.io.InputStream> resp = get(ctx, uri, HttpResponse.BodyHandlers.ofInputStream());
+            String prefix = "HTTP " + resp.statusCode() + "\n";
             String type = resp.headers().firstValue("Content-Type").orElse("");
-            if (type.contains("html") || body.stripLeading().startsWith("<")) {
-                Document doc = Jsoup.parse(body, uri.toString());
+            String mime = mimeType(type);
+            long declared = resp.headers().firstValueAsLong("Content-Length").orElse(-1);
+            byte[] bytes;
+            try (java.io.InputStream stream = resp.body()) {
+                if (!mime.isEmpty() && !isTextType(mime)) {
+                    if (resp.statusCode() / 100 != 2) return prefix + "[" + mime + " body not shown]";
+                    throw new IllegalStateException("web_fetch only returns text, and " + uri + " is " + mime
+                            + (declared >= 0 ? " (" + declared + " bytes)" : "")
+                            + ": use web_download to save it to a file");
+                }
+                bytes = stream.readNBytes((int) Math.min(fetchMaxBytes + 1, Integer.MAX_VALUE - 8));
+            }
+            boolean cut = bytes.length > fetchMaxBytes;
+            if (cut) bytes = java.util.Arrays.copyOf(bytes, (int) fetchMaxBytes);
+            if (mime.isEmpty() && looksBinary(bytes)) {
+                throw new IllegalStateException("web_fetch only returns text, and " + uri
+                        + " looks binary: use web_download to save it to a file");
+            }
+            java.nio.charset.Charset charset = charset(type);
+            String body = new String(bytes, charset == null ? StandardCharsets.UTF_8 : charset);
+            if (mime.contains("html") || body.stripLeading().startsWith("<")) {
+                // Without a declared charset Jsoup reads the one of the page's <meta>.
+                Document doc = Jsoup.parse(new java.io.ByteArrayInputStream(bytes),
+                        charset == null ? null : charset.name(), uri.toString());
                 doc.select("script,style,nav,footer").remove();
                 body = doc.title() + "\n\n" + doc.body().wholeText().replaceAll("\\n{3,}", "\n\n").trim();
             }
             int max = config.web().fetchMaxChars();
-            String prefix = "HTTP " + resp.statusCode() + "\n";
-            return prefix + (body.length() > max ? body.substring(0, max) + "\n[truncated]" : body);
+            if (body.length() > max) return prefix + body.substring(0, max) + "\n[truncated]";
+            if (cut) {
+                return prefix + body + "\n[truncated: only the first " + fetchMaxBytes + " bytes"
+                        + (declared > 0 ? " of " + declared : "") + " were read (web.fetchMaxBytes)]";
+            }
+            return prefix + body;
         });
+    }
+
+    /** The media type of a Content-Type header, lower case and without parameters; empty when absent. */
+    static String mimeType(String contentType) {
+        int semi = contentType.indexOf(';');
+        return (semi < 0 ? contentType : contentType.substring(0, semi)).trim().toLowerCase(java.util.Locale.ROOT);
+    }
+
+    /** Whether web_fetch may return a body of this media type as text. */
+    static boolean isTextType(String mime) {
+        if (mime.startsWith("text/")) return true;
+        if (mime.endsWith("+json") || mime.endsWith("+xml") || mime.endsWith("+yaml")) return true;
+        return switch (mime) {
+            case "application/json", "application/xml", "application/javascript", "application/ecmascript",
+                 "application/x-javascript", "application/yaml", "application/x-yaml", "application/toml",
+                 "application/x-ndjson", "application/graphql", "application/sql", "application/x-sh",
+                 "application/x-www-form-urlencoded", "application/csv" -> true;
+            default -> false;
+        };
+    }
+
+    /** The charset parameter of a Content-Type header, null when absent or unknown. */
+    static java.nio.charset.Charset charset(String contentType) {
+        for (String part : contentType.split(";")) {
+            String p = part.trim();
+            if (p.regionMatches(true, 0, "charset=", 0, 8)) {
+                String name = p.substring(8).trim().replace("\"", "").replace("'", "");
+                try {
+                    return java.nio.charset.Charset.forName(name);
+                } catch (IllegalArgumentException e) {
+                    return null;
+                }
+            }
+        }
+        return null;
+    }
+
+    /** A NUL byte in the first 8 KB: not text. */
+    private static boolean looksBinary(byte[] bytes) {
+        for (int i = 0, n = Math.min(bytes.length, 8192); i < n; i++) if (bytes[i] == 0) return true;
+        return false;
     }
 
     private HarnessTool webDownload() {

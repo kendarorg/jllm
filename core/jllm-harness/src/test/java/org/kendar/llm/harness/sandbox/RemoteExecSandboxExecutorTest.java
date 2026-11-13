@@ -193,7 +193,7 @@ class RemoteExecSandboxExecutorTest {
     void displayPathUsesContainerPaths() {
         RemoteExecSandboxExecutor box = cli(tmp);
         assertEquals("/workspace", box.displayPath(box.workDir("c")));
-        assertEquals("/workspace/.kendhar/scratchpad/main", box.displayPath(box.scratchDir("c", "main")));
+        assertEquals("/workspace/.jllm/scratchpad/main", box.displayPath(box.scratchDir("c", "main")));
         assertThrows(IllegalArgumentException.class, () -> box.scratchDir("c", ".."));
     }
 
@@ -271,11 +271,11 @@ class RemoteExecSandboxExecutorTest {
         remoteConfig();
         Path project = Files.createDirectories(tmp.resolve("project"));
         Files.writeString(project.resolve("file.txt"), "local\n");
-        Files.createDirectories(project.resolve(".kendhar/scratchpad/main"));
-        Files.writeString(project.resolve(".kendhar/scratchpad/main/tmp.txt"), "scratch");
+        Files.createDirectories(project.resolve(".jllm/scratchpad/main"));
+        Files.writeString(project.resolve(".jllm/scratchpad/main/tmp.txt"), "scratch");
         RemoteExecSandboxExecutor box = new RemoteExecSandboxExecutor(config, docker, "tcp://10.9.9.9:2375",
                 new CwdSandboxExecutor(config, project), RemoteExecSandboxExecutor.Kind.CLI, project);
-        ExecutionResult r = box.execute("c1", "cat file.txt; ls .kendhar/scratchpad 2>&1 | head -1", Duration.ofSeconds(30));
+        ExecutionResult r = box.execute("c1", "cat file.txt; ls .jllm/scratchpad 2>&1 | head -1", Duration.ofSeconds(30));
         assertTrue(r.stdout().startsWith("local"), r.stdout());
         assertFalse(r.stdout().contains("tmp.txt"), "scratchpad is not uploaded");
         String create = String.join(" ", docker.first("create"));
@@ -289,7 +289,58 @@ class RemoteExecSandboxExecutorTest {
         assertTrue(box.backup("c1").startsWith("Backed up"));
         assertEquals("local\nremote\n", Files.readString(project.resolve("file.txt")).replace("\r\n", "\n"));
         assertEquals("new", Files.readString(project.resolve("added.txt")).strip());
-        assertEquals("scratch", Files.readString(project.resolve(".kendhar/scratchpad/main/tmp.txt")));
+        assertEquals("scratch", Files.readString(project.resolve(".jllm/scratchpad/main/tmp.txt")));
+    }
+
+    private RemoteExecSandboxExecutor remoteCli(Path project) {
+        return new RemoteExecSandboxExecutor(config, docker, "tcp://10.9.9.9:2375",
+                new CwdSandboxExecutor(config, project), RemoteExecSandboxExecutor.Kind.CLI, project);
+    }
+
+    @Test
+    void remoteCleanKeepsTheContainerWhenTheBackupFails() throws Exception {
+        remoteConfig();
+        Path project = Files.createDirectories(tmp.resolve("project"));
+        Path other = Files.createDirectories(tmp.resolve("other-repo"));
+        RemoteExecSandboxExecutor box = remoteCli(project);
+        box.execute("c1", "mkdir shared && echo x > shared/f.txt", Duration.ofSeconds(30));
+        // the host has "shared" as a link: unpacking would write into other-repo, so the backup fails
+        boolean linked;
+        if (System.getProperty("os.name", "").toLowerCase().contains("win")) {
+            Process p = new ProcessBuilder("cmd", "/c", "mklink", "/J", project.resolve("shared").toString(),
+                    other.toString()).redirectErrorStream(true).start();
+            p.getInputStream().readAllBytes();
+            linked = p.waitFor() == 0;
+        } else {
+            try {
+                Files.createSymbolicLink(project.resolve("shared"), other);
+                linked = true;
+            } catch (IOException | UnsupportedOperationException e) {
+                linked = false;
+            }
+        }
+        Assumptions.assumeTrue(linked, "cannot create a link");
+        try {
+            long removed = docker.count("rm");
+            String out = box.clean("c1");
+            assertTrue(out.startsWith("Backup failed") && out.contains("was kept") && out.contains(" cp "), out);
+            assertEquals(removed, docker.count("rm"), "container kept");
+            assertFalse(Files.exists(other.resolve("f.txt")));
+        } finally {
+            Files.delete(project.resolve("shared"));
+        }
+        assertTrue(box.clean("c1").contains("Removed sandbox container"), "backup works again once fixed");
+        assertEquals("x", Files.readString(project.resolve("shared/f.txt")).strip());
+    }
+
+    @Test
+    void remoteCleanInANewSessionBacksUpTheExistingContainerFirst() throws Exception {
+        remoteConfig();
+        Path project = Files.createDirectories(tmp.resolve("project"));
+        remoteCli(project).execute("c1", "echo made > made.txt", Duration.ofSeconds(30));
+        String out = remoteCli(project).clean("c1"); // not connected yet: attaches to the container
+        assertTrue(out.startsWith("Backed up") && out.contains("Removed sandbox container"), out);
+        assertEquals("made", Files.readString(project.resolve("made.txt")).strip());
     }
 
     @Test
@@ -299,7 +350,7 @@ class RemoteExecSandboxExecutorTest {
         RemoteExecSandboxExecutor box = web(base);
         box.execute("chat-1", "echo kept > keep.txt", Duration.ofSeconds(30));
         box.close(); // backs up, then removes the container
-        assertTrue(Files.isRegularFile(base.resolve("chat-1/.kendhar/workspace-backup.zip")));
+        assertTrue(Files.isRegularFile(base.resolve("chat-1/.jllm/workspace-backup.zip")));
         assertTrue(docker.count("rm") >= 1);
         docker.stopDaemon();
         ExecutionResult r = web(base).execute("chat-1", "cat keep.txt", Duration.ofSeconds(30));
@@ -322,19 +373,19 @@ class RemoteExecSandboxExecutorTest {
         Path src = Files.createDirectories(tmp.resolve("src"));
         Files.createDirectories(src.resolve("a/b"));
         Files.writeString(src.resolve("a/b/f.txt"), "f");
-        Files.createDirectories(src.resolve(".kendhar/history"));
-        Files.writeString(src.resolve(".kendhar/history/h"), "h");
-        Files.createDirectories(src.resolve(".kendhar/scratchpad"));
-        Files.writeString(src.resolve(".kendhar/scratchpad/s"), "s");
-        Files.createDirectories(src.resolve(".kendhar/checkpoints/c"));
-        Files.writeString(src.resolve(".kendhar/checkpoints/c/k"), "k");
+        Files.createDirectories(src.resolve(".jllm/history"));
+        Files.writeString(src.resolve(".jllm/history/h"), "h");
+        Files.createDirectories(src.resolve(".jllm/scratchpad"));
+        Files.writeString(src.resolve(".jllm/scratchpad/s"), "s");
+        Files.createDirectories(src.resolve(".jllm/checkpoints/c"));
+        Files.writeString(src.resolve(".jllm/checkpoints/c/k"), "k");
         byte[] zip = WorkspaceArchive.pack(src);
         Path dst = tmp.resolve("dst");
         assertEquals(2, WorkspaceArchive.unpack(zip, dst));
         assertTrue(Files.exists(dst.resolve("a/b/f.txt")));
-        assertTrue(Files.exists(dst.resolve(".kendhar/checkpoints/c/k")));
-        assertFalse(Files.exists(dst.resolve(".kendhar/history")));
-        assertFalse(Files.exists(dst.resolve(".kendhar/scratchpad")));
+        assertTrue(Files.exists(dst.resolve(".jllm/checkpoints/c/k")));
+        assertFalse(Files.exists(dst.resolve(".jllm/history")));
+        assertFalse(Files.exists(dst.resolve(".jllm/scratchpad")));
         assertTrue(WorkspaceArchive.hasContent(src));
         assertFalse(WorkspaceArchive.hasContent(Files.createDirectories(tmp.resolve("empty"))));
 

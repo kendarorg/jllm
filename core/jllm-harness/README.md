@@ -21,7 +21,7 @@ Micrometer. Java 21, Jackson, JDK `HttpClient`, jsoup, swagger-parser, slf4j-api
 - **Sub-agents**: `task` tool with `general`, `explore`, `plan` and custom types; they inherit the caller's mode.
 - **Extensions**: settings file, hooks around agents, model calls and tool calls, plugins, skills, `KENDAR.md`
   instruction files, slash commands and numbered menus.
-- **Persistence**: in memory or as files under `.kendhar/history`; ports for your own stores. Tool grants and todo
+- **Persistence**: in memory or as files under `.jllm/history`; ports for your own stores. Tool grants and todo
   lists go through the `StateStore` port (`<history>/<chat>/state/*.json` in the CLI and web).
 - **Resilience**: `order` on a provider chains fallbacks; hooks report duration and token usage for tracing.
 
@@ -213,7 +213,7 @@ the settings), `config.withContextStrategy(ContextStrategyKind.MNEMONIC)`, or a 
 `AgentHarness.builder().contextStrategy(deps -> ...)` (wins over everything). `/status` shows the active one.
 
 The mnemonic strategy (after mnemonic-proxy) renders each request from the verbatim log and decisions stored per chat
-and agent (`mnemonicStore(...)`; the CLI keeps them in `.kendhar/history/<chat>/<agent>/mnemonic.json`). The same log
+and agent (`mnemonicStore(...)`; the CLI keeps them in `.jllm/history/<chat>/<agent>/mnemonic.json`). The same log
 always gives the same bytes, so the prompt cache stays valid up to the first newly masked message.
 - Over `maskTrigger` (default 60% of the ceiling) a batch replaces the oldest tool outputs, large tool inputs and
   reasoning of earlier user turns with one-line receipts such as

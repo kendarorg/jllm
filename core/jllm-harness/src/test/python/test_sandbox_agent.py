@@ -14,6 +14,7 @@ import tempfile
 import time
 import unittest
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -99,6 +100,27 @@ class TokenTest(Base):
     def test_right_token(self):
         self.assertEqual(200, self.call("GET", "/health")[0])
 
+    def raw_request(self, head):
+        with socket.create_connection(("127.0.0.1", self.port), timeout=10) as s:
+            s.sendall(head.encode())
+            data = b""
+            while True:
+                chunk = s.recv(4096)  # the daemon closes the connection: no wait for the announced body
+                if not chunk:
+                    return data
+                data += chunk
+
+    def test_401_does_not_read_the_announced_body(self):
+        started = time.time()
+        resp = self.raw_request("POST /exec HTTP/1.1\r\nHost: x\r\nContent-Length: 99999999999\r\n\r\n")
+        self.assertTrue(resp.startswith(b"HTTP/1.1 401"), resp)
+        self.assertLess(time.time() - started, 5)
+
+    def test_oversized_body_is_413_without_reading_it(self):
+        resp = self.raw_request("PUT /file?path=big HTTP/1.1\r\nHost: x\r\nX-Jllm-Token: %s\r\n"
+                                "Content-Length: 99999999999\r\n\r\n" % TOKEN)
+        self.assertTrue(resp.startswith(b"HTTP/1.1 413"), resp)
+
 
 class ExecTest(Base):
     def test_output_and_exit_code(self):
@@ -138,14 +160,35 @@ class ExecTest(Base):
         self.assertEqual(200, self.call("DELETE", "/exec/" + r["id"])[0])
         self.assertEqual(404, self.call("GET", "/exec/" + r["id"])[0])
 
-    def test_long_output_keeps_tail_and_full_log(self):
-        _, res = self.run_cmd("i=1; while [ $i -le 20000 ]; do echo line-$i; i=$((i+1)); done")
+    LONG = "i=1; while [ $i -le 20000 ]; do echo line-$i; i=$((i+1)); done"
+
+    def test_long_output_keeps_tail_and_capped_log(self):
+        _, res = self.run_cmd(self.LONG)
         self.assertEqual(0, res["exitCode"])
         self.assertTrue(res["stdout"].rstrip().endswith("line-20000"))
         self.assertLessEqual(len(res["stdout"].encode()), 50 * 1024)
         self.assertGreater(res["omittedLines"], 0)
-        self.assertTrue(res["logPath"].startswith(os.path.join(self.ws, ".kendhar", "scratchpad")))
+        self.assertTrue(res["logPath"].startswith(os.path.join(self.ws, ".jllm", "scratchpad")))
+        log = Path(res["logPath"]).read_bytes()
+        self.assertTrue(log.startswith(b"line-1\n"))
+        self.assertTrue(log.endswith(b"[log truncated at 51200 bytes]\n"), log[-80:])
+        self.assertLessEqual(len(log), 50 * 1024 + 100)
+
+    def test_log_cap_from_the_request(self):
+        code, r = self.call("POST", "/exec", {"command": self.LONG, "cwd": self.ws, "timeoutSeconds": 60,
+                                              "logMaxBytes": 0})
+        self.assertEqual(200, code, r)
+        res = self.call("GET", "/exec/" + r["id"] + "?wait=25")[1]
         self.assertEqual(20000, len(Path(res["logPath"]).read_text().splitlines()))
+
+    def test_returns_when_the_shell_exits_although_a_background_job_holds_the_output(self):
+        started = time.time()
+        eid, res = self.run_cmd("sleep 20 & echo started", timeout=60)
+        self.assertLess(time.time() - started, 15)
+        self.assertEqual(0, res["exitCode"])
+        self.assertFalse(res["timedOut"])
+        self.assertIn("started", res["stdout"])
+        self.assertEqual(200, self.call("DELETE", "/exec/" + eid)[0])  # the harness releases it: job killed
 
 
 class FileTest(Base):
@@ -181,6 +224,19 @@ class FileTest(Base):
         self.assertNotIn("g/sub/c.txt", hits)
         self.assertEqual(["g/A.java"], self.call("GET", "/glob?pattern=g/*.java")[1].split("\n"))
 
+    def test_glob_classes_cannot_leak_into_the_regex(self):
+        for f in ["gc/a1.txt", "gc/b2.txt", "gc/x.txt", "secret/key.txt"]:
+            self.call("PUT", "/file?path=" + f, b"x")
+        q = urllib.parse.quote
+        self.assertEqual("gc/a1.txt", self.call("GET", "/glob?pattern=" + q("gc/[a]1.txt"))[1])
+        self.assertEqual(["gc/a1.txt", "gc/b2.txt"],
+                         self.call("GET", "/glob?pattern=" + q("gc/[a-b][0-9].txt"))[1].split("\n"))
+        self.assertEqual("gc/x.txt", self.call("GET", "/glob?pattern=" + q("gc/[!ab]*.txt"))[1])
+        self.assertEqual("", self.call("GET", "/glob?pattern=" + q("gc/[.*]"))[1])
+        for bad in ["gc/[]{][a],**", "gc/[a/b]", "{a,b"]:
+            code, body = self.call("GET", "/glob?pattern=" + q(bad))
+            self.assertEqual(400, code, (bad, body))
+
     def test_grep(self):
         self.call("PUT", "/file?path=gr/x.txt", b"alpha\nbeta needle\n")
         self.call("PUT", "/file?path=gr/y.md", b"needle again\n")
@@ -190,9 +246,25 @@ class FileTest(Base):
         self.assertEqual("gr/y.md:1:needle again", out)
         self.assertEqual(400, self.call("POST", "/grep", {"pattern": "("})[0])
 
+    def test_grep_glob_is_relative_to_path(self):
+        self.call("PUT", "/file?path=gp/a.java", b"needle\n")
+        self.call("PUT", "/file?path=gp/sub/b.java", b"needle\n")
+        self.call("PUT", "/file?path=gp/c.txt", b"needle\n")
+        # relative to the searched path: "*.java" is a top-level file of gp only
+        out = self.call("POST", "/grep", {"pattern": "needle", "path": "gp", "glob": "*.java"})[1]
+        self.assertEqual("gp/a.java:1:needle", out)
+        out = self.call("POST", "/grep", {"pattern": "needle", "path": "gp", "glob": "sub/*.java"})[1]
+        self.assertEqual("gp/sub/b.java:1:needle", out)
+        # relative to the work dir: still accepted
+        out = self.call("POST", "/grep", {"pattern": "needle", "path": "gp", "glob": "gp/*.java"})[1]
+        self.assertEqual("gp/a.java:1:needle", out)
+        # a single file: the glob matches its name
+        out = self.call("POST", "/grep", {"pattern": "needle", "path": "gp/c.txt", "glob": "*.txt"})[1]
+        self.assertEqual("gp/c.txt:1:needle", out)
+
     def test_scratch_root(self):
         self.assertEqual(200, self.call("PUT", "/file?root=scratch&path=a1/n.txt", b"s")[0])
-        self.assertTrue(os.path.exists(os.path.join(self.ws, ".kendhar", "scratchpad", "a1", "n.txt")))
+        self.assertTrue(os.path.exists(os.path.join(self.ws, ".jllm", "scratchpad", "a1", "n.txt")))
         self.assertEqual(400, self.call("GET", "/file?root=scratch&path=../../x")[0])
 
 
@@ -249,14 +321,14 @@ class BackupTest(Base):
         self.call("PUT", "/file?path=bk/a.txt", b"alpha")
         self.call("PUT", "/file?path=bk/sub/b.txt", b"beta")
         self.call("PUT", "/file?root=scratch&path=main/tmp.txt", b"scratch")
-        self.call("PUT", "/file?path=.kendhar/history/h.txt", b"history")
-        self.call("PUT", "/file?path=.kendhar/checkpoints/c/1/created.txt", b"x")
+        self.call("PUT", "/file?path=.jllm/history/h.txt", b"history")
+        self.call("PUT", "/file?path=.jllm/checkpoints/c/1/created.txt", b"x")
         self.run_cmd("printf '#!/bin/sh' > bk/run.sh && chmod +x bk/run.sh")
         code, data = self.call("GET", "/backup", raw=True)
         self.assertEqual(200, code)
         names = zipfile.ZipFile(io.BytesIO(data)).namelist()
         self.assertIn("bk/a.txt", names)
-        self.assertIn(".kendhar/checkpoints/c/1/created.txt", names)
+        self.assertIn(".jllm/checkpoints/c/1/created.txt", names)
         self.assertFalse([n for n in names if "scratchpad" in n or "history" in n], names)
         self.assertEqual(200, self.call("DELETE", "/file?path=bk")[0])
         code, res = self.call("POST", "/setup", data)

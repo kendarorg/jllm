@@ -51,6 +51,13 @@ public class AgentService {
 
     private final boolean serializeRuns;
     private final Semaphore runSlot;
+    /** Called when a user message starts a turn (the first one of a run, a queued one, a steer or a follow-up). */
+    private volatile Consumer<String> turnStart = chatId -> { };
+
+    /** Sets what runs at the start of every user turn, e.g. opening a checkpoint for {@code /undo}. */
+    public void onTurnStart(Consumer<String> turnStart) {
+        this.turnStart = turnStart == null ? chatId -> { } : turnStart;
+    }
 
     public AgentService(AgentLoop loop, ChatSessionService sessions, ApprovalService approvals, ObjectMapper mapper,
                         HarnessConfig config) {
@@ -139,14 +146,15 @@ public class AgentService {
             AgentLoop.Inbox inbox = new AgentLoop.Inbox() {
                 @Override
                 public String pollSteering() {
-                    return run.steering.poll();
+                    return turnStarted(chatId, sink, run.steering.poll());
                 }
 
                 @Override
                 public String pollFollowUp() {
-                    return run.followUp.poll();
+                    return turnStarted(chatId, sink, run.followUp.poll());
                 }
             };
+            turnStarted(chatId, sink, userText);
             loop.run(chatId, userText, sink, run.token, inbox);
             // a message queued just as the loop finished starts the next turn instead of being lost
             while (!run.token.isCancelled()) {
@@ -160,6 +168,7 @@ public class AgentService {
                     }
                 }
                 sink.emit("steer_applied", mapper.createObjectNode().put("text", next));
+                turnStarted(chatId, sink, next);
                 loop.run(chatId, next, sink, run.token, inbox);
             }
         } catch (Throwable t) {
@@ -167,9 +176,26 @@ public class AgentService {
             sink.emit("error", mapper.createObjectNode().put("message", String.valueOf(t.getMessage())));
         } finally {
             if (locked) runSlot.release();
-            sink.emit("run_finished", mapper.createObjectNode().put("cancelled", run.cancelRequested));
-            run.running = false;
+            // not running any more before anyone hears run_finished (a client may start the next run at once); under
+            // the run lock, so a new run's start() cannot clear the buffer between the two
+            synchronized (run) {
+                run.running = false;
+                publish(run, "run_finished", mapper.createObjectNode().put("cancelled", run.cancelRequested));
+            }
         }
+    }
+
+    /** Runs the turn-start callback for a user message that is about to be applied; passes the message through. */
+    private String turnStarted(String chatId, EventSink sink, String text) {
+        if (text == null) return null;
+        try {
+            turnStart.accept(chatId);
+        } catch (RuntimeException e) {
+            log.warn("Turn start failed for chat {}: {}", chatId, e.getMessage());
+            sink.emit("warning", mapper.createObjectNode()
+                    .put("message", "Turn start failed (/undo may not see this turn): " + e.getMessage()));
+        }
+        return text;
     }
 
     /** Waits for the single run slot when serialization is on; returns whether a permit is held. */
@@ -192,20 +218,65 @@ public class AgentService {
         }
     }
 
+    /**
+     * Buffers the event and delivers it. Publishers on different threads may deliver out of seq order: each
+     * subscriber's {@link OrderedListener} puts them back in order.
+     */
     private void publish(ChatRun run, String type, JsonNode data) {
         AgentEvent ev;
+        List<Consumer<AgentEvent>> targets;
         synchronized (run.events) {
             ev = new AgentEvent(run.nextSeq++, type, data);
             run.events.add(ev);
             if (run.events.size() > MAX_BUFFERED_EVENTS) run.events.remove(0);
+            // the listeners registered when the seq was assigned: a later subscriber gets this event by replay
+            targets = List.copyOf(run.listeners);
         }
-        for (Consumer<AgentEvent> l : run.listeners) {
+        for (Consumer<AgentEvent> l : targets) {
             try {
                 l.accept(ev);
             } catch (RuntimeException e) {
                 run.listeners.remove(l);
             }
         }
+    }
+
+    /**
+     * Delivers events to one subscriber in seq order, without gaps or duplicates: an event that arrives ahead of
+     * its turn is held until the ones before it arrived.
+     */
+    static final class OrderedListener implements Consumer<AgentEvent> {
+        private final Consumer<AgentEvent> target;
+        private final java.util.TreeMap<Long, AgentEvent> held = new java.util.TreeMap<>();
+        private long next;
+
+        /** @param next seq of the first event to deliver */
+        OrderedListener(Consumer<AgentEvent> target, long next) {
+            this.target = target;
+            this.next = next;
+        }
+
+        @Override
+        public synchronized void accept(AgentEvent ev) {
+            if (ev.seq() < next) return; // already delivered
+            held.put(ev.seq(), ev);
+            // a seq that never arrives (should not happen) must not hold the stream forever
+            if (held.size() > MAX_BUFFERED_EVENTS) next = held.firstKey();
+            for (AgentEvent e = held.remove(next); e != null; e = held.remove(next)) {
+                next++;
+                target.accept(e);
+            }
+        }
+    }
+
+    /**
+     * Publishes an event to the chat's stream outside of a run (e.g. "a login finished"): live subscribers get it at
+     * once, a reconnecting one by replay until the next run starts. Unknown chats are ignored.
+     */
+    public void notify(String chatId, String type, JsonNode data) {
+        if (chatId == null || type == null || sessions.find(chatId).isEmpty()) return;
+        ChatRun run = runs.computeIfAbsent(chatId, k -> new ChatRun());
+        publish(run, type, data == null ? mapper.createObjectNode() : data);
     }
 
     /** Manual /compact. @throws RunAlreadyActiveException if a run is in progress */
@@ -283,17 +354,23 @@ public class AgentService {
      */
     public Runnable subscribe(String chatId, long afterSeq, Consumer<AgentEvent> listener) {
         ChatRun run = runs.computeIfAbsent(chatId, k -> new ChatRun());
-        long[] highest = {afterSeq};
-        Consumer<AgentEvent> ordered = ev -> {
-            synchronized (highest) {
-                if (ev.seq() > highest[0]) {
-                    highest[0] = ev.seq();
-                    listener.accept(ev);
-                }
-            }
-        };
-        run.listeners.add(ordered);
-        for (AgentEvent ev : events(chatId, afterSeq)) ordered.accept(ev);
+        OrderedListener ordered;
+        List<AgentEvent> replay;
+        // registration and snapshot under the lock that assigns seqs: every event is either replayed or delivered live
+        synchronized (run.events) {
+            long last = run.nextSeq - 1;
+            // a seq ahead of ours comes from before a restart (seqs start again at 1): replay everything buffered
+            long from = afterSeq > last ? 0 : Math.max(0, afterSeq);
+            replay = run.events.stream().filter(e -> e.seq() > from).toList();
+            ordered = new OrderedListener(listener, replay.isEmpty() ? run.nextSeq : replay.get(0).seq());
+            run.listeners.add(ordered);
+        }
+        try {
+            for (AgentEvent ev : replay) ordered.accept(ev);
+        } catch (RuntimeException e) {
+            run.listeners.remove(ordered);
+            throw e;
+        }
         return () -> run.listeners.remove(ordered);
     }
 

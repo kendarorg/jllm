@@ -36,7 +36,7 @@ flags as the CLI, without the prefix: `--provider openai`, `--sandbox docker`, `
 | `jllm.sandbox` | `local` | `local` or `docker` (`bash` in a container, chat directory mounted; see [SANDBOX](../docs/SANDBOX.md)); wins over the settings file |
 | `jllm.docker-image` | `python:3.12-slim` | image of the docker sandbox; wins over the settings file |
 | `jllm.docker-mode` | `oneshot` | `oneshot` or `daemon`: one long-running container per chat for `bash` and the file tools, removed with the chat (see [SANDBOX](../docs/SANDBOX.md)); wins over the settings file |
-| `jllm.docker-remote` | `false` | flag `--docker-remote`: docker on another machine; each chat's workspace is uploaded to its container and backed up under `<X>/<chatId>/.kendhar/` ([SANDBOX](../docs/SANDBOX.md#remote-docker)) |
+| `jllm.docker-remote` | `false` | flag `--docker-remote`: docker on another machine; each chat's workspace is uploaded to its container and backed up under `<X>/<chatId>/.jllm/` ([SANDBOX](../docs/SANDBOX.md#remote-docker)) |
 | `jllm.docker-remote-host` | from `DOCKER_HOST` | address where the remote host's published ports are reached |
 | `jllm.system-prompt-file` (flag `--system-prompt-file`) | none | file appended to the system prompt |
 | `jllm.system-prompt-replace` (flag `--system-prompt-replace`) | none | file that replaces the built-in system prompt |
@@ -46,7 +46,7 @@ flags as the CLI, without the prefix: `--provider openai`, `--sandbox docker`, `
 
 Also set: `server.port=8080` and `spring.mvc.async.request-timeout=-1` (SSE streams must not time out).
 
-The sandbox, history and scratch directories are the same as in the CLI (`.kendhar/` under the project directory).
+The sandbox, history and scratch directories are the same as in the CLI (`.jllm/` under the project directory).
 There is **no authentication**, and no isolation unless `--sandbox docker`: shell commands run as the user running the server. Bind it to
 localhost or put it behind your own proxy.
 

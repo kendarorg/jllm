@@ -19,9 +19,13 @@ import java.nio.file.attribute.AclEntryType;
 import java.nio.file.attribute.AclFileAttributeView;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
 
 /**
@@ -30,21 +34,31 @@ import java.util.function.Supplier;
  */
 public final class TokenStore {
 
+    /**
+     * File locks belong to the whole JVM (a second {@code lock()} on the same file throws
+     * {@link java.nio.channels.OverlappingFileLockException}), so every store on a file shares one in-process lock.
+     */
+    private static final Map<Path, ReentrantLock> LOCKS = new ConcurrentHashMap<>();
+    /** Lock files the current thread already holds, across all stores: nested calls run without locking again. */
+    private static final ThreadLocal<Set<Path>> HOLDING = ThreadLocal.withInitial(HashSet::new);
+    private static final Map<Path, TokenStore> SHARED = new ConcurrentHashMap<>();
+
     private final Path file;
+    private final Path lockFile;
     private final ObjectMapper mapper = new ObjectMapper();
-    private final Object monitor = new Object();
-    private final ThreadLocal<Boolean> holding = ThreadLocal.withInitial(() -> false);
 
     public TokenStore(Path file) {
         this.file = file;
+        this.lockFile = file.toAbsolutePath().normalize().resolveSibling(file.getFileName() + ".lock");
     }
 
     public static Path defaultFile() {
         return Path.of(System.getProperty("jllm.home", System.getProperty("user.home")), ".jllm", "auth.json");
     }
 
+    /** The store on {@link #defaultFile()}, one instance per file for the whole JVM. */
     public static TokenStore defaultStore() {
-        return new TokenStore(defaultFile());
+        return SHARED.computeIfAbsent(defaultFile().toAbsolutePath().normalize(), TokenStore::new);
     }
 
     public Optional<OAuthToken> get(String name) {
@@ -74,27 +88,29 @@ public final class TokenStore {
     }
 
     /**
-     * Runs {@code action} holding the in-process monitor and the inter-process file lock; reads inside see other
-     * processes' writes. Re-entrant on the same thread.
+     * Runs {@code action} holding the in-process lock and the inter-process file lock; reads inside see other
+     * processes' writes. Re-entrant on the same thread, also across stores on the same file.
      */
     public <T> T locked(Supplier<T> action) {
-        if (holding.get()) return action.get();
-        synchronized (monitor) {
-            try {
-                Files.createDirectories(file.toAbsolutePath().getParent());
-                Path lock = file.resolveSibling(file.getFileName() + ".lock");
-                try (FileChannel ch = FileChannel.open(lock, StandardOpenOption.CREATE, StandardOpenOption.WRITE);
-                     FileLock l = ch.lock()) {
-                    holding.set(true);
-                    try {
-                        return action.get();
-                    } finally {
-                        holding.set(false);
-                    }
+        Set<Path> held = HOLDING.get();
+        if (held.contains(lockFile)) return action.get();
+        ReentrantLock lock = LOCKS.computeIfAbsent(lockFile, k -> new ReentrantLock());
+        lock.lock();
+        try {
+            Files.createDirectories(lockFile.getParent());
+            try (FileChannel ch = FileChannel.open(lockFile, StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+                 FileLock l = ch.lock()) {
+                held.add(lockFile);
+                try {
+                    return action.get();
+                } finally {
+                    held.remove(lockFile);
                 }
-            } catch (IOException e) {
-                throw new UncheckedIOException("Cannot lock " + file, e);
             }
+        } catch (IOException e) {
+            throw new UncheckedIOException("Cannot lock " + file, e);
+        } finally {
+            lock.unlock();
         }
     }
 

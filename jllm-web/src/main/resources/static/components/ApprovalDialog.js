@@ -18,25 +18,34 @@ export default {
     })));
 
     const otherDir = ref('');
-    watch(a, () => { otherDir.value = ''; });
+    const error = ref('');   // the server's reason for refusing an answer (the dialog stays open)
+    watch(a, () => { otherDir.value = ''; error.value = ''; });
+    watch(otherDir, () => { error.value = ''; });
+    const answer = async (...args) => {
+      error.value = '';
+      const refused = await resolveApproval(...args);
+      if (refused) error.value = refused;
+    };
     const approve = (remember = false, rememberDir = false) =>
-      resolveApproval(a.value, true, ['context', 'continue'].includes(a.value.type) ? edited.value : null, remember, rememberDir);
+      answer(a.value, true, ['context', 'continue'].includes(a.value.type) ? edited.value : null, remember, rememberDir);
     // A typed folder (relative to the project) replaces the offered one, as 'd <path>' in the CLI
     const approveDir = (typed = false) => {
       const t = typed ? otherDir.value.trim().replace(/\\/g, '/') : '';
-      // same rules as the server: absolute, '..' and .git grant nothing
+      // same rules as the server: absolute, '..' and .git grant nothing; the dialog stays open for a new choice
       if (typed && (t.startsWith('/') || /^[A-Za-z]:/.test(t)
           || t.split('/').some(s => s === '..' || s.toLowerCase() === '.git'))) {
-        toast('Path not allowed (absolute, ".." or .git): no folder granted', 'error');
+        error.value = 'Path not allowed (absolute, ".." or .git): no folder granted';
+        toast(error.value, 'error');
+        return;
       }
-      return resolveApproval(a.value, true, typed ? otherDir.value.trim() : null, false, true);
+      return answer(a.value, true, typed ? otherDir.value.trim() : null, false, true);
     };
-    const reject = () => resolveApproval(a.value, false);
+    const reject = () => answer(a.value, false);
 
     const onEsc = e => { if (e.key === 'Escape' && a.value) reject(); };
     onMounted(() => document.addEventListener('keydown', onEsc));
     onUnmounted(() => document.removeEventListener('keydown', onEsc));
-    return { a, edited, approveBtn, diffLines, approve, approveDir, otherDir, reject };
+    return { a, edited, approveBtn, diffLines, approve, approveDir, otherDir, reject, error };
   },
   template: `
   <div class="overlay" :class="{ show: a }" role="dialog" aria-modal="true" aria-labelledby="dlg-title">
@@ -54,6 +63,7 @@ export default {
         </div>
         <div v-else class="diff"><div v-for="(l, i) in diffLines" :key="i" :class="l.cls">{{ l.text }}</div></div>
       </div>
+      <p v-if="error" class="dialog-error" role="alert" style="color:var(--red);margin:0.5rem 0 0">{{ error }}</p>
       <div class="dialog-foot">
         <button class="btn-danger" @click="reject">Reject</button>
         <input v-if="a.writeDir" v-model="otherDir" placeholder="other project folder" aria-label="Other project folder to allow writes in">

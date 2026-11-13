@@ -9,6 +9,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Comparator;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Function;
 import java.util.stream.Stream;
 
@@ -30,24 +33,56 @@ public class FileStateStore implements StateStore {
     @Override
     public JsonNode load(String chatId, String name) {
         Path f = file(chatId, name);
-        if (!Files.isRegularFile(f)) return null;
+        ReentrantLock lock = lockOf(f);
+        lock.lock();
         try {
+            if (!Files.isRegularFile(f)) return null;
             return mapper.readTree(f.toFile());
         } catch (IOException e) {
             throw new UncheckedIOException("Cannot read " + f, e);
+        } finally {
+            lock.unlock();
         }
     }
 
+    /** One lock per document file, shared by every store of the process (several stores may share a root). */
+    private static final Map<Path, ReentrantLock> LOCKS = new ConcurrentHashMap<>();
+
+    private static ReentrantLock lockOf(Path f) {
+        return LOCKS.computeIfAbsent(f.toAbsolutePath().normalize(), k -> new ReentrantLock());
+    }
+
+    /**
+     * Writes a unique temporary file in the same directory, then moves it over the document (atomically when the file
+     * system can), under the document's lock: concurrent saves never share a temporary file or interleave.
+     */
     @Override
     public void save(String chatId, String name, JsonNode value) {
         Path f = file(chatId, name);
+        ReentrantLock lock = lockOf(f);
+        lock.lock();
+        Path tmp = null;
         try {
             Files.createDirectories(f.getParent());
-            Path tmp = f.resolveSibling(f.getFileName() + ".tmp");
+            tmp = Files.createTempFile(f.getParent(), f.getFileName().toString(), ".tmp");
             mapper.writeValue(tmp.toFile(), value);
-            Files.move(tmp, f, StandardCopyOption.REPLACE_EXISTING);
+            try {
+                Files.move(tmp, f, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (java.nio.file.AtomicMoveNotSupportedException e) {
+                Files.move(tmp, f, StandardCopyOption.REPLACE_EXISTING);
+            }
+            tmp = null;
         } catch (IOException e) {
             throw new UncheckedIOException("Cannot write " + f, e);
+        } finally {
+            if (tmp != null) {
+                try {
+                    Files.deleteIfExists(tmp);
+                } catch (IOException ignored) {
+                    // best effort
+                }
+            }
+            lock.unlock();
         }
     }
 

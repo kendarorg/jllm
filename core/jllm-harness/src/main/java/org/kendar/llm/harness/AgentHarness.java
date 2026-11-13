@@ -69,6 +69,7 @@ public final class AgentHarness {
     private org.kendar.llm.harness.llm.ModelSwitch modelSwitch;
     private int maxParallel;
     private org.kendar.llm.harness.tools.Checkpoints checkpoints;
+    private org.kendar.llm.harness.tools.StorageQuota quota;
     private final SlashCommands commands = new SlashCommands(this);
 
     private AgentHarness(AgentService service, ChatSessionService sessions, HarnessToolRegistry registry,
@@ -92,11 +93,15 @@ public final class AgentHarness {
 
     /** Starts a user turn asynchronously. @throws AgentService.RunAlreadyActiveException if the chat is busy */
     public void start(String chatId, String text) {
-        if (isRunning(chatId)) throw new AgentService.RunAlreadyActiveException(chatId);
+        // the checkpoint of the turn is opened by the run itself (beginTurn), once the run was accepted
+        service.start(chatId, text);
+    }
+
+    /** Opens the checkpoint of a new user turn: the first message of a run and every queued, steered or follow-up one. */
+    private void beginTurn(String chatId) {
         var files = sandbox.files(chatId, null); // non-null: the files are in a container
         if (files == null) checkpoints.beginTurn(chatId, sandbox.workDir(chatId));
         else checkpoints.beginTurn(chatId, files);
-        service.start(chatId, text);
     }
 
     /**
@@ -108,13 +113,24 @@ public final class AgentHarness {
     public org.kendar.llm.harness.tools.Checkpoints.UndoResult undo(String chatId, int turns) {
         if (isRunning(chatId)) throw new AgentService.RunAlreadyActiveException(chatId);
         var files = sandbox.files(chatId, null);
-        if (files != null) return checkpoints.undo(chatId, files, turns);
-        return checkpoints.undo(chatId, sandbox.workDir(chatId), turns);
+        try {
+            if (files != null) return checkpoints.undo(chatId, files, turns);
+            return checkpoints.undo(chatId, sandbox.workDir(chatId), turns);
+        } finally {
+            if (quota != null) quota.forget(chatId); // restored files change the storage size: measure it again
+        }
     }
 
-    /** Releases the sandbox (removes the web containers); a kept CLI container stays. Safe to call twice. */
+    /**
+     * Stops the MCP clients and releases the sandbox (removes the web containers); a kept CLI container stays. Safe
+     * to call twice.
+     */
     public void close() {
-        sandbox.close();
+        try {
+            sources.close();
+        } finally {
+            sandbox.close();
+        }
     }
 
     /**
@@ -148,10 +164,12 @@ public final class AgentHarness {
         return service.activeSubAgents(chatId);
     }
 
-    /** Deletes a chat with everything kept for it: log, context-strategy state, sub-agent runs. */
+    /**
+     * Deletes a chat with everything kept for it: log, sub-agent runs, and (through the delete listener registered by
+     * the builder) context-strategy state, grants, taint and storage accounting.
+     */
     public void deleteChat(String chatId) {
         service.cancel(chatId);
-        context.forget(chatId);
         subAgentRuns.deleteChat(chatId);
         sessions.delete(chatId);
     }
@@ -305,7 +323,8 @@ public final class AgentHarness {
 
     /** Slash commands shared by the command line and the web front end. */
     private java.util.Map<String, org.kendar.llm.harness.auth.OAuthLogin> logins = java.util.Map.of();
-    private final org.kendar.llm.harness.auth.TokenStore tokenStore = org.kendar.llm.harness.auth.TokenStore.defaultStore();
+    /** Shared with {@link ExternalSources}: a login and the MCP clients see the same tokens. */
+    private org.kendar.llm.harness.auth.TokenStore tokenStore;
 
     /** The logins {@code /login} can run: discovered {@link org.kendar.llm.harness.auth.OAuthLogin} services and MCP servers with oauth. */
     public java.util.Map<String, org.kendar.llm.harness.auth.OAuthLogin> logins() {
@@ -719,7 +738,12 @@ public final class AgentHarness {
             return this;
         }
 
-        /** @throws IllegalArgumentException on duplicate tool names; @throws IllegalStateException without a model */
+        /**
+         * @throws IllegalArgumentException on duplicate tool names
+         * @throws IllegalStateException without a model
+         * @throws org.kendar.llm.harness.integration.ToolNames.CollisionException when a tool of an MCP server or REST
+         *         API enabled at start takes a name already in use (the clients opened so far are closed)
+         */
         public AgentHarness build() {
             installPlugins();
             config = settings.applyTo(config);
@@ -739,6 +763,7 @@ public final class AgentHarness {
             if (maxParallel > 0) modelClient = new LimitedModelClient(modelClient, maxParallel);
             SandboxExecutor box = sandbox != null ? sandbox : new LocalDirSandboxExecutor(config);
             box.environmentWhitelist(settings.whitelistedEnvVars());
+            box.outputLogLimit(settings.sandboxOutputLogMaxBytes());
 
             org.kendar.llm.harness.tools.Checkpoints harnessCheckpoints = new org.kendar.llm.harness.tools.Checkpoints();
             List<HarnessTool> all = new ArrayList<>();
@@ -746,10 +771,11 @@ public final class AgentHarness {
             org.kendar.llm.harness.tools.StorageQuota quota =
                     new org.kendar.llm.harness.tools.StorageQuota(settings.storageMaxBytes(), box::chatStorage);
             if (standardTools) {
-                fileTools.addAll(new FileSystemAgentTools(documentReaders, harnessCheckpoints, quota).tools());
+                fileTools.addAll(new FileSystemAgentTools(documentReaders, harnessCheckpoints, quota,
+                        settings.filesMaxReadBytes()).tools());
                 all.addAll(fileTools);
                 all.addAll(new ShellAgentTools(box, config).tools());
-                all.addAll(new WebAgentTools(config, mapper, quota).tools());
+                all.addAll(new WebAgentTools(config, mapper, quota, settings.webFetchMaxBytes()).tools());
             }
             all.removeIf(t -> removedTools.contains(t.name()));
             all.addAll(tools);
@@ -762,8 +788,27 @@ public final class AgentHarness {
             org.kendar.llm.harness.auth.Identity identity = new org.kendar.llm.harness.auth.Identity(credentials,
                     userPolicies, principalDirectory,
                     chatId -> sessions.find(chatId).map(ChatSessionData::principal).orElse(null));
-            ExternalSources sources = new ExternalSources(registry, settings, HttpClient.newHttpClient(), mapper, identity);
+            org.kendar.llm.harness.auth.TokenStore tokenStore = org.kendar.llm.harness.auth.TokenStore.defaultStore();
+            ExternalSources sources = new ExternalSources(registry, settings, HttpClient.newHttpClient(), mapper,
+                    identity, tokenStore);
+            try {
+                return build(sources, tokenStore, registry, sessions, identity, permissionRules, skills, fileTools,
+                        harnessCheckpoints, quota, box, providers, modelSwitch, maxParallel);
+            } catch (RuntimeException | Error e) {
+                sources.close(); // the MCP processes started above must not outlive a failed build
+                throw e;
+            }
+        }
 
+        /** The steps of {@link #build()} after the external sources are connected. */
+        private AgentHarness build(ExternalSources sources, org.kendar.llm.harness.auth.TokenStore tokenStore,
+                                   HarnessToolRegistry registry, ChatSessionService sessions,
+                                   org.kendar.llm.harness.auth.Identity identity, PermissionRules permissionRules,
+                                   SkillCatalog skills, List<HarnessTool> fileTools,
+                                   org.kendar.llm.harness.tools.Checkpoints harnessCheckpoints,
+                                   org.kendar.llm.harness.tools.StorageQuota quota, SandboxExecutor box,
+                                   org.kendar.llm.harness.llm.ProviderCatalog providers,
+                                   org.kendar.llm.harness.llm.ModelSwitch modelSwitch, int maxParallel) {
             ApprovalService approvals = new ApprovalService(config.approvalTimeoutSeconds(), stateStore);
             ModelClient fast = fastClient != null ? fastClient
                     : settings.fastModel() != null ? ModelClients.from(settings.fastModel(), mapper) : null;
@@ -796,7 +841,8 @@ public final class AgentHarness {
                 chain.addAll(inputValidators);
                 loop.inputValidator(org.kendar.llm.harness.tools.ToolInputValidator.chain(chain));
             }
-            if (settings.noiseCommands()) {
+            if (settings.noiseCommands()
+                    && org.kendar.llm.harness.context.noise.NoiseCommandPruner.appliesTo(context.kind())) {
                 loop.noisePruner(new org.kendar.llm.harness.context.noise.NoiseCommandPruner(sessions,
                         new org.kendar.llm.harness.context.noise.NoiseQualifier(fast != null ? fast : modelClient),
                         mapper));
@@ -807,6 +853,19 @@ public final class AgentHarness {
             harness.permissionRules = permissionRules;
             harness.providers = providers;
             harness.checkpoints = harnessCheckpoints;
+            harness.quota = quota;
+            harness.tokenStore = tokenStore;
+            service.onTurnStart(harness::beginTurn);
+            // whatever path deletes a chat (REST, /chats, retention): drop what is kept for it in memory
+            sessions.onDelete(id -> {
+                context.forget(id);
+                approvals.forget(id);
+                loop.forgetTaint(id);
+                quota.forget(id);
+            });
+            // a login started from the web ended: tell the chat it was started from
+            harness.commands().onLoginFinished((chatId, msg) -> service.notify(chatId, "login",
+                    mapper.createObjectNode().put("message", msg).put("ok", msg != null && msg.startsWith("Logged in"))));
             harness.modelSwitch = modelSwitch;
             harness.maxParallel = maxParallel;
             java.util.Map<String, org.kendar.llm.harness.auth.OAuthLogin> found = new java.util.TreeMap<>();

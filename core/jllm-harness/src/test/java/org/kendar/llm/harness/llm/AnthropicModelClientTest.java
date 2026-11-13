@@ -177,6 +177,23 @@ class AnthropicModelClientTest {
     }
 
     @Test
+    void nonJson200FailsAtOnceWithTheBody() {
+        okBody = "<!doctype html><title>Captive portal</title>";
+        ModelException e = assertThrows(ModelException.class, () -> client(3, true, 0).complete(req(null, false)));
+        assertTrue(e.getMessage().contains("non-JSON"), e.getMessage());
+        assertTrue(e.getMessage().contains("Captive portal"), e.getMessage());
+        assertEquals(1, calls.get());
+    }
+
+    @Test
+    void errorInside200IsReported() {
+        okBody = "{\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}";
+        ModelException e = assertThrows(ModelException.class, () -> client(3, true, 0).complete(req(null, false)));
+        assertTrue(e.getMessage().contains("overloaded_error: Overloaded"), e.getMessage());
+        assertEquals(1, calls.get());
+    }
+
+    @Test
     void preservesAllStopReasons() throws Exception {
         for (String stop : List.of("max_tokens", "pause_turn", "refusal", "stop_sequence", "tool_use")) {
             okBody = "{\"content\":[],\"stop_reason\":\"" + stop + "\",\"usage\":{}}";

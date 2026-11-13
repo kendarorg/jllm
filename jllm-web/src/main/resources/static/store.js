@@ -3,7 +3,7 @@ import {api, post} from './api.js';
 import {reactive} from 'vue';
 
 const EVENTS = ['run_started', 'text', 'tool_call', 'tool_result', 'approval_request', 'usage', 'compaction',
-  'warning', 'error', 'cancelled', 'run_finished', 'plan_ready'];
+  'warning', 'error', 'cancelled', 'run_finished', 'plan_ready', 'login'];
 
 let uid = 0;
 const nextKey = () => ++uid;
@@ -121,8 +121,22 @@ function renderHistory(messages, refs) {
 // ── sessions ────────────────────────────────────────────────────────────────
 export const loadSessions = guard(async () => { store.sessions = await api('/api/chat'); });
 
+// Each openChat takes a token; an older call that resumes after a newer one (or a close) started drops its result.
+let openToken = 0;
+let openAbort = null;
+
+function cancelOpen() {
+  openToken++;
+  if (openAbort) { openAbort.abort(); openAbort = null; }
+}
+
+function closeStream() {
+  if (es) { es.close(); es = null; }
+}
+
 export function closeChat() {
-  if (es) es.close();
+  cancelOpen();
+  closeStream();
   remember(null);
   delete store.tabs[store.chatId];
   store.chatId = null; store.items = []; store.usage = null; group = null;
@@ -140,23 +154,38 @@ export const deleteChat = guard(async id => {
 });
 
 export async function openChat(id) {
-  if (es) es.close();
+  cancelOpen();
+  const token = openToken;
+  const ctl = new AbortController();
+  openAbort = ctl;
+  const current = () => token === openToken;
+  closeStream();
   if (!store.tabs[id]) store.tabs[id] = 'chat';   // never opened before: start on Chat; otherwise keep its own tab
   store.chatId = id; store.approvals = []; store.menuOpen = false; group = null; store.items = []; store.resumeOffer = null;
+  store.msgCount = undefined;   // the poll must not compare the new chat against the old count while loading
   remember(id);
-  const s = await api('/api/chat/' + id);
-  let refs = [];
-  try { refs = await api('/api/chat/' + id + '/references'); } catch (e) { /* optional */ }
-  // idle chat: history is complete, so skip replaying buffered events (they would show twice)
-  store.lastSeq = s.running ? 0 : (s.lastSeq || 0);
-  store.msgCount = s.messages.length;
-  store.mode = s.mode;
-  renderHistory(s.messages, refs);
-  store.usage = s.usage;
-  store.running = s.running;
-  (s.pendingApprovals || []).forEach(enqueueApproval);
-  connect();
-  loadSessions();
+  try {
+    const s = await api('/api/chat/' + id, { signal: ctl.signal });
+    if (!current()) return;
+    let refs = [];
+    try { refs = await api('/api/chat/' + id + '/references', { signal: ctl.signal }); } catch (e) { /* optional */ }
+    if (!current()) return;
+    // idle chat: history is complete, so skip replaying buffered events (they would show twice)
+    store.lastSeq = s.running ? 0 : (s.lastSeq || 0);
+    store.msgCount = s.messages.length;
+    store.mode = s.mode;
+    renderHistory(s.messages, refs);
+    store.usage = s.usage;
+    store.running = s.running;
+    (s.pendingApprovals || []).forEach(enqueueApproval);
+    connect();
+    loadSessions();
+  } catch (e) {
+    if (!current() || e.name === 'AbortError') return;   // superseded by a newer openChat or a close
+    throw e;
+  } finally {
+    if (openAbort === ctl) openAbort = null;
+  }
 }
 
 // ── events ──────────────────────────────────────────────────────────────────
@@ -179,6 +208,7 @@ function handleEvent(ev) {
     case 'compaction': addMsg('notice', 'Context compacted (tier ' + (d.tier ?? d.kind ?? '?') + ')'); break;
     case 'plan_ready': addMsg('notice', d.message); break;
     case 'warning': addMsg('notice', d.message); break;
+    case 'login': addMsg(d.ok ? 'notice' : 'error', d.message); toast(d.message, d.ok ? '' : 'error'); break;
     case 'error': addMsg('error', d.message); break;
     case 'cancelled': addMsg('notice', 'Cancelled.'); break;
     case 'run_finished':
@@ -188,18 +218,25 @@ function handleEvent(ev) {
 }
 
 function connect() {
+  closeStream();   // at most one stream: a second connect must not leak the first
   const id = store.chatId;
+  if (!id) return;
   const source = new EventSource(`/api/chat/${id}/events?after=${store.lastSeq}`);
   es = source;
   EVENTS.forEach(t => source.addEventListener(t, e => {
-    if (store.chatId !== id) return;
+    if (es !== source || store.chatId !== id) return;
     const ev = JSON.parse(e.data);
     if (ev.seq <= store.lastSeq) return;
+    // events were lost (buffer trimmed, server restarted): an approval_request may be among them
+    if (ev.seq > store.lastSeq + 1) syncApprovals(id);
     store.lastSeq = ev.seq; handleEvent(ev);
   }));
+  // every (re)connect: approvals asked while the stream was down are not replayed if their event is gone
+  source.onopen = () => { if (es === source && store.chatId === id) syncApprovals(id); };
   source.onerror = () => {
-    if (source.readyState === EventSource.CLOSED && store.chatId === id) {
-      setTimeout(() => store.chatId === id && connect(), 2000);
+    // only the live stream reconnects; a replaced or closed one stays dead
+    if (source.readyState === EventSource.CLOSED && es === source && store.chatId === id) {
+      setTimeout(() => { if (es === source && store.chatId === id) connect(); }, 2000);
     }
   };
 }
@@ -294,10 +331,31 @@ function enqueueApproval(a) {
   if (!store.approvals.some(x => x.id === a.id)) store.approvals.push(a);
 }
 
+/**
+ * Brings the queue in line with the server's pending approvals: the ones answered elsewhere go, missed ones are
+ * added. A queued entry is kept as it is (its event may carry more, e.g. writeDir).
+ */
+async function syncApprovals(id) {
+  let pending;
+  try { pending = await api(`/api/chat/${id}/approvals`); } catch (e) { return; /* next reconnect or gap retries */ }
+  if (store.chatId !== id || !Array.isArray(pending)) return;
+  const ids = new Set(pending.map(p => p.id));
+  store.approvals = store.approvals.filter(x => ids.has(x.id));
+  pending.forEach(enqueueApproval);
+}
+
+/**
+ * Returns the server's error text when it refused the answer as invalid (400, e.g. a typed folder outside the
+ * project): the approval then stays open for a new choice. Otherwise the approval leaves the queue and null is returned.
+ */
 export async function resolveApproval(a, approved, editedText, remember = false, rememberDir = false) {
   try {
     await post(`/api/chat/${store.chatId}/approvals/${a.id}`, { approved, editedText: approved ? editedText ?? null : null,
       remember: approved && remember, rememberDir: approved && rememberDir });
-  } catch (e) { toast(e.message, 'error'); }
+  } catch (e) {
+    toast(e.message, 'error');
+    if (e.status === 400) return e.message;
+  }
   store.approvals = store.approvals.filter(x => x.id !== a.id);
+  return null;
 }

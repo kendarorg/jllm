@@ -61,6 +61,14 @@ public class AnthropicModelClient implements ModelClient {
         }
         ObjectNode body = buildBody(req);
         JsonNode json = send(body, cancel);
+        // a proxy may answer 200 with an error body ({"type":"error","error":{...}})
+        if ("error".equals(json.path("type").asText()) || json.path("error").isObject()) {
+            JsonNode err = json.path("error");
+            String type = err.path("type").asText("");
+            String message = err.path("message").asText("");
+            throw new ModelException("Anthropic API error: " + (type.isEmpty() ? "" : type + ": ")
+                    + (message.isEmpty() ? truncate(json.toString()) : truncate(message)));
+        }
 
         ArrayNode content = json.path("content").isArray() ? (ArrayNode) json.get("content") : mapper.createArrayNode();
         JsonNode u = json.path("usage");
@@ -288,7 +296,7 @@ public class AnthropicModelClient implements ModelClient {
                 HttpResponse<String> resp = cancel.send(http, request);
                 int status = resp.statusCode();
                 if (status == 200) {
-                    return mapper.readTree(resp.body());
+                    return readJson(resp.body());
                 }
                 if (status == 401 && auth != null && !authRetried) {
                     authRetried = true;
@@ -325,6 +333,17 @@ public class AnthropicModelClient implements ModelClient {
                 }
             }
         }
+    }
+
+    /** A 200 body must be a JSON object; anything else (HTML from a proxy or a wrong baseUrl) fails at once. */
+    private JsonNode readJson(String body) {
+        try {
+            JsonNode json = body == null ? null : mapper.readTree(body);
+            if (json != null && json.isObject()) return json;
+        } catch (IOException e) {
+            // not JSON: reported below
+        }
+        throw new ModelException("Anthropic API returned a non-JSON response (check baseUrl): " + truncate(body));
     }
 
     private static long parseSeconds(String v) {

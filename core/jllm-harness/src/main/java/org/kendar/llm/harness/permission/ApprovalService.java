@@ -162,10 +162,42 @@ public class ApprovalService {
             if (!p.startsWith(root)) return null;
             java.nio.file.Path dir = root.relativize(p).getParent();
             if (dir == null) return ".";
-            for (java.nio.file.Path seg : dir) if (seg.toString().equalsIgnoreCase(".git")) return null;
+            for (java.nio.file.Path seg : dir) if (isGitName(seg.toString())) return null;
+            if (realPathInGit(root, root.resolve(dir))) return null;
             return dir.toString().replace('\\', '/');
         } catch (java.nio.file.InvalidPathException e) {
             return null;
+        }
+    }
+
+    /**
+     * True for a path segment that names, or on Windows may alias, a {@code .git} directory: compared case-insensitively
+     * after dropping trailing dots and spaces ({@code .git.}, {@code .GIT }), and 8.3 short names ({@code GIT~1}).
+     * Applied on every platform: refusing a grant there is harmless.
+     */
+    static boolean isGitName(String segment) {
+        String s = segment.strip();
+        int end = s.length();
+        while (end > 0 && (s.charAt(end - 1) == '.' || s.charAt(end - 1) == ' ')) end--;
+        String t = s.substring(0, end).toLowerCase(java.util.Locale.ROOT);
+        int colon = t.indexOf(':'); // NTFS stream: ".git::$INDEX_ALLOCATION"
+        if (colon >= 0) t = t.substring(0, colon);
+        return t.equals(".git") || t.matches("git~\\d+");
+    }
+
+    /** True when the deepest existing ancestor of {@code p} really lies inside a {@code .git} directory (short names). */
+    private static boolean realPathInGit(java.nio.file.Path root, java.nio.file.Path p) {
+        try {
+            java.nio.file.Path q = p;
+            while (q != null && q.startsWith(root) && !java.nio.file.Files.exists(q)) q = q.getParent();
+            if (q == null || !q.startsWith(root)) return false;
+            java.nio.file.Path realRoot = root.toRealPath();
+            java.nio.file.Path real = q.toRealPath();
+            if (!real.startsWith(realRoot)) return true; // a link out of the work dir: not grantable either
+            for (java.nio.file.Path seg : realRoot.relativize(real)) if (isGitName(seg.toString())) return true;
+            return false;
+        } catch (java.io.IOException | SecurityException e) {
+            return false; // the lexical check above already ran
         }
     }
 
@@ -179,12 +211,13 @@ public class ApprovalService {
         if (t.isEmpty() || t.startsWith("/") || t.matches("^[A-Za-z]:.*")) return null;
         for (String seg : t.split("/")) {
             if (seg.equals("..")) return null;
-            if (seg.equalsIgnoreCase(".git")) return null;
+            if (isGitName(seg)) return null;
         }
         try {
             java.nio.file.Path root = workDir.toAbsolutePath().normalize();
             java.nio.file.Path p = root.resolve(t).normalize();
             if (!p.startsWith(root)) return null;
+            if (realPathInGit(root, p)) return null;
             java.nio.file.Path rel = root.relativize(p);
             return rel.toString().isEmpty() ? "." : rel.toString().replace('\\', '/');
         } catch (java.nio.file.InvalidPathException e) {
@@ -227,10 +260,12 @@ public class ApprovalService {
 
     public void grant(String chatId, String tool) {
         Set<String> g = grantsOf(chatId);
-        if (g.add(tool)) {
-            com.fasterxml.jackson.databind.node.ArrayNode a = MAPPER.createArrayNode();
-            new java.util.TreeSet<>(g).forEach(a::add);
-            state.save(chatId, GRANTS, a);
+        synchronized (g) { // the saved snapshot always includes every grant added before it
+            if (g.add(tool)) {
+                com.fasterxml.jackson.databind.node.ArrayNode a = MAPPER.createArrayNode();
+                new java.util.TreeSet<>(g).forEach(a::add);
+                state.save(chatId, GRANTS, a);
+            }
         }
     }
 
@@ -245,15 +280,81 @@ public class ApprovalService {
         return "cmd:" + tool + ":" + command;
     }
 
-    /** Stores an approved command verbatim so the same command is not asked again; ignored at 512 chars or more. */
-    public void grantCommand(String chatId, String tool, String command) {
-        if (command == null || command.isEmpty() || command.length() >= MAX_COMMAND_GRANT) return;
-        grant(chatId, commandKey(tool, command));
+    private static String prefixKey(String tool, String prefix) {
+        return "cmdprefix:" + tool + ":" + prefix;
     }
 
+    /**
+     * The stored form of a command: surrounding whitespace removed and runs of blanks (space, tab) outside quotes
+     * collapsed to one space, so {@code ls  -la } and {@code ls -la} are one grant. Quoted text, newlines and every
+     * other character are kept as they are. Null when the command cannot be granted (blank, or 512 chars or more).
+     */
+    public static String normalizeCommand(String command) {
+        if (command == null) return null;
+        String c = command.strip();
+        if (c.isEmpty()) return null;
+        StringBuilder sb = new StringBuilder(c.length());
+        char quote = 0;
+        boolean blank = false;
+        for (int i = 0; i < c.length(); i++) {
+            char ch = c.charAt(i);
+            if (quote == 0 && (ch == ' ' || ch == '\t')) {
+                blank = true;
+                continue;
+            }
+            if (blank) {
+                sb.append(' ');
+                blank = false;
+            }
+            sb.append(ch);
+            if (ch == '\\' && quote != '\'' && i + 1 < c.length()) {
+                sb.append(c.charAt(++i));
+                continue;
+            }
+            if (quote == 0 && (ch == '\'' || ch == '"')) quote = ch;
+            else if (ch == quote) quote = 0;
+        }
+        String n = sb.toString();
+        return n.length() >= MAX_COMMAND_GRANT ? null : n;
+    }
+
+    /** Characters that chain, substitute or redirect: a command holding one is never covered by a prefix grant. */
+    private static final java.util.regex.Pattern SHELL_META = java.util.regex.Pattern.compile("[;&|`$<>\\n\\r(){}]");
+
+    /** Stores an approved command (normalized) so the same command is not asked again; ignored at 512 chars or more. */
+    public void grantCommand(String chatId, String tool, String command) {
+        String n = normalizeCommand(command);
+        if (n != null) grant(chatId, commandKey(tool, n));
+    }
+
+    /**
+     * Allows every command that is {@code prefix} or {@code prefix} followed by plain arguments (e.g. {@code git status}
+     * covers {@code git status --short}); a command with shell operators, substitutions or redirections is never
+     * covered. The prefix itself must be free of them.
+     *
+     * @return false when the prefix cannot be granted
+     */
+    public boolean grantCommandPrefix(String chatId, String tool, String prefix) {
+        String n = normalizeCommand(prefix);
+        if (n == null || SHELL_META.matcher(n).find()) return false;
+        grant(chatId, prefixKey(tool, n));
+        return true;
+    }
+
+    /** True when the command, normalized, was approved before: as the same command or under a prefix grant. */
     public boolean commandGranted(String chatId, String tool, String command) {
-        if (command == null || command.length() >= MAX_COMMAND_GRANT) return false;
-        return granted(chatId, commandKey(tool, command));
+        String n = normalizeCommand(command);
+        if (n == null) return false;
+        Set<String> g = grantsOf(chatId);
+        if (g.contains(commandKey(tool, n)) || g.contains(commandKey(tool, command))) return true;
+        if (SHELL_META.matcher(n).find()) return false;
+        String p = prefixKey(tool, "");
+        for (String grant : g) {
+            if (!grant.startsWith(p)) continue;
+            String prefix = grant.substring(p.length());
+            if (n.equals(prefix) || n.startsWith(prefix + " ")) return true;
+        }
+        return false;
     }
 
     private Set<String> grantsOf(String chatId) {

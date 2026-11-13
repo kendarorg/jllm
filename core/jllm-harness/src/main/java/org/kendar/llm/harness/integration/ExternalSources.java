@@ -1,5 +1,6 @@
 package org.kendar.llm.harness.integration;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.kendar.llm.harness.auth.AuthProvider;
 import org.kendar.llm.harness.auth.McpOAuthLogin;
@@ -9,6 +10,9 @@ import org.kendar.llm.harness.settings.McpServerSettings;
 import org.kendar.llm.harness.settings.RestApiSettings;
 import org.kendar.llm.harness.tools.HarnessTool;
 import org.kendar.llm.harness.tools.HarnessToolRegistry;
+import org.kendar.llm.harness.tools.ToolContext;
+import org.kendar.llm.harness.tools.ToolKind;
+import org.kendar.llm.harness.tools.TruncationMode;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -16,15 +20,24 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 /**
  * The MCP servers and REST APIs of a harness. Enabling a source discovers its tools and registers them; disabling
  * unregisters them. State is in memory: the {@code enabled} flag of the settings is only the startup default.
+ * <p>
+ * Two tools with the same name (after sanitizing) are a configuration error: at construction it is thrown as a
+ * {@link ToolNames.CollisionException} after every opened client was closed; at runtime {@link #enable} refuses the
+ * source. An MCP server lost for good (see {@link McpToolProvider#connect}) disables its source and warns the run that
+ * hit the failure. {@link #close()} stops every MCP client (and so every stdio server process).
  */
-public final class ExternalSources {
+public final class ExternalSources implements AutoCloseable {
 
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(ExternalSources.class);
+
+    /** The context of the external tool call running on this thread: where a warning of that call goes. */
+    private static final ThreadLocal<ToolContext> CALLER = new ThreadLocal<>();
 
     public enum Kind {
         MCP("mcp"), API("api");
@@ -48,15 +61,20 @@ public final class ExternalSources {
         final String name;
         final Supplier<List<HarnessTool>> discover;
         final Supplier<String> probe;
+        final boolean startEnabled;
         boolean enabled;
         int tools;
+        /** Names of the tools now in the registry for this source. */
+        Set<String> registered = Set.of();
         String error;
 
-        Source(Kind kind, String name, Supplier<List<HarnessTool>> discover, Supplier<String> probe) {
+        Source(Kind kind, String name, Supplier<List<HarnessTool>> discover, Supplier<String> probe,
+               boolean startEnabled) {
             this.kind = kind;
             this.name = name;
             this.discover = discover;
             this.probe = probe;
+            this.startEnabled = startEnabled;
         }
     }
 
@@ -65,9 +83,11 @@ public final class ExternalSources {
     private final ObjectMapper mapper;
     private final Map<String, Source> sources = new LinkedHashMap<>();
     private final Map<String, McpClient> connections = new HashMap<>();
+    private final ToolNames.Claims claims = new ToolNames.Claims();
     private final java.util.List<String> toolEnv;
-
     private final org.kendar.llm.harness.auth.Identity identity;
+    private TokenStore tokenStore;
+    private boolean closed;
 
     public ExternalSources(HarnessToolRegistry registry, HarnessSettings settings, HttpClient http,
                            ObjectMapper mapper) {
@@ -77,25 +97,47 @@ public final class ExternalSources {
     /** @param identity who each MCP and REST call is made for; the single-user default is {@code Identity.ANONYMOUS} */
     public ExternalSources(HarnessToolRegistry registry, HarnessSettings settings, HttpClient http,
                            ObjectMapper mapper, org.kendar.llm.harness.auth.Identity identity) {
+        this(registry, settings, http, mapper, identity, null);
+    }
+
+    /**
+     * @param tokenStore where the OAuth tokens of MCP servers are kept, shared with the rest of the harness; null: one
+     *                   {@link TokenStore#defaultStore()}, created on first use and shared by every server
+     * @throws ToolNames.CollisionException when two tools of the sources enabled at start get the same name, or one
+     *                                      takes the name of a harness tool; every client opened is closed first
+     */
+    public ExternalSources(HarnessToolRegistry registry, HarnessSettings settings, HttpClient http,
+                           ObjectMapper mapper, org.kendar.llm.harness.auth.Identity identity,
+                           TokenStore tokenStore) {
         this.registry = registry;
         this.toolEnv = settings.toolsWhitelistedEnvVars();
         this.http = http;
         this.mapper = mapper;
         this.identity = identity;
-        for (McpServerSettings m : settings.mcpServers()) {
-            add(new Source(Kind.MCP, m.name(), () -> mcpDiscover(m), () -> mcpProbe(m)), m.active());
-        }
-        for (RestApiSettings a : settings.restApis()) {
-            add(new Source(Kind.API, a.name(), () -> RestApiToolProvider.discover(a, http, mapper, identity),
-                    () -> apiProbe(a)), a.active());
+        this.tokenStore = tokenStore;
+        try {
+            for (McpServerSettings m : settings.mcpServers()) {
+                add(new Source(Kind.MCP, m.name(), () -> mcpDiscover(m), () -> mcpProbe(m), m.active()));
+            }
+            for (RestApiSettings a : settings.restApis()) {
+                add(new Source(Kind.API, a.name(), () -> RestApiToolProvider.discover(a, http, mapper, identity, claims),
+                        () -> apiProbe(a), a.active()));
+            }
+            synchronized (this) {
+                for (Source s : sources.values()) {
+                    if (s.startEnabled) enable(s, true);
+                }
+            }
+        } catch (RuntimeException e) {
+            close();
+            throw e;
         }
     }
 
-    private void add(Source s, boolean startEnabled) {
+    private void add(Source s) {
         if (sources.putIfAbsent(key(s.kind, s.name), s) != null) {
             throw new IllegalArgumentException("Duplicate " + s.kind.prefix + " source '" + s.name + "'");
         }
-        if (startEnabled) enable(s.kind, s.name);
     }
 
     public synchronized List<Status> list(Kind kind) {
@@ -106,29 +148,65 @@ public final class ExternalSources {
         return out;
     }
 
-    /** @return null on success, else why the source stays disabled */
+    /**
+     * A failure, a name collision included, leaves the source disabled.
+     *
+     * @return null on success, else why the source stays disabled
+     */
     public synchronized String enable(Kind kind, String name) {
         Source s = require(kind, name);
+        if (closed) return "external sources are closed";
+        return enable(s, false);
+    }
+
+    /** @param startup a name collision is thrown instead of returned */
+    private String enable(Source s, boolean startup) {
+        String key = key(s.kind, s.name);
         try {
             List<HarnessTool> tools = s.discover.get();
-            registry.setSource(key(kind, name), tools);
+            checkHarnessNames(s, tools);
+            registry.setSource(key, tools);
             s.enabled = true;
             s.tools = tools.size();
+            Set<String> names = new HashSet<>();
+            tools.forEach(t -> names.add(t.name()));
+            s.registered = names;
             s.error = null;
             return null;
         } catch (RuntimeException e) {
-            s.enabled = false;
+            drop(s);
             s.error = String.valueOf(e.getMessage());
+            if (e instanceof ToolNames.CollisionException) {
+                if (startup) throw e;
+                log.warn("{} source '{}' not enabled: {}", s.kind.prefix, s.name, s.error);
+            }
             return s.error;
         }
     }
 
+    /** A tool of the source must not take the name of a tool of the harness (standard, injected or plugin). */
+    private void checkHarnessNames(Source s, List<HarnessTool> tools) {
+        for (HarnessTool t : tools) {
+            if (registry.get(t.name()) == null || s.registered.contains(t.name())) continue;
+            String mine = claims.owner(t.name());
+            throw new ToolNames.CollisionException(t.name(), "harness tool '" + t.name() + "'",
+                    mine != null ? mine : s.kind.prefix + " source '" + s.name + "' tool '" + t.name() + "'");
+        }
+    }
+
     public synchronized void disable(Kind kind, String name) {
-        Source s = require(kind, name);
-        registry.removeSource(key(kind, name));
-        closeConnection(key(kind, name));
+        drop(require(kind, name));
+    }
+
+    /** Unregisters the tools of the source, frees their names and closes its connection. Lock held. */
+    private void drop(Source s) {
+        String key = key(s.kind, s.name);
+        registry.removeSource(key);
+        claims.release(key);
+        closeConnection(key);
         s.enabled = false;
         s.tools = 0;
+        s.registered = Set.of();
     }
 
     /** Whether the source answers. Does not change what is registered. */
@@ -154,6 +232,19 @@ public final class ExternalSources {
         }
     }
 
+    /** Closes every MCP client, stopping the stdio server processes. Safe to call twice; enable is refused after. */
+    @Override
+    public void close() {
+        List<McpClient> open;
+        synchronized (this) {
+            if (closed) return;
+            closed = true;
+            open = new ArrayList<>(connections.values());
+            connections.clear();
+        }
+        open.forEach(ExternalSources::closeQuietly);
+    }
+
     private Source require(Kind kind, String name) {
         Source s = sources.get(key(kind, name));
         if (s == null) throw new IllegalArgumentException("Unknown " + kind.prefix + " '" + name + "'");
@@ -164,18 +255,26 @@ public final class ExternalSources {
         return kind.prefix + ":" + name;
     }
 
+    private synchronized TokenStore tokenStore() {
+        if (tokenStore == null) tokenStore = TokenStore.defaultStore();
+        return tokenStore;
+    }
+
     private AuthProvider mcpOAuth(McpServerSettings m) {
-        return new McpOAuthLogin(m.name(), m.url(), http, mapper).authProvider(TokenStore.defaultStore());
+        return new McpOAuthLogin(m.name(), m.url(), http, mapper).authProvider(tokenStore());
     }
 
     private List<HarnessTool> mcpDiscover(McpServerSettings m) {
         String key = key(Kind.MCP, m.name());
-        McpClient client = McpToolProvider.connect(m, http, mapper, toolEnv, this::mcpOAuth);
+        AtomicReference<McpClient> self = new AtomicReference<>();
+        McpClient client = McpToolProvider.connect(m, http, mapper, toolEnv, this::mcpOAuth,
+                reason -> onMcpUnavailable(m.name(), self.get(), reason));
+        self.set(client);
         try {
-            List<HarnessTool> tools = McpToolProvider.tools(m, client, mapper, identity);
+            List<HarnessTool> tools = McpToolProvider.tools(m, client, mapper, identity, claims);
             closeConnection(key);
             connections.put(key, client);
-            return tools;
+            return wrap(tools);
         } catch (java.io.IOException e) {
             closeQuietly(client);
             throw new IllegalStateException(e.getMessage(), e);
@@ -183,6 +282,32 @@ public final class ExternalSources {
             closeQuietly(client);
             Thread.currentThread().interrupt();
             throw new IllegalStateException("interrupted", e);
+        } catch (RuntimeException e) {
+            closeQuietly(client);
+            throw e;
+        }
+    }
+
+    /**
+     * The client of an enabled MCP server gave up (session lost, process not restartable): the source is disabled and
+     * the run whose call failed is warned. Runs on the thread of that call, outside the client's locks.
+     */
+    private void onMcpUnavailable(String name, McpClient client, String reason) {
+        String key = key(Kind.MCP, name);
+        synchronized (this) {
+            Source s = sources.get(key);
+            if (s == null || closed || client == null || connections.get(key) != client) return; // stale client
+            drop(s);
+            s.error = reason;
+        }
+        String message = "MCP server '" + name + "' disabled: " + reason + " (re-enable it with /mcp)";
+        log.warn(message);
+        ToolContext caller = CALLER.get();
+        if (caller == null || caller.run() == null || caller.run().sink() == null) return;
+        try {
+            caller.run().sink().emit("warning", mapper.createObjectNode().put("message", message));
+        } catch (RuntimeException e) {
+            log.debug("Cannot emit MCP warning: {}", e.toString());
         }
     }
 
@@ -224,6 +349,62 @@ public final class ExternalSources {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("interrupted", e);
+        }
+    }
+
+    private static List<HarnessTool> wrap(List<HarnessTool> tools) {
+        List<HarnessTool> out = new ArrayList<>(tools.size());
+        for (HarnessTool t : tools) out.add(new CallerTracking(t));
+        return out;
+    }
+
+    /** Makes the context of a running MCP call visible to {@link #onMcpUnavailable}, which runs on its thread. */
+    private record CallerTracking(HarnessTool tool) implements HarnessTool {
+        @Override
+        public String name() {
+            return tool.name();
+        }
+
+        @Override
+        public String description() {
+            return tool.description();
+        }
+
+        @Override
+        public JsonNode inputSchema() {
+            return tool.inputSchema();
+        }
+
+        @Override
+        public String group() {
+            return tool.group();
+        }
+
+        @Override
+        public ToolKind kind() {
+            return tool.kind();
+        }
+
+        @Override
+        public TruncationMode truncation() {
+            return tool.truncation();
+        }
+
+        @Override
+        public String execute(ToolContext ctx, JsonNode input) throws Exception {
+            ToolContext previous = CALLER.get();
+            CALLER.set(ctx);
+            try {
+                return tool.execute(ctx, input);
+            } finally {
+                if (previous == null) CALLER.remove();
+                else CALLER.set(previous);
+            }
+        }
+
+        @Override
+        public String preview(ToolContext ctx, JsonNode input) {
+            return tool.preview(ctx, input);
         }
     }
 }

@@ -95,7 +95,7 @@ flowchart TD
     M --> N["AgentHarness + plugin commands registered"]
 ```
 
-`jllm-cli` Main additionally wires `CwdSandboxExecutor` (workdir = project dir, scratch under `.kendhar/scratchpad`) and `FileHistory*` stores (`.kendhar/history/<chatId>/<agentId>/messages.jsonl`).
+`jllm-cli` Main additionally wires `CwdSandboxExecutor` (workdir = project dir, scratch under `.jllm/scratchpad`) and `FileHistory*` stores (`.jllm/history/<chatId>/<agentId>/messages.jsonl`).
 
 ## 3. One user turn, end to end
 
@@ -449,7 +449,7 @@ flowchart LR
     BASH["bash tool"] --> SE["SandboxExecutor.execute(chatId, runDir, readOnlyDir, cmd, timeout)"]
     FT["file tools"] --> JAIL["path jail: workDir(chatId)<br/>(PLAN: scratch only)"]
     SE --> L["LocalDirSandboxExecutor<br/>no isolation, process as user"]
-    SE --> CW["CwdSandboxExecutor<br/>workDir = project dir<br/>scratch = .kendhar/scratchpad"]
+    SE --> CW["CwdSandboxExecutor<br/>workDir = project dir<br/>scratch = .jllm/scratchpad"]
     SE --> DK["DockerSandboxExecutor<br/>docker run: --network none, memory/cpus/pids limits,<br/>workdir mounted, read-only in PLAN"]
 ```
 

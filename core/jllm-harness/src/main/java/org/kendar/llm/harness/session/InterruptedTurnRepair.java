@@ -20,6 +20,26 @@ public final class InterruptedTurnRepair {
     private InterruptedTurnRepair() {
     }
 
+    /**
+     * A process that died while appending leaves a partial last line. That line (only the last non-blank one) is
+     * dropped when it is not valid JSON; a bad line anywhere else stays and fails the load as corrupt.
+     *
+     * @return the log without its partial last line, or {@code null} when the last line is fine
+     */
+    public static String dropPartialLastLine(String jsonLines, ObjectMapper mapper) {
+        if (jsonLines == null || jsonLines.isBlank()) return null;
+        String text = jsonLines.stripTrailing();
+        int nl = text.lastIndexOf('\n');
+        String last = text.substring(nl + 1);
+        try {
+            JsonNode n = mapper.readTree(last);
+            if (n != null && n.isObject()) return null;
+        } catch (Exception e) {
+            // partial line
+        }
+        return nl < 0 ? "" : text.substring(0, nl).stripTrailing();
+    }
+
     /** @return the repaired JSON lines, or {@code null} when nothing had to change */
     public static String repair(String jsonLines, ObjectMapper mapper) {
         if (jsonLines == null || jsonLines.isBlank()) return null;

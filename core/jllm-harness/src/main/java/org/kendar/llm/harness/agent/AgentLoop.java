@@ -76,6 +76,38 @@ public class AgentLoop {
     public record ActiveSubAgent(String label, String chatId, String prompt, long startedAtMillis) {
     }
 
+    /** How a run of the loop ended. */
+    enum Outcome { COMPLETED, TRUNCATED, REFUSED, MAX_TURNS, CANCELLED, FAILED }
+
+    /** Final text of a run of the loop and how it ended. */
+    record LoopResult(String text, Outcome outcome) {
+    }
+
+    /**
+     * A sub-agent ended without a final answer (cut off, refused, out of turns, cancelled).
+     *
+     * @see #status() {@code partial}, {@code refused} or {@code cancelled}
+     */
+    public static final class SubAgentIncompleteException extends RuntimeException {
+        private final String status;
+        private final String partial;
+
+        public SubAgentIncompleteException(String status, String partial, String warning) {
+            super(warning);
+            this.status = status;
+            this.partial = partial == null ? "" : partial;
+        }
+
+        public String status() {
+            return status;
+        }
+
+        /** What the sub-agent wrote before it stopped (may be empty). */
+        public String partial() {
+            return partial;
+        }
+    }
+
     /** The sub-agents running for the chat, oldest first. */
     public List<ActiveSubAgent> activeSubAgents(String chatId) {
         return activeSubAgents.values().stream().filter(a -> a.chatId().equals(chatId))
@@ -272,6 +304,10 @@ public class AgentLoop {
             } catch (org.kendar.llm.harness.tools.ToolCatalog.ToolCallException e) {
                 error = e.getMessage();
                 throw e;
+            } catch (RuntimeException e) {
+                // a hook or the permission check failed: the call still ends with an error result
+                error = "Tool execution failed: " + e.getMessage();
+                throw e;
             } finally {
                 ObjectNode ev = mapper.createObjectNode();
                 ev.put("id", id).put("name", name).put("parent", parent).put("isError", error != null);
@@ -286,8 +322,127 @@ public class AgentLoop {
         }
     }
 
-    /** Chats whose current run has read untrusted tool output. */
-    private final java.util.Set<String> tainted = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    /**
+     * Per chat, the tool_use ids whose results carry untrusted output. The chat stays tainted while one of them is
+     * still in its context. The set is stored with the chat ({@link ChatSessionService#taintedToolUses}), so a
+     * restarted harness keeps gating. {@link #TAINT_RUN} stands for output that cannot be tied to a call of the log;
+     * it lasts until the next user message.
+     */
+    private final java.util.Map<String, java.util.Set<String>> tainted = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final String TAINT_RUN = "*";
+
+    /** The tainted ids of the chat, loaded from the stored chat on first use. */
+    private java.util.Set<String> taintSet(String chatId) {
+        return tainted.computeIfAbsent(chatId, k -> {
+            java.util.Set<String> s = java.util.concurrent.ConcurrentHashMap.newKeySet();
+            try {
+                s.addAll(sessions.taintedToolUses(k));
+            } catch (RuntimeException e) {
+                log.warn("Cannot load the taint state of chat {}: {}", k, e.toString());
+            }
+            return s;
+        });
+    }
+
+    private void saveTaint(String chatId) {
+        java.util.Set<String> ids = tainted.get(chatId);
+        try {
+            sessions.setTaintedToolUses(chatId, ids == null ? List.of() : new ArrayList<>(ids));
+        } catch (RuntimeException e) {
+            log.warn("Cannot store the taint state of chat {}: {}", chatId, e.toString());
+        }
+    }
+
+    /** Drops the in-memory taint state of a chat (the chat was deleted). */
+    public void forgetTaint(String chatId) {
+        if (chatId != null) tainted.remove(chatId);
+    }
+
+    private boolean isTainted(String chatId) {
+        return !taintSet(chatId).isEmpty();
+    }
+
+    private void taint(String chatId, String toolUseId) {
+        // a call made by a script ("<run_js id>/<uuid>") is answered through the run_js result
+        String id = toolUseId == null ? null : toolUseId.contains("/")
+                ? toolUseId.substring(0, toolUseId.indexOf('/')) : toolUseId;
+        if (id == null || id.isEmpty() || id.equals("js")) id = TAINT_RUN;
+        if (taintSet(chatId).add(id)) saveTaint(chatId);
+    }
+
+    /** Drops the tainted calls whose result is no longer in the log, or was cleared by compaction. */
+    private void pruneTaint(String chatId, ArrayNode messages, boolean newUserMessage) {
+        java.util.Set<String> ids = taintSet(chatId);
+        if (ids.isEmpty()) return;
+        boolean changed = newUserMessage && ids.remove(TAINT_RUN);
+        java.util.Set<String> inContext = new java.util.HashSet<>();
+        for (JsonNode m : messages) {
+            for (JsonNode b : m.path("content")) {
+                if ("tool_result".equals(b.path("type").asText())
+                        && !b.path("content").asText("").startsWith("[tool result cleared")) {
+                    inContext.add(b.path("tool_use_id").asText());
+                }
+            }
+        }
+        changed |= ids.removeIf(id -> !TAINT_RUN.equals(id) && !inContext.contains(id));
+        if (changed) saveTaint(chatId);
+    }
+
+    /**
+     * Gives every tool_use of an assistant message that is followed by another message an (error) tool_result in the
+     * message right after it, as the APIs require. The last message is left alone (its calls may still run).
+     *
+     * @return whether the log changed
+     */
+    boolean repairToolPairing(ArrayNode messages) {
+        boolean changed = false;
+        for (int i = 0; i < messages.size() - 1; i++) {
+            JsonNode m = messages.get(i);
+            if (!"assistant".equals(m.path("role").asText())) continue;
+            List<String> uses = new ArrayList<>();
+            for (JsonNode b : m.path("content")) {
+                if ("tool_use".equals(b.path("type").asText())) uses.add(b.path("id").asText());
+            }
+            if (uses.isEmpty()) continue;
+            JsonNode next = messages.get(i + 1);
+            java.util.Set<String> answered = new java.util.HashSet<>();
+            if ("user".equals(next.path("role").asText())) {
+                for (JsonNode b : next.path("content")) {
+                    if ("tool_result".equals(b.path("type").asText())) answered.add(b.path("tool_use_id").asText());
+                }
+            }
+            List<String> missing = uses.stream().filter(id -> !answered.contains(id)).toList();
+            if (missing.isEmpty()) continue;
+            ArrayNode fixed = mapper.createArrayNode();
+            for (String id : missing) fixed.add(toolResult(id, "Not executed: the call was interrupted.", true));
+            if ("user".equals(next.path("role").asText())) {
+                // tool results go first in the user message
+                JsonNode old = next.path("content");
+                if (old.isArray()) fixed.addAll((ArrayNode) old);
+                else if (old.isTextual()) fixed.addObject().put("type", "text").put("text", old.asText());
+                ((ObjectNode) next).set("content", fixed);
+            } else {
+                ObjectNode user = mapper.createObjectNode();
+                user.put("role", "user");
+                user.set("content", fixed);
+                messages.insert(i + 1, user);
+            }
+            log.warn("Answered {} tool call(s) left without a result", missing.size());
+            changed = true;
+        }
+        return changed;
+    }
+
+    /** The tool_use ids of a message log. */
+    private static java.util.Set<String> toolUseIds(ArrayNode messages) {
+        java.util.Set<String> ids = new java.util.HashSet<>();
+        for (JsonNode m : messages) {
+            for (JsonNode b : m.path("content")) {
+                if ("tool_use".equals(b.path("type").asText())) ids.add(b.path("id").asText());
+            }
+        }
+        return ids;
+    }
 
     /**
      * @param requestToolGroup on-demand tool groups; null disables them
@@ -362,7 +517,6 @@ public class AgentLoop {
     }
 
     public void run(String chatId, String userText, EventSink sink, BooleanSupplier cancelled, Inbox inbox) {
-        tainted.remove(chatId);
         HookResult prompt = hooks.run(HookContext.prompt(chatId, userText));
         if (prompt.denied()) {
             sink.emit("warning", mapper.createObjectNode()
@@ -383,13 +537,15 @@ public class AgentLoop {
         content.addObject().put("type", "text").put("text", userText);
         if (prompt.addedContext() != null) content.addObject().put("type", "text").put("text", prompt.addedContext());
         sessions.saveMessages(chatId, messages);
+        // untrusted output read earlier keeps gating side effects while it is still in the context
+        pruneTaint(chatId, messages, true);
 
-      String answer = "";
+        String answer = "";
         boolean failed = true;
         try {
             answer = loop(chatId, messages, () -> chatTools(chatId, userText), sessions.pinnedPrefix(session),
                 systemPrompt, PermissionMode.parse(session.mode()), sink, cancelled, true, true, HookContext.MAIN,
-                    model, new int[]{0}, null, inbox);
+                    model, new int[]{0}, null, inbox).text();
             failed = false;
         } finally {
             hooks.run(HookContext.after(HookEvent.POST_AGENT, chatId, HookContext.MAIN, answer, failed));
@@ -425,7 +581,21 @@ public class AgentLoop {
         // the user's tool filter: applied to every tool offered to the model, including the ones added above
         org.kendar.llm.harness.auth.UserPolicy policy = identity.policyOf(chatId);
         tools.removeIf(t -> !policy.allows(t));
+        // the chat's own tool set (tools switched off for this chat only)
+        tools.removeIf(t -> !sessions.chatAllowsTool(chatId, t.name()));
+        chatSkills(chatId, tools);
         return tools;
+    }
+
+    /** Restricts the skill tool to the skills of the chat's own set; drops it when none is left. */
+    private void chatSkills(String chatId, List<HarnessTool> tools) {
+        for (int i = tools.size() - 1; i >= 0; i--) {
+            if (tools.get(i) instanceof org.kendar.llm.harness.skills.SkillTool st) {
+                var view = st.forChat(skill -> sessions.chatAllowsSkill(chatId, skill));
+                if (view.offered().isEmpty() && !st.offered().isEmpty()) tools.remove(i);
+                else tools.set(i, view);
+            }
+        }
     }
 
     /** Manual compaction of a persisted chat (the /compact command). */
@@ -529,45 +699,82 @@ public class AgentLoop {
                                     || agentType.tools().contains(t.name()))
                             .toList()));
             tools.addAll(context.tools());
+            // the user's tool filter, as for the main agent (the stack branch inherits the filtered list)
+            org.kendar.llm.harness.auth.UserPolicy policy = identity.policyOf(chatId);
+            tools.removeIf(t -> !policy.allows(t));
+            tools.removeIf(t -> !sessions.chatAllowsTool(chatId, t.name()));
+            chatSkills(chatId, tools);
             extra = systemPrompt + "\n\n" + roleNote;
             pinned = "chatId=" + chatId + "; subagent";
         }
         List<HarnessTool> subTools = tools;
         // a model failure inside the sub-agent must reach SubAgentTool as a failure, not an empty "ok" result
         String[] failure = {null};
+        String[] warning = {null};
         Usage[] used = {Usage.ZERO};
         EventSink parentSink = run == null ? EventSink.NOOP : run.sink();
         BooleanSupplier cancelled = run == null ? () -> false : run.cancelled();
         EventSink errors = (type, data) -> {
             if ("approval_request".equals(type)) parentSink.emit(type, data);
             else if ("error".equals(type)) failure[0] = data.path("message").asText("sub-agent failed");
+            else if ("warning".equals(type)) warning[0] = data.path("message").asText(null);
             else if ("usage".equals(type)) {
                 used[0] = used[0].plus(new Usage(data.path("inputTokens").asLong(), data.path("outputTokens").asLong(),
                         data.path("cacheReadTokens").asLong(), data.path("cacheCreationTokens").asLong()));
             }
         };
-        String answer = "";
+        LoopResult result = new LoopResult("", Outcome.FAILED);
+        SubAgentIncompleteException incomplete = null;
         String agentName = agentType == null ? AgentCatalog.DEFAULT : agentType.name();
         String label = agentName + " #" + subAgentSeq.incrementAndGet();
         HookResult entering = hooks.run(HookContext.before(HookEvent.PRE_AGENT, chatId, agentName, prompt));
         if (entering.denied()) throw new IllegalStateException("Sub-agent blocked by a hook: " + entering.denyReason());
         activeSubAgents.put(label, new ActiveSubAgent(label, chatId, prompt, System.currentTimeMillis()));
         try {
-            answer = loop(chatId, messages, () -> subTools, pinned, extra,
+            result = loop(chatId, messages, () -> subTools, pinned, extra,
                     mode, errors, cancelled, false, true, agentName, client, inherited, label, null, frame);
+            if (failure[0] == null) incomplete = incomplete(result, warning[0]);
         } catch (RuntimeException e) {
             if (failure[0] == null) failure[0] = String.valueOf(e.getMessage());
             throw e;
         } finally {
             activeSubAgents.remove(label);
-            hooks.run(HookContext.after(HookEvent.POST_AGENT, chatId, agentName,
-                    failure[0] != null ? failure[0] : answer, failure[0] != null));
+            // untrusted output the sub-agent read reaches the parent through the result of its task call
+            java.util.Set<String> ids = taintSet(chatId);
+            java.util.Set<String> own = toolUseIds(messages);
+            if (ids.removeIf(own::contains)) {
+                taint(chatId, toolUseId);
+                saveTaint(chatId); // taint() saves only when the parent id is new
+            }
+            String answer = result.text();
+            String outcome = failure[0] != null ? failure[0]
+                    : incomplete != null ? answer + "\n[" + incomplete.getMessage() + "]" : answer;
+            hooks.run(HookContext.after(HookEvent.POST_AGENT, chatId, agentName, outcome,
+                    failure[0] != null || incomplete != null));
             sessions.addUsage(chatId, used[0]);
-            recordSubAgent(runId, chatId, toolUseId, prompt, messages, failure[0] != null ? failure[0] : answer,
-                    failure[0] == null, used[0]);
+            recordSubAgent(runId, chatId, toolUseId, prompt, messages, outcome,
+                    failure[0] != null ? "failed" : incomplete != null ? incomplete.status() : "ok", used[0]);
         }
         if (failure[0] != null) throw new IllegalStateException(failure[0]);
-        return answer;
+        if (incomplete != null) throw incomplete;
+        return result.text();
+    }
+
+    /** The exception that reports a sub-agent run that ended without a final answer; null when it completed. */
+    private static SubAgentIncompleteException incomplete(LoopResult r, String warning) {
+        String why = warning != null ? warning : switch (r.outcome()) {
+            case TRUNCATED -> "The response was cut off";
+            case REFUSED -> "The model declined to answer (refusal)";
+            case MAX_TURNS -> "Stopped at the turn limit";
+            case CANCELLED -> "Cancelled by the user";
+            default -> "Ended without a final answer";
+        };
+        return switch (r.outcome()) {
+            case COMPLETED -> null;
+            case REFUSED -> new SubAgentIncompleteException("refused", r.text(), why);
+            case CANCELLED -> new SubAgentIncompleteException("cancelled", r.text(), "Cancelled by the user");
+            default -> new SubAgentIncompleteException("partial", r.text(), why);
+        };
     }
 
     /** Directory-safe agent id: the scratch dir of an agent is named after it. */
@@ -618,10 +825,10 @@ public class AgentLoop {
     }
 
     private void recordSubAgent(String runId, String chatId, String toolUseId, String prompt, ArrayNode messages, String answer,
-                                boolean ok, Usage usage) {
+                                String status, Usage usage) {
         try {
             subAgentRunLog.record(new SubAgentRunData(runId, chatId, toolUseId, prompt,
-                    sessions.toJsonLines(messages), answer, ok ? "ok" : "failed", usage.inputTokens(),
+                    sessions.toJsonLines(messages), answer, status, usage.inputTokens(),
                     usage.outputTokens(), usage.cacheReadTokens(), usage.cacheCreationTokens(), Instant.now()));
         } catch (RuntimeException e) {
             log.warn("Cannot record sub-agent run for chat {}: {}", chatId, e.getMessage());
@@ -645,7 +852,7 @@ public class AgentLoop {
         return into.size();
     }
 
-    private String loop(String chatId, ArrayNode messages, Supplier<List<HarnessTool>> toolSource, String pinned,
+    private LoopResult loop(String chatId, ArrayNode messages, Supplier<List<HarnessTool>> toolSource, String pinned,
                         String extra, PermissionMode mode, EventSink sink, BooleanSupplier cancelled,
                         boolean persist, boolean interactive, String agent) {
         return loop(chatId, messages, toolSource, pinned, extra, mode, sink, cancelled, persist, interactive, agent,
@@ -658,7 +865,7 @@ public class AgentLoop {
      * @param inherited  [0] = leading messages that are a copy of the parent's context (0 for the main agent)
      * @param label      names a sub-agent in its approval requests; null for the main agent
      */
-    private String loop(String chatId, ArrayNode messages, Supplier<List<HarnessTool>> toolSource, String pinned,
+    private LoopResult loop(String chatId, ArrayNode messages, Supplier<List<HarnessTool>> toolSource, String pinned,
                         String extra, PermissionMode mode, EventSink sink, BooleanSupplier cancelled,
                         boolean persist, boolean interactive, String agent, ModelClient client, int[] inherited,
                         String label) {
@@ -666,7 +873,7 @@ public class AgentLoop {
                 client, inherited, label, null);
     }
 
-    private String loop(String chatId, ArrayNode messages, Supplier<List<HarnessTool>> toolSource, String pinned,
+    private LoopResult loop(String chatId, ArrayNode messages, Supplier<List<HarnessTool>> toolSource, String pinned,
                         String extra, PermissionMode mode, EventSink sink, BooleanSupplier cancelled,
                         boolean persist, boolean interactive, String agent, ModelClient client, int[] inherited,
                         String label, Inbox inbox) {
@@ -678,7 +885,7 @@ public class AgentLoop {
     private record StackFrame(String turnExtra, java.util.function.Predicate<HarnessTool> allowed) {
     }
 
-    private String loop(String chatId, ArrayNode messages, Supplier<List<HarnessTool>> toolSource, String pinned,
+    private LoopResult loop(String chatId, ArrayNode messages, Supplier<List<HarnessTool>> toolSource, String pinned,
                         String extra, PermissionMode mode, EventSink sink, BooleanSupplier cancelled,
                         boolean persist, boolean interactive, String agent, ModelClient client, int[] inherited,
                         String label, Inbox inbox, StackFrame frame) {
@@ -694,7 +901,7 @@ public class AgentLoop {
         }
     }
 
-    private String runLoop(String chatId, ArrayNode messages, Supplier<List<HarnessTool>> toolSource, String pinned,
+    private LoopResult runLoop(String chatId, ArrayNode messages, Supplier<List<HarnessTool>> toolSource, String pinned,
                            String extra, PermissionMode mode, EventSink sink, BooleanSupplier cancelled,
                            boolean persist, boolean interactive, String agent, ModelClient client, int[] inherited,
                            String label, String scratchId, String contextKey, Inbox inbox, StackFrame frame) {
@@ -720,7 +927,7 @@ public class AgentLoop {
                 || continueAfterLimit(turnLimit, turn, chatId, interactive, sink, cancelled, label); turn++) {
             if (cancelled.getAsBoolean()) {
                 sink.emit("cancelled", mapper.createObjectNode());
-                return finalText;
+                return new LoopResult(finalText, Outcome.CANCELLED);
             }
             List<HarnessTool> tools = toolSource.get();
             Map<String, HarnessTool> byName = new LinkedHashMap<>();
@@ -731,6 +938,9 @@ public class AgentLoop {
             });
             scope.byName = byName;
 
+            // a tool_use without its tool_result (an older log, a crash) makes every request fail: answer it now
+            if (repairToolPairing(messages) && persist) sessions.saveMessages(chatId, messages);
+            if (persist) pruneTaint(chatId, messages, false);
             java.util.function.Consumer<Usage> spent = u -> { metrics.tokens(u); sessions.addUsage(chatId, u); };
             RequestPrefix prefix = new RequestPrefix(pinned, turnExtra, tools, client, !config.parallelToolUse());
             ContextView view = context.prepare(new ContextTurn(chatId, contextKey, messages, inherited, last, prefix,
@@ -753,7 +963,7 @@ public class AgentLoop {
                 // nothing was appended for this turn, so the message log stays consistent
                 sink.emit("error", mapper.createObjectNode()
                         .put("message", "Model call blocked by a hook: " + calling.denyReason()));
-                return finalText;
+                return new LoopResult(finalText, Outcome.FAILED);
             }
             try {
                 ModelRequest request = new ModelRequest(pinned, turnExtra, view.messages(), tools, config.maxTokens(),
@@ -774,7 +984,7 @@ public class AgentLoop {
                     // nothing was appended for this turn, so the message log stays consistent
                     metrics.modelCall(java.time.Duration.ofNanos(System.nanoTime() - modelStart), "cancelled");
                     sink.emit("cancelled", mapper.createObjectNode());
-                    return finalText;
+                    return new LoopResult(finalText, Outcome.CANCELLED);
                 }
                 if (!overflowRetried && ModelException.isContextOverflow(e)) {
                     // rejected as too long: let the strategy shrink the request once; a second rejection is an error
@@ -791,7 +1001,7 @@ public class AgentLoop {
                 metrics.modelCall(java.time.Duration.ofNanos(System.nanoTime() - modelStart), "error");
                 log.warn("Model call failed: {}", e.getMessage());
                 sink.emit("error", mapper.createObjectNode().put("message", String.valueOf(e.getMessage())));
-                return finalText;
+                return new LoopResult(finalText, Outcome.FAILED);
             }
             overflowRetried = false;
             last = resp.usage();
@@ -845,7 +1055,7 @@ public class AgentLoop {
                         + (complete > 0 ? " Running the " + complete + " complete tool call(s)." : "")
                         + (continueText ? " Asking the model to continue." : "")));
                 if (toolUses.isEmpty()) {
-                    if (!continueText) return finalText;
+                    if (!continueText) return new LoopResult(finalText, Outcome.TRUNCATED);
                     continuations++;
                     carried = finalText;
                     ObjectNode more = messages.addObject();
@@ -863,7 +1073,7 @@ public class AgentLoop {
                     fix.put("role", "user");
                     fix.putArray("content").add(truncatedResult(cut, windowFull, tctx));
                     if (persist) sessions.saveMessages(chatId, messages);
-                    return finalText;
+                    return new LoopResult(finalText, Outcome.TRUNCATED);
                 }
                 truncationRetried = complete == 0;
                 if (cut != null) toolUses.remove(toolUses.size() - 1);
@@ -874,7 +1084,18 @@ public class AgentLoop {
                     sink.emit("warning", mapper.createObjectNode().put("message",
                             "refusal".equals(stop) ? "The model declined to answer (refusal)."
                                     : "The model context window was exceeded."));
-                    return finalText;
+                    if (!toolUses.isEmpty()) {
+                        // the calls are not run: answer each one, or every later request is rejected
+                        ObjectNode fix = messages.addObject();
+                        fix.put("role", "user");
+                        ArrayNode fixed = fix.putArray("content");
+                        for (JsonNode use : toolUses) {
+                            fixed.add(toolResult(use.path("id").asText(), "Not executed: the response ended with "
+                                    + stop + ".", true));
+                        }
+                        if (persist) sessions.saveMessages(chatId, messages);
+                    }
+                    return new LoopResult(finalText, "refusal".equals(stop) ? Outcome.REFUSED : Outcome.TRUNCATED);
                 }
                 // end_turn and stop_sequence both simply end the turn
                 if (!"tool_use".equals(stop) || toolUses.isEmpty()) {
@@ -883,7 +1104,7 @@ public class AgentLoop {
                             chatId, persist)) {
                         continue;
                     }
-                    return finalText;
+                    return new LoopResult(finalText, Outcome.COMPLETED);
                 }
             }
 
@@ -921,8 +1142,8 @@ public class AgentLoop {
             // every tool_use has its tool_result: a safe boundary for the user's steering messages
             injectSteering(inbox, messages, sink, chatId, persist);
         }
-        sink.emit("warning", mapper.createObjectNode().put("message", "Stopped after " + config.maxTurns() + " turns."));
-        return finalText;
+        sink.emit("warning", mapper.createObjectNode().put("message", "Stopped after " + turnLimit[0] + " turns."));
+        return new LoopResult(finalText, Outcome.MAX_TURNS);
     }
 
     /**
@@ -1020,32 +1241,38 @@ public class AgentLoop {
         long toolStart = System.nanoTime();
         HarnessTool tool = byName.get(name);
         org.kendar.llm.harness.tools.ToolInputValidator.Outcome check = tool == null ? null : checkInput(tool, input, ctx);
-        if (tool == null) {
-            result = refused.contains(name)
-                    ? toolResult(id, "Tool unavailable for agent", true)
-                    : toolResult(id, "Unknown tool '" + name + "'", true);
-        } else if (cancelled.getAsBoolean()) {
-            result = toolResult(id, "Cancelled by user", true);
-        } else if (!check.valid()) {
-            result = toolResult(id, "Invalid arguments for '" + name + "': " + String.join("; ", check.errors())
-                    + ". Expected input schema: " + tool.inputSchema(), true);
-        } else {
-            input = check.input();
-            Authz az = authorize(tool, name, input, ctx, mode, sink, cancelled, interactive, intent, label, false);
-            input = az.input();
-            if (az.denial() != null) {
-                result = toolResult(id, az.denial(), true);
+        try {
+            if (tool == null) {
+                result = refused.contains(name)
+                        ? toolResult(id, "Tool unavailable for agent", true)
+                        : toolResult(id, "Unknown tool '" + name + "'", true);
+            } else if (cancelled.getAsBoolean()) {
+                result = toolResult(id, "Cancelled by user", true);
+            } else if (!check.valid()) {
+                result = toolResult(id, "Invalid arguments for '" + name + "': " + String.join("; ", check.errors())
+                        + ". Expected input schema: " + tool.inputSchema(), true);
             } else {
-                try {
-                    result = runTool(tool, input, ctx.withToolUseId(id), id);
-                } catch (SandboxUnavailableException e) {
-                    result = sandboxUnavailable(e, tool, input, ctx, id, sink, cancelled, interactive, label);
+                input = check.input();
+                Authz az = authorize(tool, name, input, ctx, mode, sink, cancelled, interactive, intent, label, false);
+                input = az.input();
+                if (az.denial() != null) {
+                    result = toolResult(id, az.denial(), true);
+                } else {
+                    try {
+                        result = runTool(tool, input, ctx.withToolUseId(id), id);
+                    } catch (SandboxUnavailableException e) {
+                        result = sandboxUnavailable(e, tool, input, ctx, id, sink, cancelled, interactive, label);
+                    }
+                    result = withHookContext(result, az.pre().addedContext(),
+                            hooks.run(HookContext.postTool(ctx.chatId(), name, input, result.path("content").asText(""),
+                                    result.path("is_error").asBoolean(false),
+                                    (System.nanoTime() - toolStart) / 1_000_000L, ctx.parent())).addedContext());
                 }
-                result = withHookContext(result, az.pre().addedContext(),
-                        hooks.run(HookContext.postTool(ctx.chatId(), name, input, result.path("content").asText(""),
-                                result.path("is_error").asBoolean(false),
-                                (System.nanoTime() - toolStart) / 1_000_000L, ctx.parent())).addedContext());
             }
+        } catch (RuntimeException e) {
+            // a hook, the permission check or the sandbox fallback failed: the call still gets its result event
+            log.warn("Tool call {} ({}) failed outside the tool: {}", id, name, e.toString());
+            result = toolResult(id, "Tool execution failed: " + e.getMessage(), true);
         }
 
         boolean failed = result.path("is_error").asBoolean(false);
@@ -1077,11 +1304,14 @@ public class AgentLoop {
                             String label, boolean free) {
         HookResult pre = hooks.run(HookContext.preTool(ctx.chatId(), name, input, ctx.parent()));
         if (pre.modifiedInput() != null) input = pre.modifiedInput();
-        // dispatch check: a call the model makes must be inside the user's tools, even if it names a hidden one.
-        // Calls made by a script are covered by the run_js call that the user was allowed to make.
+        // dispatch check: a call must be inside the user's tools, even if it names a hidden one; also a call made by a
+        // script (run_js does not widen what the user may call)
         org.kendar.llm.harness.auth.UserPolicy policy = identity.policyOf(ctx.chatId());
-        if (ctx.parent() == null && !policy.allows(tool)) {
+        if (!policy.allows(tool)) {
             return new Authz("Not available to this user: " + name, pre, input);
+        }
+        if (!sessions.chatAllowsTool(ctx.chatId(), name)) {
+            return new Authz("Tool disabled for this chat: " + name, pre, input);
         }
         PermissionGate userGate = policy.approval() == null ? gate : new PermissionGate(policy.approval(), gate.rules());
         Decision decision = free ? Decision.ALLOW : userGate.check(mode, tool);
@@ -1093,7 +1323,7 @@ public class AgentLoop {
             sink.emit("classifier", mapper.createObjectNode().put("tool", name).put("verdict", v.name()));
         }
         // settings rules: deny wins in every mode and over any grant; ask forces the question; allow skips it
-        PermissionRules.Match rule = gate.rules().match(name, input);
+        PermissionRules.Match rule = gate.rules().match(name, input, ctx.workDir());
         if (!free && rule != null && rule.kind() == PermissionRules.Kind.ASK && decision == Decision.ALLOW) {
             decision = Decision.ASK;
         }
@@ -1105,12 +1335,12 @@ public class AgentLoop {
                 && mode != PermissionMode.AUTO) {
             decision = Decision.ALLOW;
         }
-        // outside content was read in this run: side effects need an explicit yes, even over grants and allow rules
-        if (!free && decision == Decision.ALLOW && tool.kind() != ToolKind.READ_ONLY && tainted.contains(ctx.chatId())
+        // outside content is in the context: side effects need an explicit yes, even over grants and allow rules
+        if (!free && decision == Decision.ALLOW && tool.kind() != ToolKind.READ_ONLY && isTainted(ctx.chatId())
                 && (rule == null || rule.kind() != PermissionRules.Kind.DENY)) {
             decision = Decision.ASK;
             sink.emit("warning", mapper.createObjectNode().put("message", "Confirming '" + name
-                    + "': this run read untrusted tool output that could contain injected instructions"));
+                    + "': the conversation holds untrusted tool output that could contain injected instructions"));
         }
         if (decision == Decision.ASK && !interactive) decision = Decision.DENY;
         if (pre.denied()) return new Authz("Denied by a hook: " + pre.denyReason(), pre, input);
@@ -1166,15 +1396,23 @@ public class AgentLoop {
             if (label != null) ev.put("agent", label);
             if (writeDir != null) ev.put("writeDir", writeDir);
             sink.emit("approval_request", ev);
-        }, cancelled, () -> !tainted.contains(ctx.chatId()) && (approvals.granted(ctx.chatId(), tool.name())
+        }, cancelled, () -> !isTainted(ctx.chatId()) && (approvals.granted(ctx.chatId(), tool.name())
                 || approvals.dirGranted(ctx.chatId(), writeDir)));
         boolean ok = d.approved();
-        if (ok && d.remember()) approvals.grant(ctx.chatId(), tool.name());
         if (ok && d.rememberDir()) {
-            // A typed path (carried in "edited") replaces the offered directory; an invalid one grants nothing
+            // A typed path (carried in "edited") replaces the offered directory; an invalid one (outside the work
+            // dir, absolute) rejects the call: the user approved a grant that cannot be given
             boolean typed = d.edited() != null && !d.edited().isBlank();
-            approvals.grantDir(ctx.chatId(), typed ? ApprovalService.grantDirOf(ctx.workDir(), d.edited()) : writeDir);
+            String dir = typed ? ApprovalService.grantDirOf(ctx.workDir(), d.edited()) : writeDir;
+            if (typed && dir == null) {
+                sink.emit("warning", mapper.createObjectNode().put("message",
+                        "Invalid folder '" + d.edited() + "': the call was rejected"));
+                ok = false;
+            } else {
+                approvals.grantDir(ctx.chatId(), dir);
+            }
         }
+        if (ok && d.remember()) approvals.grant(ctx.chatId(), tool.name());
         metrics.approval("tool", ok);
         return ok;
     }
@@ -1261,7 +1499,7 @@ public class AgentLoop {
         ToolOutputSanitizer.Trust trust = LOCAL_GROUPS.contains(tool.group())
                 ? ToolOutputSanitizer.Trust.LOW : ToolOutputSanitizer.Trust.UNTRUSTED;
         ToolOutputSanitizer.Result r = sanitizer.sanitize(tool.name(), trust, out);
-        if (r.tainted() && config.output().taintGating()) tainted.add(ctx.chatId());
+        if (r.tainted() && config.output().taintGating()) taint(ctx.chatId(), ctx.toolUseId());
         if (r.flagged()) {
             log.warn("Tool '{}' output flagged as possible prompt injection: {}", tool.name(), r.findings());
         }

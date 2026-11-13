@@ -36,15 +36,26 @@ public final class MnemonicState {
     /**
      * Start of a segment: the messages before {@code cut} are replaced by the handoff notes.
      *
-     * @param firstUser index of the chat's first user message, kept verbatim at the top; -1 if none
+     * @param firstUser   index of the agent's first user message (a sub-agent's own task, else the chat's first
+     *                    request), kept verbatim at the top; -1 if none
+     * @param instruction index of the user instruction in progress when the cut falls after it, kept verbatim after
+     *                    the first request; null when it stays in the tail (or in files written before it existed)
      */
-    public record Segment(int cut, String cutHash, int firstUser, String firstUserHash, String notes, String index) {
+    public record Segment(int cut, String cutHash, int firstUser, String firstUserHash, String notes, String index,
+                          Integer instruction, String instructionHash) {
+
+        public Segment(int cut, String cutHash, int firstUser, String firstUserHash, String notes, String index) {
+            this(cut, cutHash, firstUser, firstUserHash, notes, index, null, null);
+        }
     }
 
     public final List<Mask> masks = new ArrayList<>();
     /** New masks only at or after this message index: the first masked message of the last batch. */
     public int frontier;
     public final List<Segment> segments = new ArrayList<>();
+    /** Set by a store that could not read the saved state and started over; reported once as a warning event. */
+    @JsonIgnore
+    public volatile String warning;
 
     @JsonIgnore
     Segment current() {
@@ -71,7 +82,8 @@ public final class MnemonicState {
     boolean invalidateFrom(int index) {
         int before = masks.size() + segments.size();
         masks.removeIf(m -> m.index() >= index);
-        segments.removeIf(s -> s.cut() >= index || s.firstUser() >= index);
+        segments.removeIf(s -> s.cut() >= index || s.firstUser() >= index
+                || (s.instruction() != null && s.instruction() >= index));
         frontier = Math.min(frontier, index);
         return masks.size() + segments.size() != before;
     }

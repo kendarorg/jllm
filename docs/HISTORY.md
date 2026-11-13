@@ -94,7 +94,7 @@ Sub-agents, until then always read-only, became full agents:
   context, so the cache is unaffected.
 - Writable sub-agents run one after another in `edit` and `auto` mode to avoid concurrent edits to the same file.
 
-Sessions and sub-agent histories can be stored as files under `.kendhar/history`, and IDs are v7 UUIDs.
+Sessions and sub-agent histories can be stored as files under `.jllm/history`, and IDs are v7 UUIDs.
 
 ## 4. Mnemonic context and small models
 A second context strategy was added, modelled on mnemonic-proxy:

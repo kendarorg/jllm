@@ -31,7 +31,9 @@ public class SubAgentTool implements HarnessTool {
     private final ObjectMapper mapper;
     private final AgentCatalog agents;
     private final boolean parallel;
-    private final java.util.concurrent.locks.ReentrantLock serialRun = new java.util.concurrent.locks.ReentrantLock(true);
+    /** Serial writer sub-agents: one at a time per working directory (chats with their own directory do not wait). */
+    private static final java.util.concurrent.ConcurrentHashMap<Object, java.util.concurrent.locks.ReentrantLock>
+            WORK_DIR_LOCKS = new java.util.concurrent.ConcurrentHashMap<>();
     private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
 
     public SubAgentTool(Supplier<AgentLoop> loop, ObjectMapper mapper) {
@@ -103,18 +105,29 @@ public class SubAgentTool implements HarnessTool {
                 || (!type.readOnly() && (mode == PermissionMode.EDIT || mode == PermissionMode.AUTO));
         ExecutorService batchExecutor = !serial ? executor
                 : Executors.newSingleThreadExecutor(Thread.ofVirtual().factory());
+        java.util.concurrent.locks.ReentrantLock dirLock = serial ? WORK_DIR_LOCKS.computeIfAbsent(lockKey(ctx),
+                k -> new java.util.concurrent.locks.ReentrantLock(true)) : null;
+        java.util.function.BooleanSupplier cancelled = ctx.run() == null ? () -> false : ctx.run().cancelled();
         List<Future<String>> futures = new ArrayList<>();
         List<String> runIds = new ArrayList<>();
         for (String prompt : prompts) {
             String runId = Uuids.v7String();
             runIds.add(runId);
             futures.add(batchExecutor.submit(() -> {
-                // serial: a sub-agent runs to its end before any other starts, even across `task` calls
-                if (serial) serialRun.lock();
+                // serial: a sub-agent runs to its end before any other in the same directory starts, even across
+                // `task` calls and chats; waiting stops on cancel or interrupt
+                if (dirLock != null) {
+                    while (!dirLock.tryLock(200, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+                        if (cancelled.getAsBoolean()) {
+                            throw new AgentLoop.SubAgentIncompleteException("cancelled", "",
+                                    "Cancelled while waiting for another sub-agent writing in the same directory");
+                        }
+                    }
+                }
                 try {
                     return agentLoop.runSubAgent(ctx.chatId(), ctx.toolUseId(), prompt, type, mode, ctx.run(), runId);
                 } finally {
-                    if (serial) serialRun.unlock();
+                    if (dirLock != null) dirLock.unlock();
                 }
             }));
         }
@@ -125,17 +138,40 @@ public class SubAgentTool implements HarnessTool {
                 r.put("prompt", prompts.get(i));
                 r.put("runId", runIds.get(i));
                 try {
+                    String answer = futures.get(i).get();
                     r.put("status", "ok");
-                    r.put("result", futures.get(i).get());
+                    r.put("result", answer);
+                } catch (InterruptedException e) {
+                    // the caller was cancelled: stop the others too
+                    Thread.currentThread().interrupt();
+                    futures.forEach(f -> f.cancel(true));
+                    r.put("status", "cancelled");
+                    r.put("result", "");
+                } catch (java.util.concurrent.CancellationException e) {
+                    r.put("status", "cancelled");
+                    r.put("result", "");
                 } catch (Exception e) {
                     Throwable cause = e.getCause() != null ? e.getCause() : e;
-                    r.put("status", "failed");
-                    r.put("result", String.valueOf(cause.getMessage()));
+                    if (cause instanceof AgentLoop.SubAgentIncompleteException inc) {
+                        // ended without a final answer: what it produced, and why it is incomplete
+                        r.put("status", inc.status());
+                        r.put("result", inc.partial());
+                        r.put("warning", inc.getMessage());
+                    } else {
+                        r.put("status", "failed");
+                        r.put("result", String.valueOf(cause.getMessage()));
+                    }
                 }
             }
         } finally {
             if (batchExecutor != executor) batchExecutor.shutdownNow();
         }
         return mapper.writeValueAsString(results);
+    }
+
+    /** The working directory the sub-agents write into: the key of the serial lock. */
+    private static Object lockKey(ToolContext ctx) {
+        if (ctx.workDir() != null) return ctx.workDir().toAbsolutePath().normalize();
+        return "chat:" + ctx.chatId(); // files in a container of the chat
     }
 }

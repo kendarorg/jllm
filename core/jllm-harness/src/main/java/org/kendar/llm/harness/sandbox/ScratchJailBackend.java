@@ -14,7 +14,7 @@ import java.util.List;
 public final class ScratchJailBackend implements FileBackend {
 
     private final FileBackend inner;
-    /** The scratch directory relative to the work dir, e.g. {@code .kendhar/scratchpad/main}; null when elsewhere. */
+    /** The scratch directory relative to the work dir, e.g. {@code .jllm/scratchpad/main}; null when elsewhere. */
     private final String prefix;
 
     public ScratchJailBackend(FileBackend inner) {
@@ -74,9 +74,12 @@ public final class ScratchJailBackend implements FileBackend {
         return path == null || path.isBlank() || path.equals(".") ? prefix : prefix + "/" + path;
     }
 
+    /** Hits relative to the scratch directory; anything outside it (a pattern the daemon matched too widely) is dropped. */
     private List<String> unscope(List<String> lines) {
         List<String> out = new ArrayList<>();
-        for (String l : lines) out.add(l.startsWith(prefix + "/") ? l.substring(prefix.length() + 1) : l);
+        for (String l : lines) {
+            if (l.startsWith(prefix + "/")) out.add(l.substring(prefix.length() + 1));
+        }
         return out;
     }
 
@@ -109,7 +112,13 @@ public final class ScratchJailBackend implements FileBackend {
 
     @Override
     public void move(Root root, String from, String to) throws IOException {
-        inner.move(root, from, to);
+        // both ends are mapped into the scratch tree, like every other path: the work dir cannot be reached
+        Target src = inner.writeTarget(from, true);
+        Target dst = inner.writeTarget(to, true);
+        if (src.root() != Root.SCRATCH || dst.root() != Root.SCRATCH) {
+            throw new IllegalArgumentException("Path escapes the scratch dir: " + from + " -> " + to);
+        }
+        inner.move(Root.SCRATCH, src.path(), dst.path());
     }
 
     @Override

@@ -124,7 +124,7 @@ public class HarnessConfiguration {
         return harness;
     }
 
-    /** {@code <base>/<chatId>/.kendhar/history} of every chat directory below the base. */
+    /** {@code <base>/<chatId>/.jllm/history} of every chat directory below the base. */
     private static java.util.List<Path> chatHistoryRoots(ChatDirSandboxExecutor sandbox) {
         Path base = sandbox.location();
         if (!java.nio.file.Files.isDirectory(base)) return java.util.List.of();

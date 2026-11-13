@@ -23,6 +23,8 @@ public class DockerSandboxExecutor implements SandboxExecutor {
     /** Directory layout (work, scratch, delete) and the fallback when docker is unavailable. */
     private final LocalDirSandboxExecutor localFallback;
     private volatile boolean verified;
+    /** The endpoint of the current docker context when DOCKER_HOST is unset; null until read. */
+    private volatile String contextHost;
 
     public DockerSandboxExecutor(HarnessConfig config, DockerCommandRunner runner) {
         this(config, runner, System.getenv("DOCKER_HOST"));
@@ -50,7 +52,42 @@ public class DockerSandboxExecutor implements SandboxExecutor {
 
     /** A remote daemon cannot see the host work dir, so a bind mount would silently use the wrong files. */
     boolean remoteDaemon() {
-        return isRemote(dockerHost);
+        return isRemote(effectiveHost());
+    }
+
+    /** DOCKER_HOST, or when it is unset the endpoint of the current docker context (cached once read). */
+    String effectiveHost() {
+        if (dockerHost != null && !dockerHost.isBlank()) return dockerHost;
+        String h = contextHost;
+        if (h == null) {
+            h = contextHost(runner, config.sandbox().docker().binary());
+            if (h != null) contextHost = h;
+        }
+        return h == null || h.isEmpty() ? null : h;
+    }
+
+    /**
+     * The docker endpoint of the current context ({@code docker context inspect}; DOCKER_CONTEXT is honoured by the
+     * CLI): "" when it has none, null when it cannot be read (no docker, old CLI), which callers treat as local.
+     */
+    static String contextHost(DockerCommandRunner runner, String binary) {
+        try {
+            DockerCommandRunner.Result r = runner.run(
+                    List.of(binary, "context", "inspect", "--format", "{{.Endpoints.docker.Host}}"), CONTROL_TIMEOUT);
+            if (r.exitCode() != 0 || r.timedOut()) return null;
+            return r.stdout().strip();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        } catch (IOException | RuntimeException e) {
+            return null;
+        }
+    }
+
+    /** How the daemon was found, for messages. */
+    private String hostDescription() {
+        return dockerHost != null && !dockerHost.isBlank() ? "DOCKER_HOST=" + dockerHost
+                : "the docker context endpoint " + effectiveHost();
     }
 
     /** True when {@code dockerHost} (the DOCKER_HOST value) points at a daemon that is not on this machine. */
@@ -65,6 +102,11 @@ public class DockerSandboxExecutor implements SandboxExecutor {
     @Override
     public void environmentWhitelist(java.util.List<String> patterns) {
         localFallback.environmentWhitelist(patterns);
+    }
+
+    @Override
+    public void outputLogLimit(long maxBytes) {
+        localFallback.outputLogLimit(maxBytes);
     }
 
     @Override
@@ -141,7 +183,7 @@ public class DockerSandboxExecutor implements SandboxExecutor {
     @Override
     public ExecutionResult execute(String chatId, Path dir, Path readOnlyDir, String command, Duration timeout) {
         ExecutionResult unavailable = remoteDaemon()
-                ? new ExecutionResult("", "Docker sandbox unavailable: DOCKER_HOST=" + dockerHost
+                ? new ExecutionResult("", "Docker sandbox unavailable: " + hostDescription()
                 + " is a remote daemon and cannot mount the local work dir.", 127, false)
                 : verifyDocker();
         if (unavailable != null) {
@@ -154,12 +196,15 @@ public class DockerSandboxExecutor implements SandboxExecutor {
         }
         String name = "harness-" + chatId + "-" + Uuids.v7String();
         try {
-            DockerCommandRunner.Result r = runner.run(runArgs(name, dir, readOnlyDir, command), timeout);
+            List<String> argv = runArgs(name, dir, readOnlyDir, command);
+            // bounded output, the rest in a log
+            DockerCommandRunner.Result r = runner.run(argv, timeout, LocalDirSandboxExecutor.CAPTURE_LIMIT,
+                    localFallback.outputLogLimit());
             if (r.timedOut()) {
                 kill(name);
-                return new ExecutionResult(r.stdout(), r.stderr(), -1, true);
+                return new ExecutionResult(r.stdout(), r.stderr(), -1, true, r.omittedLines(), r.log());
             }
-            return new ExecutionResult(r.stdout(), r.stderr(), r.exitCode(), false);
+            return new ExecutionResult(r.stdout(), r.stderr(), r.exitCode(), false, r.omittedLines(), r.log());
         } catch (InterruptedException e) {
             kill(name);
             Thread.currentThread().interrupt();
