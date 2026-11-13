@@ -250,7 +250,9 @@ roles and skills, plugged in through the common module's `WebAuthentication`, `C
 The file repositories are used with `jllm.store=file` (the default); another store supplies its own
 `UserRepository`, `RoleRepository`, `SkillRepository` and `LoginSessionRepository` beans. The harness settings layers come from a
 `SettingsSource` bean (default: the settings files) and the project trust answers from a `ProjectMcpTrust` bean;
-a `TokenStore` bean (passed through `HarnessIdentity.tokenStore()`) can replace the OAuth token files.
+a `TokenStore` bean (passed through `HarnessIdentity.tokenStore()`) can replace the OAuth token files. Chat history
+(`ChatSessionStore`, `SubAgentRunLog`, `MnemonicStore`, `StateStore`) is optional beans too; default: files under each
+chat's history root.
 
 Tests: `SampleUsersTest`, `LoginTest`, `MeControllerTest`, `AdminControllerTest`, `JllmWebApplicationArgsTest`
 (`mvn -pl jllm-web -am test`).

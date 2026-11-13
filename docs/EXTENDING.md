@@ -31,8 +31,52 @@ flowchart LR
 | [10](#10-metrics-and-pricing) | metrics and pricing |
 | [11](#11-prompts) | prompts |
 | [12](#12-testing) | testing |
+| [13](#13-web-storage) | web storage (users, roles, skills, sign-in sessions, settings, tokens) |
 
 External tools without code: [MCP and REST APIs](MCP.md). Instructions without code: [SKILLS](SKILLS.md).
+
+## Jars to import
+
+All artifacts: group `org.kendar.llm`, version `1.1.0-jllm` (`mvn install` from the root puts them in the local
+repository; JDK 21).
+
+| Artifact | Contains | Import when |
+|---|---|---|
+| `jllm-commons` | `HarnessTool`, `ToolContext`, `ToolKind`, `HarnessPlugin`, hooks, shared records | writing a plugin (scope `provided`: the host supplies it) |
+| `jllm-harness` | `AgentHarness`, `AgentLoop`, model clients, sessions, settings, context, sandbox | embedding the harness (brings `jllm-commons`, `jllm-fs`, `jllm-webbrowse`, `jllm-apimcp`) |
+| `jllm-fs` | file tools (read, write, edit, grep, remote files) | only with the tools and no harness |
+| `jllm-webbrowse` | web search and fetch tools | only with the tools and no harness |
+| `jllm-apimcp` | REST API and MCP tool providers | only with the tools and no harness |
+| `jllm-test-support` | `HarnessTestSupport`: `ScriptedModel`, `Rig`, `Events` ([12](#12-testing)) | tests (scope `test`) |
+| `jllm-web-commons` | Spring Boot REST + SSE chat and file API, storage interfaces ([13](#13-web-storage)) | building a web front end with its own sign-in and storage |
+| `jllm-web` | the reference web application (file stores, cookie sign-in, admin) | running it, or as an example |
+
+A plugin jar (loaded from the plugin directory by the CLI and the web app):
+
+```xml
+<dependency>
+    <groupId>org.kendar.llm</groupId>
+    <artifactId>jllm-commons</artifactId>
+    <version>1.1.0-jllm</version>
+    <scope>provided</scope>
+</dependency>
+<dependency>
+    <groupId>org.kendar.llm</groupId>
+    <artifactId>jllm-harness</artifactId>
+    <version>1.1.0-jllm</version>
+    <scope>test</scope>
+</dependency>
+<dependency>
+    <groupId>org.kendar.llm</groupId>
+    <artifactId>jllm-test-support</artifactId>
+    <version>1.1.0-jllm</version>
+    <scope>test</scope>
+</dependency>
+```
+
+Package third-party libraries into the plugin (`jar-with-dependencies`, as `plugins/jllm-pdf` and `plugins/jllm-js`
+do); never the `jllm-*` jars. An application embedding the harness depends on `jllm-harness` (compile scope); a web
+application on `jllm-web-commons`.
 
 ## 1. Tools
 
@@ -130,7 +174,7 @@ sequenceDiagram
             L->>H: POST_TOOL
         end
     end
-    L->>H: STOP (main; again after each continueWith re-entry)
+    L->>H: STOP (main, again after each continueWith re-entry)
     L->>H: POST_AGENT (main)
 ```
 
@@ -540,7 +584,7 @@ with the same path earlier on the class path.
 
 ## 12. Testing
 
-`HarnessTestSupport` ships in the test-jar (`<type>test-jar</type>`):
+`HarnessTestSupport` (`org.kendar.llm.harness.testsupport`) ships in `jllm-test-support` (scope `test`):
 
 | Helper | Use |
 |---|---|
@@ -561,3 +605,120 @@ Events events = new Events();
 rig.loop.run(chat, "How many rows?", events, () -> false);
 assertEquals("one row", events.ofType("text").getLast().path("text").asText());
 ```
+
+## 13. Web storage
+
+A web application built on `jllm-web-commons` keeps its users, roles, skills, sign-in sessions, settings and tokens
+behind interfaces. `jllm-web` ships file and in-memory implementations, wired when `jllm.store=file` (the default,
+`WebAuthConfiguration`); another store (e.g. SQL) sets `jllm.store` to another value and supplies its own beans. The
+controllers and the harness depend only on the interfaces.
+
+```mermaid
+flowchart LR
+    subgraph WC["jllm-web-commons: org.kendar.llm.web.commons.users"]
+        UR["UserRepository / WebUser"]
+        RR["RoleRepository / Role"]
+        SR["SkillRepository"]
+        LS["LoginSessionRepository"]
+    end
+    subgraph HC["jllm-web-commons: HarnessConfiguration beans"]
+        SS["SettingsSource"]
+        PT["ProjectMcpTrust"]
+        HI["HarnessIdentity.tokenStore()"]
+    end
+    subgraph WEB["jllm-web (jllm.store=file)"]
+        FUR["FileUserRepository"]
+        FRR["FileRoleRepository"]
+        FSR["FileSkillRepository"]
+        ILR["InMemoryLoginSessionRepository"]
+    end
+    FUR --> UR
+    FRR --> RR
+    FSR --> SR
+    ILR --> LS
+```
+
+| Interface | Module, package | Default (jllm-web) | Holds |
+|---|---|---|---|
+| `UserRepository` | jllm-web-commons, `...web.commons.users` | `FileUserRepository`: `webauth/users/<id>.json` | `WebUser`: id, name, role, password hash, per-source credential headers (`env:NAME` only), disabled tools and skills |
+| `RoleRepository` | jllm-web-commons, `...web.commons.users` | `FileRoleRepository`: `webauth/permissions/<role>.json` | `Role`: tool patterns, read-only, approval `ask`/`off`; the fixed `admin` role is never stored |
+| `SkillRepository` | jllm-web-commons, `...web.commons.users` | `FileSkillRepository`: `webauth/global-skills/`, `webauth/user-skills/<id>/` | global and per-user skills (name, description, content) |
+| `LoginSessionRepository` | jllm-web-commons, `...web.commons.users` | `InMemoryLoginSessionRepository` (a restart signs everybody out) | cookie token → user id, sliding `TTL` of 7 days |
+| `SettingsSource` | jllm-harness, `...harness.settings` | `FileSettingsSource`: `~/.jllm/settings.json`, `<project>/.jllm/settings.json`, `--settings`/`jllm.settings` | `SettingsLayer`s, `GLOBAL` → `PROJECT` → `EXPLICIT`, a later layer wins |
+| `ProjectMcpTrust` | jllm-harness, `...harness.settings` | `FileProjectMcpTrust.user()`: `~/.jllm/trusted-mcp.json` | trust answers for project MCP servers, tied to a SHA-256 of the definition |
+| `TokenStore` | jllm-harness, `...harness.auth` | `FileTokenStore` from the `tokenStore` settings | OAuth tokens per principal ([8](#token-stores)) |
+| `ChatSessionStore`, `SubAgentRunLog`, `StateStore` | jllm-commons, `...harness.session`, `...harness.state` | `FileChatSessionStore`, `FileHistorySubAgentRunLog`, `FileStateStore` under `<base>/<chatId>/.jllm/history` | chats, sub-agent runs, per-chat state ([8](#8-persistence)) |
+| `MnemonicStore` | jllm-harness, `...harness.context.mnemonic` | `FileMnemonicStore` under the same root | mnemonic decisions per chat and agent |
+
+```java
+public interface UserRepository {
+    Optional<WebUser> find(String id);
+    List<WebUser> all();
+    boolean exists(String id);
+    WebUser create(String id, String name, String role, String passwordHash); // IllegalStateException if it exists
+    WebUser setName(String id, String name);                                   // setters: NoSuchElementException if unknown
+    WebUser setRole(String id, String role);
+    WebUser setPassword(String id, String passwordHash);                       // null = default password
+    WebUser setCredentials(String id, Map<String, Map<String, String>> credentials);
+    WebUser setDisabledTools(String id, List<String> patterns);
+    WebUser setDisabledSkills(String id, List<String> names);
+    boolean delete(String id);
+}
+
+public interface RoleRepository {
+    Optional<Role> find(String name);
+    List<Role> all();
+    void save(Role role);
+    boolean delete(String name);
+}
+
+public interface SkillRepository {
+    List<Skill> global();
+    List<Skill> own(String userId);
+    Optional<Skill> findGlobal(String name);
+    Optional<Skill> findOwn(String userId, String name);
+    Skill writeGlobal(String name, String description, String content);
+    Skill writeOwn(String userId, String name, String description, String content);
+    boolean deleteGlobal(String name);
+    boolean deleteOwn(String userId, String name);
+    void deleteAllOwn(String userId);
+    List<String> ownersOf(String name);
+}
+
+public interface LoginSessionRepository {
+    Duration TTL = Duration.ofDays(7);
+    String create(String userId);              // token: at least 256 random bits
+    Optional<String> find(String token);       // slides the expiry
+    void revoke(String token);
+    void revokeUser(String userId, String keep);
+}
+
+@FunctionalInterface
+public interface SettingsSource {
+    List<SettingsLayer> layers();              // global, project, explicit; a missing layer is left out
+}
+```
+
+Wiring:
+- `UserRepository`, `RoleRepository`, `SkillRepository`, `LoginSessionRepository`: beans. The `jllm-web` ones are
+  `@ConditionalOnProperty(name = "jllm.store", havingValue = "file", matchIfMissing = true)`.
+- `SettingsSource`, `ProjectMcpTrust`: optional beans read by `HarnessConfiguration` (`ObjectProvider`); without
+  them the files are used.
+- `TokenStore`: returned by your `HarnessIdentity.tokenStore()`; null = the store the `tokenStore` settings describe,
+  under `HarnessIdentity.tokenDir()`.
+- `HarnessIdentity`, `WebAuthentication`, `ChatAccess` (sign-in, per-user policy, chat ownership) are beans too;
+  `JllmWebCommonsAutoConfiguration` falls back to "nobody signs in" without them.
+
+Rules every store keeps (the helpers are static methods on the interfaces):
+- ids and names `[a-z0-9_-]{1,64}` (`UserRepository.validId`, `SkillRepository.validName`);
+- credential values only `env:NAME` references (`UserRepository.checkCredentials`), never secrets;
+- skills at most 64 KB (`SkillRepository.checkSize`) and 50 own skills per user (`MAX_OWN`);
+- read on each use: a change applies at once, no cache across requests;
+- a persistent login session store keeps a hash of the token, never the token.
+
+Chat history: `ChatSessionStore`, `SubAgentRunLog`, `MnemonicStore` and `StateStore` ([8](#8-persistence)) are
+optional beans read by `HarnessConfiguration`; without them it uses `FileChatSessionStore`,
+`FileHistorySubAgentRunLog`, `FileMnemonicStore` and `FileStateStore` under each chat's history root
+(`<base>/<chatId>/.jllm/history`). Chat retention (`chatRetentionLimit`) picks the chats to delete from `ChatSessionStore.list()`.
+
+A sketch of a MySQL store (tables, mapping of errors, token table) is in [jllm-web/README.md](../jllm-web/README.md#a-possible-extension-a-mysql-store).

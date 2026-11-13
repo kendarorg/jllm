@@ -5,18 +5,23 @@ import org.kendar.llm.harness.AgentHarness;
 import org.kendar.llm.harness.HarnessConfig;
 import org.kendar.llm.harness.HarnessPricing;
 import org.kendar.llm.harness.context.mnemonic.FileMnemonicStore;
+import org.kendar.llm.harness.context.mnemonic.MnemonicStore;
 import org.kendar.llm.harness.llm.ModelClient;
 import org.kendar.llm.harness.llm.ModelClientFactory;
 import org.kendar.llm.harness.sandbox.ChatDirSandboxExecutor;
+import org.kendar.llm.harness.session.ChatSessionStore;
 import org.kendar.llm.harness.session.FileChatSessionStore;
 import org.kendar.llm.harness.session.HistoryRootLock;
 import org.kendar.llm.harness.session.FileHistorySubAgentRunLog;
 import org.kendar.llm.harness.session.InMemorySubAgentRunLog;
+import org.kendar.llm.harness.session.SubAgentRunLog;
 import org.kendar.llm.harness.settings.FileProjectMcpTrust;
 import org.kendar.llm.harness.settings.FileSettingsSource;
 import org.kendar.llm.harness.settings.HarnessSettings;
 import org.kendar.llm.harness.settings.ProjectMcpTrust;
 import org.kendar.llm.harness.settings.SettingsSource;
+import org.kendar.llm.harness.state.FileStateStore;
+import org.kendar.llm.harness.state.StateStore;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -45,7 +50,11 @@ public class HarnessConfiguration {
     public AgentHarness agentHarness(JllmProperties p, ModelClient modelClient, HarnessPricing pricing,
                                      ObjectMapper mapper, HarnessIdentity identity,
                                      ObjectProvider<SettingsSource> settingsSource,
-                                     ObjectProvider<ProjectMcpTrust> projectTrust) {
+                                     ObjectProvider<ProjectMcpTrust> projectTrust,
+                                     ObjectProvider<ChatSessionStore> sessionStore,
+                                     ObjectProvider<SubAgentRunLog> subAgentRunLog,
+                                     ObjectProvider<MnemonicStore> mnemonicStore,
+                                     ObjectProvider<StateStore> stateStore) {
         String settingsFile = JllmProperties.blankToNull(p.settings());
         Path projectDir = Path.of(p.workdir() == null ? "" : p.workdir()).toAbsolutePath().normalize();
         // default: global ~/.jllm/settings.json, then project .jllm/settings.json, then the settings file; later wins.
@@ -103,10 +112,13 @@ public class HarnessConfiguration {
                 .systemPrompt(promptAppend)
                 .systemPromptReplace(promptReplace)
                 .sandbox(executor(settings, config, sandbox, projectDir))
-                .sessionStore(new FileChatSessionStore(sandbox::historyRoot, () -> chatHistoryRoots(sandbox), mapper))
-                .subAgentRunLog(new FileHistorySubAgentRunLog(new InMemorySubAgentRunLog(), sandbox::historyRoot))
-                .mnemonicStore(new FileMnemonicStore(sandbox::historyRoot))
-                .stateStore(new org.kendar.llm.harness.state.FileStateStore(sandbox::historyRoot))
+                // chat history: files under each chat's history root, unless the application supplies the beans
+                .sessionStore(sessionStore.getIfAvailable(() ->
+                        new FileChatSessionStore(sandbox::historyRoot, () -> chatHistoryRoots(sandbox), mapper)))
+                .subAgentRunLog(subAgentRunLog.getIfAvailable(() ->
+                        new FileHistorySubAgentRunLog(new InMemorySubAgentRunLog(), sandbox::historyRoot)))
+                .mnemonicStore(mnemonicStore.getIfAvailable(() -> new FileMnemonicStore(sandbox::historyRoot)))
+                .stateStore(stateStore.getIfAvailable(() -> new FileStateStore(sandbox::historyRoot)))
                 .settings(settings)
                 .pricing(pricing)
                 .objectMapper(mapper)
