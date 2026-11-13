@@ -169,6 +169,29 @@ only. Not done on purpose: restoring the last `/model`.
   Code and Hermes Agent (competitor columns are from memory and unverified). The root `history.md` was removed in
   favour of this file; README links updated.
 
+## 9. Hardening review
+
+A full code review produced about 70 findings, each decided (fix, design choice, or accepted) and then fixed in
+parallel by area:
+
+- **Security:** the file-tool jail checks real paths (symlinks, Windows junctions, `.git` aliases), checkpoints and
+  backup unpacking can no longer write outside the work dir, REST tool paths are resolved before allow/deny checks,
+  project settings can only add deny rules and need a trust answer before starting stdio MCP servers, web slash
+  commands are scoped to the chat owner (admin-only for global ones), tool/MCP/skill toggles are per chat, and taint
+  from untrusted content lasts while that content is in context.
+- **Robustness:** ordered and complete event delivery, atomic writes for files, session logs and state, per-path edit
+  locks, charset and line-ending preserving edits, bounded output, fetch and read sizes, a log that always pairs
+  `tool_use` with `tool_result`, sub-agents reporting partial, refused or cancelled outcomes, MCP sources that reconnect
+  once and are then disabled, and a startup failure on tool-name collisions.
+- **Context:** fixes to compaction (summaries built from unpruned messages, the fixed part counted once, previous
+  summary kept on retry, cuts inside long turns), thinking blocks stripped after rewrites, sub-agent task and recall ids
+  kept under the mnemonic strategy, and a corrupt mnemonic state quarantined instead of failing every turn.
+- **Layout:** the per-workdir runtime directory `.kendhar` became `.jllm`, the same name as the configuration
+  directory. Existing `.kendhar` directories are not migrated.
+
+New settings: `files.maxReadBytes`, `web.fetchMaxBytes`, `sandbox.outputLogMaxBytes`. The decisions and plans are in
+the root `todo.md`.
+
 ## Overall direction
 - **Where it lives:** an embedded component, then a standalone library with a CLI, then a web front end.
 - **Model target:** Anthropic, then local llama.cpp/Qwen, then small models.
@@ -176,4 +199,5 @@ only. Not done on purpose: restoring the last `/model`.
   rewrites the log, then a budgeted one with offloading and a task list.
 - **Permissions:** one approval flag, then a mode-by-tool-kind matrix, then sub-agents inheriting the parent's
   permissions.
+- **Hardening:** a full review pass closing jail escapes, races and unbounded reads before adding features.
 - **Unchanged throughout:** the prompt-cache prefix must stay byte-stable.
