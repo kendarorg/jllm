@@ -1,5 +1,7 @@
 package org.kendar.llm.web;
 
+import org.kendar.llm.web.users.FileUserRepository;
+import org.kendar.llm.web.users.FileRoleRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -7,9 +9,9 @@ import org.kendar.llm.harness.auth.HarnessPrincipal;
 import org.kendar.llm.harness.auth.UserPolicy;
 import org.kendar.llm.harness.tools.SimpleTool;
 import org.kendar.llm.harness.tools.ToolKind;
-import org.kendar.llm.web.users.FileCredentialResolver;
+import org.kendar.llm.web.users.UserCredentialResolver;
 import org.kendar.llm.web.users.Permissions;
-import org.kendar.llm.web.users.UserDirectory;
+import org.kendar.llm.web.commons.users.UserRepository;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -29,12 +31,12 @@ class SampleUsersTest {
 
     /** The shipped permission files, copied into a temp folder so the test reads what the sample ships. */
     private static Permissions shipped(Path dir) throws Exception {
-        Path src = Path.of("..", "webauth", "permissions");
-        if (!Files.isDirectory(src)) src = Path.of("webauth", "permissions");
+        Path src = Path.of("..", "runConfig", "webauth", "permissions");
+        if (!Files.isDirectory(src)) src = Path.of("runConfig", "webauth", "permissions");
         for (String role : List.of("guest", "reader", "admin")) {
             Files.copy(src.resolve(role + ".json"), dir.resolve(role + ".json"));
         }
-        return new Permissions(dir, new ObjectMapper());
+        return new Permissions(new FileRoleRepository(dir, new ObjectMapper()));
     }
 
     private static void user(Path dir, String id, String role, String credentials) throws Exception {
@@ -83,7 +85,7 @@ class SampleUsersTest {
     void credentialsComeFromEnvironmentReferencesOnly(@TempDir Path dir) throws Exception {
         user(dir, "rita", "guest", "{\"mcp:docs\":{\"Authorization\":\"env:PATH\",\"X-Literal\":\"secret\"},"
                 + "\"api:pets\":{\"X-Key\":\"env:JLLM_SAMPLE_UNSET_VARIABLE\"}}");
-        FileCredentialResolver r = new FileCredentialResolver(new UserDirectory(dir, mapper));
+        UserCredentialResolver r = new UserCredentialResolver(new FileUserRepository(dir, mapper));
         HarnessPrincipal rita = HarnessPrincipal.of("rita");
 
         Map<String, String> docs = r.headers(rita, "mcp:docs");
@@ -97,7 +99,7 @@ class SampleUsersTest {
     @Test
     void unknownUserIdsAreRejected(@TempDir Path dir) throws Exception {
         user(dir, "rita", "guest", "{}");
-        UserDirectory users = new UserDirectory(dir, mapper);
+        UserRepository users = new FileUserRepository(dir, mapper);
         assertTrue(users.find("rita").isPresent());
         assertTrue(users.find("../rita").isEmpty());
         assertTrue(users.find("Rita").isEmpty());
@@ -107,7 +109,7 @@ class SampleUsersTest {
     @Test
     void chatWithoutPrincipalGetsNoTools(@TempDir Path dir) throws Exception {
         Files.writeString(dir.resolve("reader.json"), "{\"tools\":[\"*\"]}");
-        var resolver = new Permissions(dir, mapper).resolver();
+        var resolver = new Permissions(new FileRoleRepository(dir, mapper)).resolver();
         var anyTool = tool("read_file", ToolKind.READ_ONLY);
         assertFalse(resolver.resolve(null).allows(anyTool));
         assertTrue(resolver.resolve(new HarnessPrincipal("u", Set.of("reader"), Map.of())).allows(anyTool));

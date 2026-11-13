@@ -5,7 +5,7 @@ import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.auth.UserPolicy;
-import org.kendar.llm.harness.settings.SkillSettings;
+import org.kendar.llm.harness.auth.UserSkill;
 import org.kendar.llm.harness.tools.ToolKind;
 import org.kendar.llm.web.auth.PasswordHasher;
 
@@ -29,7 +29,7 @@ class MeControllerTest {
     }
 
     private static List<String> skillNames(UserPolicy p) {
-        return p.skills().stream().map(SkillSettings::name).toList();
+        return p.skills().stream().map(UserSkill::name).toList();
     }
 
     // ---- password

@@ -1,15 +1,12 @@
 package org.kendar.llm.harness.skills;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import org.kendar.llm.harness.settings.SkillSettings;
+import org.kendar.llm.harness.auth.UserSkill;
 import org.kendar.llm.harness.tools.HarnessTool;
 import org.kendar.llm.harness.tools.SimpleTool;
 import org.kendar.llm.harness.tools.ToolContext;
 import org.kendar.llm.harness.tools.ToolKind;
 
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -46,17 +43,14 @@ public final class SkillTool implements HarnessTool {
 
     /**
      * The same tool restricted to the catalog skills {@code allowed} accepts, plus {@code extra} skills (the user's
-     * own). An extra skill whose file is missing, or whose name is a catalog skill, is left out.
+     * own). An extra skill whose name is a catalog skill is left out.
      */
-    public SkillTool forChat(Predicate<String> allowed, List<SkillSettings> extra) {
+    public SkillTool forChat(Predicate<String> allowed, List<UserSkill> extra) {
         Map<String, SkillCatalog.Skill> own = new LinkedHashMap<>();
-        for (SkillSettings s : extra == null ? List.<SkillSettings>of() : extra) {
-            if (s == null || s.name() == null || s.path() == null || catalog.contains(s.name())) continue;
-            Path path = Path.of(s.path());
-            if (!Files.isRegularFile(path)) continue;
+        for (UserSkill s : extra == null ? List.<UserSkill>of() : extra) {
+            if (s == null || catalog.contains(s.name())) continue;
             if (allowed != null && !allowed.test(s.name())) continue;
-            String description = s.description() != null ? s.description() : SkillCatalog.frontMatterDescription(path);
-            own.putIfAbsent(s.name(), new SkillCatalog.Skill(s.name(), description, path));
+            own.putIfAbsent(s.name(), new SkillCatalog.Skill(s.name(), s.description(), s.text()));
         }
         return new SkillTool(catalog, allowed, own);
     }
@@ -99,7 +93,7 @@ public final class SkillTool implements HarnessTool {
     public String execute(ToolContext ctx, JsonNode input) throws Exception {
         String name = input.path("name").asText();
         SkillCatalog.Skill own = extra.get(name);
-        if (own != null) return Files.readString(own.path(), StandardCharsets.UTF_8);
+        if (own != null) return own.text().read();
         if (allowed != null && !allowed.test(name)) {
             throw new IllegalArgumentException("Skill disabled for this chat: " + name);
         }

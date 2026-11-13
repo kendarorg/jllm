@@ -131,7 +131,9 @@ class PluginLoaderTest {
             java.nio.file.Files.createDirectories(dir.resolve(".jllm"));
             java.nio.file.Files.writeString(dir.resolve(".jllm").resolve("settings.json"), "{\"plugins\":" + base + "}");
             System.setProperty("jllm.home", dir.toString());
-            var s = HarnessSettings.loadLayered(f2, null);
+            var s = HarnessSettings.loadLayered(new org.kendar.llm.harness.settings.FileSettingsSource(f2, null), null,
+                    k -> null, null,
+                    new org.kendar.llm.harness.settings.FileProjectMcpTrust(dir.resolve("trust.json")), w -> { });
             System.clearProperty("jllm.home");
             assertTrue(s.plugins().get("a").get("enabled").asBoolean());
             assertEquals(1, s.plugins().get("a").get("settings").get("k").asInt());

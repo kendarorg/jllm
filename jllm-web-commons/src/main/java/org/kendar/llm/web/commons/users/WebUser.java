@@ -1,4 +1,4 @@
-package org.kendar.llm.web.users;
+package org.kendar.llm.web.commons.users;
 
 import org.kendar.llm.harness.auth.HarnessPrincipal;
 import org.kendar.llm.web.commons.WebPrincipal;
@@ -8,9 +8,9 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * A user, read from {@code webauth/users/<id>.json}.
+ * A user, as kept by a {@link UserRepository}.
  *
- * @param role           name of a role of {@code webauth/permissions}; {@code admin} is the fixed administrator role
+ * @param role           name of a role ({@link RoleRepository}); {@code admin} is the fixed administrator role
  * @param credentials    per call source ({@code mcp:<server>}, {@code api:<name>}) the headers to add; a value of the
  *                       form {@code env:NAME} is read from the environment at call time, anything else is ignored
  * @param password       stored password hash ({@code pbkdf2$...}); null = the default password (see

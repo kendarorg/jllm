@@ -736,79 +736,58 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
     }
 
     /**
-     * Global, then project, then explicit file: later wins, objects merged per key, other values (including arrays)
-     * replaced, except {@code permissions.deny}: the union of every layer (a later file can only add denials). A file
-     * whose root is not a JSON object is ignored with a warning. Missing files are skipped; {@code explicit} and
-     * {@code projectDir} may be null. Stdio MCP servers that come from the project file run only when trusted, see
-     * {@link ProjectMcpTrust}; here no one is asked, only remembered answers count.
+     * The layers of {@code source} merged: global, then project, then explicit; later wins, objects merged per key,
+     * other values (including arrays) replaced, except {@code permissions.deny}: the union of every layer (a later
+     * layer can only add denials). A layer whose root is not a JSON object is ignored with a warning. Stdio MCP
+     * servers, stop hooks and OAuth blocks that only the project layer defines count only when trusted, see
+     * {@link ProjectMcpTrust}; the project layer cannot set {@code tokenStore} nor name a literal client secret.
+     *
+     * @param projectDir the project the {@link SettingsLayer.Kind#PROJECT} layer belongs to (the key of the trust
+     *                   answers); null when there is no project layer
+     * @param prompt     asks about what the project defines and was not answered before; null = no one to ask
+     * @param trust      where the answers are remembered
      */
-    public static HarnessSettings loadLayered(Path explicit, Path projectDir) {
-        return loadLayered(explicit, projectDir, System::getenv);
-    }
-
-    public static HarnessSettings loadLayered(Path explicit, Path projectDir, Function<String, String> env) {
-        return loadLayered(explicit, projectDir, env, ProjectMcpTrust.Prompt.NONE);
-    }
-
-    /** As {@link #loadLayered(Path, Path)}; {@code prompt} asks about project stdio MCP servers not answered before. */
-    public static HarnessSettings loadLayered(Path explicit, Path projectDir, ProjectMcpTrust.Prompt prompt) {
-        return loadLayered(explicit, projectDir, System::getenv, prompt);
-    }
-
-    public static HarnessSettings loadLayered(Path explicit, Path projectDir, Function<String, String> env,
-                                              ProjectMcpTrust.Prompt prompt) {
-        return loadLayered(explicit, projectDir, env, prompt, ProjectMcpTrust.user(), LOG::warn);
-    }
-
-    static HarnessSettings loadLayered(Path explicit, Path projectDir, Function<String, String> env,
-                                       ProjectMcpTrust.Prompt prompt, ProjectMcpTrust trust,
-                                       java.util.function.Consumer<String> warn) {
-        List<Path> files = new ArrayList<>();
-        files.add(globalFile());
-        Path projectFile = projectDir == null ? null : projectFile(projectDir);
-        if (projectFile != null) files.add(projectFile);
-        if (explicit != null) files.add(explicit);
+    public static HarnessSettings loadLayered(SettingsSource source, Path projectDir, Function<String, String> env,
+                                              ProjectMcpTrust.Prompt prompt, ProjectMcpTrust trust,
+                                              java.util.function.Consumer<String> warn) {
         ObjectMapper mapper = mapper(warn);
         JsonNode merged = null;
         List<JsonNode> deny = new ArrayList<>();
         JsonNode projectTree = null;
         List<JsonNode> otherTrees = new ArrayList<>();
         try {
-            for (Path f : files) {
-                if (!java.nio.file.Files.isRegularFile(f)) {
-                    if (f.equals(explicit)) throw new UncheckedIOException("Cannot read settings " + f,
-                            new java.io.FileNotFoundException(f.toString()));
-                    continue;
-                }
-                JsonNode tree = mapper.readTree(f.toFile());
+            for (SettingsLayer layer : source.layers()) {
+                JsonNode tree = layer.tree();
                 if (!(tree instanceof ObjectNode)) {
-                    warn.accept("Settings file " + f + " ignored: its root must be a JSON object, not "
+                    warn.accept("Settings " + layer.origin() + " ignored: its root must be a JSON object, not "
                             + (tree == null || tree.isMissingNode() ? "empty" : tree.getNodeType().name().toLowerCase()));
                     continue;
                 }
+                tree = tree.deepCopy();
                 for (JsonNode d : tree.path("permissions").path("deny")) {
                     if (!deny.contains(d)) deny.add(d.deepCopy());
                 }
-                if (f.equals(projectFile) && !f.equals(explicit)) projectTree = tree.deepCopy();
+                if (layer.kind() == SettingsLayer.Kind.PROJECT) projectTree = tree.deepCopy();
                 else otherTrees.add(tree.deepCopy());
                 merged = merged == null ? tree : merge(merged, tree);
             }
             if (merged == null) return empty();
+            if (projectTree != null && projectDir == null) {
+                throw new IllegalArgumentException("A project settings layer needs its project directory");
+            }
             if (!deny.isEmpty()) {
                 ObjectNode perms = merged.get("permissions") instanceof ObjectNode o ? o
                         : ((ObjectNode) merged).putObject("permissions");
                 ArrayNode union = perms.putArray("deny");
                 deny.forEach(union::add);
             }
-            if (projectTree != null) dropUntrustedProjectServers((ObjectNode) merged, projectTree, otherTrees,
-                    projectDir, prompt == null ? ProjectMcpTrust.Prompt.NONE : prompt, trust, warn);
-            if (projectTree != null) dropUntrustedProjectHooks((ObjectNode) merged, projectTree, otherTrees,
-                    projectDir, prompt == null ? ProjectMcpTrust.Prompt.NONE : prompt, trust, warn);
+            ProjectMcpTrust.Prompt ask = prompt == null ? ProjectMcpTrust.Prompt.NONE : prompt;
             if (projectTree != null) {
+                dropUntrustedProjectServers((ObjectNode) merged, projectTree, otherTrees, projectDir, ask, trust, warn);
+                dropUntrustedProjectHooks((ObjectNode) merged, projectTree, otherTrees, projectDir, ask, trust, warn);
                 refuseLiteralSecrets(projectTree);
                 projectTokenStore((ObjectNode) merged, projectTree, otherTrees, warn);
-                dropUntrustedProjectOAuth((ObjectNode) merged, projectTree, otherTrees, projectDir,
-                        prompt == null ? ProjectMcpTrust.Prompt.NONE : prompt, trust, warn);
+                dropUntrustedProjectOAuth((ObjectNode) merged, projectTree, otherTrees, projectDir, ask, trust, warn);
             }
             return mapper.treeToValue(expand(merged, env), HarnessSettings.class);
         } catch (IOException e) {

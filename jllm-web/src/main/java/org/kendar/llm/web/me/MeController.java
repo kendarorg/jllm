@@ -11,12 +11,13 @@ import org.kendar.llm.web.admin.ToolCatalogView;
 import org.kendar.llm.web.auth.CookieAuthentication;
 import org.kendar.llm.web.auth.LoginThrottle;
 import org.kendar.llm.web.auth.PasswordHasher;
-import org.kendar.llm.web.auth.SessionStore;
+import org.kendar.llm.web.commons.users.LoginSessionRepository;
 import org.kendar.llm.web.commons.WebPrincipal;
 import org.kendar.llm.web.users.Permissions;
-import org.kendar.llm.web.users.SkillFiles;
-import org.kendar.llm.web.users.UserDirectory;
-import org.kendar.llm.web.users.WebUser;
+import org.kendar.llm.web.commons.users.Role;
+import org.kendar.llm.web.commons.users.SkillRepository;
+import org.kendar.llm.web.commons.users.UserRepository;
+import org.kendar.llm.web.commons.users.WebUser;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -32,15 +33,15 @@ import java.util.*;
 @RequestMapping("/api/me")
 public class MeController {
 
-    private final UserDirectory users;
+    private final UserRepository users;
     private final Permissions permissions;
-    private final SkillFiles skills;
-    private final SessionStore sessions;
+    private final SkillRepository skills;
+    private final LoginSessionRepository sessions;
     private final LoginThrottle throttle;
     private final AgentHarness harness;
     private final ToolCatalogView catalog;
 
-    public MeController(UserDirectory users, Permissions permissions, SkillFiles skills, SessionStore sessions,
+    public MeController(UserRepository users, Permissions permissions, SkillRepository skills, LoginSessionRepository sessions,
                         LoginThrottle throttle, AgentHarness harness, ToolCatalogView catalog) {
         this.users = users;
         this.permissions = permissions;
@@ -97,7 +98,7 @@ public class MeController {
                                        WebPrincipal principal) {
         Optional<WebUser> u = user(principal);
         if (u.isEmpty()) return Api.error(HttpStatus.UNAUTHORIZED, "Sign in first");
-        Optional<Permissions.Role> role = permissions.role(u.get().role());
+        Optional<Role> role = permissions.role(u.get().role());
         ToolCatalogView.Catalog c = role.map(r -> catalog.forUser(r, u.get()))
                 .orElse(new ToolCatalogView.Catalog(List.of(), List.of(), List.of()));
         Map<String, Object> out = new LinkedHashMap<>();
@@ -118,7 +119,7 @@ public class MeController {
         if (disabled == null) return Api.error(HttpStatus.BAD_REQUEST, "'disabled' must be an array of strings");
         List<String> kept = permissions.role(u.get().role())
                 .map(r -> catalog.keepMeaningful(r, disabled)).orElse(List.of());
-        users.setList(u.get().id(), "disabledTools", kept);
+        users.setDisabledTools(u.get().id(), kept);
         return ResponseEntity.noContent().build();
     }
 
@@ -153,12 +154,12 @@ public class MeController {
             shared.add(s.name());
             list.add(entry(s.name(), s.description(), "settings", !off.contains(s.name()), false));
         }
-        for (SkillFiles.Skill s : skills.global()) {
+        for (SkillRepository.Skill s : skills.global()) {
             boolean shadowed = shared.contains(s.name());
             shared.add(s.name());
             list.add(entry(s.name(), s.description(), "global", !off.contains(s.name()), shadowed));
         }
-        for (SkillFiles.Skill s : skills.own(u.id())) {
+        for (SkillRepository.Skill s : skills.own(u.id())) {
             list.add(entry(s.name(), s.description(), "own", !off.contains(s.name()), shared.contains(s.name())));
         }
         Map<String, Object> out = new LinkedHashMap<>();
@@ -184,14 +185,14 @@ public class MeController {
                                         WebPrincipal principal) {
         Optional<WebUser> u = user(principal);
         if (u.isEmpty()) return Api.error(HttpStatus.UNAUTHORIZED, "Sign in first");
-        Optional<SkillFiles.Skill> own = skills.findOwn(u.get().id(), name);
+        Optional<SkillRepository.Skill> own = skills.findOwn(u.get().id(), name);
         if (own.isPresent()) return ResponseEntity.ok(body(own.get(), "own"));
-        Optional<SkillFiles.Skill> global = skills.findGlobal(name);
+        Optional<SkillRepository.Skill> global = skills.findGlobal(name);
         if (global.isPresent()) return ResponseEntity.ok(body(global.get(), "global"));
         for (SkillCatalog.Skill s : harness.skills().all()) {
             if (s.name().equals(name)) {
                 try {
-                    String text = java.nio.file.Files.readString(s.path());
+                    String text = s.text().read();
                     return ResponseEntity.ok(Map.of("name", s.name(), "description", s.description(),
                             "source", "settings", "content", text));
                 } catch (java.io.IOException e) {
@@ -202,7 +203,7 @@ public class MeController {
         return Api.error(HttpStatus.NOT_FOUND, "Unknown skill " + name);
     }
 
-    static Map<String, Object> body(SkillFiles.Skill s, String source) {
+    static Map<String, Object> body(SkillRepository.Skill s, String source) {
         return Map.of("name", s.name(), "description", s.description(), "source", source, "content", s.content());
     }
 
@@ -216,7 +217,7 @@ public class MeController {
         if (disabled == null) return Api.error(HttpStatus.BAD_REQUEST, "'disabled' must be an array of strings");
         Set<String> known = sharedNames();
         skills.own(u.get().id()).forEach(s -> known.add(s.name()));
-        users.setList(u.get().id(), "disabledSkills", disabled.stream().filter(known::contains).distinct().toList());
+        users.setDisabledSkills(u.get().id(), disabled.stream().filter(known::contains).distinct().toList());
         return ResponseEntity.noContent().build();
     }
 
@@ -229,14 +230,14 @@ public class MeController {
         WebUser u = found.get();
         if (!canUseSkills(u)) return Api.error(HttpStatus.FORBIDDEN, "Skills are not available to your role");
         String name = Api.text(body, "name");
-        if (!SkillFiles.validName(name)) {
+        if (!SkillRepository.validName(name)) {
             return Api.error(HttpStatus.BAD_REQUEST, "Skill name: 1-64 of a-z, 0-9, '_' and '-'");
         }
         if (sharedNames().contains(name) || skills.findOwn(u.id(), name).isPresent()) {
             return Api.error(HttpStatus.CONFLICT, "A skill named " + name + " exists");
         }
-        if (skills.own(u.id()).size() >= SkillFiles.MAX_OWN) {
-            return Api.error(HttpStatus.CONFLICT, "At most " + SkillFiles.MAX_OWN + " skills per user");
+        if (skills.own(u.id()).size() >= SkillRepository.MAX_OWN) {
+            return Api.error(HttpStatus.CONFLICT, "At most " + SkillRepository.MAX_OWN + " skills per user");
         }
         return write(u.id(), name, body, HttpStatus.CREATED);
     }
@@ -259,10 +260,10 @@ public class MeController {
 
     private ResponseEntity<Object> write(String userId, String name, Map<String, Object> body, HttpStatus status) {
         try {
-            SkillFiles.Skill s = skills.writeOwn(userId, name, Api.text(body, "description"),
+            SkillRepository.Skill s = skills.writeOwn(userId, name, Api.text(body, "description"),
                     Api.text(body, "content"));
             return ResponseEntity.status(status).body(body(s, "own"));
-        } catch (SkillFiles.SkillTooLargeException e) {
+        } catch (SkillRepository.SkillTooLargeException e) {
             return Api.error(HttpStatus.PAYLOAD_TOO_LARGE, e.getMessage());
         }
     }
@@ -279,7 +280,7 @@ public class MeController {
                     : Api.error(HttpStatus.NOT_FOUND, "Unknown skill " + name);
         }
         if (u.disabledSkills().contains(name) && !sharedNames().contains(name)) {
-            users.setList(u.id(), "disabledSkills", u.disabledSkills().stream().filter(n -> !n.equals(name)).toList());
+            users.setDisabledSkills(u.id(), u.disabledSkills().stream().filter(n -> !n.equals(name)).toList());
         }
         return ResponseEntity.noContent().build();
     }

@@ -6,6 +6,7 @@ import org.kendar.llm.harness.AgentHarness;
 import org.kendar.llm.harness.agent.AgentEvent;
 import org.kendar.llm.harness.auth.HarnessPrincipal;
 import org.kendar.llm.harness.auth.UserPolicy;
+import org.kendar.llm.harness.auth.UserSkill;
 import org.kendar.llm.harness.settings.HarnessSettings;
 import org.kendar.llm.harness.settings.SkillSettings;
 import org.kendar.llm.harness.tools.ToolContext;
@@ -31,7 +32,7 @@ class UserSkillsTest {
     Path base;
 
     /** Per user: own skills and the harness skills kept; changed between turns by the tests. */
-    private final Map<String, List<SkillSettings>> own = new ConcurrentHashMap<>();
+    private final Map<String, List<UserSkill>> own = new ConcurrentHashMap<>();
     private final Map<String, Set<String>> hidden = new ConcurrentHashMap<>();
 
     private Path write(String name, String content) throws Exception {
@@ -52,7 +53,7 @@ class UserSkillsTest {
     @Test
     void ownSkillIsOfferedAndLoadedOnlyForItsUser() throws Exception {
         Path notes = write("notes.md", "---\ndescription: My notes\n---\nAlways write notes.");
-        own.put("alice", List.of(new SkillSettings("notes", null, notes.toString())));
+        own.put("alice", List.of(new UserSkill("notes", null, () -> Files.readString(notes))));
         ScriptedModel model = new ScriptedModel()
                 .enqueue(toolUse("t1", "skill", "{\"name\":\"notes\"}"), text("ok"))
                 .enqueue(text("ok"));
@@ -77,13 +78,27 @@ class UserSkillsTest {
         SkillCatalog catalog = new SkillCatalog(List.of(new SkillSettings("pdf", "PDF", pdf.toString()),
                 new SkillSettings("csv", "CSV", csv.toString())));
         SkillTool view = new SkillTool(catalog).forChat(name -> !name.equals("csv"),
-                List.of(new SkillSettings("pdf", "mine", fake.toString()),
-                        new SkillSettings("gone", "x", base.resolve("missing.md").toString())));
+                List.of(new UserSkill("pdf", "mine", () -> Files.readString(fake))));
 
         assertEquals(List.of("pdf"), view.offered().stream().map(SkillCatalog.Skill::name).toList());
         assertEquals("harness pdf", view.execute(new ToolContext("c", base), json("{'name':'pdf'}")));
         assertThrows(IllegalArgumentException.class,
                 () -> view.execute(new ToolContext("c", base), json("{'name':'csv'}")));
+    }
+
+    @Test
+    void ownSkillTextIsReadOnEachLoad() throws Exception {
+        SkillCatalog catalog = new SkillCatalog(List.of());
+        String[] text = {"first"};
+        SkillTool view = new SkillTool(catalog).forChat(null, List.of(new UserSkill("notes", "N", () -> {
+            if (text[0] == null) throw new java.nio.file.NoSuchFileException("notes");
+            return text[0];
+        })));
+        assertEquals("first", view.execute(new ToolContext("c", base), json("{'name':'notes'}")));
+        text[0] = "second";
+        assertEquals("second", view.execute(new ToolContext("c", base), json("{'name':'notes'}")));
+        text[0] = null;
+        assertThrows(java.io.IOException.class, () -> view.execute(new ToolContext("c", base), json("{'name':'notes'}")));
     }
 
     @Test

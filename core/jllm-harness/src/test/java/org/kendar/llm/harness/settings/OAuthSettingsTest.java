@@ -30,7 +30,7 @@ class OAuthSettingsTest {
         home = tmp.resolve("home");
         project = tmp.resolve("proj");
         System.setProperty("jllm.home", home.toString());
-        trust = new ProjectMcpTrust(home.resolve(".jllm/trusted-mcp.json"));
+        trust = new FileProjectMcpTrust(home.resolve(".jllm/trusted-mcp.json"));
     }
 
     @AfterEach
@@ -44,7 +44,7 @@ class OAuthSettingsTest {
     }
 
     private HarnessSettings load(ProjectMcpTrust.Prompt prompt) {
-        return HarnessSettings.loadLayered(null, project, Map.of("CRM_SECRET", "s3")::get, prompt, trust,
+        return HarnessSettings.loadLayered(new FileSettingsSource(null, project), project, Map.of("CRM_SECRET", "s3")::get, prompt, trust,
                 warnings::add);
     }
 

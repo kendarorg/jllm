@@ -5,13 +5,14 @@ import org.kendar.llm.harness.skills.SkillCatalog;
 import org.kendar.llm.web.Api;
 import org.kendar.llm.web.auth.AuthController;
 import org.kendar.llm.web.auth.PasswordHasher;
-import org.kendar.llm.web.auth.SessionStore;
+import org.kendar.llm.web.commons.users.LoginSessionRepository;
 import org.kendar.llm.web.commons.WebPrincipal;
 import org.kendar.llm.web.me.MeController;
 import org.kendar.llm.web.users.Permissions;
-import org.kendar.llm.web.users.SkillFiles;
-import org.kendar.llm.web.users.UserDirectory;
-import org.kendar.llm.web.users.WebUser;
+import org.kendar.llm.web.commons.users.Role;
+import org.kendar.llm.web.commons.users.SkillRepository;
+import org.kendar.llm.web.commons.users.UserRepository;
+import org.kendar.llm.web.commons.users.WebUser;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -27,14 +28,14 @@ import java.util.*;
 @RequestMapping("/api/admin")
 public class AdminController {
 
-    private final UserDirectory users;
+    private final UserRepository users;
     private final Permissions permissions;
-    private final SkillFiles skills;
-    private final SessionStore sessions;
+    private final SkillRepository skills;
+    private final LoginSessionRepository sessions;
     private final AgentHarness harness;
     private final ToolCatalogView catalog;
 
-    public AdminController(UserDirectory users, Permissions permissions, SkillFiles skills, SessionStore sessions,
+    public AdminController(UserRepository users, Permissions permissions, SkillRepository skills, LoginSessionRepository sessions,
                            AgentHarness harness, ToolCatalogView catalog) {
         this.users = users;
         this.permissions = permissions;
@@ -68,7 +69,7 @@ public class AdminController {
         String id = Api.text(body, "id");
         String role = Api.text(body, "role");
         String password = Api.text(body, "password");
-        if (!UserDirectory.validId(id)) return Api.error(HttpStatus.BAD_REQUEST, "Login: 1-64 of a-z, 0-9, '_' and '-'");
+        if (!UserRepository.validId(id)) return Api.error(HttpStatus.BAD_REQUEST, "Login: 1-64 of a-z, 0-9, '_' and '-'");
         if (permissions.role(role).isEmpty()) return Api.error(HttpStatus.BAD_REQUEST, "Unknown role " + role);
         if (users.exists(id)) return Api.error(HttpStatus.CONFLICT, "User " + id + " exists");
         String hash = null;
@@ -96,10 +97,9 @@ public class AdminController {
                 return Api.error(HttpStatus.CONFLICT, "The last admin cannot lose the admin role");
             }
         }
-        WebUser updated = users.update(id, n -> {
-            if (name != null && !name.isBlank()) n.put("name", name.strip());
-            if (role != null) n.put("role", role);
-        });
+        WebUser updated = found.get();
+        if (name != null && !name.isBlank()) updated = users.setName(id, name);
+        if (role != null) updated = users.setRole(id, role);
         return ResponseEntity.ok(row(updated));
     }
 
@@ -135,7 +135,7 @@ public class AdminController {
 
     // ---- roles
 
-    private Map<String, Object> row(Permissions.Role r, List<WebUser> all) {
+    private Map<String, Object> row(Role r, List<WebUser> all) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("name", r.name());
         m.put("tools", r.tools());
@@ -177,7 +177,7 @@ public class AdminController {
         boolean readOnly = body != null && Boolean.TRUE.equals(body.get("readOnly"));
         String approval = Api.text(body, "approval");
         try {
-            Permissions.Role saved = permissions.save(new Permissions.Role(name, tools.stream().distinct().toList(),
+            Role saved = permissions.save(new Role(name, tools.stream().distinct().toList(),
                     readOnly, approval));
             return ResponseEntity.status(status).body(row(saved, users.all()));
         } catch (IllegalArgumentException e) {
@@ -211,7 +211,7 @@ public class AdminController {
             out.add(Map.of("name", s.name(), "description", s.description(), "source", "settings",
                     "shadows", List.of()));
         }
-        for (SkillFiles.Skill s : skills.global()) {
+        for (SkillRepository.Skill s : skills.global()) {
             out.add(Map.of("name", s.name(), "description", s.description(), "source", "global",
                     "shadows", skills.ownersOf(s.name())));
         }
@@ -220,9 +220,9 @@ public class AdminController {
 
     @GetMapping("/skills/{name}")
     public ResponseEntity<Object> skill(@PathVariable String name) {
-        Optional<SkillFiles.Skill> g = skills.findGlobal(name);
+        Optional<SkillRepository.Skill> g = skills.findGlobal(name);
         if (g.isPresent()) {
-            SkillFiles.Skill s = g.get();
+            SkillRepository.Skill s = g.get();
             return ResponseEntity.ok(Map.of("name", s.name(), "description", s.description(), "source", "global",
                     "content", s.content()));
         }
@@ -230,7 +230,7 @@ public class AdminController {
             if (!s.name().equals(name)) continue;
             try {
                 return ResponseEntity.ok(Map.of("name", s.name(), "description", s.description(),
-                        "source", "settings", "content", java.nio.file.Files.readString(s.path())));
+                        "source", "settings", "content", s.text().read()));
             } catch (java.io.IOException e) {
                 return Api.error(HttpStatus.NOT_FOUND, "Skill file unreadable: " + name);
             }
@@ -245,7 +245,7 @@ public class AdminController {
     @PostMapping("/skills")
     public ResponseEntity<Object> createSkill(@RequestBody(required = false) Map<String, Object> body) {
         String name = Api.text(body, "name");
-        if (!SkillFiles.validName(name)) return Api.error(HttpStatus.BAD_REQUEST, "Skill name: 1-64 of a-z, 0-9, '_' and '-'");
+        if (!SkillRepository.validName(name)) return Api.error(HttpStatus.BAD_REQUEST, "Skill name: 1-64 of a-z, 0-9, '_' and '-'");
         if (settingsSkill(name) || skills.findGlobal(name).isPresent()) {
             return Api.error(HttpStatus.CONFLICT, "A skill named " + name + " exists");
         }
@@ -263,10 +263,10 @@ public class AdminController {
 
     private ResponseEntity<Object> writeSkill(String name, Map<String, Object> body, HttpStatus status) {
         try {
-            SkillFiles.Skill s = skills.writeGlobal(name, Api.text(body, "description"), Api.text(body, "content"));
+            SkillRepository.Skill s = skills.writeGlobal(name, Api.text(body, "description"), Api.text(body, "content"));
             return ResponseEntity.status(status).body(Map.of("name", s.name(), "description", s.description(),
                     "source", "global", "content", s.content(), "shadows", skills.ownersOf(name)));
-        } catch (SkillFiles.SkillTooLargeException e) {
+        } catch (SkillRepository.SkillTooLargeException e) {
             return Api.error(HttpStatus.PAYLOAD_TOO_LARGE, e.getMessage());
         }
     }
