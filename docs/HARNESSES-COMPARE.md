@@ -1,6 +1,6 @@
 # Feature matrix
 
-Legend: yes, no, partial. Same caveats as above: all columns except jllm are from memory and unverified; Hermes Agent has the lowest confidence.
+Legend: yes, no, partial. All columns except jllm are from memory and unverified; Hermes Agent has the lowest confidence. For source-pinned comparisons use the paper's tables, not this document.
 
 <table>
 <tr><th>Functionality</th><th>mini-swe-agent</th><th>Pi</th><th>OpenCode</th><th>Qwen Code</th><th>Hermes Agent</th><th>jllm</th></tr>

@@ -117,7 +117,7 @@ AgentHarness h = AgentHarness.builder()
   and [TOOLS](../../docs/TOOLS.md#document-readers). `builder.discoverPlugins()` loads the `HarnessPlugin`s found by
   `ServiceLoader` (classpath and `builder.pluginDir(...)`) that are listed and enabled under `plugins` in the settings
   (ids `pdf`, `docs`; see [EXTENDING](../../docs/EXTENDING.md#3-plugins-and-slash-commands)); `builder.documentReader(...)` adds a reader directly.
-- `${ENV_VAR}` is expanded in every string; a missing variable fails the load. OAuth is not supported (static headers).
+- `${ENV_VAR}` is expanded in every string; a missing variable fails the load. MCP servers support OAuth (`oauth: true`, see [MCP](../../docs/MCP.md#oauth)); REST uses static headers only.
 - A REST operation becomes a tool only if it passes `allowedPaths` and `denyPaths` (`METHOD /path`, method optional, `*` wildcard).
   MCP tools follow `allowList` and `denyList` (tool names, `*` wildcard). Absent allow = all, `[]` = none, `["*"]` = all;
   deny hides matches. Hidden tools are never sent to the model.

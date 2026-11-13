@@ -27,7 +27,7 @@ Also: [HISTORY](docs/HISTORY.md) (how the harness evolved) and [HARNESSES-COMPAR
 
 What is still missing (more in [FUTURE](docs/FUTURE.md)):
 
-* OAuth & token support on MCP/API calls (static headers only)
+* OAuth on REST/API calls (MCP OAuth is done; no provider logins, static headers only for REST)
 * Authentication & authorization on the web UI: `jllm-web` is a reference front end meant for localhost or a trusted
   network. Do not expose it publicly without a reverse proxy that handles authentication.
 
@@ -88,7 +88,7 @@ MCP servers and REST APIs need no code, only configuration:
 ```
 
 - **MCP**: streamable-HTTP servers or stdio child processes (`command`/`args`/`env`), static headers (`${ENV_VAR}` expanded), tools listed at startup. A server that is
-  down does not stop the harness. No OAuth.
+  down does not stop the harness. OAuth with `"oauth": true` (`/login mcp:<name>`, see [MCP](docs/MCP.md#oauth)).
 - **REST**: the OpenAPI 3 spec is parsed and each operation that passes `allowedPaths` and `denyPaths` becomes a tool whose
   input schema comes from the spec. Hidden operations are not reachable. GET/HEAD are read-only, other methods need approval.
 - **Visibility lists**: MCP `allowList`/`denyList` (tool names) and REST `allowedPaths`/`denyPaths` (`METHOD /path`).
