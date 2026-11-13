@@ -34,4 +34,12 @@ public interface HarnessIdentity {
 
     /** The principal of a user id; null when unknown. */
     Function<String, HarnessPrincipal> principals();
+
+    /**
+     * Directory of the users' OAuth token files when the settings name none ({@code tokenStore.dir}); null = the
+     * harness default.
+     */
+    default java.nio.file.Path tokenDir() {
+        return null;
+    }
 }

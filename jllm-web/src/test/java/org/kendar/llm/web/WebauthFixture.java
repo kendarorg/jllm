@@ -87,7 +87,7 @@ final class WebauthFixture {
             }
         };
         HarnessSettings settings = new HarnessSettings(
-                List.of(new McpServerSettings("docs", "http://127.0.0.1:9/mcp", null, null, false, null)),
+                List.of(new McpServerSettings("docs", "http://127.0.0.1:9/mcp", null, null, false, null, null, null, null, null, null, null, null)),
                 null, List.of(new SkillSettings("pdf", null, pdf.toString())), null, null);
         List<HarnessTool> tools = List.of(tool("read_file", ToolKind.READ_ONLY), tool("grep", ToolKind.READ_ONLY),
                 tool("write_file", ToolKind.FILE_EDIT), tool("web_fetch", ToolKind.READ_ONLY));

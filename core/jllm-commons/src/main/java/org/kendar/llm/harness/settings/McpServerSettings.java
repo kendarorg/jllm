@@ -19,10 +19,13 @@ import java.util.Map;
  *                  {@code ["*"]} all
  * @param denyList  tool names (wildcard {@code *}) that are hidden. Empty or absent hides nothing, {@code ["*"]}
  *                  hides everything
+ * @param perUser   with {@code oauth}: every user's calls carry their own token ({@code /login mcp:<name>} per user);
+ *                  discovery uses the shared (admin) login. Default true when the harness has users, false for a
+ *                  single user (one shared login, as before). Not allowed on a stdio server
  */
 public record McpServerSettings(String name, String url, Map<String, String> headers, String group, Boolean enabled,
                                 Boolean readOnly, String command, List<String> args, Map<String, String> env,
-                                Boolean oauth, List<String> allowList, List<String> denyList) {
+                                Boolean oauth, List<String> allowList, List<String> denyList, Boolean perUser) {
 
     public McpServerSettings {
         headers = headers == null ? Map.of() : Map.copyOf(headers);
@@ -35,23 +38,19 @@ public record McpServerSettings(String name, String url, Map<String, String> hea
         if (hasUrl == hasCommand) {
             throw new IllegalArgumentException("MCP server '" + name + "' needs exactly one of url or command");
         }
+        if (hasCommand && Boolean.TRUE.equals(perUser)) {
+            throw new IllegalArgumentException("MCP server '" + name + "': perUser needs an HTTP server (a stdio server is one process for everybody)");
+        }
     }
 
-    public McpServerSettings(String name, String url, Map<String, String> headers, String group, Boolean enabled,
-                             Boolean readOnly, String command, List<String> args, Map<String, String> env,
-                             Boolean oauth) {
-        this(name, url, headers, group, enabled, readOnly, command, args, env, oauth, null, null);
+    /** Whether calls use each user's own token: {@code oauth} and {@code perUser} (default {@code multiUser}). */
+    public boolean perUserOAuth(boolean multiUser) {
+        return Boolean.TRUE.equals(oauth) && !isStdio() && (perUser != null ? perUser : multiUser);
     }
 
-    public McpServerSettings(String name, String url, Map<String, String> headers, String group, Boolean enabled,
-                             Boolean readOnly, String command, List<String> args, Map<String, String> env) {
-        this(name, url, headers, group, enabled, readOnly, command, args, env, null);
-    }
-
-    /** An HTTP server. */
-    public McpServerSettings(String name, String url, Map<String, String> headers, String group, Boolean enabled,
-                             Boolean readOnly) {
-        this(name, url, headers, group, enabled, readOnly, null, null, null, null);
+    /** The token store and credential source name of this server: {@code mcp:<name>}. */
+    public String source() {
+        return "mcp:" + name;
     }
 
     public boolean isStdio() {

@@ -38,6 +38,10 @@ public final class McpHttpClient implements McpClient {
     private static final String PROTOCOL_VERSION = "2025-03-26";
     /** Session key of calls made without a principal. */
     static final String NO_PRINCIPAL = "";
+    /** Most principal sessions kept; the least recently used beyond it is closed. */
+    static final int MAX_SESSIONS = 256;
+    /** A principal session unused this long is closed. */
+    static final long IDLE_NANOS = java.util.concurrent.TimeUnit.MINUTES.toNanos(15);
 
     private final HttpClient http;
     private final ObjectMapper mapper;
@@ -46,6 +50,9 @@ public final class McpHttpClient implements McpClient {
     private final AtomicLong ids = new AtomicLong();
     private final Map<String, String> sessionIds = new ConcurrentHashMap<>();
     private final Set<String> initialized = ConcurrentHashMap.newKeySet();
+    /** Last use of each principal session, in access order (oldest first). Guarded by itself. */
+    private final java.util.LinkedHashMap<String, Long> lastUse = new java.util.LinkedHashMap<>(16, 0.75f, true);
+    private volatile java.util.function.LongSupplier nanoClock = System::nanoTime;
     private final AtomicReference<String> unavailable = new AtomicReference<>();
     private volatile org.kendar.llm.harness.auth.AuthProvider auth;
     private volatile Consumer<String> onUnavailable = reason -> { };
@@ -122,11 +129,70 @@ public final class McpHttpClient implements McpClient {
         initialized.remove(key);
     }
 
+    /** Test seam: the clock of the idle sessions. */
+    McpHttpClient nanoClock(java.util.function.LongSupplier clock) {
+        this.nanoClock = clock;
+        return this;
+    }
+
+    /** Number of open principal sessions (tests, status). */
+    public int principalSessions() {
+        synchronized (lastUse) {
+            return lastUse.size();
+        }
+    }
+
+    /** Marks the session of {@code key} used, and closes the idle ones and the oldest beyond {@link #MAX_SESSIONS}. */
+    private void touch(String key) {
+        if (NO_PRINCIPAL.equals(key)) return;
+        List<String> evict = new ArrayList<>();
+        long now = nanoClock.getAsLong();
+        synchronized (lastUse) {
+            lastUse.put(key, now);
+            var it = lastUse.entrySet().iterator();
+            while (it.hasNext()) {
+                var e = it.next();
+                boolean idle = now - e.getValue() > IDLE_NANOS;
+                boolean over = lastUse.size() - evict.size() > MAX_SESSIONS;
+                if (e.getKey().equals(key) || !(idle || over)) continue;
+                evict.add(e.getKey());
+                it.remove();
+            }
+        }
+        evict.forEach(this::endSession);
+    }
+
+    @Override
+    public void closeSession(String principalId) {
+        String key = principalId == null ? NO_PRINCIPAL : principalId;
+        synchronized (lastUse) {
+            lastUse.remove(key);
+        }
+        endSession(key);
+    }
+
+    /** Forgets the session of {@code key} and tells the server (DELETE, best effort). */
+    private void endSession(String key) {
+        String session;
+        synchronized (this) {
+            session = sessionIds.remove(key);
+            initialized.remove(key);
+        }
+        if (session == null) return;
+        try {
+            http.sendAsync(HttpRequest.newBuilder(url).timeout(Duration.ofSeconds(10)).header("Mcp-Session-Id", session)
+                    .DELETE().build(), HttpResponse.BodyHandlers.discarding());
+        } catch (RuntimeException e) {
+            log.debug("MCP {}: session close failed: {}", url, e.toString());
+        }
+    }
+
     /** Runs {@code step} in an initialized session; a lost session is initialized again and the step repeated once. */
     private JsonNode withSession(String key, Map<String, String> extra, Step step)
             throws IOException, InterruptedException {
         String reason = unavailable.get();
         if (reason != null) throw new McpUnavailableException("MCP server " + url + " is unavailable: " + reason);
+        touch(key);
         try {
             initialize(key, extra);
             return step.run();
@@ -201,6 +267,9 @@ public final class McpHttpClient implements McpClient {
             throws IOException, InterruptedException {
         String session = sessionIds.get(key);
         HttpResponse<String> resp = send(body, session, extra);
+        if (resp.statusCode() == 401 && ownCredentials(extra)) {
+            throw new McpUnauthorizedException("MCP " + url + " answered HTTP 401 to the caller's credentials");
+        }
         if (resp.statusCode() == 401 && auth != null) {
             auth.onUnauthorized();
             resp = send(body, session, extra);
@@ -230,7 +299,7 @@ public final class McpHttpClient implements McpClient {
         if (session != null) b.header("Mcp-Session-Id", session);
         headers.forEach(b::header);
         extra.forEach(b::header);
-        if (auth != null) {
+        if (auth != null && !ownCredentials(extra)) { // a per-user token replaces the shared login
             try {
                 auth.headers().forEach(b::header);
             } catch (IllegalStateException e) {
@@ -247,6 +316,12 @@ public final class McpHttpClient implements McpClient {
         } catch (IOException e) {
             throw new SessionLost("MCP " + url + " connection failed: " + e, session, e);
         }
+    }
+
+    /** The call carries the caller's own {@code Authorization} header. */
+    private static boolean ownCredentials(Map<String, String> extra) {
+        for (String k : extra.keySet()) if (k.equalsIgnoreCase("authorization")) return true;
+        return false;
     }
 
     /**

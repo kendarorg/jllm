@@ -398,6 +398,81 @@ public interface ChatSessionStore {
 cheap or write behind. The `FileHistory*` stores are decorators: they wrap another store and mirror to
 `<root>/<chatId>/<agentId>/messages.jsonl`, so a database store can be wrapped the same way.
 
+### Token stores
+
+OAuth tokens (REST APIs, MCP servers, provider logins) go through `org.kendar.llm.harness.auth.TokenStore`. Shipped:
+`FileTokenStore` (one file per principal, optional `TokenCipher` encryption, cross-process file lock) and
+`NativeTokenStore` (macOS Keychain, Windows DPAPI, Linux Secret Service; single user). `AgentHarness.Builder.tokenStore(store)`
+takes any implementation and wins over the `tokenStore` settings ([MCP](MCP.md#6-token-storage)).
+
+```java
+public interface TokenStore {
+    Optional<OAuthToken> get(String principalId, String name);   // principalId null: single user / shared login
+    void put(String principalId, String name, OAuthToken token);
+    boolean remove(String principalId, String name);
+    List<String> names(String principalId);
+    default void removeAll(String principalId) { ... }           // user deleted
+    default boolean compareAndPut(String principalId, String name, OAuthToken expected, OAuthToken next) { ... }
+    default <T> T locked(String principalId, String name, Supplier<T> action) { ... } // in-process by default
+    default boolean crossProcess() { return false; }
+    String describe();                                             // "file ...", "macOS keychain": never a secret
+}
+```
+
+Rules:
+- Only keep tokens. Never refresh them in the store: the harness refreshes under `locked`, re-reads, and saves with
+  `compareAndPut`; a second refresher of a rotating refresh token would break the first.
+- `compareAndPut` with `next == null` removes the entry (a revoked token).
+- Implement `locked` and `crossProcess()` when several processes share the store, else the refresh is safe inside one
+  process only.
+- Never log `OAuthToken` contents (its `toString` hides them).
+
+Example: HashiCorp Vault KV v2, where `compareAndPut` maps to Vault's `cas` (check-and-set), so it is safe across
+processes. `vault` is your client of choice; none is a harness dependency.
+
+```java
+final class VaultTokenStore implements TokenStore {
+    private final VaultKv vault;                        // your KV v2 client: read(path) -> {data, version}, write(path, data, cas)
+
+    private static String path(String p, String name) {
+        return "jllm/" + (p == null ? "-" : p) + "/" + URLEncoder.encode(name, UTF_8);
+    }
+
+    public Optional<OAuthToken> get(String p, String name) {
+        return vault.read(path(p, name)).map(v -> Tokens.fromJson(v.data()));
+    }
+
+    public void put(String p, String name, OAuthToken t) {
+        vault.write(path(p, name), Tokens.toJson(t), null);           // unconditional
+    }
+
+    public boolean compareAndPut(String p, String name, OAuthToken expected, OAuthToken next) {
+        var cur = vault.read(path(p, name));
+        if (!Objects.equals(cur.map(v -> Tokens.fromJson(v.data())).orElse(null), expected)) return false;
+        int cas = cur.map(VaultKv.Entry::version).orElse(0);      // 0: create only
+        try {
+            if (next == null) vault.delete(path(p, name));
+            else vault.write(path(p, name), Tokens.toJson(next), cas);
+            return true;
+        } catch (VaultKv.CasMismatch e) {
+            return false;                                          // another process won: the harness uses its token
+        }
+    }
+
+    public <T> T locked(String p, String name, Supplier<T> action) { return action.get(); } // CAS does the work
+    public boolean crossProcess() { return true; }
+    public boolean remove(String p, String name) { return vault.delete(path(p, name)); }
+    public List<String> names(String p) { return vault.list("jllm/" + (p == null ? "-" : p)); }
+    public String describe() { return "vault " + vault.address(); }
+}
+```
+
+Other choices:
+- **A database table** `(principal, name, data, version)` with the data encrypted by `TokenCipher`
+  (`cipher.encrypt(json)` / `decrypt(sealed)`); `compareAndPut` is an `UPDATE ... WHERE version = ?`.
+- **AWS Secrets Manager** works too, but each refresh is a paid, rate-limited write per user and hour; a database
+  scales better.
+
 ## 9. Sandbox
 
 ```java

@@ -71,6 +71,9 @@ final class Renderer {
             case "tool_result" -> toolResult(d);
             case "warning" -> out.accept(color(YELLOW, "[warning] " + clean(d.path("message").asText())));
             case "retry" -> out.accept(color(YELLOW, "[retry] " + clean(d.path("message").asText())));
+            case "login_required" -> out.accept(color(YELLOW, "[login] " + clean(d.path("source").asText())
+                    + " is not connected: run /login " + clean(d.path("source").asText()) + ", then ask to retry"));
+            case "login" -> out.accept(color(YELLOW, "[login] " + clean(d.path("message").asText())));
             case "error" -> {
                 closeStreamed();
                 err.accept(color(RED, "[error] " + clean(d.path("message").asText())));

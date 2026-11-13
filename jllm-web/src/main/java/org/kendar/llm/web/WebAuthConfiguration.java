@@ -80,7 +80,9 @@ public class WebAuthConfiguration {
     }
 
     @Bean
-    public HarnessIdentity harnessIdentity(UserDirectory users, Permissions permissions, SkillFiles skills) {
+    public HarnessIdentity harnessIdentity(UserDirectory users, Permissions permissions, SkillFiles skills,
+                                           @Value("${jllm.webauth-dir:webauth}") String webauthDir) {
+        Path tokens = root(webauthDir).resolve("tokens");
         CredentialResolver credentials = new FileCredentialResolver(users);
         UserPolicyResolver policies = permissions.resolver(users, skills);
         Function<String, HarnessPrincipal> principals = id -> users.find(id).map(WebUser::principal).orElse(null);
@@ -98,6 +100,12 @@ public class WebAuthConfiguration {
             @Override
             public Function<String, HarnessPrincipal> principals() {
                 return principals;
+            }
+
+            /** {@code <webauth>/tokens}: one encrypted file per user. */
+            @Override
+            public Path tokenDir() {
+                return tokens;
             }
         };
     }

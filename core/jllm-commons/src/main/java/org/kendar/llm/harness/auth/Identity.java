@@ -19,6 +19,11 @@ public final class Identity {
         public Map<String, String> headers(String source) {
             return credentials == null ? Map.of() : credentials.headers(principal, source);
         }
+
+        /** See {@link CredentialResolver#onUnauthorized}. @return true when one retry is worth it */
+        public boolean onUnauthorized(String source) {
+            return credentials != null && credentials.onUnauthorized(principal, source);
+        }
     }
 
     private final CredentialResolver credentials;

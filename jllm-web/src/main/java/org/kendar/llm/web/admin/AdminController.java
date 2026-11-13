@@ -129,6 +129,7 @@ public class AdminController {
         users.delete(id);
         skills.deleteAllOwn(id);
         sessions.revokeUser(id, null);
+        harness.forgetUser(id); // the user's OAuth tokens and MCP sessions
         return ResponseEntity.noContent().build();
     }
 

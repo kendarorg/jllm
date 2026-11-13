@@ -1,5 +1,5 @@
 import {nextTick, onMounted, ref, watch} from 'vue';
-import {store} from '../store.js';
+import {connectSource, store} from '../store.js';
 
 export default {
   setup() {
@@ -35,13 +35,14 @@ export default {
       } catch (e) { /* the event carries a cut output: read the statuses from the text */ }
       return [...t.output.matchAll(/"status"\s*:\s*"(\w+)"/g)].map(m => ({ status: m[1], warning: '' }));
     };
-    return { store, SYMBOL, el, running, failed, brief, pretty, subRuns, subClass };
+    return { store, SYMBOL, el, running, failed, brief, pretty, subRuns, subClass, connectSource };
   },
   template: `
   <div class="stream" ref="el" role="log" aria-live="polite" aria-label="Messages">
     <div v-if="!store.chatId" class="empty">Create or select a chat to begin.</div>
     <template v-for="it in store.items" :key="it.key">
-      <div v-if="it.kind === 'msg'" class="msg" :class="it.cls">{{ it.text }}</div>
+      <div v-if="it.kind === 'msg'" class="msg" :class="it.cls">{{ it.text }}
+        <button v-if="it.connect" class="btn-sm btn-primary" @click="connectSource(it.connect)">Connect {{ it.connect }}</button></div>
       <details v-else class="toolgroup">
         <summary>Tool calls ({{ it.tools.length }})
           <span v-if="running(it)" class="gstatus-run">… {{ running(it) }} running</span>

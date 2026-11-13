@@ -729,7 +729,7 @@ public class AgentLoop {
         EventSink parentSink = run == null ? EventSink.NOOP : run.sink();
         BooleanSupplier cancelled = run == null ? () -> false : run.cancelled();
         EventSink errors = (type, data) -> {
-            if ("approval_request".equals(type)) parentSink.emit(type, data);
+            if ("approval_request".equals(type) || "login_required".equals(type)) parentSink.emit(type, data);
             else if ("error".equals(type)) failure[0] = data.path("message").asText("sub-agent failed");
             else if ("warning".equals(type)) warning[0] = data.path("message").asText(null);
             else if ("usage".equals(type)) {
@@ -1632,9 +1632,32 @@ public class AgentLoop {
             return toolResult(id, sanitizeOutput(tool, ctx, out), false);
         } catch (SandboxUnavailableException e) {
             throw e;
+        } catch (org.kendar.llm.harness.auth.LoginRequiredException e) {
+            loginRequired(ctx, e.source());
+            return toolResult(id, "Error: " + e.getMessage(), true);
         } catch (Exception e) {
             String m = e instanceof java.io.IOException ? e.getClass().getSimpleName() + ": " + e.getMessage() : e.getMessage();
             return toolResult(id, "Error: " + m, true);
+        }
+    }
+
+    /** Sources already reported as needing a login, per run (its event sink): one event per run and source. */
+    private final java.util.Map<EventSink, java.util.Set<String>> loginsRequired =
+            java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
+
+    /** Emits {@code login_required {source, agent?}} once per run and source; the token never appears in it. */
+    private void loginRequired(ToolContext ctx, String source) {
+        if (ctx == null || ctx.run() == null || ctx.run().sink() == null) return;
+        EventSink sink = ctx.run().sink();
+        if (!loginsRequired.computeIfAbsent(sink, k -> java.util.concurrent.ConcurrentHashMap.newKeySet()).add(source)) {
+            return;
+        }
+        ObjectNode ev = mapper.createObjectNode().put("source", source);
+        if (ctx.run().contextKey() != null) ev.put("agent", ctx.run().contextKey());
+        try {
+            sink.emit("login_required", ev);
+        } catch (RuntimeException e) {
+            log.debug("Cannot emit login_required: {}", e.toString());
         }
     }
 

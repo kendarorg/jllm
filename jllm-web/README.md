@@ -43,6 +43,7 @@ flags as the CLI, without the prefix: `--provider openai`, `--sandbox docker`, `
 | `jllm.system-prompt` | none | text appended to the built-in system prompt; `SYSTEM.md` (replace) and `APPEND_SYSTEM.md` in `~/.jllm/` and `<workdir>/.jllm/` are also read, see [USAGE](../docs/USAGE.md#system-prompt-files) |
 | `jllm.search-api-key` | `BRAVE_API_KEY` env var | Brave key for `web_search` |
 | `jllm.pricing.input-per-million`, `output-per-million`, `cache-read-per-million`, `cache-write-per-million` | 0 | USD per million tokens, for the cost estimate |
+| `jllm.web.public-url` | none | the externally visible base URL (`https://jllm.example.com`); OAuth logins redirect to `<public-url>/oauth/callback`. Required when a per-user OAuth source uses the authorization code flow |
 
 Also set: `server.port=8080` and `spring.mvc.async.request-timeout=-1` (SSE streams must not time out).
 
@@ -67,9 +68,8 @@ use, so changes (by hand or from the UI) apply without a restart.
 | `webauth/user-skills/<id>/<name>.md` | a user's own skills |
 
 ### Sign-in
-- Login and password. A user file without `password` has the **default password: the lowercase hex SHA-256 of the
-  login** (e.g. `admin` → `8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918`). The UI shows a banner
-  until the user picks their own.
+- Login and password. A user file without `password` has the **default password: the login itself** (`admin` /
+  `admin`). The UI shows a banner until the user picks their own.
 - Stored passwords are `pbkdf2$<iterations>$<salt>$<hash>` (PBKDF2WithHmacSHA256, 210000 iterations, random salt).
 - The cookie `jllm_session` (HttpOnly, SameSite=Strict, Secure on HTTPS) holds a random session token; sessions are
   in memory (7 days, sliding), so a restart signs everybody out. A deleted user is signed out at once.
@@ -104,7 +104,30 @@ MCP server and REST API the harness knows, also disabled or failing sources) and
 - Chats belong to the user who created them. Others get 404; the admin sees all chats.
 - Credentials: a user file can declare headers per source, e.g.
   `"credentials": { "mcp:docs": { "Authorization": "env:DOCS_TOKEN" } }`. The value is read from the environment on each
-  call. Literal values are ignored, so secrets stay out of the directory.
+  call. Literal values are ignored, so secrets stay out of the directory. An OAuth header of the same source wins.
+
+### OAuth logins
+
+REST APIs with `oauth` and MCP servers with `oauth` (see [MCP](../docs/MCP.md#oauth)) are per user by default here: each
+user connects their own account, and every call of their chats carries their own token.
+
+- **Encryption is required**: set `JLLM_TOKEN_KEY` (32 random bytes in base64: `openssl rand -base64 32`). The tokens
+  are kept in `<webauth>/tokens/users/<id>.json`, AES-GCM encrypted; the shared (admin) logins in
+  `<webauth>/tokens/auth.json`. With a per-user source and no key, the server refuses to start: backups, other admins
+  and container volumes all see these files. To rotate, move the old key to `JLLM_TOKEN_KEY_OLD` and set a new one.
+- **`jllm.web.public-url`**: the redirect URI is exact, so the authorization server must know
+  `<public-url>/oauth/callback` (register it with the client, or it is registered dynamically). Without it, a per-user
+  source with the authorization code flow is refused at startup; the device code flow needs no redirect.
+- **Connecting**: Settings → **Connections** lists the user's sources (connected, expiry, not connected, service
+  account) with Connect and Disconnect. A call without a login shows a **Connect** button in the chat. `/login api:<x>`
+  typed in a chat answers with the same link. The authorization page opens in a new tab; when it comes back the chat
+  gets a `login` event; resend or steer ("retry").
+- Every user can `/login` and `/logout` their own per-user sources; the shared logins (`perUser: false`, and the
+  discovery login of a per-user MCP server: `/login mcp:<x> shared`) and provider logins are for the admin.
+- The callback is the only route without sign-in. Its `state` is single-use, expires after 10 minutes and must come
+  back in the browser of the user who started the login (another signed-in user gets 403: no login CSRF, no account
+  mix-up). It never shows tokens or the authorization server's messages.
+- Deleting a user deletes their token file and closes their MCP sessions.
 
 ## REST API
 
@@ -149,6 +172,15 @@ All paths are under `/api/chat`. Errors are `{"error": "..."}`.
 | `GET /api/admin/catalog` | | `{tools, mcp, api}`: everything a role can be granted |
 | `GET/POST /api/admin/skills`, `GET/PUT/DELETE /api/admin/skills/{name}` | `{name, description, content}` | global skills; settings-file skills read-only |
 
+### OAuth (jllm-web-commons)
+
+| Method and path | Params | Result |
+|---|---|---|
+| `GET /api/oauth` | | `{sources: [{source, perUser, serviceAccount, connected, expiresAt?, sharedConnected?}], store}`; never a token. A non-admin sees the per-user sources and service accounts |
+| `POST /api/oauth/{source}/start` | `chatId?`, `shared?` | `{authorizeUrl}` (or `{message}` with a device code); 403 for a shared login when not admin; 409 when one is in progress |
+| `DELETE /api/oauth/{source}` | `shared?` | 204: logout |
+| `GET /oauth/callback` | `state`, `code` / `error` | a small HTML page; 400 unknown, used or expired state; 403 another user |
+
 ### Events (SSE)
 
 `GET /api/chat/{id}/events?after=<seq>` replays the buffered events with `seq` greater than `after`, then streams new
@@ -156,7 +188,7 @@ ones. Each SSE message has `id` = `seq`, `event` = the event type and the event 
 passes the last `seq` it saw and gets no gap and no duplicate; `GET /api/chat/{id}` returns `lastSeq` for the first
 subscription. The event types and their data are the harness ones (`run_started`, `text_delta`, `text_reset`, `text`,
 `tool_call`, `tool_result`, `approval_request`, `usage`, `compaction`, `stuck`, `verify_failed`, `warning`, `error`,
-`cancelled`, `plan_ready`, `run_finished`): see the [front-end contract](../docs/USAGE.md#front-end-contract).
+`cancelled`, `plan_ready`, `login_required`, `login`, `run_finished`): see the [front-end contract](../docs/USAGE.md#front-end-contract).
 
 Streaming: `text_delta` (and `thinking_delta`, `text_reset`) are sent without an SSE `id` and with `seq` 0: they are
 live only and never replayed, so they must not move the client's last `seq`. The UI appends them to an open

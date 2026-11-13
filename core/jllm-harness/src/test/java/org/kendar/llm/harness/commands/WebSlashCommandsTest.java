@@ -44,10 +44,10 @@ class WebSlashCommandsTest {
     @Test
     void adminOnlyCommandsAreRefusedToOtherWebUsers() {
         String a = chatOf("alice");
-        for (String line : List.of("/model x", "/login", "/logout x")) {
-            String out = commands.execute(a, line, ALICE).output();
-            assertTrue(out.contains("reserved to the administrator"), line + " -> " + out);
-        }
+        assertTrue(commands.execute(a, "/model x", ALICE).output().contains("reserved to the administrator"));
+        // /login and /logout are open to every user, for their own logins of per-user sources only
+        assertFalse(commands.execute(a, "/login", ALICE).output().contains("reserved"));
+        assertTrue(commands.execute(a, "/logout x", ALICE).output().contains("only the administrator"));
         assertFalse(commands.execute(a, "/login", ADMIN).output().contains("reserved"));
         assertTrue(commands.list(ALICE).stream().noneMatch(i -> i.name().equals("/model")));
         assertTrue(commands.list(ADMIN).stream().anyMatch(i -> i.name().equals("/model")));

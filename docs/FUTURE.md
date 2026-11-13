@@ -20,7 +20,7 @@ Talk to the agent from Telegram, Discord, Slack, WhatsApp and similar apps inste
 ## Provider OAuth logins
 
 Log in to a model provider with a subscription account instead of an API key (Pi, OpenCode, Qwen Code and Hermes Agent
-do). jllm has the generic OAuth utilities and MCP OAuth (`OAuthLogin`, `TokenStore`, `/login`) but no provider login.
+do). jllm has the generic OAuth utilities, MCP and REST API OAuth (per user or shared), the `TokenStore` (file or OS secret store) and `/login`, but no provider login.
 
 - Implement `OAuthLogin` per provider, discovered through `ServiceLoader` as now, and let a provider entry in the
   settings use the stored token instead of `apiKey`, refreshing it when it expires.

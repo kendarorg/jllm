@@ -87,6 +87,7 @@ public final class ExternalSources implements AutoCloseable {
     private final java.util.List<String> toolEnv;
     private final org.kendar.llm.harness.auth.Identity identity;
     private TokenStore tokenStore;
+    private final java.util.function.Function<RestApiSettings, Map<String, String>> specHeaders;
     private boolean closed;
 
     public ExternalSources(HarnessToolRegistry registry, HarnessSettings settings, HttpClient http,
@@ -97,18 +98,22 @@ public final class ExternalSources implements AutoCloseable {
     /** @param identity who each MCP and REST call is made for; the single-user default is {@code Identity.ANONYMOUS} */
     public ExternalSources(HarnessToolRegistry registry, HarnessSettings settings, HttpClient http,
                            ObjectMapper mapper, org.kendar.llm.harness.auth.Identity identity) {
-        this(registry, settings, http, mapper, identity, null);
+        this(registry, settings, http, mapper, identity, null, null);
     }
 
     /**
      * @param tokenStore where the OAuth tokens of MCP servers are kept, shared with the rest of the harness; null: one
      *                   {@link TokenStore#defaultStore()}, created on first use and shared by every server
+     * @param specHeaders extra headers to fetch the spec of a REST API with (a service token for
+     *                    {@code oauth.specAuth: client_credentials}); called at each discovery; null: none
      * @throws ToolNames.CollisionException when two tools of the sources enabled at start get the same name, or one
      *                                      takes the name of a harness tool; every client opened is closed first
      */
     public ExternalSources(HarnessToolRegistry registry, HarnessSettings settings, HttpClient http,
                            ObjectMapper mapper, org.kendar.llm.harness.auth.Identity identity,
-                           TokenStore tokenStore) {
+                           TokenStore tokenStore,
+                           java.util.function.Function<RestApiSettings, Map<String, String>> specHeaders) {
+        this.specHeaders = specHeaders == null ? a -> Map.of() : specHeaders;
         this.registry = registry;
         this.toolEnv = settings.toolsWhitelistedEnvVars();
         this.http = http;
@@ -120,7 +125,8 @@ public final class ExternalSources implements AutoCloseable {
                 add(new Source(Kind.MCP, m.name(), () -> mcpDiscover(m), () -> mcpProbe(m), m.active()));
             }
             for (RestApiSettings a : settings.restApis()) {
-                add(new Source(Kind.API, a.name(), () -> RestApiToolProvider.discover(a, http, mapper, identity, claims),
+                add(new Source(Kind.API, a.name(), () -> RestApiToolProvider.discover(a, http, mapper, identity, claims,
+                        this.specHeaders.apply(a)),
                         () -> apiProbe(a), a.active()));
             }
             synchronized (this) {
@@ -255,13 +261,34 @@ public final class ExternalSources implements AutoCloseable {
         return kind.prefix + ":" + name;
     }
 
+    /**
+     * Ends the MCP session of a principal on a server (logout): its next call opens a new one with its new token.
+     * Does nothing for an unknown or disabled server.
+     */
+    public void closeSession(String server, String principalId) {
+        McpClient c;
+        synchronized (this) {
+            c = connections.get(key(Kind.MCP, server));
+        }
+        if (c != null) c.closeSession(principalId);
+    }
+
+    /** Ends the sessions of a principal on every MCP server (user deleted). */
+    public void closeSessions(String principalId) {
+        List<McpClient> open;
+        synchronized (this) {
+            open = new ArrayList<>(connections.values());
+        }
+        open.forEach(c -> c.closeSession(principalId));
+    }
+
     private synchronized TokenStore tokenStore() {
         if (tokenStore == null) tokenStore = TokenStore.defaultStore();
         return tokenStore;
     }
 
     private AuthProvider mcpOAuth(McpServerSettings m) {
-        return new McpOAuthLogin(m.name(), m.url(), http, mapper).authProvider(tokenStore());
+        return new McpOAuthLogin(m.name(), m.url(), http, mapper).authProvider(tokenStore(), null);
     }
 
     private List<HarnessTool> mcpDiscover(McpServerSettings m) {

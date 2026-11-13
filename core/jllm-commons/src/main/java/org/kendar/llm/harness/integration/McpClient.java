@@ -28,6 +28,10 @@ public interface McpClient extends Closeable {
         return callTool(name, arguments);
     }
 
+    /** Ends the session of one principal (logout, idle); the next call of that principal opens a new one. */
+    default void closeSession(String principalId) {
+    }
+
     @Override
     default void close() throws IOException {
     }

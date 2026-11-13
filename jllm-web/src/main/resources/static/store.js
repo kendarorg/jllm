@@ -3,7 +3,7 @@ import {api, post} from './api.js';
 import {reactive} from 'vue';
 
 const EVENTS = ['run_started', 'text', 'tool_call', 'tool_result', 'approval_request', 'usage', 'compaction',
-  'warning', 'error', 'cancelled', 'run_finished', 'plan_ready', 'login', 'stuck', 'verify_failed',
+  'warning', 'error', 'cancelled', 'run_finished', 'plan_ready', 'login', 'login_required', 'stuck', 'verify_failed',
   'text_delta', 'text_reset'];
 // streaming deltas carry seq 0: shown live, never replayed (the final 'text' event is)
 const TRANSIENT = new Set(['text_delta', 'text_reset']);
@@ -72,6 +72,37 @@ export function toast(text, type = '') {
 export function addMsg(role, text, cls) {
   group = null;
   store.items.push({ key: nextKey(), kind: 'msg', role, text, cls: cls || role });
+}
+
+/** A notice with a Connect button: an OAuth source the user has not connected yet. */
+function addConnect(source) {
+  group = null;
+  store.items.push({ key: nextKey(), kind: 'msg', role: 'notice', cls: 'notice',
+    text: 'This needs your ' + source + ' login.', connect: source });
+}
+
+/**
+ * Starts the login of an OAuth source (REST API or MCP server) for the signed-in user: the authorization page opens
+ * in a new tab; the chat gets a 'login' event when it ends. Resend or steer ("retry") afterwards.
+ */
+export async function connectSource(source, shared = false) {
+  // opened now, inside the click, so the browser does not block it; pointed at the URL once known
+  const tab = window.open('', '_blank');
+  try {
+    const q = new URLSearchParams();
+    if (store.chatId) q.set('chatId', store.chatId);
+    if (shared) q.set('shared', 'true');
+    const r = await post('/api/oauth/' + encodeURIComponent(source) + '/start?' + q.toString());
+    if (r.authorizeUrl) {
+      if (tab) { tab.opener = null; tab.location = r.authorizeUrl; } else window.open(r.authorizeUrl, '_blank', 'noopener');
+    } else {
+      if (tab) tab.close();
+      if (r.message) { addMsg('notice', r.message); toast(r.message); }
+    }
+  } catch (e) {
+    if (tab) tab.close();
+    toast(e.message, 'error');
+  }
 }
 
 // assistant bubbles being streamed, by content block index; the final 'text' event replaces and closes them
@@ -260,7 +291,8 @@ function handleEvent(ev) {
     case 'compaction': addMsg('notice', 'Context compacted (tier ' + (d.tier ?? d.kind ?? '?') + ')'); break;
     case 'plan_ready': addMsg('notice', d.message); break;
     case 'warning': addMsg('notice', d.message); break;
-    case 'login': addMsg(d.ok ? 'notice' : 'error', d.message); toast(d.message, d.ok ? '' : 'error'); break;
+    case 'login': addMsg(d.ok ? 'notice' : 'error', d.message + (d.ok ? ' — resend or steer ("retry") to go on.' : '')); toast(d.message, d.ok ? '' : 'error'); break;
+    case 'login_required': addConnect(d.source); break;
     case 'error': streamClose(); addMsg('error', d.message); break;
     case 'cancelled': streamClose(); addMsg('notice', 'Cancelled.'); break;
     case 'run_finished':

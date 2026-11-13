@@ -104,7 +104,10 @@ ignored.
   "mcpServers": [{"name": "docs", "url": "https://h/mcp", "headers": {"Authorization": "Bearer ${DOCS_TOKEN}"},
                   "readOnly": true, "enabled": true, "group": "Mcp/docs", "allowList": ["search*", "get_*"], "denyList": ["get_secret"]}],
   "restApis":   [{"name": "pets", "openApiUrl": "https://h/openapi.yaml", "baseUrl": "https://h/api",
-                  "allowedPaths": ["GET /pets", "/pets/{id}", "/store/*"], "denyPaths": ["DELETE *"]}],
+                  "allowedPaths": ["GET /pets", "/pets/{id}", "/store/*"], "denyPaths": ["DELETE *"]},
+                 {"name": "crm", "openApiUrl": "https://crm/openapi.json",
+                  "oauth": {"issuer": "https://login.example.com", "clientId": "jllm", "scopes": ["crm.read"]}}],
+  "tokenStore": {"type": "auto", "dir": null, "encrypt": null},
   "skills":     [{"name": "pdf", "path": "skills/pdf/SKILL.md"}],
   "instructionFiles": ["KENDAR.md", "~/KENDAR.md"],
   "agents":     [{"name": "scout", "description": "Looks around", "tools": ["read_file", "grep"],
@@ -177,14 +180,29 @@ After the prompt come, as before, the small-model rules, instruction files and s
 Model clients and HTTP MCP servers can take an `AuthProvider` (package `org.kendar.llm.harness.auth`) instead of a
 static key: it returns the headers of each request and is told about a 401, after which the client retries once.
 `AuthProvider.staticKey(...)` and `dynamicKey(...)` cover plain and rotating keys. Generic OAuth pieces, with no
-provider-specific code: `OAuthTokenClient` (code, refresh and device grants), `Pkce`, `LoopbackCallbackServer`,
-`DeviceCodeFlow`, `BrowserLauncher`, `TokenStore` (`~/.jllm/auth.json`, atomic writes, owner-only, file lock, never
-logged), `RefreshingAuthProvider` (refresh 60 s ahead, single flight, rotated refresh token saved first).
-A provider login is an `OAuthLogin` (name, `login(UserInteraction)`, `authProvider(store)`), usually `AuthCodeLogin` or
-`DeviceCodeLogin` plus endpoints, registered as a `java.util.ServiceLoader` service. `/login [name]` runs it
-(no name: list logins and what is logged in), `/logout <name>` removes the stored token. The clients take it with
-`AnthropicModelClient.authProvider(...)` / `OpenAiCompatModelClient.authProvider(...)`; it is not selectable from the
-settings file. MCP OAuth: see [MCP](MCP.md). No provider login is shipped.
+provider-specific code: `OAuthTokenClient` (code, refresh, device and client credentials grants), `Pkce`,
+`RedirectTarget` (loopback listener or a web callback), `DeviceCodeFlow`, `BrowserLauncher`, `TokenStore` (tokens by
+principal and name, see [token storage](MCP.md#6-token-storage)), `RefreshingAuthProvider` (refresh 60 s ahead under
+the store's lock, re-read first, rotated refresh token saved with a compare-and-set before use).
+A provider login is an `OAuthLogin` (name, `login(UserInteraction)`, optionally `login(ui, RedirectTarget)`,
+`authProvider(store, principalId)`), usually `AuthCodeLogin` or `DeviceCodeLogin` plus endpoints, registered as a
+`java.util.ServiceLoader` service. The clients take it with `AnthropicModelClient.authProvider(...)` /
+`OpenAiCompatModelClient.authProvider(...)`; it is not selectable from the settings file. No provider login is shipped.
+
+OAuth of MCP servers and REST APIs (per user or shared, with login-required tool results) and the `tokenStore`
+section: see [MCP](MCP.md#oauth).
+
+`/login` and `/logout`:
+
+| Command | Effect |
+|---|---|
+| `/login` | lists the logins (providers, `api:<name>`, `mcp:<name>`) with their state: connected (expiry), not connected, service account; and the store in use |
+| `/login <name>` | runs the login: browser with a loopback redirect, or a device code; blocks until done on the command line |
+| `/login <name> shared` | with users: the login every user shares (admin only) |
+| `/logout <name> [shared]` | removes the stored token (and the user's MCP session for that server) |
+
+In a web chat `/login api:<x>` and `/login mcp:<x>` of a per-user source are open to every user and work on the user's
+own login (the reply is a link to open); other logins are reserved to the administrator.
 
 ### Providers and temperature
 
@@ -362,6 +380,12 @@ String owner = h.sessions().principal(chat);                      // "alice"; re
   cache misses once. The principal must come from your auth layer, never from model input.
 - MCP sessions are kept per principal. The tool list of an MCP server is discovered once, without a principal, so
   per-user tool lists are not supported yet.
+- OAuth REST APIs and MCP servers with `perUser` use each principal's own token, kept in the `TokenStore`
+  (`Builder.tokenStore(...)`, or `tokenStoreDir(...)` for the file store; encrypt it with `JLLM_TOKEN_KEY`). The
+  harness adds its OAuth resolver after yours, so its header wins. Logins: `harness.logins()`, `harness.saveLogin`,
+  `harness.logout`; a deleted user: `harness.forgetUser(id)`. A web front end starts logins with
+  `OAuthLogin.login(ui, redirectTarget)` and its own callback ([jllm-web](../jllm-web/README.md#oauth-logins) does);
+  `harness.commands().webLogin(...)` routes `/login` typed in a chat through it.
 
 - A `UserPolicy` can also carry the user's own skills and a filter over the settings skills
   ([SKILLS](SKILLS.md#per-user-skills)).
@@ -421,6 +445,8 @@ waits `delayMs` before retry `attempt` of `max`; it is followed by the normal ev
 | `warning`, `error` | `message` |
 | `cancelled` | — |
 | `plan_ready` | `message` |
+| `login_required` | `source` (`api:<name>`, `mcp:<server>`), `agent` (sub-agent key, when not the main agent): a call needs a login the user has not done; once per run and source |
+| `login` | `source`, `ok`, `message`: a login started from this chat ended |
 | `run_finished` | `cancelled`, `outcome`: `completed`, `stuck`, `unverified`, `max_turns`, `truncated`, `refused`, `cancelled`, `failed` |
 
 Every event carries a per-chat `seq`, except the streaming deltas (`seq` 0). A reconnecting front end subscribes with the last `seq` it saw and gets no gap

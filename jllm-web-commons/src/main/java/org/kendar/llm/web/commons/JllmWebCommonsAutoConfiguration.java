@@ -14,7 +14,7 @@ import org.springframework.context.annotation.Import;
 @AutoConfiguration
 @EnableConfigurationProperties(JllmProperties.class)
 @Import({HarnessConfiguration.class, WebConfig.class, ChatController.class, FilesController.class,
-        SandboxSweep.class})
+        SandboxSweep.class, OAuthController.class})
 public class JllmWebCommonsAutoConfiguration {
 
     @Bean

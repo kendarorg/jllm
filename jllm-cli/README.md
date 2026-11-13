@@ -130,7 +130,7 @@ included.
 | `/chats` `/resume <id\|prefix>` `/title <text>` | list, switch, rename chats |
 | `/chats delete <id>` `/chats clean [days]` | delete one chat; list chats older than `days` (default 30), `/chats clean confirm` deletes them |
 | `/export [md\|html] [file]` | write the chat as a transcript into the scratch directory |
-| `/login [name]` `/logout <name>` | OAuth login (providers, MCP servers with `oauth`); no name lists them |
+| `/login [name]` `/logout <name>` | OAuth login of providers, MCP servers and REST APIs with `oauth` (`api:<name>`, `mcp:<name>`); no name lists them with their state and the token store in use |
 | `/exit` `/quit` | leave the CLI |
 
 Menu toggles live in memory only; the settings file is the startup default.

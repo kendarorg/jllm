@@ -99,7 +99,7 @@ class WebSecurityFixesTest {
         JsonNode cmds = mapper.readTree(chats.perform(get("/api/chat/commands").requestAttr(WebPrincipal.ATTR, ALICE))
                 .andReturn().getResponse().getContentAsString());
         for (JsonNode c : cmds) {
-            assertFalse(Set.of("/new", "/model", "/login", "/logout").contains(c.path("name").asText()), c.toString());
+            assertFalse(Set.of("/new", "/model").contains(c.path("name").asText()), c.toString());
         }
     }
 

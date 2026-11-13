@@ -101,6 +101,7 @@ public class HarnessConfiguration {
                 .credentialResolver(identity.credentials())
                 .userPolicyResolver(identity.policies())
                 .principalDirectory(identity.principals())
+                .tokenStoreDir(identity.tokenDir())
                 .discoverPlugins()
                 .build();
         harness.enforceChatRetention(settings.chatRetentionLimit(), null);

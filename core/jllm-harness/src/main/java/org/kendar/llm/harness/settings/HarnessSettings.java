@@ -40,6 +40,8 @@ import java.util.regex.Pattern;
  *                         absent = unlimited (default)
  * @param loop             optional stuck detection and verify-on-stop settings
  * @param hooks            optional command hooks ({@code stop}); from the project file only when trusted
+ * @param tokenStore       where OAuth tokens are kept; from the user settings and {@code --settings} only (a project
+ *                         file's section is ignored)
  */
 public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSettings> restApis,
                               List<SkillSettings> skills, List<String> instructionFiles,
@@ -48,7 +50,24 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
                               List<ProviderSettings> providers, String defaultProvider,
                               Integer chatRetentionLimit, JsonNode plugins, Storage storage,
                               List<String> whitelistedEnvVars, List<String> toolsWhitelistedEnvVars,
-                              FileLimits files, WebLimits web, Loop loop, HookSettings hooks) {
+                              FileLimits files, WebLimits web, Loop loop, HookSettings hooks,
+                              TokenStoreSettings tokenStore) {
+
+    /**
+     * Where OAuth tokens are kept.
+     *
+     * @param type    {@code auto} (default): the OS secret store for a single user when it works, else the file;
+     *                {@code file}; {@code native} (single user only)
+     * @param dir     directory of the file store; default {@code ~/.jllm} (single user), the embedder's choice with
+     *                users (jllm-web: {@code <webauth>/tokens})
+     * @param encrypt encrypt the files with {@code JLLM_TOKEN_KEY}; default false for a single user, with users true
+     *                when the key is set (an embedder with per-user sources requires it, jllm-web does)
+     */
+    public record TokenStoreSettings(String type, String dir, Boolean encrypt) {
+    }
+
+    /** Name prefix under which a project REST API with oauth is asked about and remembered in {@link ProjectMcpTrust}. */
+    public static final String OAUTH_TRUST_PREFIX = "oauth:api:";
 
     /** The 21 components before {@code loop} and {@code hooks}: defaults, no command hooks. */
     public HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSettings> restApis,
@@ -61,7 +80,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
                            FileLimits files, WebLimits web) {
         this(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context, fastModel, output,
                 smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage,
-                whitelistedEnvVars, toolsWhitelistedEnvVars, files, web, null, null);
+                whitelistedEnvVars, toolsWhitelistedEnvVars, files, web, null, null, null);
     }
 
     /**
@@ -281,7 +300,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
                 pluginSettings));
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context,
                 fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, copy, storage,
-                whitelistedEnvVars, toolsWhitelistedEnvVars, files, web, loop, hooks);
+                whitelistedEnvVars, toolsWhitelistedEnvVars, files, web, loop, hooks, tokenStore);
     }
 
     /**
@@ -388,7 +407,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution,
                 new Sandbox(s.tempDir(), s.timeoutSeconds(), backend.toLowerCase(), s.localFallback(), s.docker(), s.outputLogMaxBytes()),
                 context, fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
-                toolsWhitelistedEnvVars, files, web, loop, hooks);
+                toolsWhitelistedEnvVars, files, web, loop, hooks, tokenStore);
     }
 
     /** Same settings with {@code sandbox.docker.image} replaced (e.g. by a command line flag). */
@@ -400,7 +419,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
                         new Docker(d.binary(), image, d.memory(), d.cpus(), d.pidsLimit(), d.user(), d.network(),
                                 d.mode(), d.remote(), d.remoteHost()), s.outputLogMaxBytes()),
                 context, fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
-                toolsWhitelistedEnvVars, files, web, loop, hooks);
+                toolsWhitelistedEnvVars, files, web, loop, hooks, tokenStore);
     }
 
     /** Same settings with {@code sandbox.docker.mode} replaced (e.g. by a command line flag). */
@@ -415,7 +434,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
                         new Docker(d.binary(), d.image(), d.memory(), d.cpus(), d.pidsLimit(), d.user(), d.network(),
                                 mode.toLowerCase(), d.remote(), d.remoteHost()), s.outputLogMaxBytes()),
                 context, fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
-                toolsWhitelistedEnvVars, files, web, loop, hooks);
+                toolsWhitelistedEnvVars, files, web, loop, hooks, tokenStore);
     }
 
     /** Same settings with {@code sandbox.docker.remote} and {@code remoteHost} replaced (command line flags). */
@@ -428,7 +447,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
                                 d.mode(), remote != null ? remote : d.remote(),
                                 remoteHost != null ? remoteHost : d.remoteHost()), s.outputLogMaxBytes()),
                 context, fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
-                toolsWhitelistedEnvVars, files, web, loop, hooks);
+                toolsWhitelistedEnvVars, files, web, loop, hooks, tokenStore);
     }
 
     /** True when the docker backend runs in daemon mode (long-running container). */
@@ -577,7 +596,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox,
                 new Context(maxTokens, c.keepRecentTurns(), c.auto(), c.keepTokens(), c.buffer(), c.strategy(),
                         c.mnemonic(), c.scope(), c.noiseCommands(), c.deferCompactionOnThinkingOverflow()), fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
-                toolsWhitelistedEnvVars, files, web, loop, hooks);
+                toolsWhitelistedEnvVars, files, web, loop, hooks, tokenStore);
     }
 
     /** Same settings with {@code context.strategy} replaced (e.g. by a command line flag). */
@@ -587,7 +606,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox,
                 new Context(c.maxTokens(), c.keepRecentTurns(), c.auto(), c.keepTokens(), c.buffer(), strategy,
                         c.mnemonic(), c.scope(), c.noiseCommands(), c.deferCompactionOnThinkingOverflow()), fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
-                toolsWhitelistedEnvVars, files, web, loop, hooks);
+                toolsWhitelistedEnvVars, files, web, loop, hooks, tokenStore);
     }
 
     /** False when {@code context.noiseCommands} is set to false. */
@@ -599,14 +618,14 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
     public HarnessSettings withSmallModel(boolean small) {
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context,
                 fastModel, output, small, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
-                toolsWhitelistedEnvVars, files, web, loop, hooks);
+                toolsWhitelistedEnvVars, files, web, loop, hooks, tokenStore);
     }
 
     /** Same settings with {@code chatRetentionLimit} replaced. */
     public HarnessSettings withChatRetentionLimit(Integer limit) {
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context,
                 fastModel, output, smallModel, permissions, providers, defaultProvider, limit, plugins, storage, whitelistedEnvVars,
-                toolsWhitelistedEnvVars, files, web, loop, hooks);
+                toolsWhitelistedEnvVars, files, web, loop, hooks, tokenStore);
     }
 
     /** Concurrency limit: {@code 1} serialized (default), {@code N} bounded, {@code -1} unlimited. */
@@ -785,6 +804,12 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
                     projectDir, prompt == null ? ProjectMcpTrust.Prompt.NONE : prompt, trust, warn);
             if (projectTree != null) dropUntrustedProjectHooks((ObjectNode) merged, projectTree, otherTrees,
                     projectDir, prompt == null ? ProjectMcpTrust.Prompt.NONE : prompt, trust, warn);
+            if (projectTree != null) {
+                refuseLiteralSecrets(projectTree);
+                projectTokenStore((ObjectNode) merged, projectTree, otherTrees, warn);
+                dropUntrustedProjectOAuth((ObjectNode) merged, projectTree, otherTrees, projectDir,
+                        prompt == null ? ProjectMcpTrust.Prompt.NONE : prompt, trust, warn);
+            }
             return mapper.treeToValue(expand(merged, env), HarnessSettings.class);
         } catch (IOException e) {
             throw new UncheckedIOException("Cannot read settings", e);
@@ -860,6 +885,77 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
                 warn.accept("Stop hook '" + command + "' from the project settings skipped: "
                         + (ok == null ? "it runs a local command and was never trusted (no prompt available here)"
                         : "not trusted"));
+                it.remove();
+            }
+        }
+    }
+
+    private static final Pattern ENV_ONLY = Pattern.compile("\\$\\{[A-Za-z_][A-Za-z0-9_]*}");
+
+    /** A project file may name a client secret only through {@code ${ENV}}: the file is shared, the secret is not. */
+    private static void refuseLiteralSecrets(JsonNode projectTree) {
+        for (JsonNode api : projectTree.path("restApis")) {
+            JsonNode secret = api.path("oauth").get("clientSecret");
+            if (secret != null && !secret.isNull() && !ENV_ONLY.matcher(secret.asText()).matches()) {
+                throw new IllegalArgumentException("REST API '" + api.path("name").asText("?")
+                        + "': oauth.clientSecret in the project settings must be an ${ENV_VAR} reference, not a literal");
+            }
+        }
+    }
+
+    /**
+     * The {@code tokenStore} section counts from the user settings and {@code --settings} only: a project cannot
+     * choose where (or how unprotected) a user's tokens are kept.
+     */
+    private static void projectTokenStore(ObjectNode merged, JsonNode projectTree, List<JsonNode> others,
+                                          java.util.function.Consumer<String> warn) {
+        if (!projectTree.has("tokenStore")) return;
+        warn.accept("tokenStore in the project settings ignored: it is read from the user settings only");
+        JsonNode kept = null;
+        for (JsonNode t : others) {
+            JsonNode ts = t.get("tokenStore");
+            if (ts != null) kept = kept == null ? ts.deepCopy() : merge(kept, ts.deepCopy());
+        }
+        if (kept == null) merged.remove("tokenStore");
+        else merged.set("tokenStore", kept);
+    }
+
+    /**
+     * Removes the REST APIs with {@code oauth} that only the project file defines and that the user did not trust:
+     * the block decides where a user's token is sent. Asked once per project and definition
+     * ({@link #OAUTH_TRUST_PREFIX} + name), answer remembered.
+     */
+    private static void dropUntrustedProjectOAuth(ObjectNode merged, JsonNode projectTree, List<JsonNode> others,
+                                                  Path projectDir, ProjectMcpTrust.Prompt prompt,
+                                                  ProjectMcpTrust trust, java.util.function.Consumer<String> warn) {
+        if (!(merged.get("restApis") instanceof ArrayNode apis)) return;
+        List<JsonNode> fromProject = new ArrayList<>();
+        projectTree.path("restApis").forEach(fromProject::add);
+        if (fromProject.isEmpty()) return;
+        for (Iterator<JsonNode> it = apis.iterator(); it.hasNext(); ) {
+            JsonNode a = it.next();
+            if (!a.has("oauth") || a.get("oauth").isNull() || !fromProject.contains(a)) continue;
+            boolean elsewhere = false;
+            for (JsonNode t : others) {
+                for (JsonNode o : t.path("restApis")) elsewhere |= o.equals(a);
+            }
+            if (elsewhere) continue;
+            String api = a.path("name").asText("?");
+            String name = OAUTH_TRUST_PREFIX + api;
+            Boolean ok = trust.lookup(projectDir, name, a);
+            if (ok == null) {
+                JsonNode o = a.get("oauth");
+                StringBuilder where = new StringBuilder("OAuth login for REST API '" + api + "' sending your token to ");
+                where.append(a.path("baseUrl").asText(a.path("openApiUrl").asText(a.path("openApiFile").asText("?"))));
+                for (String k : List.of("issuer", "authorizationUrl", "tokenUrl")) {
+                    if (o.hasNonNull(k)) where.append(", ").append(k).append(' ').append(o.get(k).asText());
+                }
+                ok = prompt.ask(projectDir, name, where.toString());
+                if (ok != null) trust.remember(projectDir, name, a, ok);
+            }
+            if (!Boolean.TRUE.equals(ok)) {
+                warn.accept("REST API '" + api + "' from the project settings skipped: its oauth block "
+                        + (ok == null ? "was never trusted (no prompt available here)" : "is not trusted"));
                 it.remove();
             }
         }

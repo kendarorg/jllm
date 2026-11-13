@@ -107,7 +107,7 @@ class IntegrationProvidersTest {
     @Test
     void restExposesOnlyAllowedOperations() throws Exception {
         RestApiSettings api = new RestApiSettings("pets", base + "/api", base + "/spec.yaml", null,
-                Map.of("Authorization", "Bearer t"), null, List.of("GET /pets/{id}", "/pets"), null);
+                Map.of("Authorization", "Bearer t"), null, List.of("GET /pets/{id}", "/pets"), null, null, null);
         List<HarnessTool> tools = RestApiToolProvider.load(api, http, MAPPER);
 
         assertEquals(List.of("pets__addPet", "pets__getPet"),
@@ -129,35 +129,35 @@ class IntegrationProvidersTest {
     @Test
     void restWildcardAndEmptyAllowList() {
         RestApiSettings wildcard = new RestApiSettings("p", base + "/api", base + "/spec.yaml", null, null, null,
-                List.of("/pets/*"), null);
+                List.of("/pets/*"), null, null, null);
         assertEquals(2, RestApiToolProvider.load(wildcard, http, MAPPER).size());
-        RestApiSettings none = new RestApiSettings("p", base + "/api", base + "/spec.yaml", null, null, null, List.of(), null);
+        RestApiSettings none = new RestApiSettings("p", base + "/api", base + "/spec.yaml", null, null, null, List.of(), null, null, null);
         assertTrue(RestApiToolProvider.load(none, http, MAPPER).isEmpty());
-        RestApiSettings absent = new RestApiSettings("p", base + "/api", base + "/spec.yaml", null, null, null, null, null);
+        RestApiSettings absent = new RestApiSettings("p", base + "/api", base + "/spec.yaml", null, null, null, null, null, null, null);
         assertEquals(4, RestApiToolProvider.load(absent, http, MAPPER).size());
     }
 
     @Test
     void restDenyPathsHideOperations() {
         RestApiSettings denied = new RestApiSettings("pets", base + "/api", base + "/spec.yaml", null, null, null,
-                null, null, List.of("POST /pets"));
+                null, null, List.of("POST /pets"), null);
         assertEquals(List.of("pets__deletePet", "pets__getPet", "pets__reset"),
                 RestApiToolProvider.load(denied, http, MAPPER).stream().map(HarnessTool::name).sorted().toList());
         RestApiSettings all = new RestApiSettings("pets", base + "/api", base + "/spec.yaml", null, null, null,
-                null, null, List.of("*"));
+                null, null, List.of("*"), null);
         assertTrue(RestApiToolProvider.load(all, http, MAPPER).isEmpty());
     }
 
     @Test
     void unreachableSpecIsSkipped() {
         RestApiSettings api = new RestApiSettings("p", base, "http://127.0.0.1:1/none.yaml", null, null, null,
-                List.of("/*"), null);
+                List.of("/*"), null, null, null);
         assertTrue(RestApiToolProvider.load(api, http, MAPPER).isEmpty());
     }
 
     @Test
     void mcpToolsAreDiscoveredAndCalled() throws Exception {
-        McpServerSettings server = new McpServerSettings("srv", base + "/mcp", null, null, null, true);
+        McpServerSettings server = new McpServerSettings("srv", base + "/mcp", null, null, null, true, null, null, null, null, null, null, null);
         List<HarnessTool> tools = McpToolProvider.load(server, http, MAPPER);
 
         assertEquals(1, tools.size());
@@ -170,20 +170,20 @@ class IntegrationProvidersTest {
 
     @Test
     void disabledOrDeadMcpServerContributesNothing() {
-        assertTrue(McpToolProvider.load(new McpServerSettings("s", base + "/mcp", null, null, false, null), http, MAPPER).isEmpty());
-        assertTrue(McpToolProvider.load(new McpServerSettings("s", "http://127.0.0.1:1/mcp", null, null, null, null), http, MAPPER).isEmpty());
+        assertTrue(McpToolProvider.load(new McpServerSettings("s", base + "/mcp", null, null, false, null, null, null, null, null, null, null, null), http, MAPPER).isEmpty());
+        assertTrue(McpToolProvider.load(new McpServerSettings("s", "http://127.0.0.1:1/mcp", null, null, null, null, null, null, null, null, null, null, null), http, MAPPER).isEmpty());
     }
 
     @Test
     void mcpAllowAndDenyListsHideTools() {
         McpServerSettings deny = new McpServerSettings("srv", base + "/mcp", null, null, null, true, null, null, null,
-                null, null, List.of("echo"));
+                null, null, List.of("echo"), null);
         assertTrue(McpToolProvider.load(deny, http, MAPPER).isEmpty());
         McpServerSettings allow = new McpServerSettings("srv", base + "/mcp", null, null, null, true, null, null, null,
-                null, List.of("ec*"), null);
+                null, List.of("ec*"), null, null);
         assertEquals(1, McpToolProvider.load(allow, http, MAPPER).size());
         McpServerSettings none = new McpServerSettings("srv", base + "/mcp", null, null, null, true, null, null, null,
-                null, List.of(), null);
+                null, List.of(), null, null);
         assertTrue(McpToolProvider.load(none, http, MAPPER).isEmpty());
     }
 }

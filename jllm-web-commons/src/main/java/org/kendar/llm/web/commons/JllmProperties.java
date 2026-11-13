@@ -29,6 +29,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param pluginDir     directory of plugin jars; blank = {@code ./plugins} when it exists
  * @param plugins       {@code jllm.plugins.<id>.enabled} and {@code jllm.plugins.<id>.settings.*}; same as the
  *                      {@code plugins} section of the settings file, and wins over it
+ * @param web           {@code jllm.web.public-url}: the externally visible base URL (OAuth logins redirect to
+ *                      {@code <public-url>/oauth/callback})
  */
 @ConfigurationProperties("jllm")
 public record JllmProperties(String provider, String apiKey, String baseUrl, String model, Integer maxTokens,
@@ -36,7 +38,11 @@ public record JllmProperties(String provider, String apiKey, String baseUrl, Str
                              String contextStrategy, Boolean smallModel, String systemPrompt, String systemPromptFile, String systemPromptReplace, String searchApiKey, Pricing pricing,
                              String sandbox, String dockerImage, String dockerMode,
                              Boolean dockerRemote, String dockerRemoteHost, String pluginDir,
-                             java.util.Map<String, Plugin> plugins) {
+                             java.util.Map<String, Plugin> plugins, Web web) {
+
+    /** @param publicUrl externally visible base URL, e.g. {@code https://jllm.example.com} */
+    public record Web(String publicUrl) {
+    }
 
     /** One entry of {@code jllm.plugins}. */
     public record Plugin(Boolean enabled, java.util.Map<String, Object> settings) {

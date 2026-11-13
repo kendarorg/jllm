@@ -28,7 +28,7 @@ Also: [HISTORY](docs/HISTORY.md) (how the harness evolved) and [HARNESSES-COMPAR
 
 What is still missing (more in [FUTURE](docs/FUTURE.md)):
 
-* OAuth on REST/API calls (MCP OAuth is done; no provider logins, static headers only for REST)
+* Provider (model) OAuth logins: the `OAuthLogin` SPI exists, no provider login is shipped
 * Authentication & authorization on the web UI: `jllm-web` is a reference front end meant for localhost or a trusted
   network. Do not expose it publicly without a reverse proxy that handles authentication.
 
@@ -89,9 +89,16 @@ MCP servers and REST APIs need no code, only configuration:
 ```
 
 - **MCP**: streamable-HTTP servers or stdio child processes (`command`/`args`/`env`), static headers (`${ENV_VAR}` expanded), tools listed at startup. A server that is
-  down does not stop the harness. OAuth with `"oauth": true` (`/login mcp:<name>`, see [MCP](docs/MCP.md#oauth)).
+  down does not stop the harness. OAuth with `"oauth": true` (`/login mcp:<name>`, see [MCP](docs/MCP.md#oauth)),
+  shared or with each user's own token.
 - **REST**: the OpenAPI 3 spec is parsed and each operation that passes `allowedPaths` and `denyPaths` becomes a tool whose
   input schema comes from the spec. Hidden operations are not reachable. GET/HEAD are read-only, other methods need approval.
+  OAuth2 per API (`oauth`: authorization code, device code or client credentials; endpoints from the issuer or the
+  spec): every call carries the token of the user behind the chat, and a missing login is a tool result asking the
+  user to connect, never a changed tool list ([MCP](docs/MCP.md#oauth-1)).
+- **Token storage**: one `TokenStore` for every login: a file (encrypted with `JLLM_TOKEN_KEY` when there are users),
+  the OS secret store (macOS Keychain, Windows DPAPI, Linux Secret Service) for a single user, or your own
+  ([MCP](docs/MCP.md#6-token-storage)).
 - **Visibility lists**: MCP `allowList`/`denyList` (tool names) and REST `allowedPaths`/`denyPaths` (`METHOD /path`).
   Absent allow = all, `[]` = none, `["*"]` = all; deny hides matches. Hidden tools never reach the model. Separate from the
   `permissions` rules, which decide approval of visible tools.

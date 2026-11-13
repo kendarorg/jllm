@@ -5,7 +5,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.io.IOException;
-import java.net.ServerSocket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -93,30 +92,29 @@ public final class McpOAuthLogin implements OAuthLogin {
 
     @Override
     public OAuthToken login(UserInteraction ui) {
+        return login(ui, RedirectTarget.loopback());
+    }
+
+    /** Registers the redirect URI of {@code target} (loopback or web callback) and runs the code flow with it. */
+    @Override
+    public OAuthToken login(UserInteraction ui, RedirectTarget target) {
         Metadata meta = discover();
-        int port;
-        try (ServerSocket s = new ServerSocket(0, 1, java.net.InetAddress.getLoopbackAddress())) {
-            port = s.getLocalPort();
-        } catch (IOException e) {
-            throw new OAuthException("io", "No free local port: " + e.getMessage(), e);
-        }
-        String clientId = register(meta, "http://127.0.0.1:" + port + "/callback");
-        OAuthTokenClient tokens = new OAuthTokenClient(http, mapper, meta.tokenEndpoint(), clientId, null);
-        OAuthToken t = new AuthCodeLogin(name(), meta.authorizationEndpoint(), tokens, clientId, null, null, port,
-                AuthCodeLogin.bearer()).login(ui);
+        String[] clientId = {null};
+        OAuthToken t = AuthCodeLogin.run(ui, target == null ? RedirectTarget.loopback() : target,
+                meta.authorizationEndpoint(), redirect -> clientId[0] = register(meta, redirect), null, null,
+                (id, code, redirect, verifier) -> new OAuthTokenClient(http, mapper, meta.tokenEndpoint(), id, null)
+                        .exchangeCode(code, redirect, verifier));
         Map<String, String> extra = new HashMap<>(t.extra());
-        extra.put("client_id", clientId);
+        extra.put("client_id", clientId[0]);
         extra.put("token_endpoint", meta.tokenEndpoint());
         return new OAuthToken(t.access(), t.refresh(), t.expiresAt(), extra);
     }
 
     @Override
-    public AuthProvider authProvider(TokenStore store) {
-        return new RefreshingAuthProvider(name(), store, refreshToken -> {
-            OAuthToken cur = store.get(name()).orElseThrow(() -> new IllegalStateException(
-                    "Not logged in to " + name() + ": run /login " + name()));
+    public AuthProvider authProvider(TokenStore store, String principalId) {
+        return new RefreshingAuthProvider(principalId, name(), store, cur -> {
             OAuthToken fresh = new OAuthTokenClient(http, mapper, cur.extra().get("token_endpoint"),
-                    cur.extra().get("client_id"), null).refresh(refreshToken);
+                    cur.extra().get("client_id"), null).refresh(cur.refresh());
             Map<String, String> extra = new HashMap<>(cur.extra());
             extra.putAll(fresh.extra());
             return new OAuthToken(fresh.access(), fresh.refresh(), fresh.expiresAt(), extra);

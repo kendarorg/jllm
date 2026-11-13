@@ -19,16 +19,16 @@ class LoginTest {
     Path dir;
 
     @Test
-    void hashesVerifyAndTheDefaultPasswordIsTheSha256OfTheLogin() {
-        assertEquals("8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918",
-                PasswordHasher.defaultPassword("admin"));
+    void hashesVerifyAndTheDefaultPasswordIsTheLogin() {
+        assertEquals("admin", PasswordHasher.defaultPassword("admin"));
         String h = PasswordHasher.hash("correct horse");
         assertTrue(h.startsWith("pbkdf2$"));
         assertNotEquals(h, PasswordHasher.hash("correct horse"), "salted");
         assertTrue(PasswordHasher.verify("x", "correct horse", h));
         assertFalse(PasswordHasher.verify("x", "wrong", h));
         assertTrue(PasswordHasher.verify("bob", PasswordHasher.defaultPassword("bob"), null));
-        assertFalse(PasswordHasher.verify("bob", "bob", null));
+        assertTrue(PasswordHasher.verify("bob", "bob", null));
+        assertFalse(PasswordHasher.verify("bob", "Bob", null));
         assertFalse(PasswordHasher.verify("bob", "x", "garbage"));
         assertFalse(PasswordHasher.verify("bob", null, null));
     }

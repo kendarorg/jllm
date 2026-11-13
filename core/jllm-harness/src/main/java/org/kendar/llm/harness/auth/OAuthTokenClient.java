@@ -62,6 +62,15 @@ public final class OAuthTokenClient {
         return t.refresh() == null ? new OAuthToken(t.access(), refreshToken, t.expiresAt(), t.extra()) : t;
     }
 
+    /** Client credentials grant (a service account): no user, no refresh token. */
+    public OAuthToken clientCredentials(String scope, Map<String, String> extraParams) {
+        Map<String, String> f = new LinkedHashMap<>();
+        f.put("grant_type", "client_credentials");
+        if (scope != null && !scope.isBlank()) f.put("scope", scope);
+        if (extraParams != null) f.putAll(extraParams);
+        return post(f);
+    }
+
     /** @throws OAuthException with code {@code authorization_pending} or {@code slow_down} while the user has not finished */
     public OAuthToken deviceToken(String deviceCode) {
         Map<String, String> f = new LinkedHashMap<>();

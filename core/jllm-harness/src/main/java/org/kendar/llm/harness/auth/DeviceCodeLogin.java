@@ -44,9 +44,15 @@ public class DeviceCodeLogin implements OAuthLogin {
         }, Thread::sleep, () -> System.currentTimeMillis() / 1000);
     }
 
+    /** No redirect: the device code works from anywhere. */
     @Override
-    public AuthProvider authProvider(TokenStore store) {
-        return new RefreshingAuthProvider(name, store, tokens::refresh, headerBuilder,
+    public OAuthToken login(UserInteraction ui, RedirectTarget target) {
+        return login(ui);
+    }
+
+    @Override
+    public AuthProvider authProvider(TokenStore store, String principalId) {
+        return new RefreshingAuthProvider(principalId, name, store, t -> tokens.refresh(t.refresh()), headerBuilder,
                 () -> System.currentTimeMillis() / 1000);
     }
 }

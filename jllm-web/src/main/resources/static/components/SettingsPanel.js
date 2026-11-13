@@ -1,10 +1,10 @@
 import {onMounted, reactive, ref} from 'vue';
 import {api, del, post, put} from '../api.js';
-import {toast} from '../store.js';
+import {connectSource, toast} from '../store.js';
 import ToolPicker from './ToolPicker.js';
 import SkillEditor from './SkillEditor.js';
 
-const TABS = [['password', 'Password'], ['tools', 'Tools'], ['skills', 'Skills']];
+const TABS = [['password', 'Password'], ['tools', 'Tools'], ['skills', 'Skills'], ['connections', 'Connections']];
 
 /** The signed-in user's own settings. Every change applies to all their chats from the next turn. */
 export default {
@@ -89,8 +89,26 @@ export default {
       try { await del('/api/me/skills/' + encodeURIComponent(s.name)); await loadSkills(); } catch (e) { toast(e.message, 'error'); }
     }
 
+    // connections: OAuth logins of REST APIs and MCP servers (never a token here)
+    const connections = ref(null);
+    async function loadConnections() {
+      try { connections.value = await api('/api/oauth'); } catch (e) { toast(e.message, 'error'); }
+    }
+    async function connect(c, shared = false) {
+      await connectSource(c.source, shared);
+      toast('Finish the login in the new tab, then refresh this list');
+    }
+    async function disconnect(c, shared = false) {
+      try {
+        await del('/api/oauth/' + encodeURIComponent(c.source) + (shared ? '?shared=true' : ''));
+        await loadConnections();
+      } catch (e) { toast(e.message, 'error'); }
+    }
+    const expires = s => s ? new Date(s * 1000).toLocaleString() : '';
+
     function select(t) {
       tab.value = t;
+      if (t === 'connections') loadConnections();
       if (t === 'tools' && !catalog.value) loadTools();
       if (t === 'skills') loadSkills();
     }
@@ -104,7 +122,8 @@ export default {
     onMounted(() => { if (props.me.defaultPassword) tab.value = 'password'; });
 
     return {TABS, tab, select, onKey, pw, changePassword, catalog, disabled, toolsDirty, onTools, saveTools,
-      skills, usable, editing, toggleSkill, open, create, save, remove};
+      skills, usable, editing, toggleSkill, open, create, save, remove,
+      connections, loadConnections, connect, disconnect, expires, me: props.me};
   },
   template: `
   <section class="panel" aria-label="Settings">
@@ -136,6 +155,40 @@ export default {
             <button class="btn-primary" :disabled="!toolsDirty" @click="saveTools">Save</button>
             <button class="btn-sm" :disabled="!toolsDirty" @click="loadTools">Discard</button>
           </div>
+        </template>
+        <div v-else class="spinner"></div>
+      </div>
+
+      <div v-if="tab === 'connections'" role="tabpanel">
+        <p>Your logins to the REST APIs and MCP servers that need one. Each call of your chats uses your own login.
+          After connecting, resend your message or steer the chat with "retry".</p>
+        <template v-if="connections">
+          <table class="grid">
+            <thead><tr><th>Source</th><th>State</th><th></th></tr></thead>
+            <tbody>
+              <tr v-for="c in connections.sources" :key="c.source">
+                <td><code>{{ c.source }}</code></td>
+                <td>
+                  <span v-if="c.serviceAccount" class="muted">service account (no login)</span>
+                  <template v-else>
+                    <span v-if="c.connected">connected<span v-if="c.expiresAt" class="muted"> (expires {{ expires(c.expiresAt) }})</span></span>
+                    <span v-else class="muted">not connected</span>
+                    <span v-if="!c.perUser" class="badge">shared</span>
+                    <span v-if="c.perUser && me.role === 'admin'" class="muted"> · shared login: {{ c.sharedConnected ? 'connected' : 'none' }}</span>
+                  </template>
+                </td>
+                <td class="row-actions">
+                  <template v-if="!c.serviceAccount">
+                    <button class="btn-sm btn-primary" @click="connect(c, !c.perUser)">{{ c.connected ? 'Reconnect' : 'Connect' }}</button>
+                    <button v-if="c.connected" class="btn-danger" @click="disconnect(c, !c.perUser)">Disconnect</button>
+                  </template>
+                </td>
+              </tr>
+              <tr v-if="!connections.sources.length"><td colspan="3" class="empty">No source needs a login.</td></tr>
+            </tbody>
+          </table>
+          <p class="muted">Tokens are kept in: {{ connections.store }}</p>
+          <div class="row-actions"><button class="btn-sm" @click="loadConnections">Refresh</button></div>
         </template>
         <div v-else class="spinner"></div>
       </div>

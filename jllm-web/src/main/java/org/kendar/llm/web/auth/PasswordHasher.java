@@ -5,10 +5,8 @@ import javax.crypto.spec.PBEKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.util.Base64;
-import java.util.HexFormat;
 
 /**
  * Password hashes of the user files: {@code pbkdf2$<iterations>$<salt b64>$<hash b64>} (PBKDF2WithHmacSHA256).
@@ -61,14 +59,9 @@ public final class PasswordHasher {
         pbkdf2(password == null ? "" : password, new byte[SALT_BYTES], ITERATIONS);
     }
 
-    /** The default password of a login id: lowercase hex SHA-256 of the id. */
+    /** The default password of a login id: the id itself (the UI asks to change it at once). */
     public static String defaultPassword(String id) {
-        try {
-            byte[] d = MessageDigest.getInstance("SHA-256").digest(String.valueOf(id).getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(d);
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException(e);
-        }
+        return String.valueOf(id);
     }
 
     private static byte[] pbkdf2(String password, byte[] salt, int iterations) {

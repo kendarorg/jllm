@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.kendar.llm.harness.auth.AuthProvider;
 import org.kendar.llm.harness.auth.Identity;
+import org.kendar.llm.harness.auth.LoginRequiredException;
 import org.kendar.llm.harness.settings.McpServerSettings;
 import org.kendar.llm.harness.util.ToolFilter;
 import org.kendar.llm.harness.tools.HarnessTool;
@@ -134,7 +135,17 @@ public final class McpToolProvider {
                     (ctx, input) -> {
                         Identity.Caller caller = identity.callerOf(ctx == null ? null : ctx.chatId());
                         String pid = caller.principal() == null ? null : caller.principal().id();
-                        return render(client.callTool(remote, input, pid, caller.headers("mcp:" + server.name())));
+                        String source = server.source();
+                        try {
+                            return render(client.callTool(remote, input, pid, caller.headers(source)));
+                        } catch (McpUnauthorizedException e) {
+                            if (!caller.onUnauthorized(source)) throw e;
+                            try {
+                                return render(client.callTool(remote, input, pid, caller.headers(source)));
+                            } catch (McpUnauthorizedException again) {
+                                throw new LoginRequiredException(source, again);
+                            }
+                        }
                     }));
         }
         if (out.isEmpty() && listed > 0) {

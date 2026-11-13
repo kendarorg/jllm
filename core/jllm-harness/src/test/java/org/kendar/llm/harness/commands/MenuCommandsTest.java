@@ -60,9 +60,9 @@ class MenuCommandsTest {
         url = "http://127.0.0.1:" + server.getAddress().getPort();
 
         HarnessSettings settings = new HarnessSettings(
-                List.of(new McpServerSettings("srv", url + "/mcp", null, null, null, null)),
+                List.of(new McpServerSettings("srv", url + "/mcp", null, null, null, null, null, null, null, null, null, null, null)),
                 List.of(new RestApiSettings("pets", url + "/api", url + "/spec.yaml", null, null, null,
-                        List.of("/ping"), false)), null, null, null);
+                        List.of("/ping"), false, null, null)), null, null, null);
         harness = AgentHarness.builder().modelClient(new ScriptedModel()).config(config(base))
                 .withoutStandardTools()
                 .tools(List.of(tool("alpha", "Misc", ToolKind.READ_ONLY, (c, i) -> ""),

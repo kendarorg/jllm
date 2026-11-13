@@ -199,7 +199,7 @@ startup, the UI and the sample sign-in and permissions that implement them.
 
 ## 11. Users and administration
 `jllm-web` became a reference implementation of a multi-user front end; `jllm-web-commons` was not touched.
-- **Real sign-in:** login and password instead of the picker. The default password is the hex SHA-256 of the login;
+- **Real sign-in:** login and password instead of the picker. The default password was then the hex SHA-256 of the login (now the login itself);
   stored passwords are PBKDF2 hashes. The cookie holds a random in-memory session token instead of the user id, and
   repeated failures lock the login for a while.
 - **Administration page** for the `admin` role: users, roles and global skills. The `admin` role is fixed. A role's

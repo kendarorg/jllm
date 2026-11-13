@@ -16,7 +16,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 /** One-shot listener on 127.0.0.1 that receives the OAuth redirect, checks {@code state} and returns the {@code code}. */
-public final class LoopbackCallbackServer implements AutoCloseable {
+public final class LoopbackCallbackServer implements RedirectTarget.Receiver {
 
     private final HttpServer server;
     private final CompletableFuture<String> code = new CompletableFuture<>();
@@ -54,6 +54,7 @@ public final class LoopbackCallbackServer implements AutoCloseable {
         server.start();
     }
 
+    @Override
     public String redirectUri() {
         return "http://127.0.0.1:" + server.getAddress().getPort() + "/callback";
     }
@@ -62,6 +63,7 @@ public final class LoopbackCallbackServer implements AutoCloseable {
      * Waits for the redirect carrying the expected state; requests with another state are answered 400 and ignored.
      * @throws OAuthException on an error redirect, a redirect without code or a timeout (code {@code timeout})
      */
+    @Override
     public String awaitCode(Duration timeout) {
         try {
             return code.get(timeout.toMillis(), TimeUnit.MILLISECONDS);

@@ -325,6 +325,8 @@ public final class AgentHarness {
     private java.util.Map<String, org.kendar.llm.harness.auth.OAuthLogin> logins = java.util.Map.of();
     /** Shared with {@link ExternalSources}: a login and the MCP clients see the same tokens. */
     private org.kendar.llm.harness.auth.TokenStore tokenStore;
+    private org.kendar.llm.harness.auth.OAuthSources oauth;
+    private boolean multiUser;
 
     /** The logins {@code /login} can run: discovered {@link org.kendar.llm.harness.auth.OAuthLogin} services and MCP servers with oauth. */
     public java.util.Map<String, org.kendar.llm.harness.auth.OAuthLogin> logins() {
@@ -333,6 +335,63 @@ public final class AgentHarness {
 
     public org.kendar.llm.harness.auth.TokenStore tokenStore() {
         return tokenStore;
+    }
+
+    /** The REST APIs and MCP servers with OAuth: their logins, and which are per user. */
+    public org.kendar.llm.harness.auth.OAuthSources oauth() {
+        return oauth;
+    }
+
+    /** True when the harness serves several users (a user policy resolver was given). */
+    public boolean multiUser() {
+        return multiUser;
+    }
+
+    /**
+     * The store key of a login: the principal for a per-user source, else null (the single user, or the login
+     * shared by every user).
+     */
+    public String loginKey(String principalId, String name) {
+        return principalId != null && oauth.perUser(name) ? principalId : null;
+    }
+
+    /** Stores a login's token and drops what was cached for it. */
+    public void saveLogin(String principalId, String name, org.kendar.llm.harness.auth.OAuthToken token) {
+        String key = loginKey(principalId, name);
+        tokenStore.put(key, name, token);
+        oauth.resolver().forget(key, name);
+    }
+
+    /**
+     * Removes a login: the token, what is cached for it, and the caller's MCP session on that server.
+     *
+     * @return false when there was no stored login
+     */
+    public boolean logout(String principalId, String name) {
+        String key = loginKey(principalId, name);
+        boolean had = tokenStore.remove(key, name);
+        oauth.resolver().forget(key, name);
+        if (name.startsWith("mcp:") && key != null) sources.closeSession(name.substring(4), key);
+        return had;
+    }
+
+    /** Tells a chat that a login it started ended: event {@code login {source, ok, message}}. */
+    public void loginFinished(String chatId, String source, boolean ok, String message) {
+        if (chatId == null || service == null) return;
+        try {
+            service.notify(chatId, "login", com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode().put("source", source).put("ok", ok)
+                    .put("message", message));
+        } catch (RuntimeException e) {
+            // the chat is gone: nothing to tell
+        }
+    }
+
+    /** Removes every token of a deleted user and closes their MCP sessions. */
+    public void forgetUser(String principalId) {
+        if (principalId == null) return;
+        tokenStore.removeAll(principalId);
+        oauth.resolver().forgetAll(principalId);
+        sources.closeSessions(principalId);
     }
 
     public SlashCommands commands() {
@@ -388,6 +447,10 @@ public final class AgentHarness {
         private SubAgentRunLog subAgentRunLog = new InMemorySubAgentRunLog();
         private ToolApprovalPolicy approvalPolicy = ToolApprovalPolicy.byKind();
         private org.kendar.llm.harness.auth.CredentialResolver credentials;
+        private org.kendar.llm.harness.auth.TokenStore tokenStore;
+        private Path tokenStoreDir;
+        /** The OAuth sources of the harness being built. */
+        private org.kendar.llm.harness.auth.OAuthSources builtOAuth;
         private org.kendar.llm.harness.auth.UserPolicyResolver userPolicies;
         private java.util.function.Function<String, org.kendar.llm.harness.auth.HarnessPrincipal> principalDirectory;
         private SandboxExecutor sandbox;
@@ -648,6 +711,21 @@ public final class AgentHarness {
             return this;
         }
 
+        /**
+         * Where OAuth tokens are kept (logins of REST APIs, MCP servers, providers). Wins over the {@code tokenStore}
+         * settings. Default: built from the settings ({@link org.kendar.llm.harness.auth.TokenStores}).
+         */
+        public Builder tokenStore(org.kendar.llm.harness.auth.TokenStore store) {
+            this.tokenStore = store;
+            return this;
+        }
+
+        /** Directory of the file token store when the settings name none (an embedder with users picks its own). */
+        public Builder tokenStoreDir(Path dir) {
+            this.tokenStoreDir = dir;
+            return this;
+        }
+
         /** Tools and approval policy per user, resolved when a call is made. Default: every tool, harness approval. */
         public Builder userPolicyResolver(org.kendar.llm.harness.auth.UserPolicyResolver resolver) {
             this.userPolicies = resolver;
@@ -786,15 +864,28 @@ public final class AgentHarness {
             PermissionRules permissionRules = settings.permissionRules();
             registry.hideIf(permissionRules::hides);
             ChatSessionService sessions = new ChatSessionService(sessionStore, config.agentId(), mapper);
-            org.kendar.llm.harness.auth.Identity identity = new org.kendar.llm.harness.auth.Identity(credentials,
+            boolean multiUser = userPolicies != null;
+            org.kendar.llm.harness.auth.TokenStore tokenStore = this.tokenStore != null ? this.tokenStore
+                    : org.kendar.llm.harness.auth.TokenStores.create(settings.tokenStore(), multiUser, tokenStoreDir,
+                    System::getenv);
+            HttpClient http = HttpClient.newHttpClient();
+            org.kendar.llm.harness.auth.OAuthSources oauth = org.kendar.llm.harness.auth.OAuthSources.from(settings,
+                    tokenStore, http, mapper, multiUser);
+            // the OAuth header wins over the embedder's (settings headers < user file headers < OAuth)
+            org.kendar.llm.harness.auth.CredentialResolver resolver = oauth.resolver().isEmpty() ? credentials
+                    : org.kendar.llm.harness.auth.CredentialResolver.chain(credentials, oauth.resolver());
+            org.kendar.llm.harness.auth.Identity identity = new org.kendar.llm.harness.auth.Identity(resolver,
                     userPolicies, principalDirectory,
                     chatId -> sessions.find(chatId).map(ChatSessionData::principal).orElse(null));
-            org.kendar.llm.harness.auth.TokenStore tokenStore = org.kendar.llm.harness.auth.TokenStore.defaultStore();
-            ExternalSources sources = new ExternalSources(registry, settings, HttpClient.newHttpClient(), mapper,
-                    identity, tokenStore);
+            ExternalSources sources = new ExternalSources(registry, settings, http, mapper, identity, tokenStore,
+                    oauth::specHeaders);
+            builtOAuth = oauth;
             try {
-                return build(sources, tokenStore, registry, sessions, identity, permissionRules, skills, fileTools,
-                        harnessCheckpoints, quota, box, providers, modelSwitch, maxParallel);
+                AgentHarness h = build(sources, tokenStore, registry, sessions, identity, permissionRules, skills,
+                        fileTools, harnessCheckpoints, quota, box, providers, modelSwitch, maxParallel);
+                h.oauth = oauth;
+                h.multiUser = multiUser;
+                return h;
             } catch (RuntimeException | Error e) {
                 sources.close(); // the MCP processes started above must not outlive a failed build
                 throw e;
@@ -881,12 +972,9 @@ public final class AgentHarness {
             harness.maxParallel = maxParallel;
             java.util.Map<String, org.kendar.llm.harness.auth.OAuthLogin> found = new java.util.TreeMap<>();
             for (var l : java.util.ServiceLoader.load(org.kendar.llm.harness.auth.OAuthLogin.class)) found.put(l.name(), l);
-            for (var m : settings.mcpServers()) {
-                if (!m.isStdio() && Boolean.TRUE.equals(m.oauth())) {
-                    var l = new org.kendar.llm.harness.auth.McpOAuthLogin(m.name(), m.url(), HttpClient.newHttpClient(), mapper);
-                    found.put(l.name(), l);
-                }
-            }
+            // REST APIs (not service accounts) and MCP servers with oauth: built from the settings, same instances as
+            // the resolver's
+            found.putAll(builtOAuth.logins());
             harness.logins = found;
             commands.forEach(c -> harness.commands().register(c.name(), c.description(), c.command()));
             return harness;

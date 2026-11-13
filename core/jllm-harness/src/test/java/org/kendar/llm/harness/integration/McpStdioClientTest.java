@@ -151,7 +151,7 @@ class McpStdioClientTest {
     @MethodSource("invalidServers")
     void serverNeedsExactlyOneTransport(String url, String command) {
         assertThrows(IllegalArgumentException.class,
-                () -> new McpServerSettings("srv", url, null, null, null, null, command, null, null));
+                () -> new McpServerSettings("srv", url, null, null, null, null, command, null, null, null, null, null, null));
     }
 
     static Stream<Arguments> invalidServers() {

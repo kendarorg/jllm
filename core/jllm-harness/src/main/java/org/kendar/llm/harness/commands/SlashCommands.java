@@ -41,8 +41,9 @@ public final class SlashCommands {
 
     /**
      * Who typed the command. The local command line ({@link #LOCAL}) may do everything, globally. A web user works on
-     * their own chats: {@code /new} does not exist there, {@code /model}, {@code /login} and {@code /logout} are for
-     * the admin, {@code /chats} and {@code /resume} see only the user's own chats (the admin sees all), and
+     * their own chats: {@code /new} does not exist there, {@code /model} is for the admin, {@code /login} and
+     * {@code /logout} work on the user's own logins of per-user sources (other logins are for the admin),
+     * {@code /chats} and {@code /resume} see only the user's own chats (the admin sees all), and
      * {@code /tools}, {@code /mcp}, {@code /apis}, {@code /skills} change only the current chat.
      *
      * @param principal the web user's id; null for the command line
@@ -62,7 +63,7 @@ public final class SlashCommands {
     }
 
     /** Commands a web user who is not the admin cannot run. */
-    private static final java.util.Set<String> WEB_ADMIN_ONLY = java.util.Set.of("/model", "/login", "/logout");
+    private static final java.util.Set<String> WEB_ADMIN_ONLY = java.util.Set.of("/model");
     /** Commands that do not exist on the web ({@code /new} would create a chat without owner). */
     private static final java.util.Set<String> WEB_REMOVED = java.util.Set.of("/new");
 
@@ -96,8 +97,8 @@ public final class SlashCommands {
             new Info("/resume", "Switch to another chat: /resume <id or prefix>"),
             new Info("/title", "Rename this chat: /title <text>"),
             new Info("/export", "Write this chat as a transcript: /export [md|html] [file] (default md, into the scratch directory)"),
-            new Info("/login", "Log in to an OAuth provider or MCP server: /login <name> (no name lists them). Blocks until done"),
-            new Info("/logout", "Remove the stored login: /logout <name>"),
+            new Info("/login", "Connect a REST API, MCP server or provider: /login <name> (no name lists them and their state); /login <name> shared for the login every user shares"),
+            new Info("/logout", "Remove a stored login: /logout <name> [shared]"),
             new Info("/exit", "Close the chat (command line only; does nothing elsewhere)"));
 
     /** Input that steps back in a menu: the Esc character, {@code /back} or {@code b}. */
@@ -155,6 +156,28 @@ public final class SlashCommands {
      */
     public void onLoginFinished(java.util.function.BiConsumer<String, String> listener) {
         this.loginListener = listener == null ? (c, m) -> { } : listener;
+    }
+
+    /** Starts a login through the web front end's redirect; see {@link #webLogin}. */
+    @FunctionalInterface
+    public interface WebLogin {
+        /**
+         * @param userId the signed-in user who started it (the callback must come from them)
+         * @param key    the store key (null: the shared login)
+         * @return what to show: the link to open, or why the login cannot start
+         */
+        String start(String chatId, String userId, String key, String name);
+    }
+
+    private volatile WebLogin webLogin;
+
+    /**
+     * The web front end's login: {@code /login <name>} typed in a web chat goes through it (a link to the
+     * authorization server, redirect to the front end's callback), so the slash command and the UI button are one
+     * path. Without one, a web login uses a loopback redirect (the browser must run on the server).
+     */
+    public void webLogin(WebLogin login) {
+        this.webLogin = login;
     }
 
     /** Adds a command (from a plugin). @throws IllegalArgumentException if the name is taken */
@@ -296,9 +319,8 @@ public final class SlashCommands {
                     ChatSessionData s = sessions.resolve(arg, who.owner());
                     yield new Result("chat " + s.chatId() + " " + s.title(), s.chatId(), true);
                 }
-                case "/login" -> Result.text(who.web() ? loginInBackground(chatId, arg) : login(arg));
-                case "/logout" -> Result.text(arg.isEmpty() ? "usage: /logout <name>"
-                        : harness.tokenStore().remove(arg) ? "Logged out of " + arg : "No stored login for " + arg);
+                case "/login" -> Result.text(loginCommand(chatId, arg, who));
+                case "/logout" -> Result.text(logoutCommand(arg, who));
                 case "/export" -> Result.text(export(chatId, arg));
                 case "/title" -> {
                     if (arg.isEmpty()) yield Result.text("usage: /title <text>");
@@ -315,17 +337,98 @@ public final class SlashCommands {
         }
     }
 
-    private String login(String name) {
-        var logins = harness.logins();
-        if (name.isEmpty()) {
-            return logins.isEmpty() ? "No logins available" : "logins: " + String.join(", ", logins.keySet())
-                    + "\nlogged in: " + String.join(", ", harness.tokenStore().names());
+    /** The store key a caller's login of {@code name} uses, or a refusal (as an exception message). */
+    private String keyFor(Caller who, String name, boolean shared) {
+        boolean perUser = harness.oauth().perUser(name);
+        if (!who.web()) return null; // the command line is the single user
+        if (shared || !perUser) {
+            if (!who.admin()) {
+                throw new IllegalArgumentException(name + " has one login shared by every user: only the administrator"
+                        + " can change it");
+            }
+            return null;
         }
-        var login = logins.get(name);
-        if (login == null) return "unknown login " + name + " (" + String.join(", ", logins.keySet()) + ")";
+        if (who.principal() == null) throw new IllegalArgumentException("Sign in first");
+        return who.principal();
+    }
+
+    private String loginCommand(String chatId, String arg, Caller who) {
+        if (arg.isEmpty()) return loginList(who);
+        String[] a = arg.split("\\s+");
+        String name = a[0];
+        boolean shared = a.length > 1 && a[1].equals("shared");
+        if (harness.oauth().serviceAccount(name)) return name + " uses a service account: there is nothing to log in";
+        var logins = harness.logins();
+        if (!logins.containsKey(name)) {
+            return "unknown login " + name + (logins.isEmpty() ? "" : " (" + String.join(", ", logins.keySet()) + ")");
+        }
+        String key = keyFor(who, name, shared);
+        if (!who.web()) return login(name);
+        WebLogin web = webLogin;
+        if (web != null) return web.start(chatId, who.principal(), key, name);
+        return loginInBackground(chatId, name, key);
+    }
+
+    private String logoutCommand(String arg, Caller who) {
+        if (arg.isEmpty()) return "usage: /logout <name> [shared]";
+        String[] a = arg.split("\\s+");
+        String name = a[0];
+        String key = keyFor(who, name, a.length > 1 && a[1].equals("shared"));
+        return harness.logout(key, name) ? "Logged out of " + name : "No stored login for " + name;
+    }
+
+    /**
+     * The logins and their state for this caller: connected (with expiry), not connected, service account; and the
+     * store in use. A web user who is not the admin sees the per-user sources only, with their own state.
+     */
+    private String loginList(Caller who) {
+        var logins = harness.logins();
+        var oauth = harness.oauth();
+        java.util.TreeSet<String> names = new java.util.TreeSet<>(logins.keySet());
+        names.addAll(oauth.names());
+        if (names.isEmpty()) return "No logins available";
+        StringBuilder out = new StringBuilder();
+        for (String n : names) {
+            boolean perUser = oauth.perUser(n);
+            if (who.web() && !who.admin() && !perUser) continue;
+            out.append(n).append(": ");
+            if (oauth.serviceAccount(n)) {
+                out.append("service account\n");
+                continue;
+            }
+            String key = who.web() && perUser ? who.principal() : null;
+            out.append(state(key, n));
+            if (who.web() && perUser) out.append(" (your own login");
+            if (who.web() && perUser && who.admin()) out.append("; shared: ").append(state(null, n));
+            if (who.web() && perUser) out.append(")");
+            out.append('\n');
+        }
+        String store;
+        try {
+            store = harness.tokenStore().describe();
+        } catch (RuntimeException e) {
+            store = "unavailable (" + e.getMessage() + ")";
+        }
+        out.append("tokens kept in: ").append(store);
+        return out.toString();
+    }
+
+    private String state(String key, String name) {
+        try {
+            return harness.tokenStore().get(key, name).map(t -> t.expiresAt() == 0 ? "connected"
+                    : "connected (expires " + java.time.Instant.ofEpochSecond(t.expiresAt()) + ")")
+                    .orElse("not connected");
+        } catch (RuntimeException e) {
+            return "unknown (" + e.getMessage() + ")";
+        }
+    }
+
+    /** Runs a login on the command line (loopback redirect, or device code), blocking until it ends. */
+    private String login(String name) {
+        var login = harness.logins().get(name);
         StringBuilder out = new StringBuilder();
         try {
-            harness.tokenStore().put(name, login.login(new org.kendar.llm.harness.auth.UserInteraction() {
+            harness.saveLogin(null, name, login.login(new org.kendar.llm.harness.auth.UserInteraction() {
                 @Override
                 public void show(String message) {
                     out.append(message).append('\n');
@@ -351,10 +454,9 @@ public final class SlashCommands {
      * login has something to show (the URL to open) or after a few seconds. The outcome goes to
      * {@link #onLoginFinished}; {@code /login} without a name shows who is logged in.
      */
-    private String loginInBackground(String chatId, String name) {
-        var logins = harness.logins();
-        if (name.isEmpty() || !logins.containsKey(name)) return login(name); // listing or unknown: answers at once
-        var login = logins.get(name);
+    private String loginInBackground(String chatId, String name, String key) {
+        var login = harness.logins().get(name);
+        String slot = (key == null ? "-" : key) + "/" + name;
         java.util.concurrent.CompletableFuture<String> first = new java.util.concurrent.CompletableFuture<>();
         StringBuilder shown = new StringBuilder();
         Thread t = Thread.ofVirtual().name("login-" + name).unstarted(() -> {
@@ -374,12 +476,12 @@ public final class SlashCommands {
                         return null;
                     }
                 });
-                harness.tokenStore().put(name, token);
+                harness.saveLogin(key, name, token);
                 outcome = "Logged in to " + name;
             } catch (Exception e) {
                 outcome = "Login to " + name + " failed: " + e.getMessage();
             } finally {
-                loginsInProgress.remove(name);
+                loginsInProgress.remove(slot);
             }
             first.complete(outcome);
             try {
@@ -388,7 +490,7 @@ public final class SlashCommands {
                 // the listener's problem
             }
         });
-        if (loginsInProgress.putIfAbsent(name, t) != null) return "A login to " + name + " is already in progress";
+        if (loginsInProgress.putIfAbsent(slot, t) != null) return "A login to " + name + " is already in progress";
         t.start();
         String firstMessage;
         try {

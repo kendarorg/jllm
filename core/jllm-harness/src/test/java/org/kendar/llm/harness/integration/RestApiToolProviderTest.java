@@ -101,7 +101,7 @@ class RestApiToolProviderTest {
 
     private List<HarnessTool> tools(List<String> allow, List<String> deny) {
         return RestApiToolProvider.discover(new RestApiSettings("t", base + "/api", base + "/spec.yaml", null,
-                Map.of("X-Key", "cfg"), null, allow, null, deny), http, MAPPER);
+                Map.of("X-Key", "cfg"), null, allow, null, deny, null), http, MAPPER);
     }
 
     private static HarnessTool named(List<HarnessTool> tools, String name) {
@@ -196,7 +196,7 @@ class RestApiToolProviderTest {
     @Test
     void sameToolNameFromTwoOperationsFailsNamingBoth() {
         RestApiSettings api = new RestApiSettings("c", base + "/api", base + "/clash.yaml", null, null, null, null,
-                null);
+                null, null, null);
         ToolNames.CollisionException e = assertThrows(ToolNames.CollisionException.class,
                 () -> RestApiToolProvider.discover(api, http, MAPPER));
         assertTrue(e.getMessage().contains("GET /a"), e.getMessage());
@@ -208,7 +208,7 @@ class RestApiToolProviderTest {
         ToolNames.Claims claims = new ToolNames.Claims();
         claims.claimAll("mcp:x", Map.of("t__reset", "MCP server 'x' tool 'reset'"));
         RestApiSettings api = new RestApiSettings("t", base + "/api", base + "/spec.yaml", null, null, null, null,
-                null);
+                null, null, null);
         assertThrows(ToolNames.CollisionException.class, () -> RestApiToolProvider.discover(api, http, MAPPER,
                 org.kendar.llm.harness.auth.Identity.ANONYMOUS, claims));
     }

@@ -9,8 +9,17 @@ import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-/** Authorization code flow with PKCE and a loopback redirect: browser, callback, token exchange. */
+/** Authorization code flow with PKCE: browser, redirect (loopback or web callback), token exchange. */
 public class AuthCodeLogin implements OAuthLogin {
+
+    /** How long a login waits for the browser to come back. */
+    public static final Duration TIMEOUT = Duration.ofMinutes(10);
+
+    /** Exchanges the code; {@code clientId} is the one the authorization request used. */
+    @FunctionalInterface
+    public interface Exchange {
+        OAuthToken exchange(String clientId, String code, String redirectUri, String verifier);
+    }
 
     private final String name;
     private final String authorizationEndpoint;
@@ -42,8 +51,28 @@ public class AuthCodeLogin implements OAuthLogin {
 
     @Override
     public OAuthToken login(UserInteraction ui) {
+        return login(ui, RedirectTarget.loopback(port));
+    }
+
+    @Override
+    public OAuthToken login(UserInteraction ui, RedirectTarget target) {
+        return run(ui, target == null ? RedirectTarget.loopback(port) : target, authorizationEndpoint,
+                redirect -> clientId, scope, extraParams,
+                (id, code, redirect, verifier) -> tokens.exchangeCode(code, redirect, verifier));
+    }
+
+    /**
+     * The flow itself: PKCE and state, the receiver of the redirect, the authorization URL shown to the user, the
+     * code exchange.
+     *
+     * @param clientIdFor the client id for a redirect URI (dynamic registration registers that URI)
+     */
+    public static OAuthToken run(UserInteraction ui, RedirectTarget target, String authorizationEndpoint,
+                                 Function<String, String> clientIdFor, String scope, Map<String, String> extraParams,
+                                 Exchange exchange) {
         Pkce pkce = Pkce.generate();
-        try (LoopbackCallbackServer cb = new LoopbackCallbackServer(port, pkce.state())) {
+        try (RedirectTarget.Receiver cb = target.open(pkce.state())) {
+            String clientId = clientIdFor.apply(cb.redirectUri());
             Map<String, String> q = new LinkedHashMap<>();
             q.put("response_type", "code");
             q.put("client_id", clientId);
@@ -52,21 +81,21 @@ public class AuthCodeLogin implements OAuthLogin {
             q.put("state", pkce.state());
             q.put("code_challenge", pkce.challenge());
             q.put("code_challenge_method", "S256");
-            q.putAll(extraParams);
+            if (extraParams != null) q.putAll(extraParams);
             String url = authorizationEndpoint + (authorizationEndpoint.contains("?") ? "&" : "?") + q.entrySet().stream()
                     .map(e -> URLEncoder.encode(e.getKey(), StandardCharsets.UTF_8) + "="
                             + URLEncoder.encode(e.getValue(), StandardCharsets.UTF_8)).collect(Collectors.joining("&"));
             ui.openUrl(url);
-            String code = cb.awaitCode(Duration.ofMinutes(5));
-            return tokens.exchangeCode(code, cb.redirectUri(), pkce.verifier());
+            String code = cb.awaitCode(TIMEOUT);
+            return exchange.exchange(clientId, code, cb.redirectUri(), pkce.verifier());
         } catch (IOException e) {
-            throw new OAuthException("io", "Cannot listen for the login redirect: " + e.getMessage(), e);
+            throw new OAuthException("io", "Cannot receive the login redirect: " + e.getMessage(), e);
         }
     }
 
     @Override
-    public AuthProvider authProvider(TokenStore store) {
-        return new RefreshingAuthProvider(name, store, tokens::refresh, headerBuilder,
+    public AuthProvider authProvider(TokenStore store, String principalId) {
+        return new RefreshingAuthProvider(principalId, name, store, t -> tokens.refresh(t.refresh()), headerBuilder,
                 () -> System.currentTimeMillis() / 1000);
     }
 

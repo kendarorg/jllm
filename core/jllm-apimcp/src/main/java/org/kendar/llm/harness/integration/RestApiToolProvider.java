@@ -17,7 +17,12 @@ import io.swagger.v3.parser.OpenAPIV3Parser;
 import io.swagger.v3.parser.core.models.AuthorizationValue;
 import io.swagger.v3.parser.core.models.ParseOptions;
 import io.swagger.v3.parser.core.models.SwaggerParseResult;
+import io.swagger.v3.oas.models.security.OAuthFlow;
+import io.swagger.v3.oas.models.security.OAuthFlows;
+import io.swagger.v3.oas.models.security.SecurityRequirement;
+import io.swagger.v3.oas.models.security.SecurityScheme;
 import org.kendar.llm.harness.auth.Identity;
+import org.kendar.llm.harness.auth.LoginRequiredException;
 import org.kendar.llm.harness.settings.RestApiSettings;
 import org.kendar.llm.harness.tools.HarnessTool;
 import org.kendar.llm.harness.tools.SimpleTool;
@@ -89,8 +94,17 @@ public final class RestApiToolProvider {
      */
     public static List<HarnessTool> discover(RestApiSettings api, HttpClient http, ObjectMapper mapper, Identity identity,
                                              ToolNames.Claims claims) {
+        return discover(api, http, mapper, identity, claims, Map.of());
+    }
+
+    /**
+     * As {@link #discover(RestApiSettings, HttpClient, ObjectMapper, Identity, ToolNames.Claims)}; the spec is fetched
+     * with {@code specHeaders} on top of the settings headers (e.g. a client credentials token).
+     */
+    public static List<HarnessTool> discover(RestApiSettings api, HttpClient http, ObjectMapper mapper, Identity identity,
+                                             ToolNames.Claims claims, Map<String, String> specHeaders) {
         List<HarnessTool> out = new ArrayList<>();
-        OpenAPI spec = readSpec(api);
+        OpenAPI spec = readSpec(api, specHeaders);
         String baseUrl = baseUrl(api, spec);
         Filter filter = new Filter(ToolFilter.restKeys(api.allowedPaths()), ToolFilter.restKeys(api.denyPaths()),
                 spec.getPaths() == null ? List.of() : List.copyOf(spec.getPaths().keySet()));
@@ -112,10 +126,61 @@ public final class RestApiToolProvider {
 
     /** Base URL the tools call: the settings value, else the first server of the spec. */
     public static String resolveBaseUrl(RestApiSettings api) {
-        return baseUrl(api, readSpec(api));
+        return baseUrl(api, readSpec(api, Map.of()));
     }
 
-    private static OpenAPI readSpec(RestApiSettings api) {
+    /**
+     * OAuth2 endpoints and scopes from the spec's {@code components.securitySchemes}.
+     *
+     * @param authorizationUrl null when the flow has none
+     * @param scopes           the scopes of the scheme that the allowed operations require; all the scheme's scopes
+     *                         when no operation names any
+     */
+    public record SpecOAuth(String scheme, String authorizationUrl, String tokenUrl, List<String> scopes) {
+    }
+
+    /**
+     * The first {@code oauth2} scheme of the spec that has {@code flow} ({@code authorization_code},
+     * {@code client_credentials}; {@code device_code} uses the authorization code flow's token URL), or null.
+     */
+    public static SpecOAuth specOAuth(RestApiSettings api, String flow, Map<String, String> specHeaders) {
+        OpenAPI spec = readSpec(api, specHeaders);
+        if (spec.getComponents() == null || spec.getComponents().getSecuritySchemes() == null) return null;
+        for (Map.Entry<String, SecurityScheme> e : spec.getComponents().getSecuritySchemes().entrySet()) {
+            SecurityScheme s = e.getValue();
+            if (s == null || s.getType() != SecurityScheme.Type.OAUTH2 || s.getFlows() == null) continue;
+            OAuthFlows flows = s.getFlows();
+            OAuthFlow f = "client_credentials".equals(flow) ? flows.getClientCredentials() : flows.getAuthorizationCode();
+            if (f == null) continue;
+            List<String> scopes = usedScopes(api, spec, e.getKey());
+            Set<String> offered = f.getScopes() == null ? Set.of() : f.getScopes().keySet();
+            // requirements name scopes per scheme; keep those the chosen flow offers
+            if (!offered.isEmpty()) scopes = scopes.stream().filter(offered::contains).toList();
+            if (scopes.isEmpty()) scopes = List.copyOf(offered);
+            return new SpecOAuth(e.getKey(), f.getAuthorizationUrl(), f.getTokenUrl(), scopes);
+        }
+        return null;
+    }
+
+    /** Scopes of {@code scheme} named by the security requirements of the allowed operations (or the spec default). */
+    private static List<String> usedScopes(RestApiSettings api, OpenAPI spec, String scheme) {
+        Set<String> out = new LinkedHashSet<>();
+        if (spec.getPaths() == null) return List.of();
+        Filter filter = new Filter(ToolFilter.restKeys(api.allowedPaths()), ToolFilter.restKeys(api.denyPaths()),
+                List.copyOf(spec.getPaths().keySet()));
+        spec.getPaths().forEach((path, item) -> item.readOperationsMap().forEach((method, op) -> {
+            if (!filter.visible(method + " " + path)) return;
+            List<SecurityRequirement> reqs = op.getSecurity() != null ? op.getSecurity() : spec.getSecurity();
+            if (reqs == null) return;
+            for (SecurityRequirement r : reqs) {
+                List<String> s = r.get(scheme);
+                if (s != null) out.addAll(s);
+            }
+        }));
+        return List.copyOf(out);
+    }
+
+    private static OpenAPI readSpec(RestApiSettings api, Map<String, String> specHeaders) {
         String location = api.openApiUrl() != null ? api.openApiUrl() : api.openApiFile();
         if (location == null) throw new IllegalArgumentException("openApiUrl or openApiFile is required");
         ParseOptions options = new ParseOptions();
@@ -123,6 +188,7 @@ public final class RestApiToolProvider {
         options.setResolveFully(true);
         List<AuthorizationValue> auth = new ArrayList<>();
         api.headers().forEach((k, v) -> auth.add(new AuthorizationValue(k, v, "header")));
+        if (specHeaders != null) specHeaders.forEach((k, v) -> auth.add(new AuthorizationValue(k, v, "header")));
         SwaggerParseResult result = new OpenAPIV3Parser().readLocation(location, auth, options);
         if (result.getOpenAPI() == null) {
             throw new IllegalStateException("cannot parse " + location + ": " + result.getMessages());
@@ -195,7 +261,11 @@ public final class RestApiToolProvider {
         String name = names.add(api.name() + "__" + opName,
                 "REST API '" + api.name() + "' operation " + method + " " + path);
         String description = (op.getSummary() != null ? op.getSummary() : method + " " + path)
-                + (op.getDescription() != null ? "\n" + op.getDescription() : "");
+                + (op.getDescription() != null ? "\n" + op.getDescription() : "")
+                // fixed at discovery, the same for every user: the tool list (and the prompt cache) never depends on
+                // who is logged in
+                + (api.oauth() != null && api.oauth().effectivePerUser()
+                ? "\nNeeds the user's " + api.name() + " login." : "");
         boolean readOnly = method == PathItem.HttpMethod.GET || method == PathItem.HttpMethod.HEAD;
         String body = bodyProperty;
         return new SimpleTool(name, description, schema, api.effectiveGroup(),
@@ -248,8 +318,9 @@ public final class RestApiToolProvider {
         String resolved = path;
         Map<String, String> query = new LinkedHashMap<>();
         // Configured headers win over the model's, whatever their case.
+        String source = api.source();
         Map<String, String> configured = new LinkedHashMap<>(api.headers());
-        configured.putAll(caller.headers("api:" + api.name()));
+        putReplacing(configured, caller.headers(source)); // LoginRequiredException passes through
         Set<String> configuredNames = lowerCase(configured.keySet());
         Map<String, String> headers = new LinkedHashMap<>();
         for (Param param : params) {
@@ -292,14 +363,39 @@ public final class RestApiToolProvider {
         if (bodyProperty != null && input.hasNonNull(bodyProperty)) {
             publisher = HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(input.get(bodyProperty)));
         }
-        HttpRequest.Builder b = HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(60))
-                .method(method.name(), publisher);
-        if (bodyProperty != null) b.header("Content-Type", "application/json");
-        headers.forEach(b::header);
-        HttpResponse<String> resp = http.send(b.build(), HttpResponse.BodyHandlers.ofString());
-        String text = resp.body();
+        HttpResponse<String> resp = send(uri, method, publisher, bodyProperty != null, headers, http);
+        if (resp.statusCode() == 401 && caller.onUnauthorized(source)) {
+            // the credentials were refreshed: one retry, with the model's headers and the new configured ones
+            Map<String, String> again = new LinkedHashMap<>(headers);
+            Set<String> old = lowerCase(configured.keySet());
+            again.keySet().removeIf(k -> old.contains(k.toLowerCase(Locale.ROOT)));
+            Map<String, String> fresh = new LinkedHashMap<>(api.headers());
+            putReplacing(fresh, caller.headers(source));
+            again.putAll(fresh);
+            resp = send(uri, method, publisher, bodyProperty != null, again, http);
+            if (resp.statusCode() == 401) throw new LoginRequiredException(source);
+        }
+        String text = resp.body() == null ? "" : resp.body();
         if (text.length() > MAX_RESPONSE_CHARS) text = text.substring(0, MAX_RESPONSE_CHARS) + "\n[truncated]";
         return "HTTP " + resp.statusCode() + "\n" + text;
+    }
+
+    private static HttpResponse<String> send(URI uri, PathItem.HttpMethod method, HttpRequest.BodyPublisher publisher,
+                                             boolean json, Map<String, String> headers, HttpClient http)
+            throws java.io.IOException, InterruptedException {
+        HttpRequest.Builder b = HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(60))
+                .method(method.name(), publisher);
+        if (json) b.header("Content-Type", "application/json");
+        headers.forEach(b::header);
+        return http.send(b.build(), HttpResponse.BodyHandlers.ofString());
+    }
+
+    /** Puts {@code over} into {@code into}, replacing a header of the same name in another case. */
+    private static void putReplacing(Map<String, String> into, Map<String, String> over) {
+        if (over.isEmpty()) return;
+        Set<String> names = lowerCase(over.keySet());
+        into.keySet().removeIf(k -> names.contains(k.toLowerCase(Locale.ROOT)));
+        into.putAll(over);
     }
 
     private static String encode(String s) {

@@ -54,7 +54,7 @@ class ExternalSourcesTest {
     private McpServerSettings pidServer(String name, String tool, Boolean enabled) {
         String pidFile = tmp.resolve(name + ".pid").toString();
         return new McpServerSettings(name, null, null, null, enabled, null, JAVA,
-                List.of("-cp", System.getProperty("java.class.path"), PidServer.class.getName(), pidFile, tool), null);
+                List.of("-cp", System.getProperty("java.class.path"), PidServer.class.getName(), pidFile, tool), null, null, null, null, null);
     }
 
     private long pid(String name) throws IOException {
@@ -138,7 +138,7 @@ class ExternalSourcesTest {
     @Test
     void unreachableServerAtStartupOnlyDisablesItsSource() {
         McpServerSettings gone = new McpServerSettings("gone", null, null, null, null, null, JAVA,
-                List.of("-cp", System.getProperty("java.class.path"), "no.such.Main"), null);
+                List.of("-cp", System.getProperty("java.class.path"), "no.such.Main"), null, null, null, null, null);
         try (ExternalSources sources = new ExternalSources(registry(), settings(gone), HttpClient.newHttpClient(),
                 MAPPER)) {
             ExternalSources.Status s = sources.list(ExternalSources.Kind.MCP).get(0);
@@ -165,7 +165,7 @@ class ExternalSourcesTest {
         String marker = tmp.resolve("started").toString();
         McpServerSettings once = new McpServerSettings("once", null, null, null, null, null, JAVA,
                 List.of("-cp", System.getProperty("java.class.path"),
-                        McpStdioClientTest.LoopServer.class.getName(), "once", marker), null);
+                        McpStdioClientTest.LoopServer.class.getName(), "once", marker), null, null, null, null, null);
         HarnessToolRegistry registry = registry();
         try (ExternalSources sources = new ExternalSources(registry, settings(once), HttpClient.newHttpClient(),
                 MAPPER)) {
