@@ -192,6 +192,11 @@ parallel by area:
 New settings: `files.maxReadBytes`, `web.fetchMaxBytes`, `sandbox.outputLogMaxBytes`. The decisions and plans are in
 the root `todo.md`.
 
+## 10. Web commons
+`jllm-web` was split in two. `jllm-web-commons` holds the chat and file API, the harness wiring and the `jllm.*`
+properties, and asks the application for `WebAuthentication`, `ChatAccess` and `HarnessIdentity`. `jllm-web` keeps the
+startup, the UI and the sample sign-in and permissions that implement them.
+
 ## Overall direction
 - **Where it lives:** an embedded component, then a standalone library with a CLI, then a web front end.
 - **Model target:** Anthropic, then local llama.cpp/Qwen, then small models.

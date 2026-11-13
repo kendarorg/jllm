@@ -1,4 +1,4 @@
-package org.kendar.llm.web;
+package org.kendar.llm.web.commons;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -7,8 +7,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.AgentHarness;
 import org.kendar.llm.harness.HarnessConfig;
-import org.kendar.llm.harness.HarnessPricing;
-import org.kendar.llm.harness.auth.HarnessPrincipal;
 import org.kendar.llm.harness.llm.ModelClient;
 import org.kendar.llm.harness.llm.ModelRequest;
 import org.kendar.llm.harness.llm.ModelResponse;
@@ -30,11 +28,11 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-/** Web gating of slash commands, approvals with a typed folder, upload names, file suggestions, no-principal policy. */
+/** Web gating of slash commands, approvals with a typed folder, upload names, file suggestions. */
 class WebSecurityFixesTest {
 
-    private static final WebUser ALICE = new WebUser("alice", "Alice", "reader", Map.of());
-    private static final WebUser ADMIN = new WebUser("admin", "Admin", "admin", Map.of());
+    private static final TestUser ALICE = new TestUser("alice", false);
+    private static final TestUser ADMIN = new TestUser("admin", true);
 
     private final ObjectMapper mapper = new ObjectMapper();
     @TempDir
@@ -59,28 +57,28 @@ class WebSecurityFixesTest {
         harness = AgentHarness.builder().modelClient(unused)
                 .sandbox(new ChatDirSandboxExecutor(HarnessConfig.defaults(), dir))
                 .sessionStore(new InMemoryChatSessionStore()).objectMapper(mapper).build();
-        chats = MockMvcBuilders.standaloneSetup(new ChatController(harness, mapper, new HarnessPricing(0, 0, 0, 0)))
+        chats = MockMvcBuilders.standaloneSetup(TestUser.chatController(harness, mapper))
                 .build();
         files = MockMvcBuilders.standaloneSetup(new FilesController(harness)).build();
     }
 
-    private String create(WebUser user) throws Exception {
+    private String create(TestUser user) throws Exception {
         String body = chats.perform(post("/api/chat").contentType(MediaType.APPLICATION_JSON).content("{}")
-                .requestAttr(UserInterceptor.ATTR, user)).andExpect(status().isOk()).andReturn().getResponse()
+                .requestAttr(WebPrincipal.ATTR, user)).andExpect(status().isOk()).andReturn().getResponse()
                 .getContentAsString();
         return mapper.readTree(body).path("chatId").asText();
     }
 
-    private JsonNode send(String chat, WebUser user, String text) throws Exception {
+    private JsonNode send(String chat, TestUser user, String text) throws Exception {
         return mapper.readTree(chats.perform(post("/api/chat/" + chat + "/messages")
                 .contentType(MediaType.APPLICATION_JSON).content(mapper.writeValueAsString(Map.of("text", text)))
-                .requestAttr(UserInterceptor.ATTR, user)).andReturn().getResponse().getContentAsString());
+                .requestAttr(WebPrincipal.ATTR, user)).andReturn().getResponse().getContentAsString());
     }
 
     @Test
     void slashCommandsAreGatedByUser() throws Exception {
         String a = create(ALICE);
-        String b = create(new WebUser("bob", "Bob", "reader", Map.of()));
+        String b = create(new TestUser("bob", false));
         assertTrue(send(a, ALICE, "/model other").path("output").asText().contains("administrator"));
         assertTrue(send(a, ALICE, "/logout x").path("output").asText().contains("administrator"));
         assertTrue(send(a, ADMIN, "/new").path("output").asText().contains("not available"));
@@ -98,7 +96,7 @@ class WebSecurityFixesTest {
 
     @Test
     void commandListHidesWhatTheUserCannotRun() throws Exception {
-        JsonNode cmds = mapper.readTree(chats.perform(get("/api/chat/commands").requestAttr(UserInterceptor.ATTR, ALICE))
+        JsonNode cmds = mapper.readTree(chats.perform(get("/api/chat/commands").requestAttr(WebPrincipal.ATTR, ALICE))
                 .andReturn().getResponse().getContentAsString());
         for (JsonNode c : cmds) {
             assertFalse(Set.of("/new", "/model", "/login", "/logout").contains(c.path("name").asText()), c.toString());
@@ -152,17 +150,5 @@ class WebSecurityFixesTest {
         List<String> all = ChatController.suggestions(dir.resolve("w"), "");
         assertEquals(List.of("src/main.txt"), all);
         assertEquals(List.of(), ChatController.suggestions(dir.resolve("missing"), ""));
-    }
-
-    @Test
-    void chatWithoutPrincipalGetsNoTools() throws Exception {
-        Files.createDirectories(dir.resolve("perm"));
-        Files.writeString(dir.resolve("perm/reader.json"), "{\"tools\":[\"*\"]}");
-        var resolver = new Permissions(dir.resolve("perm"), mapper).resolver();
-        var anyTool = harness.tools().all().iterator().next();
-        assertFalse(resolver.resolve(null).allows(anyTool));
-        assertTrue(resolver.resolve(new HarnessPrincipal("u", Set.of("reader"), Map.of())).allows(anyTool));
-        var identity = new org.kendar.llm.harness.auth.Identity(null, resolver, null, chat -> null);
-        assertFalse(identity.policyOf("c").allows(anyTool));
     }
 }

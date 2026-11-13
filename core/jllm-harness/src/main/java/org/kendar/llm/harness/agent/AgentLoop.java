@@ -784,10 +784,23 @@ public class AgentLoop {
         return id.isEmpty() ? "agent" : id;
     }
 
+    /**
+     * The shell description, only when this chat's user may run the shell tool: a user without it (e.g. run_js only)
+     * must not be told about cmd.exe or bash, or the model claims and tries a shell it does not have.
+     */
+    private String shellNote(String chatId) {
+        HarnessTool shell = registry.get("bash");
+        boolean usable = shell != null && identity.policyOf(chatId).allows(shell)
+                && sessions.chatAllowsTool(chatId, "bash");
+        if (usable) return sandbox.shellEnvironment();
+        return "OS: " + System.getProperty("os.name") + ". There is no shell tool in this chat: do not claim or "
+                + "suggest shell commands.";
+    }
+
     /** Date, OS and shell, directories and permission mode: after the cached system prefix. */
     private String modeNote(PermissionMode mode, ToolContext ctx) {
         String scratch = "\n\nToday's date: " + LocalDate.now()
-                + "\n" + sandbox.shellEnvironment()
+                + "\n" + shellNote(ctx.chatId())
                 + "\nWorking directory (project files go here, relative paths resolve here): "
                 + sandbox.displayPath(ctx.workDir())
                 + "\nScratch directory (only for throwaway files, never for deliverables): "

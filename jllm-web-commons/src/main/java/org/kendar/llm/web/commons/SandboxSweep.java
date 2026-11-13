@@ -1,4 +1,4 @@
-package org.kendar.llm.web;
+package org.kendar.llm.web.commons;
 
 import org.kendar.llm.harness.AgentHarness;
 import org.kendar.llm.harness.sandbox.RemoteExecSandboxExecutor;

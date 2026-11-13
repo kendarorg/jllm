@@ -1,4 +1,4 @@
-package org.kendar.llm.web;
+package org.kendar.llm.web.commons;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import org.kendar.llm.harness.sandbox.FileBackend;

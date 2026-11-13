@@ -15,11 +15,11 @@ import java.util.Map;
 public class AuthController {
 
     private final UserDirectory users;
-    private final UserInterceptor interceptor;
+    private final CookieAuthentication authentication;
 
-    public AuthController(UserDirectory users, UserInterceptor interceptor) {
+    public AuthController(UserDirectory users, CookieAuthentication authentication) {
         this.users = users;
-        this.interceptor = interceptor;
+        this.authentication = authentication;
     }
 
     @GetMapping("/api/users")
@@ -29,7 +29,7 @@ public class AuthController {
 
     @GetMapping("/api/me")
     public ResponseEntity<Map<String, Object>> me(HttpServletRequest request) {
-        return interceptor.signedIn(request).map(u -> ResponseEntity.ok(visible(u)))
+        return authentication.signedIn(request).map(u -> ResponseEntity.ok(visible(u)))
                 .orElse(ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Sign in first")));
     }
 
@@ -48,7 +48,7 @@ public class AuthController {
     }
 
     private static ResponseCookie cookie(String value, long maxAge) {
-        return ResponseCookie.from(UserInterceptor.COOKIE, value).path("/").sameSite("Strict").httpOnly(true)
+        return ResponseCookie.from(CookieAuthentication.COOKIE, value).path("/").sameSite("Strict").httpOnly(true)
                 .maxAge(maxAge).build();
     }
 

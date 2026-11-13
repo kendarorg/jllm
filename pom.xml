@@ -21,6 +21,7 @@
         <module>core</module>
         <module>plugins</module>
         <module>jllm-cli</module>
+        <module>jllm-web-commons</module>
         <module>jllm-web</module>
     </modules>
 

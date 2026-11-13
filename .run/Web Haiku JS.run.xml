@@ -2,7 +2,7 @@
   <configuration default="false" name="Web Haiku JS" type="Application" factoryName="Application">
     <option name="MAIN_CLASS_NAME" value="org.kendar.llm.web.JllmWebApplication" />
     <module name="jllm-web" />
-    <option name="PROGRAM_PARAMETERS" value="--jllm.provider=anthropic --jllm.context-strategy=compaction --jllm.model=claude-haiku-5-5 --jllm.context-tokens=99000 --jllm.plugin-dir=$PROJECT_DIR$/target/plugins --jllm.plugins.pdf.enabled=true --jllm.plugins.docs.enabled=true --jllm.plugins.js.enabled=true" />
+    <option name="PROGRAM_PARAMETERS" value="--jllm.webauth-dir=$PROJECT_DIR$/webauth --jllm.provider=anthropic --jllm.context-strategy=compaction --jllm.model=claude-haiku-5-5 --jllm.context-tokens=99000 --jllm.plugin-dir=$PROJECT_DIR$/target/plugins --jllm.plugins.pdf.enabled=true --jllm.plugins.docs.enabled=true --jllm.plugins.js.enabled=true" />
     <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/tmp" />
     <method v="2">
       <option name="Make" enabled="true" />

@@ -1,6 +1,7 @@
 package org.kendar.llm.web;
 
 import org.kendar.llm.harness.auth.HarnessPrincipal;
+import org.kendar.llm.web.commons.WebPrincipal;
 
 import java.util.Map;
 import java.util.Set;
@@ -12,12 +13,14 @@ import java.util.Set;
  * @param credentials per call source ({@code mcp:<server>}, {@code api:<name>}) the headers to add; a value of the form
  *                    {@code env:NAME} is read from the environment at call time, anything else is ignored
  */
-public record WebUser(String id, String name, String role, Map<String, Map<String, String>> credentials) {
+public record WebUser(String id, String name, String role, Map<String, Map<String, String>> credentials)
+        implements WebPrincipal {
 
     public WebUser {
         credentials = credentials == null ? Map.of() : credentials;
     }
 
+    @Override
     public boolean admin() {
         return "admin".equals(role);
     }

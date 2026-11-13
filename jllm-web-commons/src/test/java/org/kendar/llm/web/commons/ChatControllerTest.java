@@ -1,4 +1,4 @@
-package org.kendar.llm.web;
+package org.kendar.llm.web.commons;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -6,7 +6,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.AgentHarness;
-import org.kendar.llm.harness.HarnessPricing;
 import org.kendar.llm.harness.llm.ModelClient;
 import org.kendar.llm.harness.llm.ModelRequest;
 import org.kendar.llm.harness.llm.ModelResponse;
@@ -25,7 +24,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 class ChatControllerTest {
 
-    private static final WebUser ADMIN = new WebUser("admin", "Admin", "admin", Map.of());
+    private static final TestUser ADMIN = new TestUser("admin", true);
 
     private final ObjectMapper mapper = new ObjectMapper();
     private MockMvc mvc;
@@ -48,19 +47,19 @@ class ChatControllerTest {
                 .sessionStore(new InMemoryChatSessionStore())
                 .objectMapper(mapper)
                 .build();
-        mvc = MockMvcBuilders.standaloneSetup(new ChatController(harness, mapper, new HarnessPricing(0, 0, 0, 0)))
+        mvc = MockMvcBuilders.standaloneSetup(TestUser.chatController(harness, mapper))
                 .build();
     }
 
     @Test
     void createListGetDelete() throws Exception {
         String created = mvc.perform(post("/api/chat").contentType(MediaType.APPLICATION_JSON).content("{}")
-                        .requestAttr(UserInterceptor.ATTR, ADMIN))
+                        .requestAttr(WebPrincipal.ATTR, ADMIN))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         String id = mapper.readTree(created).path("chatId").asText();
         assertTrue(!id.isBlank());
 
-        JsonNode list = mapper.readTree(mvc.perform(get("/api/chat").requestAttr(UserInterceptor.ATTR, ADMIN))
+        JsonNode list = mapper.readTree(mvc.perform(get("/api/chat").requestAttr(WebPrincipal.ATTR, ADMIN))
                 .andReturn().getResponse().getContentAsString());
         assertEquals(1, list.size());
 
@@ -98,9 +97,9 @@ class ChatControllerTest {
         AgentHarness harness = AgentHarness.builder().modelClient(unused)
                 .sessionStore(new FileChatSessionStore(root, mapper)).objectMapper(mapper).build();
         MockMvc restarted = MockMvcBuilders.standaloneSetup(
-                new ChatController(harness, mapper, new HarnessPricing(0, 0, 0, 0))).build();
+                TestUser.chatController(harness, mapper)).build();
 
-        JsonNode list = mapper.readTree(restarted.perform(get("/api/chat").requestAttr(UserInterceptor.ATTR, ADMIN))
+        JsonNode list = mapper.readTree(restarted.perform(get("/api/chat").requestAttr(WebPrincipal.ATTR, ADMIN))
                 .andReturn().getResponse().getContentAsString());
         assertEquals(1, list.size());
         assertEquals("c1", list.get(0).path("chatId").asText());

@@ -21,7 +21,8 @@ They're not separate products or mandatory dependencies. They're working example
 |---|---|---|
 | [jllm-harness](core/jllm-harness) | the library: framework-free (no Spring, JPA or Micrometer), Jackson, JDK `HttpClient`, jsoup | [README](core/jllm-harness/README.md) |
 | [jllm-cli](jllm-cli) | terminal front end, one shaded runnable jar | [README](jllm-cli/README.md) |
-| [jllm-web](jllm-web) | Spring Boot REST + SSE API with a no-build Vue 3 chat UI | [README](jllm-web/README.md) |
+| [jllm-web-commons](jllm-web-commons) | REST + SSE chat and file API over the harness, independent of sign-in | [README](jllm-web-commons/README.md) |
+| [jllm-web](jllm-web) | Spring Boot application: startup, sample sign-in and permissions, no-build Vue 3 chat UI | [README](jllm-web/README.md) |
 
 Also: [HISTORY](docs/HISTORY.md) (how the harness evolved) and [HARNESSES-COMPARE](docs/HARNESSES-COMPARE.md) (feature matrix against mini-swe-agent, Pi, OpenCode, Qwen Code, Hermes Agent).
 

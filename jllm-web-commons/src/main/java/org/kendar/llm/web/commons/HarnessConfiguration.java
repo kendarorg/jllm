@@ -1,4 +1,4 @@
-package org.kendar.llm.web;
+package org.kendar.llm.web.commons;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.kendar.llm.harness.AgentHarness;
@@ -13,7 +13,6 @@ import org.kendar.llm.harness.session.HistoryRootLock;
 import org.kendar.llm.harness.session.FileHistorySubAgentRunLog;
 import org.kendar.llm.harness.session.InMemorySubAgentRunLog;
 import org.kendar.llm.harness.settings.HarnessSettings;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -37,25 +36,9 @@ public class HarnessConfiguration {
                 nz(pr.cacheReadPerMillion()), nz(pr.cacheWritePerMillion()));
     }
 
-    /** Sample sign-in and permissions: {@code jllm.webauth-dir} (default {@code webauth}, relative to the start folder). */
-    @Bean
-    public UserDirectory userDirectory(@Value("${jllm.webauth-dir:webauth}") String webauthDir, ObjectMapper mapper) {
-        return new UserDirectory(Path.of(webauthDir, "users"), mapper);
-    }
-
-    @Bean
-    public Permissions permissions(@Value("${jllm.webauth-dir:webauth}") String webauthDir, ObjectMapper mapper) {
-        return new Permissions(Path.of(webauthDir, "permissions"), mapper);
-    }
-
-    @Bean
-    public UserInterceptor userInterceptor(UserDirectory users, AgentHarness harness, ObjectMapper mapper) {
-        return new UserInterceptor(users, harness.sessions(), mapper);
-    }
-
     @Bean
     public AgentHarness agentHarness(JllmProperties p, ModelClient modelClient, HarnessPricing pricing,
-                                     ObjectMapper mapper, UserDirectory users, Permissions permissions) {
+                                     ObjectMapper mapper, HarnessIdentity identity) {
         String settingsFile = JllmProperties.blankToNull(p.settings());
         Path projectDir = Path.of(p.workdir() == null ? "" : p.workdir()).toAbsolutePath().normalize();
         // global ~/.jllm/settings.json, then project .jllm/settings.json, then the settings file; later wins
@@ -115,9 +98,9 @@ public class HarnessConfiguration {
                 .settings(settings)
                 .pricing(pricing)
                 .objectMapper(mapper)
-                .credentialResolver(new FileCredentialResolver(users))
-                .userPolicyResolver(permissions.resolver())
-                .principalDirectory(id -> users.find(id).map(WebUser::principal).orElse(null))
+                .credentialResolver(identity.credentials())
+                .userPolicyResolver(identity.policies())
+                .principalDirectory(identity.principals())
                 .discoverPlugins()
                 .build();
         harness.enforceChatRetention(settings.chatRetentionLimit(), null);

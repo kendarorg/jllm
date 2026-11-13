@@ -18,7 +18,7 @@
     <dependencies>
         <dependency>
             <groupId>org.kendar.llm</groupId>
-            <artifactId>jllm-harness</artifactId>
+            <artifactId>jllm-web-commons</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>

@@ -13,6 +13,8 @@ import org.kendar.llm.harness.llm.ModelResponse;
 import org.kendar.llm.harness.session.InMemoryChatSessionStore;
 import org.kendar.llm.harness.tools.SimpleTool;
 import org.kendar.llm.harness.tools.ToolKind;
+import org.kendar.llm.web.commons.ApiInterceptor;
+import org.kendar.llm.web.commons.ChatController;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -131,9 +133,10 @@ class SampleUsersTest {
         };
         AgentHarness harness = AgentHarness.builder().modelClient(unused)
                 .sessionStore(new InMemoryChatSessionStore()).objectMapper(mapper).build();
-        UserInterceptor interceptor = new UserInterceptor(users, harness.sessions(), mapper);
-        MockMvc mvc = MockMvcBuilders.standaloneSetup(new ChatController(harness, mapper, new HarnessPricing(0, 0, 0, 0)))
-                .addInterceptors(interceptor).build();
+        CookieAuthentication auth = new CookieAuthentication(users);
+        MockMvc mvc = MockMvcBuilders.standaloneSetup(
+                        new ChatController(harness, mapper, new HarnessPricing(0, 0, 0, 0), auth, auth))
+                .addInterceptors(new ApiInterceptor(auth, auth, harness.sessions(), mapper)).build();
 
         // not signed in
         mvc.perform(get("/api/chat")).andExpect(status().isUnauthorized());
@@ -158,5 +161,16 @@ class SampleUsersTest {
         String ritaList = mvc.perform(get("/api/chat").cookie(new jakarta.servlet.http.Cookie("jllm_user", "rita")))
                 .andReturn().getResponse().getContentAsString();
         assertTrue(ritaList.contains(chat), ritaList);
+    }
+
+    @Test
+    void chatWithoutPrincipalGetsNoTools(@TempDir Path dir) throws Exception {
+        Files.writeString(dir.resolve("reader.json"), "{\"tools\":[\"*\"]}");
+        var resolver = new Permissions(dir, mapper).resolver();
+        var anyTool = tool("read_file", ToolKind.READ_ONLY);
+        assertFalse(resolver.resolve(null).allows(anyTool));
+        assertTrue(resolver.resolve(new HarnessPrincipal("u", Set.of("reader"), Map.of())).allows(anyTool));
+        var identity = new org.kendar.llm.harness.auth.Identity(null, resolver, null, chat -> null);
+        assertFalse(identity.policyOf("c").allows(anyTool));
     }
 }

@@ -131,16 +131,18 @@ JavaScript objects with a `template` string, so nothing is compiled or transpile
 
 ## Java classes
 
+The chat and file API, the harness wiring and the `jllm.*` properties live in
+[jllm-web-commons](../jllm-web-commons/README.md). This module keeps the startup and the sample sign-in and permissions.
+
 | Class | Role |
 |---|---|
-| `JllmWebApplication` | Spring Boot entry point |
-| `JllmProperties` | the `jllm.*` properties |
-| `HarnessConfiguration` | builds `ModelClient`, `HarnessPricing` and `AgentHarness` (same wiring and precedence as the CLI) |
-| `ChatController` | the REST and SSE endpoints above |
+| `JllmWebApplication` | Spring Boot entry point, CLI-style flags, API key prompt |
+| `WebAuthConfiguration` | beans below; supplies `WebAuthentication`, `ChatAccess` and `HarnessIdentity` to the common API |
 | `AuthController` | `/api/users`, `/api/me`, `/api/login`, `/api/logout`: the fake sign-in |
-| `UserInterceptor` | requires a signed-in user on `/api/**`; hides chats that belong to others (404) |
+| `CookieAuthentication` | the user named by the sign-in cookie; a chat is visible to its owner and the admin |
+| `WebUser` | a user of `webauth/users`, the `WebPrincipal` of its requests |
 | `UserDirectory` | reads `webauth/users/<id>.json` |
 | `Permissions` | reads `webauth/permissions/<role>.json` and builds each user's `UserPolicy` |
 | `FileCredentialResolver` | per-call headers from a user's `credentials`, `env:` references only |
 
-Tests: `ChatControllerTest`, `SampleUsersTest` (`mvn -pl jllm-web -am test`).
+Tests: `SampleUsersTest`, `JllmWebApplicationArgsTest` (`mvn -pl jllm-web -am test`).

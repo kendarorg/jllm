@@ -1,4 +1,4 @@
-package org.kendar.llm.web;
+package org.kendar.llm.web.commons;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.kendar.llm.harness.AgentHarness;
@@ -47,16 +47,16 @@ public class ChatController {
     private final SandboxExecutor sandbox;
     private final ObjectMapper mapper;
     private final HarnessPricing pricing;
-    private final UserInterceptor users;
+    private final WebAuthentication authentication;
+    private final ChatAccess access;
     private final SubAgentRunLog subAgentRuns;
 
-    public ChatController(AgentHarness harness, ObjectMapper mapper, HarnessPricing pricing) {
-        this(harness, mapper, pricing, null);
-    }
-
-    /** @param users resolves the signed-in user on the open {@code /api/chat/commands} endpoint; may be null */
-    @org.springframework.beans.factory.annotation.Autowired
-    public ChatController(AgentHarness harness, ObjectMapper mapper, HarnessPricing pricing, UserInterceptor users) {
+    /**
+     * @param authentication resolves the signed-in user on the open {@code /api/chat/commands} endpoint
+     * @param access         which chats the list shows to a user
+     */
+    public ChatController(AgentHarness harness, ObjectMapper mapper, HarnessPricing pricing,
+                          WebAuthentication authentication, ChatAccess access) {
         this.agentService = harness;
         this.sessions = harness.sessions();
         this.toolRegistry = harness.tools();
@@ -64,11 +64,12 @@ public class ChatController {
         this.subAgentRuns = harness.subAgentRuns();
         this.mapper = mapper;
         this.pricing = pricing;
-        this.users = users;
+        this.authentication = authentication;
+        this.access = access;
     }
 
     /** The slash-command caller of a web request: the user's id, admin flag; no user = no rights. */
-    static org.kendar.llm.harness.commands.SlashCommands.Caller caller(WebUser user) {
+    static org.kendar.llm.harness.commands.SlashCommands.Caller caller(WebPrincipal user) {
         return user == null ? org.kendar.llm.harness.commands.SlashCommands.Caller.web(null, false)
                 : org.kendar.llm.harness.commands.SlashCommands.Caller.web(user.id(), user.admin());
     }
@@ -77,19 +78,19 @@ public class ChatController {
 
     @PostMapping("/api/chat")
     public Map<String, Object> create(@RequestBody(required = false) Map<String, String> body,
-                                      @RequestAttribute(value = UserInterceptor.ATTR, required = false) WebUser user) {
+                                      @RequestAttribute(value = WebPrincipal.ATTR, required = false) WebPrincipal user) {
         ChatSessionData s = sessions.create(body == null ? null : body.get("title"), user == null ? null : user.id());
         agentService.commands().captureChatTools(s.chatId()); // /tools, /mcp, ... toggle within this set
         return summary(sessions.get(s.chatId()));
     }
 
-    /** The chats of the signed-in user; the admin sees all of them. */
+    /** The chats the signed-in user may see. */
     @GetMapping("/api/chat")
     public List<Map<String, Object>> list(
-            @RequestAttribute(value = UserInterceptor.ATTR, required = false) WebUser user) {
+            @RequestAttribute(value = WebPrincipal.ATTR, required = false) WebPrincipal user) {
         if (user == null) return List.of();
         return sessions.list().stream()
-                .filter(s -> s.principal() != null && (user.admin() || user.id().equals(s.principal())))
+                .filter(s -> access.canSee(user, s))
                 .map(this::summary).toList();
     }
 
@@ -182,8 +183,8 @@ public class ChatController {
 
     @PostMapping("/api/chat/{id}/messages")
     public ResponseEntity<Map<String, Object>> send(@PathVariable String id, @RequestBody Map<String, String> body,
-                                                    @RequestAttribute(value = UserInterceptor.ATTR, required = false)
-                                                    WebUser user) {
+                                                    @RequestAttribute(value = WebPrincipal.ATTR, required = false)
+                                                    WebPrincipal user) {
         String text = body.get("text");
         if (text == null || text.isBlank()) {
             return ResponseEntity.badRequest().body(Map.of("error", "text is required"));
@@ -379,8 +380,8 @@ public class ChatController {
 
     @GetMapping("/api/chat/commands")
     public List<Map<String, String>> commands(jakarta.servlet.http.HttpServletRequest request) {
-        WebUser user = request.getAttribute(UserInterceptor.ATTR) instanceof WebUser u ? u
-                : users == null ? null : users.signedIn(request).orElse(null);
+        WebPrincipal user = request.getAttribute(WebPrincipal.ATTR) instanceof WebPrincipal u ? u
+                : authentication.current(request).orElse(null);
         List<Map<String, String>> out = new ArrayList<>();
         for (var c : agentService.commands().list(caller(user))) out.add(command(c.name(), c.description(), "server"));
         Set<String> groups = new TreeSet<>();

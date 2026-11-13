@@ -1,8 +1,8 @@
 package org.kendar.llm.web;
 
+import org.kendar.llm.web.commons.JllmProperties;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -12,7 +12,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 @SpringBootApplication
-@ConfigurationPropertiesScan
 public class JllmWebApplication {
     static final String ASK_TOKEN = "ASK_TOKEN";
     static final int TOKEN_WAIT_SECONDS = 30;
