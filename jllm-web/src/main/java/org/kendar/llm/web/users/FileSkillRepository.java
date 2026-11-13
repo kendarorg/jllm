@@ -1,5 +1,7 @@
 package org.kendar.llm.web.users;
 
+import org.kendar.llm.web.commons.users.UserRepository;
+import org.kendar.llm.web.commons.users.SkillRepository;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
@@ -8,73 +10,68 @@ import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
-import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
- * Skill files managed from the web: global ones ({@code <webauth>/global-skills/<name>.md}, written by the admin,
- * offered to every user) and each user's own ({@code <webauth>/user-skills/<userId>/<name>.md}). A file is markdown
- * with a front matter holding {@code name} and {@code description}; it is read on each use.
+ * Skills as files: global ones in {@code <webauth>/global-skills/<name>.md}, each user's own in
+ * {@code <webauth>/user-skills/<userId>/<name>.md}. A file is markdown with a front matter holding {@code name} and
+ * {@code description}; it is read on each use.
  */
-public final class SkillFiles {
-
-    public static final Pattern NAME = Pattern.compile("[a-z0-9_-]{1,64}");
-    public static final int MAX_BYTES = 64 * 1024;
-    public static final int MAX_OWN = 50;
-
-    /** A skill file: {@code content} is the body, without the front matter. */
-    public record Skill(String name, String description, String content, Path path) {
-    }
+public final class FileSkillRepository implements SkillRepository {
 
     private final Path global;
     private final Path users;
 
-    public SkillFiles(Path webauth) {
+    public FileSkillRepository(Path webauth) {
         this.global = webauth.resolve("global-skills");
         this.users = webauth.resolve("user-skills");
     }
 
-    public static boolean validName(String name) {
-        return name != null && NAME.matcher(name).matches();
-    }
-
+    @Override
     public List<Skill> global() {
         return list(global);
     }
 
+    @Override
     public List<Skill> own(String userId) {
-        return UserDirectory.validId(userId) ? list(users.resolve(userId)) : List.of();
+        return UserRepository.validId(userId) ? list(users.resolve(userId)) : List.of();
     }
 
+    @Override
     public Optional<Skill> findGlobal(String name) {
         return read(global, name);
     }
 
+    @Override
     public Optional<Skill> findOwn(String userId, String name) {
-        return UserDirectory.validId(userId) ? read(users.resolve(userId), name) : Optional.empty();
+        return UserRepository.validId(userId) ? read(users.resolve(userId), name) : Optional.empty();
     }
 
+    @Override
     public Skill writeGlobal(String name, String description, String content) {
         return write(global, name, description, content);
     }
 
+    @Override
     public Skill writeOwn(String userId, String name, String description, String content) {
-        if (!UserDirectory.validId(userId)) throw new IllegalArgumentException("Invalid user id");
+        if (!UserRepository.validId(userId)) throw new IllegalArgumentException("Invalid user id");
         return write(users.resolve(userId), name, description, content);
     }
 
+    @Override
     public boolean deleteGlobal(String name) {
-        return validName(name) && JsonFiles.delete(global.resolve(name + ".md"));
+        return SkillRepository.validName(name) && JsonFiles.delete(global.resolve(name + ".md"));
     }
 
+    @Override
     public boolean deleteOwn(String userId, String name) {
-        return UserDirectory.validId(userId) && validName(name)
+        return UserRepository.validId(userId) && SkillRepository.validName(name)
                 && JsonFiles.delete(users.resolve(userId).resolve(name + ".md"));
     }
 
-    /** Removes every own skill of a user (the user is being deleted). */
+    @Override
     public void deleteAllOwn(String userId) {
-        if (!UserDirectory.validId(userId)) return;
+        if (!UserRepository.validId(userId)) return;
         Path dir = users.resolve(userId);
         if (!Files.isDirectory(dir)) return;
         synchronized (JsonFiles.LOCK) {
@@ -86,12 +83,12 @@ public final class SkillFiles {
         }
     }
 
-    /** Ids of the users having an own skill of that name. */
+    @Override
     public List<String> ownersOf(String name) {
-        if (!validName(name) || !Files.isDirectory(users)) return List.of();
+        if (!SkillRepository.validName(name) || !Files.isDirectory(users)) return List.of();
         try (Stream<Path> s = Files.list(users)) {
             return s.filter(Files::isDirectory).map(p -> p.getFileName().toString())
-                    .filter(UserDirectory::validId)
+                    .filter(UserRepository::validId)
                     .filter(id -> Files.isRegularFile(users.resolve(id).resolve(name + ".md")))
                     .sorted().toList();
         } catch (IOException e) {
@@ -105,7 +102,7 @@ public final class SkillFiles {
             return s.map(p -> p.getFileName().toString())
                     .filter(n -> n.endsWith(".md"))
                     .map(n -> n.substring(0, n.length() - 3))
-                    .filter(SkillFiles::validName)
+                    .filter(SkillRepository::validName)
                     .sorted()
                     .map(n -> read(dir, n))
                     .flatMap(Optional::stream)
@@ -116,7 +113,7 @@ public final class SkillFiles {
     }
 
     private static Optional<Skill> read(Path dir, String name) {
-        if (!validName(name)) return Optional.empty();
+        if (!SkillRepository.validName(name)) return Optional.empty();
         Path file = dir.resolve(name + ".md");
         if (!Files.isRegularFile(file)) return Optional.empty();
         try {
@@ -133,28 +130,18 @@ public final class SkillFiles {
                     body = after < 0 ? "" : text.substring(after + 1);
                 }
             }
-            return Optional.of(new Skill(name, description, body, file));
+            return Optional.of(new Skill(name, description, body));
         } catch (IOException e) {
             return Optional.empty();
         }
     }
 
     private static Skill write(Path dir, String name, String description, String content) {
-        if (!validName(name)) throw new IllegalArgumentException("Invalid skill name: " + name);
-        String desc = description == null ? "" : description.replaceAll("[\\r\\n]+", " ").strip();
-        String text = "---\nname: " + name + "\ndescription: " + desc + "\n---\n" + (content == null ? "" : content);
-        if (text.getBytes(StandardCharsets.UTF_8).length > MAX_BYTES) {
-            throw new SkillTooLargeException();
-        }
-        Path file = dir.resolve(name + ".md");
-        JsonFiles.writeString(file, text);
+        if (!SkillRepository.validName(name)) throw new IllegalArgumentException("Invalid skill name: " + name);
+        SkillRepository.checkSize(description, content);
+        String text = "---\nname: " + name + "\ndescription: " + SkillRepository.cleanDescription(description)
+                + "\n---\n" + (content == null ? "" : content);
+        JsonFiles.writeString(dir.resolve(name + ".md"), text);
         return read(dir, name).orElseThrow();
-    }
-
-    /** The skill file would be larger than {@link #MAX_BYTES}. */
-    public static final class SkillTooLargeException extends IllegalArgumentException {
-        public SkillTooLargeException() {
-            super("Skill larger than " + (MAX_BYTES / 1024) + " KB");
-        }
     }
 }

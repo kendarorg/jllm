@@ -6,7 +6,8 @@ import org.kendar.llm.harness.integration.ToolNames;
 import org.kendar.llm.harness.tools.HarnessTool;
 import org.kendar.llm.harness.util.Wildcard;
 import org.kendar.llm.web.users.Permissions;
-import org.kendar.llm.web.users.WebUser;
+import org.kendar.llm.web.commons.users.Role;
+import org.kendar.llm.web.commons.users.WebUser;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -48,7 +49,7 @@ public final class ToolCatalogView {
     }
 
     /** What the role allows, with the user's {@code disabledTools} applied as {@code enabled}/{@code on}. */
-    public Catalog forUser(Permissions.Role role, WebUser user) {
+    public Catalog forUser(Role role, WebUser user) {
         return build(role, user);
     }
 
@@ -56,7 +57,7 @@ public final class ToolCatalogView {
      * The entries of {@code disabled} that mean something for the role: a source pattern of a listed source, or a
      * pattern matching at least one tool the role allows. Others are dropped.
      */
-    public List<String> keepMeaningful(Permissions.Role role, Collection<String> disabled) {
+    public List<String> keepMeaningful(Role role, Collection<String> disabled) {
         Catalog c = forUser(role, null);
         List<String> names = new ArrayList<>();
         c.tools().forEach(t -> names.add(t.name()));
@@ -73,7 +74,7 @@ public final class ToolCatalogView {
         return out;
     }
 
-    private Catalog build(Permissions.Role role, WebUser user) {
+    private Catalog build(Role role, WebUser user) {
         List<String> disabled = user == null ? List.of() : user.disabledTools();
         List<Source> mcp = sources(ExternalSources.Kind.MCP, "mcp__", role, disabled);
         List<Source> api = sources(ExternalSources.Kind.API, "", role, disabled);
@@ -90,7 +91,7 @@ public final class ToolCatalogView {
         return new Catalog(tools, mcp, api);
     }
 
-    private List<Source> sources(ExternalSources.Kind kind, String namePrefix, Permissions.Role role,
+    private List<Source> sources(ExternalSources.Kind kind, String namePrefix, Role role,
                                  List<String> disabled) {
         List<Source> out = new ArrayList<>();
         Collection<HarnessTool> every = harness.tools().every();

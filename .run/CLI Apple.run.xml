@@ -3,7 +3,7 @@
     <option name="MAIN_CLASS_NAME" value="org.kendar.llm.cli.Main" />
     <module name="jllm-cli" />
     <option name="PROGRAM_PARAMETERS" value="--context-strategy compaction --small-model --provider llamacpp --base-url http://localhost:11434/v1 --model qwen3:8b --context-tokens 6000 --mode default --plugin-dir $PROJECT_DIR$/target/plugins --plugins.pdf.enabled=true --plugins.docs.enabled=true" />
-    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/tmp" />
+    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/runConfig/tmp" />
     <method v="2">
       <option name="Make" enabled="true" />
     </method>

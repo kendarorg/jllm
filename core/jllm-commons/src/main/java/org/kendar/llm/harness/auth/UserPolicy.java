@@ -1,7 +1,6 @@
 package org.kendar.llm.harness.auth;
 
 import org.kendar.llm.harness.permission.ToolApprovalPolicy;
-import org.kendar.llm.harness.settings.SkillSettings;
 import org.kendar.llm.harness.tools.HarnessTool;
 
 import java.util.List;
@@ -13,11 +12,11 @@ import java.util.function.Predicate;
  *
  * @param toolFilter  tools the user may use; null = all
  * @param approval    approval policy for this user's calls; null = the harness policy
- * @param skills      skills of this user on top of the harness ones (their files are read on each load); a name
+ * @param skills      skills of this user on top of the harness ones (their text is read on each load); a name
  *                    already taken by a harness skill is ignored; null = none
  * @param skillFilter harness skills (by name) the user keeps; null = all
  */
-public record UserPolicy(Predicate<HarnessTool> toolFilter, ToolApprovalPolicy approval, List<SkillSettings> skills,
+public record UserPolicy(Predicate<HarnessTool> toolFilter, ToolApprovalPolicy approval, List<UserSkill> skills,
                          Predicate<String> skillFilter) {
 
     /** Every tool, the harness approval policy: the single-user default. */

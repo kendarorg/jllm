@@ -2,8 +2,8 @@ package org.kendar.llm.web.auth;
 
 import jakarta.servlet.http.HttpServletRequest;
 import org.kendar.llm.web.Api;
-import org.kendar.llm.web.users.UserDirectory;
-import org.kendar.llm.web.users.WebUser;
+import org.kendar.llm.web.commons.users.UserRepository;
+import org.kendar.llm.web.commons.users.WebUser;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
@@ -18,12 +18,12 @@ import java.util.Optional;
 @RestController
 public class AuthController {
 
-    private final UserDirectory users;
+    private final UserRepository users;
     private final CookieAuthentication authentication;
     private final SessionStore sessions;
     private final LoginThrottle throttle;
 
-    public AuthController(UserDirectory users, CookieAuthentication authentication, SessionStore sessions,
+    public AuthController(UserRepository users, CookieAuthentication authentication, SessionStore sessions,
                           LoginThrottle throttle) {
         this.users = users;
         this.authentication = authentication;

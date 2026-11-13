@@ -29,14 +29,14 @@ class LayeredSettingsTest {
                     "{\"smallModel\":true,\"context\":{\"maxTokens\":1000,\"keepRecentTurns\":3},\"instructionFiles\":[\"a\"]}");
             write(project.resolve(".jllm/settings.json"), "{\"context\":{\"maxTokens\":2000},\"instructionFiles\":[\"b\"]}");
             write(tmp.resolve("explicit.json"), "{\"context\":{\"keepRecentTurns\":9}}");
-            HarnessSettings s = HarnessSettings.loadLayered(tmp.resolve("explicit.json"), project, k -> null);
+            HarnessSettings s = load(tmp.resolve("explicit.json"), project);
             assertTrue(s.isSmallModel());
             assertEquals(2000, s.context().maxTokens());
             assertEquals(9, s.context().keepRecentTurns());
             assertEquals(java.util.List.of("b"), s.instructionFiles());
-            assertEquals(1000, HarnessSettings.loadLayered(null, tmp.resolve("none"), k -> null).context().maxTokens());
+            assertEquals(1000, load(null, tmp.resolve("none")).context().maxTokens());
             assertThrows(java.io.UncheckedIOException.class,
-                    () -> HarnessSettings.loadLayered(tmp.resolve("missing.json"), project, k -> null));
+                    () -> load(tmp.resolve("missing.json"), project));
         } finally {
             System.clearProperty("jllm.home");
         }
@@ -59,5 +59,10 @@ class LayeredSettingsTest {
         } finally {
             System.clearProperty("jllm.home");
         }
+    }
+
+    private static HarnessSettings load(Path explicit, Path project) {
+        return HarnessSettings.loadLayered(new FileSettingsSource(explicit, project), project, k -> null, null,
+                new FileProjectMcpTrust(project.resolve("trust.json")), w -> { });
     }
 }

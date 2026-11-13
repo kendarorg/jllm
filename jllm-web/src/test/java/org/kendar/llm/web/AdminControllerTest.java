@@ -154,7 +154,7 @@ class AdminControllerTest {
 
         var rita = f.permissions.resolver(f.users, f.skills).resolve(f.users.find("rita").orElseThrow().principal());
         assertEquals(1, rita.skills().size());
-        assertTrue(rita.skills().get(0).path().contains("global-skills"), "the global one wins");
+        assertEquals("Use British spelling.", rita.skills().get(0).text().read(), "the global one wins");
         JsonNode list = json(f.get(f.signIn("rita"), "/api/me/skills")).path("skills");
         boolean shadowed = false;
         for (JsonNode s : list) if (s.path("source").asText().equals("own")) shadowed = s.path("shadowed").asBoolean();

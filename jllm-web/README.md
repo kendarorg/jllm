@@ -7,7 +7,7 @@ Vue 3 chat UI. The Spring layer is a thin adapter; all agent logic lives in the 
 
 ```sh
 mvn -pl jllm-web -am package -DskipTests
-java -jar jllm-web/target/jllm-web-1.1.0-jllm.jar --provider anthropic
+java -jar jllm-web/target/jllm-web-1.1.0-jllm.jar --provider anthropic --jllm.webauth-dir=runConfig/webauth
 ```
 
 Then open <http://localhost:8080>. The UI is plain static files in `src/main/resources/static`: Vue 3 as an ES module
@@ -56,8 +56,9 @@ simple reference implementation (below); bind the server to localhost or put it 
 This module is a reference implementation of the multi-user mechanism of
 [jllm-web-commons](../jllm-web-commons/README.md); the common module stays generic and knows none of what follows.
 
-Everything lives under one folder, `webauth/` at the project root (property `jllm.webauth-dir`, default `webauth`,
-relative to the start folder; run from the project root, or pass `--jllm.webauth-dir=...`). Files are read on each
+Everything lives under one folder (property `jllm.webauth-dir`, default `webauth`, relative to the start folder).
+The sample is `runConfig/webauth/`, which the IDE run configurations in `.run/` pass explicitly; they start in
+`runConfig/tmp/` (ignored by git). Files are read on each
 use, so changes (by hand or from the UI) apply without a restart.
 
 | Path | Content |
@@ -239,11 +240,56 @@ roles and skills, plugged in through the common module's `WebAuthentication`, `C
 | `me.MeController` | `/api/me/password`, `/api/me/tools`, `/api/me/skills*` |
 | `admin.AdminController`, `admin.AdminInterceptor`, `admin.AdminWebConfig` | `/api/admin/**`, admins only |
 | `admin.ToolCatalogView` | tools, MCP servers and REST APIs of the harness, for a role or a user |
-| `users.WebUser`, `users.UserDirectory` | `webauth/users/<id>.json` |
-| `users.Permissions` | `webauth/permissions/<role>.json`; each user's `UserPolicy` (role narrowed by the user, with their skills) |
-| `users.SkillFiles` | `webauth/global-skills/` and `webauth/user-skills/<id>/` |
+| `users.FileUserRepository` | `webauth/users/<id>.json` (a `UserRepository`, interface and `WebUser` in jllm-web-commons) |
+| `users.FileRoleRepository` | `webauth/permissions/<role>.json` (a `RoleRepository`; `Role` in jllm-web-commons) |
+| `users.Permissions` | the fixed `admin` role over the stored ones; each user's `UserPolicy` (role narrowed by the user, with their skills) |
+| `users.FileSkillRepository` | `webauth/global-skills/` and `webauth/user-skills/<id>/` (a `SkillRepository`) |
 | `users.JsonFiles` | atomic writes of the `webauth` files |
-| `users.FileCredentialResolver` | per-call headers from a user's `credentials`, `env:` references only |
+| `users.UserCredentialResolver` | per-call headers from a user's `credentials`, `env:` references only |
+
+The file repositories are used with `jllm.store=file` (the default); another store supplies its own
+`UserRepository`, `RoleRepository` and `SkillRepository` beans. The harness settings layers come from a
+`SettingsSource` bean (default: the settings files) and the project trust answers from a `ProjectMcpTrust` bean;
+`HarnessIdentity.tokenStore()` can replace the OAuth token files.
 
 Tests: `SampleUsersTest`, `LoginTest`, `MeControllerTest`, `AdminControllerTest`, `JllmWebApplicationArgsTest`
 (`mvn -pl jllm-web -am test`).
+
+## TODO: a MySQL store
+
+Not implemented. The interfaces are in place, so whoever wants it can add it without touching the controllers or the
+harness. A short list:
+
+- [ ] A module or package with `JdbcUserRepository`, `JdbcRoleRepository`, `JdbcSkillRepository` (interfaces in
+      jllm-web-commons `org.kendar.llm.web.commons.users`), wired when `jllm.store=mysql` (the file beans are already
+      `@ConditionalOnProperty(jllm.store=file)`); `spring-boot-starter-jdbc`, the MySQL driver, Flyway for the schema.
+- [ ] Tables, roughly: `roles(name, read_only, approval)` + `role_tools(role, pattern, ord)`;
+      `users(id, name, role, password_hash)` + `user_credentials(user_id, source, header, env_ref)` +
+      `user_disabled_tools` + `user_disabled_skills`; `skills(owner_id NULL = global, name, description, content)`.
+      Foreign keys user→role (today a missing role just gives no tools) and cascade deletes for a user's rows.
+- [ ] Keep the rules the files have: ids/names `[a-z0-9_-]{1,64}`, credentials only `env:NAME`
+      (`UserRepository.checkCredentials`), skills at most 64 KB (`SkillRepository.checkSize`) and 50 per user, the
+      `admin` role never stored (`Permissions` adds it).
+- [ ] `create` must fail on an existing id (`IllegalStateException`) and the setters on an unknown one
+      (`NoSuchElementException`): map duplicate-key and zero-rows-updated to those.
+- [ ] OAuth tokens: a `TokenStore` on a `oauth_tokens(principal_id, name, ciphertext, version)` table, encrypted with
+      `JLLM_TOKEN_KEY` as the files are, `compareAndPut` as `UPDATE ... WHERE version = ?`, `crossProcess()` true;
+      return it from `HarnessIdentity.tokenStore()`.
+- [ ] Harness settings: a `SettingsSource` bean reading one JSON document per layer
+      (`settings_layer(kind GLOBAL|PROJECT|EXPLICIT, doc)`), and a `ProjectMcpTrust` bean on
+      `mcp_trust(project_key, name, sha256, trusted)` (`ProjectMcpTrust.projectKey`/`fingerprint`).
+- [ ] An importer from an existing `webauth/` folder (users, roles, skills, tokens) into an empty database.
+- [ ] Run the existing web tests against both stores (Testcontainers MySQL, or H2 in MySQL mode).
+
+- [ ] Chat history: the harness already takes interfaces for it, `ChatSessionStore` (the chat row and its messages),
+      `StateStore` (per-chat JSON documents: tool grants, todo lists), `MnemonicStore` (per chat and agent) and
+      `SubAgentRunLog`. Implement them on tables keyed by `chat_id` (messages as JSON text, ordered by a sequence),
+      delete in cascade with the chat, and let `HarnessConfiguration` take them as beans instead of building the
+      `File*` stores itself. `ChatSessionStore.list()` is most recent first; chat retention
+      (`chatRetentionLimit`) deletes through `delete(chatId)`.
+- [ ] Login sessions: `auth.SessionStore` is in memory (lost on restart); a `sessions(token_hash, user_id, expires)`
+      table keeps them across restarts and instances.
+
+Still on disk after all of the above: the sandbox workspace of each chat (the files the tools read and write) and
+the `HistoryRootLock` that allows one process per base folder. Several instances behind a load balancer would also
+need a shared workspace (or the docker daemon sandbox on a shared host) and that lock replaced.

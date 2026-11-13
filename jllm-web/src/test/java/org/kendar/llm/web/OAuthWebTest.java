@@ -1,5 +1,8 @@
 package org.kendar.llm.web;
 
+import org.kendar.llm.web.users.FileSkillRepository;
+import org.kendar.llm.web.users.FileUserRepository;
+import org.kendar.llm.web.users.FileRoleRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
@@ -33,8 +36,8 @@ import org.kendar.llm.web.commons.ChatController;
 import org.kendar.llm.web.commons.JllmProperties;
 import org.kendar.llm.web.commons.OAuthController;
 import org.kendar.llm.web.users.Permissions;
-import org.kendar.llm.web.users.SkillFiles;
-import org.kendar.llm.web.users.UserDirectory;
+import org.kendar.llm.web.commons.users.SkillRepository;
+import org.kendar.llm.web.commons.users.UserRepository;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
@@ -69,7 +72,7 @@ class OAuthWebTest {
     private AgentHarness harness;
     private TokenStore store;
     private MockMvc mvc;
-    private UserDirectory users;
+    private UserRepository users;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -101,9 +104,9 @@ class OAuthWebTest {
                 """);
         RestApiSettings crm = api("crm", spec, true);
         RestApiSettings shared = api("shared", spec, false);
-        users = new UserDirectory(root.resolve("users"), MAPPER);
-        Permissions permissions = new Permissions(root.resolve("permissions"), MAPPER);
-        SkillFiles skills = new SkillFiles(root);
+        users = new FileUserRepository(root.resolve("users"), MAPPER);
+        Permissions permissions = new Permissions(new FileRoleRepository(root.resolve("permissions"), MAPPER));
+        SkillRepository skills = new FileSkillRepository(root);
         store = new FileTokenStore(root.resolve("tokens"),
                 new TokenCipher(Base64.getDecoder().decode(TokenCipher.newKey()), null));
         harness = build(new HarnessSettings(null, List.of(crm, shared), null, null, null, null), store, permissions,
@@ -133,7 +136,7 @@ class OAuthWebTest {
     }
 
     private AgentHarness build(HarnessSettings settings, TokenStore store, Permissions permissions,
-                               SkillFiles skills) {
+                               SkillRepository skills) {
         return AgentHarness.builder().modelClient(new ModelClient() {
                     @Override
                     public ModelResponse complete(ModelRequest request) {
@@ -264,8 +267,8 @@ class OAuthWebTest {
     void startupIsRefusedWithoutEncryptionOrPublicUrl() throws Exception {
         Path spec = root.resolve("crm.yaml");
         HarnessSettings settings = new HarnessSettings(null, List.of(api("crm", spec, true)), null, null, null, null);
-        Permissions permissions = new Permissions(root.resolve("permissions"), MAPPER);
-        SkillFiles skills = new SkillFiles(root);
+        Permissions permissions = new Permissions(new FileRoleRepository(root.resolve("permissions"), MAPPER));
+        SkillRepository skills = new FileSkillRepository(root);
         AgentHarness plain = build(settings, new FileTokenStore(root.resolve("plain")), permissions, skills);
         CookieAuthentication auth = new CookieAuthentication(users, new SessionStore());
         IllegalStateException e = assertThrows(IllegalStateException.class,
