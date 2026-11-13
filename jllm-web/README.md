@@ -255,7 +255,7 @@ The file repositories are used with `jllm.store=file` (the default); another sto
 Tests: `SampleUsersTest`, `LoginTest`, `MeControllerTest`, `AdminControllerTest`, `JllmWebApplicationArgsTest`
 (`mvn -pl jllm-web -am test`).
 
-## TODO: a MySQL store
+## A possible extension: a MySQL store
 
 Not implemented. The interfaces are in place, so whoever wants it can add it without touching the controllers or the
 harness. A short list:
