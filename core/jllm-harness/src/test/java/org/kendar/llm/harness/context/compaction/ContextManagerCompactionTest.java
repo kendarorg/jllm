@@ -73,7 +73,7 @@ class ContextManagerCompactionTest {
 
     @Test
     void tier1MicrocompactSufficesAndMakesNoLlmCall() {
-        ArrayNode m = conversation(10, 1500);
+        ArrayNode m = conversation(10, 1100);
         manager = new ContextManager(config.withContextBudgetTokens(1200), model, approvals, MAPPER);
         Events ev = new Events();
 
@@ -85,13 +85,13 @@ class ContextManagerCompactionTest {
         assertEquals(1, ev.ofType("compaction").get(0).get("tier").asInt());
         assertEquals(ContextManager.CLEARED, m.get(2).get("content").get(0).get("content").asText());
         // recent turns keep their results
-        assertEquals(1500, m.get(m.size() - 1).get("content").get(0).get("content").asText().length());
+        assertEquals(1100, m.get(m.size() - 1).get("content").get(0).get("content").asText().length());
         assertEquals(12, m.size(), "no message was removed");
     }
 
     @Test
     void tier2SummarizesOlderTurnsKeepingRecentOnesVerbatim() {
-        ArrayNode m = conversation(1500, 10); // big prompts: tier 1 has nothing worth clearing
+        ArrayNode m = conversation(1300, 10); // big prompts: tier 1 has nothing worth clearing
         model.simpleReplies.add("SUMMARY-TEXT");
         String lastTurn = m.get(m.size() - 1).toString();
         Events ev = new Events();

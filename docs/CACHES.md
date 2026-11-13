@@ -87,8 +87,8 @@ call and its result (pop). Without it the sub-agent's prefix differs from the st
 
 | | Compaction | Mnemonic |
 |---|---|---|
-| Estimate | `messages.toString().length() / 4` | `ceil(chars(view + prefix) / 3.5) × ratio` |
-| Measured usage | `max(estimate, lastUsage.contextTokens())` | calibrates `ratio = measured / estimate`, accepted in 0.5..2 |
+| Estimate | `ceil(chars(messages + prefix) / 3.5) × ratio` (the ratio is learned from the measured usage) | `ceil(chars(view + prefix) / 3.5) × ratio` |
+| Measured usage | over the ceiling when the estimate or `lastUsage.contextTokens()` is; calibrates `ratio` as in Mnemonic | calibrates `ratio = measured / estimate`, accepted in 0.5..2 |
 | After a rewrite | measured usage is stale: estimate only | `changed` view resets `lastUsage` |
 
 `Usage.contextTokens()` = input + cache read + cache creation tokens of the previous request.
@@ -384,12 +384,12 @@ off.
 `context.scope.ScopeStrategy`, selected with `context.strategy: scope`. It reuses the summarizer of `ContextManager`
 and adds a whole-request budget, offloading, a pinned first message and a task list.
 
-**Budget.** `window - reserve - safety - fixed`, in tokens (chars / 4):
+**Budget.** `window - reserve - safety - fixed`, in tokens (chars / 3.5, corrected by the ratio between the measured and the estimated prompt):
 
 | Part | Value |
 |---|---|
 | `window` | `contextBudgetTokens` |
-| `reserve` | `min(window / 8, reserveCap, maxTokens)`, room for the answer (`reserveCap` 4096) |
+| `reserve` | `min(window / 4, maxTokens)`, room for the whole answer; `reserveCap` > 0 lowers it to `min(window / 4, reserveCap, maxTokens)` (default 0: not set) |
 | `safety` | `safetyPercent` of the window (2) |
 | `fixed` | pinned system block, per-turn note and tool schemas of the request |
 
@@ -430,7 +430,7 @@ summarize. `/compact` clears and summarizes with an optional focus.
 ```json
 "context": {"strategy": "scope",
             "scope": {"offloadChars": 20000, "overflowOffloadChars": 2000, "previewChars": 1500,
-                      "safetyPercent": 2, "reserveCap": 4096}}
+                      "safetyPercent": 2, "reserveCap": 0}}
 ```
 
 Unset values keep these defaults. Code: `builder.scopeOptions(new ScopeStrategy.Options(...))`; the settings file wins.

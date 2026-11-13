@@ -242,7 +242,7 @@ always gives the same bytes, so the prompt cache stays valid up to the first new
 ### The scope strategy
 
 `"context": {"strategy": "scope"}` (CLI `--context-strategy scope`). The request is measured as a whole: window minus
-the answer reserve (`min(window/8, reserveCap, maxTokens)`), minus `safetyPercent` of the window, minus the system
+the answer reserve (`min(window/4, maxTokens)`; a `reserveCap` above 0 lowers it), minus `safetyPercent` of the window, minus the system
 prompt and tool schemas. While it is over budget, in this order: tool results longer than `offloadChars` are written
 to `<scratch>/offload/<tool_use_id>.txt` and replaced by the path plus `previewChars` of head and tail (the agent reads
 the file with `read_file`); old tool results are cleared; older turns are summarized. A request the provider still
@@ -256,7 +256,7 @@ stored log) and sent to front ends as the `todos` event.
 ```json
 "context": {"strategy": "scope",
             "scope": {"offloadChars": 20000, "overflowOffloadChars": 2000, "previewChars": 1500,
-                      "safetyPercent": 2, "reserveCap": 4096}}
+                      "safetyPercent": 2, "reserveCap": 0}}
 ```
 
 ## Fast model and the auto-mode classifier

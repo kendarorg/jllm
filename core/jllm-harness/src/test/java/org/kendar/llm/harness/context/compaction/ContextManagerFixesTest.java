@@ -313,7 +313,7 @@ class ContextManagerFixesTest {
     @Test
     void fixedTokensCountsSystemTextAndTools() {
         assertEquals(0, ContextManager.fixedTokens(null));
-        assertEquals(3, ContextManager.fixedTokens(new RequestPrefix("1234", "12345678", null, null, false)));
+        assertEquals(4, ContextManager.fixedTokens(new RequestPrefix("1234", "12345678", null, null, false)));
     }
 
     // ---- 10. thinking ---------------------------------------------------------------------------------------------

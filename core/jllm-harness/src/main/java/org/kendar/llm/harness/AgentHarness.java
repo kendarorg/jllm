@@ -813,7 +813,7 @@ public final class AgentHarness {
             ModelClient fast = fastClient != null ? fastClient
                     : settings.fastModel() != null ? ModelClients.from(settings.fastModel(), mapper) : null;
             ContextStrategy context = contextStrategy(new ContextStrategyFactory.Deps(config, modelClient,
-                    fast != null ? fast : modelClient, approvals, mapper, metrics, subAgentRunLog), box);
+                    fast != null ? fast : modelClient, approvals, mapper, metrics, subAgentRunLog), box, sessions);
             context.install(hooks);
             ToolSelector selector = new ToolSelector(config, fast != null ? fast : modelClient, mapper);
             RequestToolGroupTool requestToolGroup = new RequestToolGroupTool(registry, sessions, mapper);
@@ -881,18 +881,43 @@ public final class AgentHarness {
             return harness;
         }
 
-        private ContextStrategy contextStrategy(ContextStrategyFactory.Deps deps, SandboxExecutor box) {
+        private ContextStrategy contextStrategy(ContextStrategyFactory.Deps deps, SandboxExecutor box,
+                                                ChatSessionService sessions) {
             if (contextStrategy != null) return contextStrategy.create(deps);
             return switch (deps.config().contextStrategy()) {
                 case MNEMONIC -> new MnemonicStrategy(deps.config(), deps.mapper(), deps.metrics(), mnemonicStore,
-                        deps.subAgentRuns());
+                        deps.subAgentRuns(),
+                        chat -> sessions.find(chat).map(ChatSessionData::agentId).orElse(null),
+                        chat -> sessions.find(chat).map(sessions::messages).orElse(null));
                 case SCOPE -> new org.kendar.llm.harness.context.scope.ScopeStrategy(deps.config(),
                         new ContextManager(deps.config(), deps.summaryModel(), deps.approvals(), deps.mapper(),
                                 deps.metrics()), deps.mapper(),
                         new org.kendar.llm.harness.context.scope.TodoStore(stateStore, deps.mapper()), settings.scopeOptions(scopeOptions),
-                        (chat, agent) -> box.scratchDir(chat, AgentLoop.scratchId(agent)), box::displayPath);
+                        offloadSink(box));
                 case COMPACTION, CUSTOM -> new CompactionStrategy(new ContextManager(deps.config(), deps.summaryModel(),
                         deps.approvals(), deps.mapper(), deps.metrics()), deps.config(), deps.mapper());
+            };
+        }
+
+        /**
+         * Offloaded tool results go where the agent's file tools read: through the sandbox's file backend when it has
+         * one (a container), else to the scratch directory on the host.
+         */
+        private static org.kendar.llm.harness.context.scope.ScopeStrategy.OffloadSink offloadSink(SandboxExecutor box) {
+            var host = org.kendar.llm.harness.context.scope.ScopeStrategy.OffloadSink.host(
+                    (chat, agent) -> box.scratchDir(chat, AgentLoop.scratchId(agent)), box::displayPath);
+            return (chat, agent, name, text) -> {
+                var files = box.files(chat, AgentLoop.scratchId(agent));
+                if (files == null) return host.store(chat, agent, name, text);
+                String dir = files.scratchRoot() + "/offload";
+                // planMode: the scratch root, writable whatever the mode
+                try {
+                    files.mkdir(files.writeTarget(dir, true));
+                } catch (IOException e) {
+                    // it may exist already: the write below tells
+                }
+                files.write(files.writeTarget(dir + "/" + name, true), text.getBytes(StandardCharsets.UTF_8), false);
+                return dir + "/" + name;
             };
         }
 

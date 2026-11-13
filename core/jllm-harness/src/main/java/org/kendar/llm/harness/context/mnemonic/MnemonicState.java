@@ -9,7 +9,7 @@ import java.util.List;
 /**
  * Persisted decisions of one agent: what is masked and where the current segment starts. Only ever appended to, so
  * the rendered prompt of a given log never changes once decided. Decisions referring to a message whose content
- * hash no longer matches the log (the log was edited or cleared) are dropped by {@link #invalidateFrom}.
+ * hash no longer matches the log (the log was edited or cleared) are dropped, each on its own.
  */
 public final class MnemonicState {
 

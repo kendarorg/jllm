@@ -124,7 +124,7 @@ ignored.
   "context":    {"maxTokens": 100000, "auto": true, "keepTokens": 15000, "buffer": null, "keepRecentTurns": 6,
                  "strategy": "compaction", "mnemonic": {"maskTrigger": null},
                  "scope": {"offloadChars": 20000, "overflowOffloadChars": 2000, "previewChars": 1500,
-                           "safetyPercent": 2, "reserveCap": 4096}},
+                           "safetyPercent": 2, "reserveCap": 0}},
   "output":     {"toolMaxChars": 30000, "eventMaxChars": 2000, "validation": "lenient"},
   "smallModel": false
 }

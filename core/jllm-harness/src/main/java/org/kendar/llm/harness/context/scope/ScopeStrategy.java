@@ -38,19 +38,48 @@ public class ScopeStrategy implements ContextStrategy {
     static final String CLEARED = "[tool result cleared to save context]";
     static final String ACK = "Understood.";
     private static final String SUMMARY_PREFIX = "[Summary of the earlier conversation]";
+    /** Rough size of the first line of an offload pointer (marker, path, size). */
+    private static final int POINTER_HEADER_CHARS = 150;
+    /** Outside a forced pass, the tool rounds of the turn in progress are summarized only when they hold this much. */
+    private static final long MIN_TURN_CUT_TOKENS = 3000;
+
+    /** Where offloaded tool results go: a place the agent's file tools can read. */
+    @FunctionalInterface
+    public interface OffloadSink {
+
+        /** Stores {@code text} as {@code name}. @return the path shown to the model */
+        String store(String chatId, String agentKey, String name, String text) throws IOException;
+
+        /**
+         * Files on the host.
+         *
+         * @param dir     {@code (chatId, agentKey)} to the agent's scratch directory
+         * @param display how a path is shown to the model
+         */
+        static OffloadSink host(BiFunction<String, String, Path> dir, Function<Path, String> display) {
+            return (chatId, agentKey, name, text) -> {
+                Path folder = dir.apply(chatId, agentKey).resolve("offload");
+                Files.createDirectories(folder);
+                Path file = folder.resolve(name);
+                Files.writeString(file, text, StandardCharsets.UTF_8);
+                return display.apply(file);
+            };
+        }
+    }
 
     /**
      * @param offloadChars         tool results longer than this are offloaded when the request is over budget
      * @param overflowOffloadChars the same threshold on the forced pass after a provider overflow
      * @param previewChars         head and tail kept in the context for an offloaded result
      * @param safetyPercent        share of the window kept free as a safety margin
-     * @param reserveCap           upper bound (tokens) of the room reserved for the answer
+     * @param reserveCap           room (tokens) reserved for the answer when it should be less than {@code maxTokens};
+     *                             0 = {@code maxTokens}. Never more than a quarter of the window
      */
     public record Options(int offloadChars, int overflowOffloadChars, int previewChars, int safetyPercent,
                           int reserveCap) {
 
         public static Options defaults() {
-            return new Options(20_000, 2_000, 1_500, 2, 4_096);
+            return new Options(20_000, 2_000, 1_500, 2, 0);
         }
     }
 
@@ -59,9 +88,9 @@ public class ScopeStrategy implements ContextStrategy {
     private final ObjectMapper mapper;
     private final TodoStore todos;
     private final Options options;
-    private final BiFunction<String, String, Path> offloadDir;
-    private final Function<Path, String> display;
+    private final OffloadSink offload;
     private final List<HarnessTool> tools;
+    private final TokenEstimate tokens = new TokenEstimate();
 
     /**
      * @param offloadDir {@code (chatId, agentKey)} to a directory the agent's file tools can read
@@ -69,13 +98,17 @@ public class ScopeStrategy implements ContextStrategy {
      */
     public ScopeStrategy(HarnessConfig config, ContextManager manager, ObjectMapper mapper, TodoStore todos,
                          Options options, BiFunction<String, String, Path> offloadDir, Function<Path, String> display) {
+        this(config, manager, mapper, todos, options, OffloadSink.host(offloadDir, display));
+    }
+
+    public ScopeStrategy(HarnessConfig config, ContextManager manager, ObjectMapper mapper, TodoStore todos,
+                         Options options, OffloadSink offload) {
         this.config = config;
         this.manager = manager;
         this.mapper = mapper;
         this.todos = todos;
         this.options = options;
-        this.offloadDir = offloadDir;
-        this.display = display;
+        this.offload = offload;
         this.tools = TodoTools.create(todos, mapper);
     }
 
@@ -102,19 +135,30 @@ public class ScopeStrategy implements ContextStrategy {
     @Override
     public ContextView prepare(ContextTurn t) {
         boolean changed = false;
+        if (t.lastUsage() != null) tokens.measured(t.chatId(), t.agentKey(), t.lastUsage().contextTokens());
         // rewriting history voids the signed thinking blocks of the turn in progress: optionally wait for it to end
         boolean defer = config.compaction().deferOnThinkingOverflow() && ContextManager.currentTurnHasThinking(t.log());
         if (config.compaction().auto() && !defer) {
-            long budget = budget(t.prefix());
-            if (estimate(t.log(), t.prefix(), t.lastUsage()) > budget) {
+            long real = budget(t.prefix());
+            // the budget in the unit of the uncorrected estimate
+            long budget = scaledBudget(t);
+            long est = estimate(t.log(), t.prefix(), null);
+            long measured = t.lastUsage() == null ? 0 : t.lastUsage().contextTokens();
+            // measured over the budget whatever the estimate says: shrink in proportion
+            if (measured > real) budget = Math.min(budget, (long) (est * ((double) real / measured)) - 1);
+            if (est > budget) {
                 changed = shrink(t, budget, options.offloadChars(), config.keepRecentTurns(), false);
             }
         }
-        return new ContextView(withTodos(t), changed, changed);
+        ArrayNode view = withTodos(t);
+        tokens.sent(t.chatId(), t.agentKey(), view.toString().length() + ContextManager.fixedChars(t.prefix()));
+        return new ContextView(view, changed, changed);
     }
 
     @Override
     public ContextView onOverflow(ContextTurn t) {
+        // the estimate was too low: trust it less from now on
+        tokens.overflowed(t.chatId(), t.agentKey());
         boolean changed = shrink(t, 0, options.overflowOffloadChars(), 1, true);
         return changed ? new ContextView(withTodos(t), true, true) : null;
     }
@@ -122,6 +166,11 @@ public class ScopeStrategy implements ContextStrategy {
     @Override
     public CompactResult compactNow(ContextTurn t, String focus) {
         long before = estimate(t.log(), null, null);
+        if (inheritsCopy(t)) {
+            boolean changed = manager.compactInherited(t.chatId(), t.log(), t.inherited(), null, t.sink(),
+                    t.usageSink(), t.prefix(), true, budget(t.prefix()), tokens.ratio(t.chatId(), t.agentKey()), null);
+            return new CompactResult(changed, before, estimate(t.log(), null, null), 0);
+        }
         ArrayNode beforeClear = t.log().deepCopy();
         int cleared = clearOld(t.log(), 1);
         boolean summarized = summarize(t, focus, beforeClear);
@@ -131,7 +180,27 @@ public class ScopeStrategy implements ContextStrategy {
 
     @Override
     public long contextTokens(String chatId, String agentKey, ArrayNode log) {
-        return estimate(log, null, null);
+        return Math.round(estimate(log, null, null) * tokens.ratio(chatId, agentKey));
+    }
+
+    @Override
+    public void release(String chatId, String agentKey) {
+        tokens.release(chatId, agentKey);
+    }
+
+    @Override
+    public void forget(String chatId) {
+        tokens.forget(chatId);
+    }
+
+    /** A sub-agent that started from a copy of its parent's context: compaction must keep the copy boundary. */
+    private static boolean inheritsCopy(ContextTurn t) {
+        return !t.main() && t.inherited()[0] > 0;
+    }
+
+    /** {@link #budget} in the unit of the uncorrected estimate. */
+    private long scaledBudget(ContextTurn t) {
+        return (long) (budget(t.prefix()) / tokens.ratio(t.chatId(), t.agentKey()));
     }
 
     // ---- budget -------------------------------------------------------------------------------------------------
@@ -142,14 +211,17 @@ public class ScopeStrategy implements ContextStrategy {
      */
     long budget(RequestPrefix prefix) {
         long window = config.contextBudgetTokens();
-        long reserve = Math.min(window / 8, Math.min(options.reserveCap(), config.maxTokens()));
+        long answer = options.reserveCap() > 0 ? Math.min(options.reserveCap(), config.maxTokens())
+                : config.maxTokens();
+        // the provider refuses a request whose input plus max_tokens is over the window
+        long reserve = Math.min(answer, window / 4);
         long safety = window * options.safetyPercent() / 100;
         return window - reserve - safety;
     }
 
     /** The whole request: messages plus the fixed part, or the measured usage (which includes it) when larger. */
     static long estimate(ArrayNode messages, RequestPrefix prefix, org.kendar.llm.harness.llm.Usage last) {
-        long chars = messages.toString().length() / 4 + ContextManager.fixedTokens(prefix);
+        long chars = TokenEstimate.tokens(messages.toString().length()) + ContextManager.fixedTokens(prefix);
         return last == null ? chars : Math.max(chars, last.contextTokens());
     }
 
@@ -174,13 +246,24 @@ public class ScopeStrategy implements ContextStrategy {
         ArrayNode beforeClear = msgs.deepCopy();
         changed |= clearOld(msgs, keepTurns) > 0;
         if (!force && estimate(msgs, t.prefix(), null) <= budget) return changed;
-        // 3. summarize
+        // 3. summarize the older turns; a sub-agent's inherited copy keeps its boundary, and its own task stays
         try {
-            changed |= summarize(t, null, beforeClear);
+            if (inheritsCopy(t)) {
+                changed |= manager.compactInherited(t.chatId(), msgs, t.inherited(), null, t.sink(), t.usageSink(),
+                        t.prefix(), true, budget(t.prefix()), tokens.ratio(t.chatId(), t.agentKey()), beforeClear);
+            } else {
+                changed |= summarize(t, null, beforeClear);
+            }
         } catch (RuntimeException e) {
             log.warn("Summarization failed: {}", e.getMessage());
             t.sink().emit("warning", mapper.createObjectNode().put("message",
                     "Context summarization failed: " + e.getMessage()));
+        }
+        // 4. one long turn has no turn boundary to cut at: summarize its older tool rounds (the forced pass of an
+        // inherited copy did it already)
+        if (!inheritsCopy(t) && (force || estimate(msgs, t.prefix(), null) > budget)) {
+            long room = (force ? scaledBudget(t) : budget) - ContextManager.fixedTokens(t.prefix());
+            changed |= manager.cutInsideTurn(msgs, room, t.usageSink(), force ? 0 : MIN_TURN_CUT_TOKENS);
         }
         if (!force && estimate(msgs, t.prefix(), null) > budget) {
             t.sink().emit("warning", mapper.createObjectNode().put("message",
@@ -201,7 +284,8 @@ public class ScopeStrategy implements ContextStrategy {
 
     private boolean offload(ContextTurn t, int threshold, int upTo) {
         boolean changed = false;
-        Path dir = null;
+        // the preview follows the threshold, or a result just over a low threshold would grow
+        int preview = Math.min(options.previewChars(), threshold / 4);
         for (int i = 0; i < upTo && i < t.log().size(); i++) {
             JsonNode content = t.log().get(i).path("content");
             if (!content.isArray()) continue;
@@ -209,13 +293,13 @@ public class ScopeStrategy implements ContextStrategy {
                 if (!"tool_result".equals(block.path("type").asText()) || !block.path("content").isTextual()) continue;
                 String text = block.path("content").asText();
                 if (text.length() <= threshold || text.startsWith(OFFLOADED)) continue;
+                // only when it at least halves the result: nothing is written otherwise
+                int kept = 2 * Math.min(preview, text.length() / 2) + POINTER_HEADER_CHARS;
+                if (kept > text.length() / 2) continue;
                 try {
-                    if (dir == null) dir = offloadDir.apply(t.chatId(), t.agentKey()).resolve("offload");
-                    Files.createDirectories(dir);
                     String id = block.path("tool_use_id").asText("result").replaceAll("[^A-Za-z0-9._-]", "_");
-                    Path file = dir.resolve(id + ".txt");
-                    Files.writeString(file, text, StandardCharsets.UTF_8);
-                    ((ObjectNode) block).put("content", pointer(display.apply(file), text));
+                    String path = offload.store(t.chatId(), t.agentKey(), id + ".txt", text);
+                    ((ObjectNode) block).put("content", pointer(path, text, preview));
                     changed = true;
                 } catch (IOException | RuntimeException e) {
                     log.warn("Cannot offload a tool result: {}", e.getMessage()); // the original stays in place
@@ -226,7 +310,12 @@ public class ScopeStrategy implements ContextStrategy {
     }
 
     String pointer(String path, String text) {
-        int p = Math.min(options.previewChars(), text.length() / 2);
+        return pointer(path, text, options.previewChars());
+    }
+
+    /** @param preview characters kept at each end */
+    String pointer(String path, String text, int preview) {
+        int p = Math.min(preview, text.length() / 2);
         return OFFLOADED + path + " (" + text.length() + " chars); read it with read_file if you need more.]\n"
                 + text.substring(0, p) + "\n[...]\n" + text.substring(text.length() - p);
     }

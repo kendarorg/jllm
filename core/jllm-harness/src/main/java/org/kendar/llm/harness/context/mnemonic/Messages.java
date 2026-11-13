@@ -19,7 +19,7 @@ import java.util.List;
 final class Messages {
 
     /** Characters per token of the estimate (before calibration against measured usage). */
-    static final double CHARS_PER_TOKEN = 3.5;
+    static final double CHARS_PER_TOKEN = org.kendar.llm.harness.context.TokenEstimate.CHARS_PER_TOKEN;
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 

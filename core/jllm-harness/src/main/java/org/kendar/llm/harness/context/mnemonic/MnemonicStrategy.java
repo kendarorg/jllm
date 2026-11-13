@@ -20,6 +20,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
+import java.util.function.LongSupplier;
 
 /**
  * The mnemonic context strategy (after mnemonic-proxy). The log is never rewritten: each request is rendered from
@@ -50,6 +52,8 @@ public class MnemonicStrategy implements ContextStrategy {
         long lastChars;
         /** Measured tokens / estimated tokens of the last request; 1 until a comparable measure arrives. */
         double ratio = 1.0;
+        /** When the agent was last looked up (clock millis): idle main agents are dropped from memory. */
+        volatile long lastUsed;
 
         Agent(MnemonicState state, boolean persistent) {
             this.state = state;
@@ -66,9 +70,31 @@ public class MnemonicStrategy implements ContextStrategy {
     private final SegmentSwitcher switcher;
     private final HistoryRecallTool recall;
     private final Map<String, Agent> agents = new ConcurrentHashMap<>();
+    /** chatId to the key of the chat's current main agent; null: not known. */
+    private final Function<String, String> mainAgentKey;
+    /** chatId to the stored log of the chat's main agent, for recall after the agent left memory; null: not known. */
+    private final Function<String, ArrayNode> mainLog;
+    /** A main agent idle this long leaves memory: its decisions are saved, the rest is rebuilt on its next turn. */
+    long idleMillis = 30 * 60_000L;
+    /** At most this many main agents stay in memory. */
+    int maxAgents = 256;
+    LongSupplier clock = System::currentTimeMillis;
+    private volatile long lastSweep;
 
     public MnemonicStrategy(HarnessConfig config, ObjectMapper mapper, HarnessMetrics metrics, MnemonicStore store,
                             SubAgentRunLog subAgentRuns) {
+        this(config, mapper, metrics, store, subAgentRuns, null, null);
+    }
+
+    /**
+     * @param mainAgentKey chatId to the key of the chat's current main agent (null result: unknown chat)
+     * @param mainLog      chatId to the stored log of that agent
+     */
+    public MnemonicStrategy(HarnessConfig config, ObjectMapper mapper, HarnessMetrics metrics, MnemonicStore store,
+                            SubAgentRunLog subAgentRuns, Function<String, String> mainAgentKey,
+                            Function<String, ArrayNode> mainLog) {
+        this.mainAgentKey = mainAgentKey;
+        this.mainLog = mainLog;
         this.config = config;
         this.mapper = mapper;
         this.metrics = metrics;
@@ -237,11 +263,31 @@ public class MnemonicStrategy implements ContextStrategy {
         return p == child ? null : p;
     }
 
-    /** The agent whose tool call this is: by key, else the first known agent of the chat. */
+    /** The agent whose tool call this is: by key, else the chat's current main agent. */
     Agent agentFor(String chatId, String agentKey) {
         if (agentKey != null) {
             Agent a = agents.get(key(chatId, agentKey));
             if (a != null) return a;
+        }
+        String main = null;
+        if (mainAgentKey != null) {
+            try {
+                main = mainAgentKey.apply(chatId);
+            } catch (RuntimeException e) {
+                log.debug("No main agent for chat {}: {}", chatId, e.getMessage());
+            }
+        }
+        if (main != null) {
+            Agent a = agent(chatId, main, true);
+            if (a.log == null && mainLog != null) {
+                // the agent left memory (idle): its decisions came back from the store, the log from the session
+                try {
+                    a.log = mainLog.apply(chatId);
+                } catch (RuntimeException e) {
+                    log.debug("Cannot load the log of chat {}: {}", chatId, e.getMessage());
+                }
+            }
+            return a;
         }
         for (Map.Entry<String, Agent> e : agents.entrySet()) {
             if (e.getKey().startsWith(chatId + "\n") && e.getValue().persistent) return e.getValue();
@@ -250,8 +296,43 @@ public class MnemonicStrategy implements ContextStrategy {
     }
 
     private Agent agent(String chatId, String agentKey, boolean persistent) {
-        return agents.computeIfAbsent(key(chatId, agentKey),
-                k -> new Agent(persistent ? store.load(chatId, agentKey) : new MnemonicState(), persistent));
+        long now = clock.getAsLong();
+        Agent a = agents.compute(key(chatId, agentKey), (k, v) -> {
+            if (v == null) v = new Agent(persistent ? store.load(chatId, agentKey) : new MnemonicState(), persistent);
+            v.lastUsed = now; // inside compute: an agent just handed out is never seen as idle
+            return v;
+        });
+        evictIdle(now);
+        return a;
+    }
+
+    /**
+     * Drops main agents idle for {@link #idleMillis}, then the least recently used ones over {@link #maxAgents}.
+     * Their decisions are saved on every change; sub-agents are dropped by {@link #release}.
+     */
+    private void evictIdle(long now) {
+        if (now - lastSweep < Math.min(60_000L, idleMillis)) return;
+        lastSweep = now;
+        List<Map.Entry<String, Agent>> kept = new ArrayList<>();
+        for (Map.Entry<String, Agent> e : agents.entrySet()) {
+            if (!e.getValue().persistent) continue;
+            if (now - e.getValue().lastUsed > idleMillis) {
+                agents.computeIfPresent(e.getKey(), (k, v) -> now - v.lastUsed > idleMillis ? null : v);
+            } else {
+                kept.add(e);
+            }
+        }
+        if (kept.size() <= maxAgents) return;
+        kept.sort(java.util.Comparator.comparingLong(e -> e.getValue().lastUsed));
+        for (int i = 0; i < kept.size() - maxAgents; i++) {
+            // not one used within the last minute: its turn may be in progress
+            agents.computeIfPresent(kept.get(i).getKey(), (k, v) -> now - v.lastUsed > 60_000L ? null : v);
+        }
+    }
+
+    /** Agents in memory (tests). */
+    int agentsInMemory() {
+        return agents.size();
     }
 
     private void save(String chatId, String agentKey, Agent a) {
@@ -327,30 +408,33 @@ public class MnemonicStrategy implements ContextStrategy {
         t.sink().emit("warning", mapper.createObjectNode().put("message", w));
     }
 
-    /** Drops decisions about messages that changed since. @return true if any was dropped */
+    /**
+     * Drops the decisions about messages that changed since, each on its own. A hash includes the message index: an
+     * edit in place costs only the decisions about that message, while an insertion or a removal shifts every later
+     * message and so drops every later decision. @return true if any was dropped
+     */
     private static boolean validate(MnemonicState st, ArrayNode log) {
-        int bad = Integer.MAX_VALUE;
-        for (Mask m : st.masks) {
-            if (m.index() >= log.size() || !Messages.hash(m.index(), log.get(m.index())).equals(m.hash())) {
-                bad = Math.min(bad, m.index());
-            }
-        }
-        for (Segment s : st.segments) {
-            if (s.cut() >= log.size() || !Messages.hash(s.cut(), log.get(s.cut())).equals(s.cutHash())) {
-                bad = Math.min(bad, s.cut());
-            }
-            if (s.firstUser() >= 0 && (s.firstUser() >= log.size()
-                    || !Messages.hash(s.firstUser(), log.get(s.firstUser())).equals(s.firstUserHash()))) {
-                bad = Math.min(bad, s.firstUser());
-            }
-            Integer ins = s.instruction();
-            if (ins != null && ins >= 0 && (ins >= log.size()
-                    || !Messages.hash(ins, log.get(ins)).equals(s.instructionHash()))) {
-                bad = Math.min(bad, ins);
-            }
-        }
-        if (st.frontier > log.size()) bad = Math.min(bad, log.size());
-        return bad != Integer.MAX_VALUE && st.invalidateFrom(bad);
+        int before = st.masks.size() + st.segments.size();
+        int[] low = {Math.min(st.frontier, log.size())};
+        st.masks.removeIf(m -> stale(log, m.index(), m.hash(), low));
+        st.segments.removeIf(s -> {
+            // every reference is checked, so that the frontier goes back to the lowest changed message
+            boolean cut = stale(log, s.cut(), s.cutHash(), low);
+            boolean first = s.firstUser() >= 0 && stale(log, s.firstUser(), s.firstUserHash(), low);
+            boolean instruction = s.instruction() != null && s.instruction() >= 0
+                    && stale(log, s.instruction(), s.instructionHash(), low);
+            return cut || first || instruction;
+        });
+        // the prompt changed from the lowest dropped decision on: masking may start again there
+        st.frontier = low[0];
+        return st.masks.size() + st.segments.size() != before;
+    }
+
+    /** True when message {@code i} is gone or no longer has {@code hash}; {@code low} keeps the lowest such index. */
+    private static boolean stale(ArrayNode log, int i, String hash, int[] low) {
+        if (i < log.size() && Messages.hash(i, log.get(i)).equals(hash)) return false;
+        low[0] = Math.min(low[0], Math.min(i, log.size()));
+        return true;
     }
 
     /** Learns how far the chars/3.5 estimate is from the measured prompt; a ratio outside 0.5..2 is not comparable. */

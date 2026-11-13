@@ -9,6 +9,7 @@ import org.kendar.llm.harness.HarnessMetrics;
 import org.kendar.llm.harness.agent.EventSink;
 import org.kendar.llm.harness.context.CompactResult;
 import org.kendar.llm.harness.context.RequestPrefix;
+import org.kendar.llm.harness.context.TokenEstimate;
 import org.kendar.llm.harness.llm.ModelClient;
 import org.kendar.llm.harness.llm.ModelException;
 import org.kendar.llm.harness.llm.Usage;
@@ -69,12 +70,17 @@ public class ContextManager {
     }
 
     public long estimateTokens(ArrayNode messages, Usage lastUsage) {
-        long chars = messages.toString().length() / 4;
+        long chars = TokenEstimate.tokens(messages.toString().length());
         return lastUsage == null ? chars : Math.max(chars, lastUsage.contextTokens());
     }
 
-    /** Tokens of the fixed part of a request (system text and tool schemas), estimated as chars / 4. */
+    /** Tokens of the fixed part of a request (system text and tool schemas), estimated from its characters. */
     public static long fixedTokens(RequestPrefix prefix) {
+        return TokenEstimate.tokens(fixedChars(prefix));
+    }
+
+    /** Characters of the fixed part of a request (system text and tool schemas). */
+    public static long fixedChars(RequestPrefix prefix) {
         if (prefix == null) return 0;
         long chars = (prefix.pinned() == null ? 0 : prefix.pinned().length())
                 + (prefix.extra() == null ? 0 : prefix.extra().length());
@@ -83,13 +89,26 @@ public class ContextManager {
                 chars += tool.name().length() + tool.description().length() + tool.inputSchema().toString().length();
             }
         }
-        return chars / 4;
+        return chars;
     }
 
-    /** The whole request: messages plus the fixed part, or the measured usage (which includes it) when larger. */
-    private long requestTokens(ArrayNode messages, Usage lastUsage, RequestPrefix prefix) {
+    /**
+     * True when the whole request (messages plus the fixed part) is over {@code budget}: by the estimate corrected
+     * with {@code ratio}, or as the provider measured it.
+     */
+    private boolean over(ArrayNode messages, Usage lastUsage, RequestPrefix prefix, long budget, double ratio) {
         long est = estimateTokens(messages, null) + fixedTokens(prefix);
-        return lastUsage == null ? est : Math.max(est, lastUsage.contextTokens());
+        return est > scaled(budget, ratio) || (lastUsage != null && lastUsage.contextTokens() > budget);
+    }
+
+    /** {@code budget} in the unit of the uncorrected estimate. */
+    private static long scaled(long budget, double ratio) {
+        return ratio > 0 ? (long) (budget / ratio) : budget;
+    }
+
+    /** The span [0, cut) is only an earlier summary: summarizing it again adds nothing. */
+    private static boolean onlySummary(ArrayNode messages, int cut) {
+        return cut == 1 && startsWithSummary(messages);
     }
 
     /** Rewrites {@code messages} in place when over budget. @return true if anything changed. */
@@ -119,11 +138,18 @@ public class ContextManager {
     public boolean compactIfNeeded(String chatId, ArrayNode messages, Usage lastUsage, EventSink sink,
                                    BooleanSupplier cancelled, java.util.function.Consumer<Usage> usageSink,
                                    boolean allowRewrite, RequestPrefix prefix) {
+        return compactIfNeeded(chatId, messages, lastUsage, sink, cancelled, usageSink, allowRewrite, prefix, 1.0);
+    }
+
+    /** @param ratio measured tokens / estimated tokens of the agent's requests (see {@link TokenEstimate}) */
+    public boolean compactIfNeeded(String chatId, ArrayNode messages, Usage lastUsage, EventSink sink,
+                                   BooleanSupplier cancelled, java.util.function.Consumer<Usage> usageSink,
+                                   boolean allowRewrite, RequestPrefix prefix, double ratio) {
         if (!config.compaction().auto()) return false;
         // rewriting history invalidates the signed thinking blocks of the turn in progress: optionally wait for it to end
         if (config.compaction().deferOnThinkingOverflow() && currentTurnHasThinking(messages)) return false;
         boolean changed = compactTo(chatId, messages, lastUsage, sink, cancelled, usageSink, allowRewrite,
-                config.compaction().ceiling(config.contextBudgetTokens()), prefix);
+                config.compaction().ceiling(config.contextBudgetTokens()), prefix, ratio);
         if (changed) stripThinking(messages, true);
         return changed;
     }
@@ -146,21 +172,37 @@ public class ContextManager {
      */
     public boolean compactInherited(String chatId, ArrayNode messages, int[] inherited, Usage lastUsage, EventSink sink,
                                     java.util.function.Consumer<Usage> usageSink, RequestPrefix prefix, boolean force) {
+        return compactInherited(chatId, messages, inherited, lastUsage, sink, usageSink, prefix, force,
+                config.compaction().ceiling(config.contextBudgetTokens()), 1.0, null);
+    }
+
+    /**
+     * @param budget   the whole request must fit in this
+     * @param ratio    measured tokens / estimated tokens of the agent's requests (see {@link TokenEstimate})
+     * @param original the same messages before the caller cleared tool results in them (same indexes), so the summary
+     *                 of the copy sees the results; null: {@code messages} as they are now
+     */
+    public boolean compactInherited(String chatId, ArrayNode messages, int[] inherited, Usage lastUsage, EventSink sink,
+                                    java.util.function.Consumer<Usage> usageSink, RequestPrefix prefix, boolean force,
+                                    long budget, double ratio, ArrayNode original) {
         if ((!force && !config.compaction().auto()) || inherited[0] <= 0) {
-            return compactIfNeeded(chatId, messages, lastUsage, sink, () -> false, usageSink, false, prefix);
+            return compactIfNeeded(chatId, messages, lastUsage, sink, () -> false, usageSink, false, prefix, ratio);
         }
         if (!force && config.compaction().deferOnThinkingOverflow() && currentTurnHasThinking(messages)) return false;
-        long ceiling = config.compaction().ceiling(config.contextBudgetTokens());
+        long ceiling = scaled(budget, ratio);
         long fixed = fixedTokens(prefix);
-        if (!force && requestTokens(messages, lastUsage, prefix) <= ceiling) return false;
+        if (!force && !over(messages, lastUsage, prefix, budget, ratio)) return false;
+        ArrayNode originalCopy = original != null && original.size() == messages.size()
+                ? slice(original, 0, inherited[0]) : null;
         ArrayNode copy = slice(messages, 0, inherited[0]);
         ArrayNode own = slice(messages, inherited[0], messages.size());
         boolean changed = false;
         long room = ceiling - fixed - estimateTokens(copy, null);
+        boolean ownDone = room > 0;
         if (room > 0) {
             try {
                 changed = force ? compactOverflow(own, room, usageSink).changed()
-                        : compactTo(chatId, own, null, sink, () -> false, usageSink, false, room, null);
+                        : compactTo(chatId, own, null, sink, () -> false, usageSink, false, room, null, 1.0);
             } catch (RuntimeException e) {
                 log.warn("Compaction of the agent's own messages failed: {}", e.getMessage());
             }
@@ -169,7 +211,7 @@ public class ContextManager {
         if (estimateTokens(copy, null) + estimateTokens(own, null) + fixed > ceiling
                 || (force && !changed && !copyIsSummary)) {
             try {
-                String summary = summarizeSpan(copy, copy.size(), null, usageSink, null, null);
+                String summary = summarizeSpan(copy, copy.size(), null, usageSink, null, originalCopy);
                 if (summary == null) throw new IllegalStateException("Nothing to compact yet");
                 copy = mapper.createArrayNode();
                 copy.addObject().put("role", "user").putArray("content").addObject().put("type", "text")
@@ -184,6 +226,16 @@ public class ContextManager {
                 log.warn("Compaction of the inherited context failed: {}", e.getMessage());
             }
         }
+        // the copy alone left no room for the agent's own messages: they get their turn now that it is a summary
+        long left = ceiling - fixed - estimateTokens(copy, null);
+        if (!ownDone && left > 0 && estimateTokens(own, null) > left) {
+            try {
+                changed |= force ? compactOverflow(own, left, usageSink).changed()
+                        : compactTo(chatId, own, null, sink, () -> false, usageSink, false, left, null, 1.0);
+            } catch (RuntimeException e) {
+                log.warn("Compaction of the agent's own messages failed: {}", e.getMessage());
+            }
+        }
         if (changed) {
             messages.removeAll();
             messages.addAll(copy);
@@ -196,13 +248,16 @@ public class ContextManager {
 
     /**
      * @param budget the whole request (messages + the fixed part of {@code prefix}) must fit in this
+     * @param ratio  measured tokens / estimated tokens of the agent's requests
      */
     private boolean compactTo(String chatId, ArrayNode messages, Usage lastUsage, EventSink sink,
                               BooleanSupplier cancelled, java.util.function.Consumer<Usage> usageSink,
-                              boolean allowRewrite, long budget, RequestPrefix prefix) {
-        if (requestTokens(messages, lastUsage, prefix) <= budget) return false;
+                              boolean allowRewrite, long budget, RequestPrefix prefix, double ratio) {
+        if (!over(messages, lastUsage, prefix, budget, ratio)) return false;
+        // the provider measured the request over the budget, whatever the estimate says
+        boolean measuredOver = lastUsage != null && lastUsage.contextTokens() > budget;
         // what the messages alone may take: the checks below measure messages only
-        long room = budget - fixedTokens(prefix);
+        long room = scaled(budget, ratio) - fixedTokens(prefix);
         // the log before tier 1: the provider has it cached, and the summaries must see the tool results tier 1 blanks
         ArrayNode original = messages.deepCopy();
 
@@ -215,7 +270,7 @@ public class ContextManager {
             sink.emit("compaction", obj("tier", 1, "cleared", cleared));
         }
         // after tier 1 the old usage figure is stale: rely on the size estimate
-        if (estimateTokens(messages, null) <= room) return changed;
+        if (estimateTokens(messages, null) <= room && !(measuredOver && cleared == 0)) return changed;
 
         // tier 2
         boolean summarized = false;
@@ -231,6 +286,15 @@ public class ContextManager {
             sink.emit("warning", obj("message", "Context summarization failed: " + e.getMessage()));
         }
         long size = estimateTokens(messages, null);
+        // still too large (one long turn has no turn boundary to cut at): summarize its older tool rounds
+        if (size > room || (measuredOver && !changed)) {
+            if (cutInsideTurn(messages, room, usageSink, SUMMARY_TOKENS)) {
+                changed = true;
+                metrics.compaction(2);
+                size = estimateTokens(messages, null);
+                sink.emit("compaction", obj("tier", 2, "inTurn", true));
+            }
+        }
         if (size <= room) return changed;
 
         // tier 3: user-approved aggressive rewrite
@@ -239,6 +303,10 @@ public class ContextManager {
         if (declinedAt != null && size < declinedAt * 1.2) return changed;
         int cut = cutIndex(messages, 1);
         if (cut <= 0) return changed;
+        // only an earlier summary before the current turn: a rewrite helps when the rest would fit without it, not
+        // when the turn in progress is what is too large
+        if (onlySummary(messages, cut)
+                && size - TokenEstimate.tokens(messages.get(0).toString().length()) > room) return changed;
         try {
             // without a tier-2 rewrite the indexes still match the uncleared log
             String proposed = summarizeSpan(messages, cut, null, usageSink, null, summarized ? null : original);
@@ -291,7 +359,7 @@ public class ContextManager {
         int cleared = microcompact(messages, 1);
         boolean summarized = false;
         int cut = cutIndex(messages, 1);
-        if (cut > 0) {
+        if (cut > 0 && !onlySummary(messages, cut)) {
             String summary = summarizeSpan(messages, cut, focus, usageSink, prefix, original);
             if (summary != null) { // null: even the shortest form was rejected, nothing to compact yet
                 replaceSpan(messages, cut, summary);
@@ -317,7 +385,7 @@ public class ContextManager {
         int cleared = microcompact(messages, 1);
         boolean summarized = false;
         int cut = cutIndex(messages, 1);
-        if (cut > 0) {
+        if (cut > 0 && !onlySummary(messages, cut)) {
             try {
                 String summary = summarizeSpan(messages, cut, null, usageSink, null, original);
                 if (summary != null) {
@@ -347,15 +415,20 @@ public class ContextManager {
      *
      * @return true if the log was rewritten
      */
-    boolean cutInsideTurn(ArrayNode messages, long room, java.util.function.Consumer<Usage> usageSink) {
+    public boolean cutInsideTurn(ArrayNode messages, long room, java.util.function.Consumer<Usage> usageSink) {
+        return cutInsideTurn(messages, room, usageSink, 0);
+    }
+
+    /** @param minFreed nothing is done unless the summarized rounds hold at least this many tokens */
+    public boolean cutInsideTurn(ArrayNode messages, long room, java.util.function.Consumer<Usage> usageSink, long minFreed) {
         int p = cutIndex(messages, 1);
         int n = messages.size();
         if (p >= n || !isPlainUserText(messages.get(p))) return false;
         long head = 0;
-        for (int i = 0; i <= p; i++) head += messages.get(i).toString().length() / 4;
+        for (int i = 0; i <= p; i++) head += TokenEstimate.tokens(messages.get(i).toString().length());
         long target = Math.min(config.compaction().keepTokens(), room - head - SUMMARY_TOKENS);
         long[] suffix = new long[n + 1];
-        for (int i = n - 1; i > p; i--) suffix[i] = suffix[i + 1] + messages.get(i).toString().length() / 4;
+        for (int i = n - 1; i > p; i--) suffix[i] = suffix[i + 1] + TokenEstimate.tokens(messages.get(i).toString().length());
         int k = -1;
         int latest = -1;
         for (int i = p + 2; i < n; i++) {
@@ -366,6 +439,7 @@ public class ContextManager {
         }
         if (k < 0) k = latest;
         if (k < 0) return false; // a single tool round: nothing to cut inside the turn
+        if (suffix[p + 1] - suffix[k] < minFreed) return false; // a summary would not be smaller
         ArrayNode span = slice(messages, p, k); // the prompt gives the rounds their context
         String summary;
         try {
@@ -450,7 +524,7 @@ public class ContextManager {
     private boolean summarize(ArrayNode messages, int keepTurns, java.util.function.Consumer<Usage> usageSink,
                               RequestPrefix prefix, ArrayNode original) {
         int cut = Math.max(cutIndex(messages, keepTurns), tokenCutIndex(messages, config.compaction().keepTokens()));
-        if (cut <= 0) return false;
+        if (cut <= 0 || onlySummary(messages, cut)) return false;
         String summary = summarizeSpan(messages, cut, null, usageSink, prefix, original);
         if (summary == null) return false;
         replaceSpan(messages, cut, summary);
@@ -573,7 +647,7 @@ public class ContextManager {
         long size = 0;
         int cut = -1;
         for (int i = messages.size() - 1; i >= 0; i--) {
-            size += messages.get(i).toString().length() / 4;
+            size += TokenEstimate.tokens(messages.get(i).toString().length());
             if (!isPlainUserText(messages.get(i))) continue;
             if (size > keepTokens) break;
             cut = i;

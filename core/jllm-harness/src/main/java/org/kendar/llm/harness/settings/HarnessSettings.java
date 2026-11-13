@@ -404,7 +404,10 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
         }
     }
 
-    /** Thresholds of the {@code scope} context strategy; unset values keep the defaults. */
+    /**
+     * Thresholds of the {@code scope} context strategy; unset values keep the defaults. {@code reserveCap}: room for
+     * the answer when it should be less than {@code maxTokens}; 0 (default) = {@code maxTokens}.
+     */
     public record Scope(Integer offloadChars, Integer overflowOffloadChars, Integer previewChars,
                         Integer safetyPercent, Integer reserveCap) {
 

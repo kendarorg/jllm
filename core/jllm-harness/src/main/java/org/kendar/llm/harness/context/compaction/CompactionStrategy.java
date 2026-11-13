@@ -15,6 +15,7 @@ public class CompactionStrategy implements ContextStrategy {
     private final ContextManager manager;
     private final HarnessConfig config;
     private final ObjectMapper mapper;
+    private final TokenEstimate tokens = new TokenEstimate();
 
     public CompactionStrategy(ContextManager manager, HarnessConfig config, ObjectMapper mapper) {
         this.manager = manager;
@@ -33,24 +34,29 @@ public class CompactionStrategy implements ContextStrategy {
 
     @Override
     public ContextView prepare(ContextTurn t) {
+        if (t.lastUsage() != null) tokens.measured(t.chatId(), t.agentKey(), t.lastUsage().contextTokens());
+        double ratio = tokens.ratio(t.chatId(), t.agentKey());
         boolean changed = t.main()
                 ? manager.compactIfNeeded(t.chatId(), t.log(), t.lastUsage(), t.sink(), t.cancelled(), t.usageSink(),
-                true, t.prefix())
+                true, t.prefix(), ratio)
                 : manager.compactInherited(t.chatId(), t.log(), t.inherited(), t.lastUsage(), t.sink(), t.usageSink(),
-                t.prefix());
+                t.prefix(), false, ceiling(), ratio, null);
+        tokens.sent(t.chatId(), t.agentKey(), t.log().toString().length() + ContextManager.fixedChars(t.prefix()));
         return new ContextView(t.log(), changed, changed);
     }
 
     @Override
     public ContextView onOverflow(ContextTurn t) {
         if (!config.compaction().auto()) return null;
+        // the estimate was too low: trust it less from now on
+        tokens.overflowed(t.chatId(), t.agentKey());
+        double ratio = tokens.ratio(t.chatId(), t.agentKey());
         try {
             CompactResult r;
             if (inheritsCopy(t)) {
-                r = compactInherited(t);
+                r = compactInherited(t, ratio);
             } else {
-                long room = config.compaction().ceiling(config.contextBudgetTokens())
-                        - ContextManager.fixedTokens(t.prefix());
+                long room = (long) (ceiling() / ratio) - ContextManager.fixedTokens(t.prefix());
                 r = manager.compactOverflow(t.log(), room, t.usageSink());
             }
             if (!r.changed()) return null;
@@ -65,7 +71,7 @@ public class CompactionStrategy implements ContextStrategy {
 
     @Override
     public CompactResult compactNow(ContextTurn t, String focus) {
-        if (inheritsCopy(t)) return compactInherited(t);
+        if (inheritsCopy(t)) return compactInherited(t, tokens.ratio(t.chatId(), t.agentKey()));
         return manager.compactNow(t.log(), focus, t.usageSink(), t.prefix());
     }
 
@@ -75,15 +81,29 @@ public class CompactionStrategy implements ContextStrategy {
     }
 
     /** Forced compaction of a sub-agent with an inherited copy; updates {@code t.inherited()[0]}. */
-    private CompactResult compactInherited(ContextTurn t) {
+    private CompactResult compactInherited(ContextTurn t, double ratio) {
         long before = manager.estimateTokens(t.log(), null);
         boolean changed = manager.compactInherited(t.chatId(), t.log(), t.inherited(), null, t.sink(), t.usageSink(),
-                t.prefix(), true);
+                t.prefix(), true, ceiling(), ratio, null);
         return new CompactResult(changed, before, manager.estimateTokens(t.log(), null), 0);
+    }
+
+    private long ceiling() {
+        return config.compaction().ceiling(config.contextBudgetTokens());
     }
 
     @Override
     public long contextTokens(String chatId, String agentKey, ArrayNode log) {
-        return manager.estimateTokens(log, null);
+        return Math.round(manager.estimateTokens(log, null) * tokens.ratio(chatId, agentKey));
+    }
+
+    @Override
+    public void release(String chatId, String agentKey) {
+        tokens.release(chatId, agentKey);
+    }
+
+    @Override
+    public void forget(String chatId) {
+        tokens.forget(chatId);
     }
 }
