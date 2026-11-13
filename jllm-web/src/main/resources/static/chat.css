@@ -30,6 +30,8 @@ body { height: 100vh; overflow: hidden; }
   .msg.assistant { background: var(--surface); }
   .msg.notice { white-space: pre-wrap; background: none; border-style: dashed; color: var(--text-muted); font-size: 0.78rem; }
   .msg.error { border-color: rgba(248,113,113,0.4); color: var(--red); }
+  .msg.assistant.streaming { border-style: dashed; }
+  .msg.assistant.partial { border-style: dashed; opacity: 0.75; }
 
   .toolgroup { max-width: 860px; border: 1px dashed var(--border); border-radius: var(--radius); font-size: 0.78rem; }
   .toolgroup > summary { padding: 0.4rem 0.75rem; cursor: pointer; color: var(--text-muted); }
@@ -45,6 +47,9 @@ body { height: 100vh; overflow: hidden; }
   .tool .status-ok { color: var(--green); }
   .tool .status-err { color: var(--red); }
   .tool .status-run { color: var(--yellow); }
+  .tool .status-warn { color: var(--yellow); }
+  .tool .subrun { margin-left: 0.4rem; font-size: 0.7rem; }
+  .tool .sub-warning { padding: 0.25rem 0.75rem; color: var(--yellow); border-top: 1px solid var(--border); white-space: pre-wrap; }
 
   /* composer */
   .composer { border-top: 1px solid var(--border); background: var(--surface); position: relative;

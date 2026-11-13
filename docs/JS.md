@@ -86,10 +86,10 @@ with a note when cut), `error` (`<message> at line N`) and `fileRoot`.
 With `fileJail: true` (default) the file tools called from a script work in a root of their own:
 
 - web app: the chat's work directory (already per chat);
-- CLI: the scratchpad of the calling agent, `<project>/.kendhar/scratchpad/<chatId>/<agentId>/`. The script cannot see
+- CLI: the scratchpad of the calling agent, `<project>/.jllm/scratchpad/<chatId>/<agentId>/`. The script cannot see
   project files, the history or the scratchpads of other agents.
 
-With the docker daemon or remote backend the same jail applies through the file backend (`ScratchJailBackend`): in the CLI layout the script sees only `/workspace/.kendhar/scratchpad/<agentId>`.
+With the docker daemon or remote backend the same jail applies through the file backend (`ScratchJailBackend`): in the CLI layout the script sees only `/workspace/.jllm/scratchpad/<agentId>`.
 
 `fileRoot` in the result tells the model where that is, as a path its own file tools accept. With `false`, scripts get
 the same root as the file tools of the model (in the CLI the whole project directory). `storage.maxBytes` caps the

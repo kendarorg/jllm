@@ -102,9 +102,12 @@ ignored.
 ```json
 {
   "mcpServers": [{"name": "docs", "url": "https://h/mcp", "headers": {"Authorization": "Bearer ${DOCS_TOKEN}"},
-                  "readOnly": true, "enabled": true, "group": "Mcp/docs"}],
+                  "readOnly": true, "enabled": true, "group": "Mcp/docs", "allowList": ["search*", "get_*"], "denyList": ["get_secret"]}],
   "restApis":   [{"name": "pets", "openApiUrl": "https://h/openapi.yaml", "baseUrl": "https://h/api",
-                  "allowedPaths": ["GET /pets", "/pets/{id}", "/store/*"]}],
+                  "allowedPaths": ["GET /pets", "/pets/{id}", "/store/*"], "denyPaths": ["DELETE *"]},
+                 {"name": "crm", "openApiUrl": "https://crm/openapi.json",
+                  "oauth": {"issuer": "https://login.example.com", "clientId": "jllm", "scopes": ["crm.read"]}}],
+  "tokenStore": {"type": "auto", "dir": null, "encrypt": null},
   "skills":     [{"name": "pdf", "path": "skills/pdf/SKILL.md"}],
   "instructionFiles": ["KENDAR.md", "~/KENDAR.md"],
   "agents":     [{"name": "scout", "description": "Looks around", "tools": ["read_file", "grep"],
@@ -124,8 +127,12 @@ ignored.
   "context":    {"maxTokens": 100000, "auto": true, "keepTokens": 15000, "buffer": null, "keepRecentTurns": 6,
                  "strategy": "compaction", "mnemonic": {"maskTrigger": null},
                  "scope": {"offloadChars": 20000, "overflowOffloadChars": 2000, "previewChars": 1500,
-                           "safetyPercent": 2, "reserveCap": 4096}},
+                           "safetyPercent": 2, "reserveCap": 0}},
   "output":     {"toolMaxChars": 30000, "eventMaxChars": 2000, "validation": "lenient"},
+  "loop":       {"stuck": {"enabled": true, "repeat": 3, "alternationCycles": 3, "malformed": 3},
+                 "verify": {"maxReentries": 3}},
+  "hooks":      {"stop": [{"command": "mvn -q test", "timeoutSeconds": 600, "agents": ["main"],
+                           "onlyIfChanged": true, "maxOutputChars": 8000}]},
   "smallModel": false
 }
 ```
@@ -146,12 +153,18 @@ ignored.
 | `smallModel` | default `false`: append the small-model rules (`prompts/small-model.md`) to the system prompt; `--small-model` sets it |
 | `sandbox.tempDir`, `sandbox.timeoutSeconds` | scratch root; default shell timeout (the tool caps it at 600 s) |
 | `sandbox.backend`, `sandbox.localFallback`, `sandbox.docker.*` | `local` (default) or `docker`; fall back to local when docker is missing (default `true`); `binary`, `image`, `memory`, `cpus`, `pidsLimit`, `user`, `network`, `mode` (`oneshot` or `daemon`, a long-running container), `remote`, `remoteHost` (docker on another machine). See [SANDBOX](SANDBOX.md). CLI and web: `--sandbox`, `--docker-image`, `--docker-mode`, `--docker-remote`, `--docker-remote-host` |
+| `sandbox.outputLogMaxBytes` | default `51200`: cap of the spill log written when a `bash` output exceeds the kept 50 KB tail; `0` = unlimited. A capped log ends with `[log truncated at N bytes]` and the tool result says `log (itself truncated)` |
+| `files.maxReadBytes` | default `1000000`: the most text one `read_file` returns and the largest file `edit_file` changes (`grep` skips larger files); `<= 0` = default |
+| `web.fetchMaxBytes` | default `5242880` (5 MB): largest response body `web_fetch` reads; `<= 0` = default |
 | `context.noiseCommands` | default `true`: after a run, shell commands that add no information (`mkdir`, `rm`, `cd`, ...) are replaced in the context by a stub, see [INTERNALS §9](INTERNALS.md#noise-commands). `false` turns it off |
 | `context.deferCompactionOnThinkingOverflow` | Anthropic extended thinking, default `false`. Compaction rewrites history, which voids the signed thinking blocks (API 400 "Invalid `signature` in `thinking` block"). `false`: finished turns lose their thinking blocks; if compaction fires in the middle of a tool loop, thinking is switched off for the rest of that turn. `true`: compaction is skipped while the turn in progress holds thinking blocks, so thinking stays on but the prompt can exceed the budget until the turn ends. **This can incur increased charges** (larger prompts, and a rewrite after the turn invalidates the prompt cache) |
 | `context.*` | [CACHES](CACHES.md); `context.strategy` is `compaction`, `mnemonic` or `scope`; `context.scope.*` are the thresholds of `scope` ([CACHES §5](CACHES.md#5-scope-strategy)) |
 | `output.toolMaxChars` | tool output kept in the context; the rest is cut with `[truncated N chars]` (the head is kept, the tail for `bash`) |
 | `output.eventMaxChars` | tool output carried by the `tool_result` event to the front end |
 | `output.validation` | check of tool-call arguments against the tool schema: `off`, `lenient` (default, repairs `"5"` for 5 and `null` for optional fields) or `strict`; `/validation` overrides it per chat, see [TOOLS §5](TOOLS.md#5-one-tool-call) |
+| `loop.stuck.*` | stuck detection, see [Stuck detection](#stuck-detection). `enabled` (default `true`), `repeat` (3: the same calls with the same results, or the same failing call, in a row), `alternationCycles` (3: A-B-A-B), `malformed` (3: responses whose calls cannot run: unknown tool, invalid arguments, cut off) |
+| `loop.verify.maxReentries` | default `3`: how many times a `STOP` hook may send the agent back to work before the run ends `unverified` |
+| `hooks.stop` | command hooks run when an agent is about to finish, see [Verify on stop](#verify-on-stop). Only from the user settings or `--settings`; one from the project file runs only once trusted, like a project stdio MCP server |
 
 ### System prompt files
 
@@ -167,20 +180,35 @@ After the prompt come, as before, the small-model rules, instruction files and s
 Model clients and HTTP MCP servers can take an `AuthProvider` (package `org.kendar.llm.harness.auth`) instead of a
 static key: it returns the headers of each request and is told about a 401, after which the client retries once.
 `AuthProvider.staticKey(...)` and `dynamicKey(...)` cover plain and rotating keys. Generic OAuth pieces, with no
-provider-specific code: `OAuthTokenClient` (code, refresh and device grants), `Pkce`, `LoopbackCallbackServer`,
-`DeviceCodeFlow`, `BrowserLauncher`, `TokenStore` (`~/.jllm/auth.json`, atomic writes, owner-only, file lock, never
-logged), `RefreshingAuthProvider` (refresh 60 s ahead, single flight, rotated refresh token saved first).
-A provider login is an `OAuthLogin` (name, `login(UserInteraction)`, `authProvider(store)`), usually `AuthCodeLogin` or
-`DeviceCodeLogin` plus endpoints, registered as a `java.util.ServiceLoader` service. `/login [name]` runs it
-(no name: list logins and what is logged in), `/logout <name>` removes the stored token. The clients take it with
-`AnthropicModelClient.authProvider(...)` / `OpenAiCompatModelClient.authProvider(...)`; it is not selectable from the
-settings file. MCP OAuth: see [MCP](MCP.md). No provider login is shipped.
+provider-specific code: `OAuthTokenClient` (code, refresh, device and client credentials grants), `Pkce`,
+`RedirectTarget` (loopback listener or a web callback), `DeviceCodeFlow`, `BrowserLauncher`, `TokenStore` (tokens by
+principal and name, see [token storage](MCP.md#6-token-storage)), `RefreshingAuthProvider` (refresh 60 s ahead under
+the store's lock, re-read first, rotated refresh token saved with a compare-and-set before use).
+A provider login is an `OAuthLogin` (name, `login(UserInteraction)`, optionally `login(ui, RedirectTarget)`,
+`authProvider(store, principalId)`), usually `AuthCodeLogin` or `DeviceCodeLogin` plus endpoints, registered as a
+`java.util.ServiceLoader` service. The clients take it with `AnthropicModelClient.authProvider(...)` /
+`OpenAiCompatModelClient.authProvider(...)`; it is not selectable from the settings file. No provider login is shipped.
+
+OAuth of MCP servers and REST APIs (per user or shared, with login-required tool results) and the `tokenStore`
+section: see [MCP](MCP.md#oauth).
+
+`/login` and `/logout`:
+
+| Command | Effect |
+|---|---|
+| `/login` | lists the logins (providers, `api:<name>`, `mcp:<name>`) with their state: connected (expiry), not connected, service account; and the store in use |
+| `/login <name>` | runs the login: browser with a loopback redirect, or a device code; blocks until done on the command line |
+| `/login <name> shared` | with users: the login every user shares (admin only) |
+| `/logout <name> [shared]` | removes the stored token (and the user's MCP session for that server) |
+
+In a web chat `/login api:<x>` and `/login mcp:<x>` of a per-user source are open to every user and work on the user's
+own login (the reply is a link to open); other logins are reserved to the administrator.
 
 ### Providers and temperature
 
 `providers` is a list of named model definitions (`name`, `type` = `anthropic` | `openai` | `gemini` | `grok` | `qwen` | `llamacpp` |
 `ollama`, `baseUrl`, `apiKey`, `model`, `maxTokens`, `maxRetries`, `timeoutSeconds`, `requireApiKey`,
-`useMaxCompletionTokens`, `contextTokens`, `smallModel`, `temperature`, `order`, `thinking`). The old names `anthropic`, `openai`, `gemini`, `grok`, `qwen`,
+`useMaxCompletionTokens`, `contextTokens`, `smallModel`, `temperature`, `order`, `thinking`, `stream`). The old names `anthropic`, `openai`, `gemini`, `grok`, `qwen`,
 `llamacpp`, `ollama` stay valid without a definition. `gemini` uses Google's OpenAI-compatible endpoint
 (`https://generativelanguage.googleapis.com/v1beta/openai`, default model `gemini-2.5-pro`, key from
 `GEMINI_API_KEY`); native Gemini features (image input, Vertex) are not supported.
@@ -197,6 +225,12 @@ settings file. MCP OAuth: see [MCP](MCP.md). No provider login is shipped.
   providers with a higher `order` are tried in ascending order; one without `order` is never a fallback. A request
   refused as too long, and a cancellation, are not passed on to another provider. A fallback that cannot be built
   (for example a missing key) is skipped.
+- **Streaming.** `stream` (default `true`): the agent loop's calls stream, so the answer shows while it is written
+  (`text_delta` events) and a cancel stops it at once. The response used is the same as without streaming. Set it
+  to `false` for a server whose streaming misbehaves. Helper calls (classifier, summaries, tool-group selection)
+  never stream. OpenAI-compatible servers that send no usage in the stream leave the usage of that call empty.
+  A call is retried, or passed to a fallback provider, only before its first delta; a stream that breaks after it
+  is retried as a whole (`text_reset` event first).
 - An agent type may set `"provider": "<name>"` (wins over an inline `model`), `"temperature"` and `"thinking"`.
 - `temperature` (0 to 2) is resolved agent type, then provider, then unset; unset means nothing is sent.
   `explore` uses 0.2 and `plan` 0.3. OpenAI-compatible clients send it, and retry once without it if the server
@@ -236,6 +270,47 @@ the load, naming the rule (`permissions.deny[2]`). Order: `deny`, then `ask`, th
 - A regex on a shell command is a guard rail, not a security boundary (quoting, variables, `python -c`). For real
   isolation use the docker sandbox (`sandbox.backend`: `docker`).
 
+### Stuck detection
+
+The loop watches the tool calls of each agent (main and each sub-agent separately) and notices a loop: the same
+calls with the same results three times in a row, the same call failing with the same error three times, an A-B-A-B
+alternation of two steps for three cycles, or three responses in a row whose calls cannot run. Calls are compared
+on name, arguments (key order does not matter) and result; parallel calls in another order are the same step. An
+edit followed by a test run is not a loop unless the edit is identical each time.
+
+- First time: a note is added after the tool results ("stop repeating it, try a different approach or explain what
+  blocks you") and a `stuck` event with `action: "nudge"` is sent.
+- Second time in the same run: the CLI and the web UI ask (`approval_request` of type `stuck`): continue, or stop.
+  A sub-agent stops at once and its `task` result has status `stuck`.
+- A run that stops this way ends with `run_finished {outcome: "stuck"}`.
+
+`loop.stuck.enabled: false` turns it off: only the turn limit stops a looping agent.
+
+### Verify on stop
+
+A `STOP` hook can refuse to let an agent finish: it returns `HookResult.continueWith(message)`, the agent gets
+"The stop check failed. Fix the problem and finish again." plus the message, and goes on. After
+`loop.verify.maxReentries` (default 3) re-entries, or when the same message comes back twice in a row, the run ends
+`unverified` (a sub-agent reports status `unverified` with its answer). Not run in plan mode or after a cancel.
+
+The common case needs no code: `hooks.stop` in the settings runs a command through the sandbox, in the work
+directory, with the same environment rules as `bash`:
+
+```json
+"hooks": {"stop": [{"command": "mvn -q test", "timeoutSeconds": 600, "agents": ["main"],
+                    "onlyIfChanged": true, "maxOutputChars": 8000}]}
+```
+
+- Exit code 0 lets the agent stop; another code or a timeout sends it back with the last `maxOutputChars` (default
+  8000) of the output, where build and test errors are. The output is sanitized like tool output.
+- `onlyIfChanged` (default `true`): run only if a tool that changes things (anything not read-only: edits, shell,
+  scripts) ran in this run of the agent, so a question does not start a build.
+- `agents`: `main` (default), a sub-agent type (`general`) or label (`general #2`), or `*`.
+- `timeoutSeconds` default 600.
+- A hook from the project's `.jllm/settings.json` runs only after the user trusted it (asked once by the CLI,
+  remembered per project and definition in `~/.jllm/trusted-mcp.json`; the web front end cannot ask and uses only
+  an answer given earlier).
+
 ### Steering a running chat
 
 While a run is active, `harness.steer(chatId, text)` queues a message that is applied after the current round of tool
@@ -273,6 +348,51 @@ h.start(chatId, "List the files in the workspace");   // asynchronous
 `start` returns at once; the run happens on a virtual thread and reports through events. A second `start` on a busy
 chat throws `AgentService.RunAlreadyActiveException`.
 
+### Multi-user embedding
+
+One server, many users: the embedder attaches a principal to each chat, and the harness uses it for every call made
+for that chat.
+
+```java
+record Staff(String id, Set<String> roles) {}                     // your own user model
+AgentHarness h = AgentHarness.builder()
+        .modelClient(model)
+        // per call, after the chat's principal is known: tokens expire and refresh
+        .credentialResolver((user, source) -> user == null ? Map.of()
+                : Map.of("Authorization", "Bearer " + tokens.current(user.id(), source)))
+        // at each call: the tools and approval policy of the user (the tool set stays fixed per chat)
+        .userPolicyResolver(user -> user != null && user.roles().contains("reader")
+                ? new UserPolicy(t -> t.kind() == ToolKind.READ_ONLY, null)
+                : UserPolicy.ALL)
+        .principalDirectory(id -> new HarnessPrincipal(id, rolesOf(id), Map.of()))
+        .build();
+
+String chat = h.sessions().create("Q3 review", "alice").chatId();   // the principal id is stored with the chat
+String owner = h.sessions().principal(chat);                      // "alice"; read it in hooks too
+```
+
+- `CredentialResolver` adds headers on top of the settings-file headers; without one, nothing changes.
+- `UserPolicy.toolFilter` is applied when the chat's tools are offered and again at dispatch, so a model that names a
+  hidden tool is refused. A `null` filter allows every tool; a `null` approval policy uses the harness one.
+- Calls made by a script (`run_js`) are covered by the `run_js` call the user was allowed to make.
+- Only the principal id is stored with the chat. Roles come from the directory and the policy is resolved on each
+  model call, so a changed role changes the tools offered from the next call on. That changes the tool block, so the prompt
+  cache misses once. The principal must come from your auth layer, never from model input.
+- MCP sessions are kept per principal. The tool list of an MCP server is discovered once, without a principal, so
+  per-user tool lists are not supported yet.
+- OAuth REST APIs and MCP servers with `perUser` use each principal's own token, kept in the `TokenStore`
+  (`Builder.tokenStore(...)`, or `tokenStoreDir(...)` for the file store; encrypt it with `JLLM_TOKEN_KEY`). The
+  harness adds its OAuth resolver after yours, so its header wins. Logins: `harness.logins()`, `harness.saveLogin`,
+  `harness.logout`; a deleted user: `harness.forgetUser(id)`. A web front end starts logins with
+  `OAuthLogin.login(ui, redirectTarget)` and its own callback ([jllm-web](../jllm-web/README.md#oauth-logins) does);
+  `harness.commands().webLogin(...)` routes `/login` typed in a chat through it.
+
+- A `UserPolicy` can also carry the user's own skills and a filter over the settings skills
+  ([SKILLS](SKILLS.md#per-user-skills)).
+
+The `jllm-web` module is a reference implementation of the wiring: password sign-in, roles, per-user tool and skill
+settings and an administration page; see its README.
+
 ### Front-end contract
 
 ```mermaid
@@ -290,7 +410,8 @@ sequenceDiagram
         S-->>FE: run_queued
     end
     S->>L: run
-    L-->>FE: usage, text, tool_call, tool_result, compaction, classifier, warning, retry
+    L-->>FE: text_delta (live only), usage, text, tool_call, tool_result, compaction, classifier, warning, retry
+    L-->>FE: stuck, verify_failed
     L-->>FE: approval_request {id, type, title, preview, proposed, agent?}
     FE->>H: resolveApproval(chatId, id, approved, edited, remember)
     opt cancel
@@ -298,7 +419,7 @@ sequenceDiagram
         L-->>FE: cancelled
     end
     L-->>FE: plan_ready (plan mode only), error (on failure)
-    S-->>FE: run_finished {cancelled}
+    S-->>FE: run_finished {cancelled, outcome}
 ```
 
 `retry` `{status, attempt, max, delayMs, message}`: a model call failed with HTTP `status` (0 = network error) and the client
@@ -309,19 +430,26 @@ waits `delayMs` before retry `attempt` of `max`; it is followed by the normal ev
 | `run_started` | `text` |
 | `run_queued` | waiting for the run slot (`serializeRuns`) |
 | `usage` | `inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheCreationTokens` |
-| `text` | `text` of one text block |
+| `text_delta` | `block`, `text`: a piece of the answer being streamed (coalesced, about every 50 ms or 200 chars). `seq` 0: live only, never replayed |
+| `thinking_delta` | `block`, `text`: a piece of the reasoning being streamed (`seq` 0) |
+| `text_reset` | the streamed call failed and is retried: drop the pieces shown so far (`seq` 0) |
+| `text` | `text` of one text block, once the response is complete (replaces what the deltas showed) |
+| `stuck` | `pattern` (`repeat`, `same_error`, `alternation`, `malformed`, `verify_repeat`), `tool`, `count`, `action` (`nudge`, `continue`, `stop`), `message`, `agent` |
+| `verify_failed` | `agent`, `attempt`, `message`: a `STOP` hook sent the agent back to work |
 | `tool_call` | `id`, `name`, `input` |
 | `tool_result` | `id`, `name`, `isError`, `output` (cut at `eventMaxChars`) |
-| `approval_request` | `id`, `chatId`, `type` (`tool` or `context`), `title`, `preview`, `proposed`, `agent` |
+| `approval_request` | `id`, `chatId`, `type` (`tool`, `context`, `continue`, `stuck`, `host`, ...), `title`, `preview`, `proposed`, `agent` |
 | `classifier` | `tool`, `verdict` |
 | `compaction` | compaction: `tier`, `cleared`/`estimatedTokens`; mnemonic: `kind`, `masked`, `savedTokens`, `estimatedTokens`; scope: `strategy`, `estimatedTokens` |
 | `todos` | `todos`: the complete list written by `todo_write` (`id`, `content`, `status`) |
 | `warning`, `error` | `message` |
 | `cancelled` | — |
 | `plan_ready` | `message` |
-| `run_finished` | `cancelled` |
+| `login_required` | `source` (`api:<name>`, `mcp:<server>`), `agent` (sub-agent key, when not the main agent): a call needs a login the user has not done; once per run and source |
+| `login` | `source`, `ok`, `message`: a login started from this chat ended |
+| `run_finished` | `cancelled`, `outcome`: `completed`, `stuck`, `unverified`, `max_turns`, `truncated`, `refused`, `cancelled`, `failed` |
 
-Every event carries a per-chat `seq`. A reconnecting front end subscribes with the last `seq` it saw and gets no gap
+Every event carries a per-chat `seq`, except the streaming deltas (`seq` 0). A reconnecting front end subscribes with the last `seq` it saw and gets no gap
 and no duplicate. The buffer is cleared at the start of every run (earlier runs are in the persisted history).
 
 For `approval_request` of type `context` (tier-3 compaction), `proposed` is the summary to approve; pass the

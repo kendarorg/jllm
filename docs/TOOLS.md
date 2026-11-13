@@ -13,7 +13,7 @@ What the model can call, how tools are grouped, selected per chat and gated. To 
 | `glob` | Files | READ_ONLY | `pattern` | at most 200 paths, sorted; `**/x` also matches top-level files |
 | `ls` | Files | READ_ONLY | `path?` | one directory, not recursive: directories first (`d name/`), then files (`f name size`); at most 200 entries; not available on a remote (docker daemon) work dir |
 | `grep` | Files | READ_ONLY | `pattern` (Java regex), `path?`, `glob?` | `path:line:text`, at most 200 hits, files over 1 MB skipped |
-| `bash` | Shell | OTHER | `command`, `timeout_seconds?` | runs through the `SandboxExecutor`; timeout capped at 600 s; stderr is merged into stdout; only the last 50 KB are kept and the result says `[output truncated: N lines omitted; full log: <scratch>/bash-N.log]` (read the log with `read_file` or `grep`) |
+| `bash` | Shell | OTHER | `command`, `timeout_seconds?` | runs through the `SandboxExecutor`; timeout capped at 600 s; stderr is merged into stdout; only the last 50 KB are kept and the result says `[output truncated: N lines omitted; log: <scratch>/bash-N.log]` (read the log with `read_file` or `grep`); the log itself is capped at `sandbox.outputLogMaxBytes` (default 50 KB, 0 = unlimited) and the result then says `log (itself truncated):` |
 | `web_search` | Web | READ_ONLY | `query`, `count?` (≤ 20) | Brave with a key, DuckDuckGo HTML otherwise |
 | `wikipedia_search` | Web | READ_ONLY | `query`, `lang?`, `count?` | titles, URLs, snippets |
 | `web_fetch` | Web | READ_ONLY | `url` | http/https only; HTML reduced to text; cut at `fetchMaxChars` (40000); asks once per host (see [per-host approval](#per-host-web-approval)) |
@@ -164,7 +164,10 @@ with `interactive=false` (the built-in main and sub-agent loops are both interac
 | `output.eventMaxChars` | 2000 | text in the `tool_result` event |
 | `web.fetchMaxChars` | 40000 | `web_fetch` body before the context limit |
 | `web.downloadMaxBytes` | 100000000 | largest file `web_download` accepts |
-| `storage.maxBytes` | -1 (no limit) | total size of a chat storage (web: the work dir of the chat; CLI: `<project>/.kendhar/scratchpad/<chatId>/`). A write by `write_file`, `edit_file` or `web_download` that would exceed it fails and creates no file. Project files edited by the model in the CLI are outside the chat storage and are not counted; writes made by a shell command are not counted until the next start |
+| `web.fetchMaxBytes` (settings) | 5242880 (5 MB) | largest response body `web_fetch` reads; `<= 0` = default |
+| `files.maxReadBytes` (settings) | 1000000 | the most text one `read_file` returns and the largest file `edit_file` changes (`grep` skips larger files); `<= 0` = default |
+| `sandbox.outputLogMaxBytes` (settings) | 51200 | cap of the spill log of a long `bash` output; `0` = unlimited |
+| `storage.maxBytes` | -1 (no limit) | total size of a chat storage (web: the work dir of the chat; CLI: `<project>/.jllm/scratchpad/<chatId>/`). A write by `write_file`, `edit_file` or `web_download` that would exceed it fails and creates no file. Project files edited by the model in the CLI are outside the chat storage and are not counted; writes made by a shell command are not counted until the next start |
 | REST response | 20000 | `RestApiToolProvider` |
 | `history_recall` page | 12000 (`mnemonic.recallMaxChars`) | per call, continue with `offset` |
 | `context.scope.offloadChars` | 20000 | `scope` strategy: a larger result is offloaded to a file, head and tail stay (applies after the `toolMaxChars` cut) |
@@ -191,7 +194,7 @@ Own formats: `builder.documentReader(reader)` or `registrar.documentReader(reade
 ## Checkpoints
 
 The first time a user turn writes a file with `write_file` or `edit_file`, the old content is copied to
-`<workdir>/.kendhar/checkpoints/<chatId>/<turn>/` (files that did not exist are recorded and deleted on undo).
+`<workdir>/.jllm/checkpoints/<chatId>/<turn>/` (files that did not exist are recorded and deleted on undo).
 `/undo [n]` restores the last n turns that edited files. Files changed by `bash` are not recorded and not restored.
 
 ## Per-host web approval

@@ -41,6 +41,13 @@ build/
 .idea
 
 ### jllm ###
+.jllm/
 .kendhar/
 node_modules/
 /jllm-web/tmp/
+/*.md
+!/README.md
+!/LICENSE*
+!/NOTICE*
+!/CHANGELOG.md
+!/CONTRIBUTING.md

@@ -1,6 +1,6 @@
 # jllm-cli
 
-Terminal front end for [jllm-harness](../jllm-harness/README.md): an interactive chat, or a single `--prompt`, over the
+Terminal front end for [jllm-harness](../core/jllm-harness/README.md): an interactive chat, or a single `--prompt`, over the
 standard tools. One class, `org.kendar.llm.cli.Main`, packaged as a shaded runnable jar.
 
 ## Build and run
@@ -31,7 +31,7 @@ Main [--provider anthropic|openai|gemini|grok|qwen|llamacpp|ollama] [--model M] 
 | `--model` | per provider (`claude-sonnet-5-5`, `gpt-4.1`, `qwen3-coder-plus`, `local`, `llama3.1`) | model name; overrides the named provider for this session only |
 | `--base-url` | per provider | endpoint (OpenAI-compatible URLs include `/v1`) |
 | `--api-key` | `<PROVIDER>_API_KEY` env var | `ASK_TOKEN` asks for it on startup |
-| `--mode` | `default` | initial [permission mode](../jllm-harness/README.md#modes-working-directory-and-scratch-directory) |
+| `--mode` | `default` | initial [permission mode](../core/jllm-harness/README.md#modes-working-directory-and-scratch-directory) |
 | `--workdir` | current directory | project directory; the file tools are confined to it |
 | `--prompt` | none | run one turn non-interactively, then exit |
 | `--settings` | none | harness [settings file](../docs/USAGE.md#5-settings-file), merged over `~/.jllm/settings.json` and `.jllm/settings.json` |
@@ -63,8 +63,8 @@ On startup the CLI prints three directories:
 | Directory | Location | Content |
 |---|---|---|
 | project dir | `--workdir` | the files the agent works on |
-| scratch dir | `<project>/.kendhar/scratchpad/<chatId>/<agentId>` | throwaway files, always writable |
-| history dir | `<project>/.kendhar/history/<chatId>/<agentId>/` | `messages.jsonl`, sub-agent runs, `mnemonic.json` |
+| scratch dir | `<project>/.jllm/scratchpad/<chatId>/<agentId>` | throwaway files, always writable |
+| history dir | `<project>/.jllm/history/<chatId>/<agentId>/` | `messages.jsonl`, sub-agent runs, `mnemonic.json` |
 
 When the project directory is not writable, scratch and history go under `sandbox.tempDir`
 (default `${java.io.tmpdir}/agent-harness`). Chats persist there. At startup the CLI offers to continue the newest saved chat (`--resume prompt|no|<id>`, default `prompt`; `--prompt` and piped input never ask), see [USAGE](../docs/USAGE.md#saved-chats-and-restarting).
@@ -130,7 +130,7 @@ included.
 | `/chats` `/resume <id\|prefix>` `/title <text>` | list, switch, rename chats |
 | `/chats delete <id>` `/chats clean [days]` | delete one chat; list chats older than `days` (default 30), `/chats clean confirm` deletes them |
 | `/export [md\|html] [file]` | write the chat as a transcript into the scratch directory |
-| `/login [name]` `/logout <name>` | OAuth login (providers, MCP servers with `oauth`); no name lists them |
+| `/login [name]` `/logout <name>` | OAuth login of providers, MCP servers and REST APIs with `oauth` (`api:<name>`, `mcp:<name>`); no name lists them with their state and the token store in use |
 | `/exit` `/quit` | leave the CLI |
 
 Menu toggles live in memory only; the settings file is the startup default.
@@ -145,7 +145,7 @@ java -jar jllm-cli.jar --provider llamacpp --base-url http://localhost:8080/v1 -
 Ollama's OpenAI endpoint cannot set the context size per request. Raise it on the Ollama side
 (`OLLAMA_CONTEXT_LENGTH` or `num_ctx` in a Modelfile) and keep `--context-tokens` below it. Model calls are serialized
 by default (`execution.maxParallel`), which suits one local GPU. `--small-model` is described in the
-[harness README](../jllm-harness/README.md#embedding).
+[harness README](../core/jllm-harness/README.md#embedding).
 
 ## Wiring
 
@@ -153,6 +153,23 @@ by default (`execution.maxParallel`), which suits one local GPU. `--small-model`
 `FileHistorySubAgentRunLog` and `FileMnemonicStore`, then subscribes to the chat's events. Precedence for the same
 setting: flag, then settings file, then default. See [USAGE](../docs/USAGE.md) for the settings file and the event
 contract.
+
+### Credentials and user policy
+
+The CLI is single-user, so it does not set the per-user hooks of the harness: no `credentialResolver`, no
+`userPolicyResolver`, no `principalDirectory`. Chats are created with `sessions().create(null)`, so they have no
+principal. What that means for each call:
+
+- **Credentials:** the `Identity` of the harness resolves a caller with no principal, and the credential resolver is
+  `CredentialResolver.NONE`. An MCP or REST call gets only the headers from the settings file (`headers` of the server
+  or API), as before.
+- **Tools and approval:** the user policy is `UserPolicy.ALL`, so every tool is offered and calls go through the
+  harness approval policy (`ToolApprovalPolicy.byKind()` by default, and the permission mode).
+- **Principal:** `sessions().principal(chatId)` returns `null`. Nothing in the CLI reads it.
+
+The resolvers exist for embedders that serve several users from one process (see
+[USAGE, Multi-user embedding](../docs/USAGE.md#multi-user-embedding)). A CLI session could set them, but
+`Main` does not, so the behavior above is fixed.
 
 ## Plugins
 

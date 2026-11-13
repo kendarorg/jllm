@@ -1,0 +1,90 @@
+/* ── Sign-in, settings and administration ────────────────────────────────── */
+
+input[type=password] {
+  width: 100%;
+  padding: 0.45rem 0.65rem;
+  margin-top: 0.3rem;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 0.875rem;
+  font-family: inherit;
+}
+input[type=password]:focus { outline: none; border-color: var(--accent); }
+
+.signin { max-width: 360px; width: calc(100% - 32px); margin: 3rem auto; }
+.signin-submit { margin-top: 1.25rem; width: 100%; }
+.error { color: var(--red); font-size: 0.85rem; margin-top: 0.75rem; }
+
+.whoami { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; flex-wrap: wrap; }
+.whoami .btn-sm.active { color: var(--accent); border-color: var(--accent); }
+.pw-banner { margin: 0.5rem 1rem 0; display: flex; align-items: center; gap: 0.75rem; }
+
+.panel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.panel-body { flex: 1; overflow: auto; padding: 1.25rem; max-width: 1100px; width: 100%; margin: 0 auto; }
+.narrow { max-width: 420px; }
+.muted { color: var(--text-muted); }
+.small { font-size: 0.78rem; margin-top: 0.5rem; margin-bottom: 0; }
+.row-actions { display: flex; gap: 0.5rem; align-items: center; margin-top: 1rem; flex-wrap: wrap; }
+td.row-actions { display: table-cell; margin-top: 0; white-space: nowrap; }
+td.row-actions > * + * { margin-left: 0.4rem; }
+.sticky-actions { position: sticky; bottom: 0; background: var(--bg); padding: 0.75rem 0; }
+
+table.grid { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+table.grid th { text-align: left; color: var(--text-muted); font-weight: 600; font-size: 0.75rem; text-transform: uppercase;
+  letter-spacing: 0.05em; padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--border); }
+table.grid td { padding: 0.45rem 0.5rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
+table.grid select { width: auto; margin-top: 0; }
+table.grid tr.subrow td { background: var(--surface); }
+.subrow input[type=password] { margin-top: 0; flex: 1; }
+
+.badge { display: inline-block; font-size: 0.7rem; padding: 0.1rem 0.45rem; border-radius: 999px;
+  border: 1px solid var(--border); color: var(--text-muted); }
+.badge.own { color: var(--green); border-color: rgba(52,211,153,0.4); }
+.badge.global { color: var(--accent); border-color: rgba(108,138,255,0.4); }
+.badge.warn { color: var(--yellow); border-color: rgba(251,191,36,0.4); }
+
+.new-user { margin-top: 1.5rem; }
+.new-user .form-row { flex-wrap: wrap; }
+.new-user .field { min-width: 140px; }
+
+.roles-layout { display: flex; gap: 1.25rem; align-items: flex-start; }
+.role-list { width: 220px; flex-shrink: 0; display: flex; flex-direction: column; gap: 0.25rem; }
+.role-item { background: var(--surface); border: 1px solid var(--border); color: var(--text); text-align: left;
+  padding: 0.45rem 0.65rem; display: flex; gap: 0.5rem; align-items: center; font-weight: normal; }
+.role-item.active { border-color: var(--accent); }
+.role-list .inline-form { margin-top: 0.5rem; }
+.role-main { flex: 1; min-width: 0; }
+.role-editor h3 { margin-top: 0; }
+.role-editor .field-sm { width: 200px; }
+
+.toolpicker { margin-top: 1rem; }
+.tp-head { display: flex; gap: 1rem; align-items: center; margin-bottom: 0.5rem; }
+.tp-head input[type=text] { margin-top: 0; max-width: 320px; }
+.tp-section { border: 1px solid var(--border); border-radius: var(--radius); padding: 0.75rem 1rem; margin-top: 0.75rem; }
+.tp-section legend { padding: 0 0.4rem; font-size: 0.78rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+.tp-section:disabled { opacity: 0.6; }
+.tp-group { margin-bottom: 0.75rem; }
+.tp-group-head { display: flex; gap: 0.5rem; align-items: center; font-weight: 600; font-size: 0.82rem; margin-bottom: 0.25rem; flex-wrap: wrap; }
+label.tp-check { display: flex; align-items: center; gap: 0.45rem; margin-top: 0.2rem; text-transform: none; letter-spacing: 0;
+  font-weight: normal; font-size: 0.85rem; color: var(--text); }
+label.tp-check input { width: auto; margin: 0; accent-color: var(--accent); }
+.tp-indent { margin-left: 1.5rem; }
+.tp-kind, .tp-note, .tp-pattern { color: var(--text-muted); font-size: 0.72rem; }
+.tp-status { font-size: 0.72rem; font-weight: normal; }
+.tp-status.on { color: var(--green); }
+.tp-status.off { color: var(--text-muted); }
+.tp-status.err { color: var(--red); }
+.tp-unknown { margin-top: 0.75rem; font-size: 0.82rem; display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+.chip { background: var(--surface2); border: 1px solid var(--border); border-radius: 999px; padding: 0.1rem 0.5rem; }
+
+.skill-editor { margin-bottom: 1rem; }
+.skill-editor textarea { min-height: 260px; }
+
+@media (max-width: 720px) {
+  .roles-layout { flex-direction: column; }
+  .role-list { width: 100%; }
+  .panel-body { padding: 1rem; }
+  table.grid { display: block; overflow-x: auto; }
+}

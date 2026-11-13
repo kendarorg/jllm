@@ -64,6 +64,26 @@ sequenceDiagram
 - Sub-agents get the `skill` tool like any other registry tool (unless their type's `tools` list leaves it out, or
   the type is read-only — it is READ_ONLY, so read-only types keep it).
 
+### Per-user skills
+
+A multi-user embedder can give each user skills of their own and hide settings skills from them through the
+`UserPolicy` its `UserPolicyResolver` returns (see [USAGE](USAGE.md)):
+
+```java
+new UserPolicy(toolFilter, approval,
+        List.of(new SkillSettings("notes", "My notes", "/data/skills/alice/notes.md")),   // extra skills
+        name -> !hiddenForAlice.contains(name));                                       // settings skills kept
+```
+
+- The extra skills are offered, next to the settings skills the filter keeps, only in that user's chats (main agent
+  and sub-agents). Their files are read on each load. One whose file is missing, or whose name is a settings skill,
+  is left out.
+- The policy is resolved on each model call, so a change applies from the next request of every chat of the user
+  (and, like any change of the tool block, costs one cache miss).
+- With a user policy resolver the `skill` tool is registered even when the settings define no skill; a chat whose
+  user has none gets no `skill` tool.
+- `jllm-web` uses this for its global (admin) and own (user) skills.
+
 ## 2. Instruction files
 
 ```json

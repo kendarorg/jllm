@@ -3,7 +3,10 @@ import {api, post} from './api.js';
 import {reactive} from 'vue';
 
 const EVENTS = ['run_started', 'text', 'tool_call', 'tool_result', 'approval_request', 'usage', 'compaction',
-  'warning', 'error', 'cancelled', 'run_finished', 'plan_ready'];
+  'warning', 'error', 'cancelled', 'run_finished', 'plan_ready', 'login', 'login_required', 'stuck', 'verify_failed',
+  'text_delta', 'text_reset'];
+// streaming deltas carry seq 0: shown live, never replayed (the final 'text' event is)
+const TRANSIENT = new Set(['text_delta', 'text_reset']);
 
 let uid = 0;
 const nextKey = () => ++uid;
@@ -71,6 +74,76 @@ export function addMsg(role, text, cls) {
   store.items.push({ key: nextKey(), kind: 'msg', role, text, cls: cls || role });
 }
 
+/** A notice with a Connect button: an OAuth source the user has not connected yet. */
+function addConnect(source) {
+  group = null;
+  store.items.push({ key: nextKey(), kind: 'msg', role: 'notice', cls: 'notice',
+    text: 'This needs your ' + source + ' login.', connect: source });
+}
+
+/**
+ * Starts the login of an OAuth source (REST API or MCP server) for the signed-in user: the authorization page opens
+ * in a new tab; the chat gets a 'login' event when it ends. Resend or steer ("retry") afterwards.
+ */
+export async function connectSource(source, shared = false) {
+  // opened now, inside the click, so the browser does not block it; pointed at the URL once known
+  const tab = window.open('', '_blank');
+  try {
+    const q = new URLSearchParams();
+    if (store.chatId) q.set('chatId', store.chatId);
+    if (shared) q.set('shared', 'true');
+    const r = await post('/api/oauth/' + encodeURIComponent(source) + '/start?' + q.toString());
+    if (r.authorizeUrl) {
+      if (tab) { tab.opener = null; tab.location = r.authorizeUrl; } else window.open(r.authorizeUrl, '_blank', 'noopener');
+    } else {
+      if (tab) tab.close();
+      if (r.message) { addMsg('notice', r.message); toast(r.message); }
+    }
+  } catch (e) {
+    if (tab) tab.close();
+    toast(e.message, 'error');
+  }
+}
+
+// assistant bubbles being streamed, by content block index; the final 'text' event replaces and closes them
+let streaming = new Map();
+
+function streamDelta(block, text) {
+  let item = streaming.get(block);
+  if (!item) {
+    addMsg('assistant', '', 'assistant streaming');
+    item = store.items[store.items.length - 1];   // reactive proxy
+    streaming.set(block, item);
+  }
+  item.text += text;
+}
+
+/** The final text of the next streamed block, or a new bubble when nothing was streamed. */
+function streamFinal(text) {
+  if (streaming.size) {
+    const block = Math.min(...streaming.keys());
+    const item = streaming.get(block);
+    streaming.delete(block);
+    item.text = text; item.cls = 'assistant';
+    group = null;
+    return;
+  }
+  addMsg('assistant', text);
+}
+
+function streamDrop() {
+  if (!streaming.size) return;
+  const open = new Set(streaming.values());
+  store.items = store.items.filter(it => !open.has(it));
+  streaming = new Map();
+}
+
+/** The run ended with bubbles still open (cancel, error): they keep what arrived, marked as cut off. */
+function streamClose() {
+  streaming.forEach(item => { item.text += ' …'; item.cls = 'assistant partial'; });
+  streaming = new Map();
+}
+
 function addTool(id, name, input, status, output, dropped) {
   if (!group) {
     group = { key: nextKey(), kind: 'tools', tools: [] };
@@ -121,11 +194,25 @@ function renderHistory(messages, refs) {
 // ── sessions ────────────────────────────────────────────────────────────────
 export const loadSessions = guard(async () => { store.sessions = await api('/api/chat'); });
 
+// Each openChat takes a token; an older call that resumes after a newer one (or a close) started drops its result.
+let openToken = 0;
+let openAbort = null;
+
+function cancelOpen() {
+  openToken++;
+  if (openAbort) { openAbort.abort(); openAbort = null; }
+}
+
+function closeStream() {
+  if (es) { es.close(); es = null; }
+}
+
 export function closeChat() {
-  if (es) es.close();
+  cancelOpen();
+  closeStream();
   remember(null);
   delete store.tabs[store.chatId];
-  store.chatId = null; store.items = []; store.usage = null; group = null;
+  store.chatId = null; store.items = []; store.usage = null; group = null; streaming = new Map();
 }
 
 export const newChat = guard(async () => {
@@ -140,23 +227,39 @@ export const deleteChat = guard(async id => {
 });
 
 export async function openChat(id) {
-  if (es) es.close();
+  cancelOpen();
+  const token = openToken;
+  const ctl = new AbortController();
+  openAbort = ctl;
+  const current = () => token === openToken;
+  closeStream();
   if (!store.tabs[id]) store.tabs[id] = 'chat';   // never opened before: start on Chat; otherwise keep its own tab
   store.chatId = id; store.approvals = []; store.menuOpen = false; group = null; store.items = []; store.resumeOffer = null;
+  streaming = new Map();
+  store.msgCount = undefined;   // the poll must not compare the new chat against the old count while loading
   remember(id);
-  const s = await api('/api/chat/' + id);
-  let refs = [];
-  try { refs = await api('/api/chat/' + id + '/references'); } catch (e) { /* optional */ }
-  // idle chat: history is complete, so skip replaying buffered events (they would show twice)
-  store.lastSeq = s.running ? 0 : (s.lastSeq || 0);
-  store.msgCount = s.messages.length;
-  store.mode = s.mode;
-  renderHistory(s.messages, refs);
-  store.usage = s.usage;
-  store.running = s.running;
-  (s.pendingApprovals || []).forEach(enqueueApproval);
-  connect();
-  loadSessions();
+  try {
+    const s = await api('/api/chat/' + id, { signal: ctl.signal });
+    if (!current()) return;
+    let refs = [];
+    try { refs = await api('/api/chat/' + id + '/references', { signal: ctl.signal }); } catch (e) { /* optional */ }
+    if (!current()) return;
+    // idle chat: history is complete, so skip replaying buffered events (they would show twice)
+    store.lastSeq = s.running ? 0 : (s.lastSeq || 0);
+    store.msgCount = s.messages.length;
+    store.mode = s.mode;
+    renderHistory(s.messages, refs);
+    store.usage = s.usage;
+    store.running = s.running;
+    (s.pendingApprovals || []).forEach(enqueueApproval);
+    connect();
+    loadSessions();
+  } catch (e) {
+    if (!current() || e.name === 'AbortError') return;   // superseded by a newer openChat or a close
+    throw e;
+  } finally {
+    if (openAbort === ctl) openAbort = null;
+  }
 }
 
 // ── events ──────────────────────────────────────────────────────────────────
@@ -167,7 +270,16 @@ function handleEvent(ev) {
       store.running = true;
       if (store.pendingUser === d.text) store.pendingUser = null; else addMsg('user', d.text);
       break;
-    case 'text': addMsg('assistant', d.text); break;
+    case 'text': streamFinal(d.text); break;
+    case 'text_delta': streamDelta(d.block ?? 0, d.text || ''); break;
+    case 'text_reset': streamDrop(); break;
+    case 'stuck':
+      addMsg('notice', (d.action === 'stop' ? 'Stopped, the agent was stuck: ' : d.action === 'continue'
+        ? 'Continuing although the agent seems stuck: ' : 'The agent seems stuck, told to change approach: ') + (d.message || d.pattern));
+      break;
+    case 'verify_failed':
+      addMsg('notice', 'Stop check failed (attempt ' + d.attempt + '), the agent goes on:\n' + (d.message || ''));
+      break;
     case 'tool_call': addTool(d.id, d.name, d.input, 'run', ''); break;
     case 'tool_result': {
       const t = findTool(d.id);
@@ -179,27 +291,39 @@ function handleEvent(ev) {
     case 'compaction': addMsg('notice', 'Context compacted (tier ' + (d.tier ?? d.kind ?? '?') + ')'); break;
     case 'plan_ready': addMsg('notice', d.message); break;
     case 'warning': addMsg('notice', d.message); break;
-    case 'error': addMsg('error', d.message); break;
-    case 'cancelled': addMsg('notice', 'Cancelled.'); break;
+    case 'login': addMsg(d.ok ? 'notice' : 'error', d.message + (d.ok ? ' — resend or steer ("retry") to go on.' : '')); toast(d.message, d.ok ? '' : 'error'); break;
+    case 'login_required': addConnect(d.source); break;
+    case 'error': streamClose(); addMsg('error', d.message); break;
+    case 'cancelled': streamClose(); addMsg('notice', 'Cancelled.'); break;
     case 'run_finished':
+      streamClose();
+      if (d.outcome === 'stuck' || d.outcome === 'unverified') toast('Run ended: ' + d.outcome, 'error');
       store.approvals = []; store.running = false; refreshUsage(); loadSessions(); markSynced();
       break;
   }
 }
 
 function connect() {
+  closeStream();   // at most one stream: a second connect must not leak the first
   const id = store.chatId;
+  if (!id) return;
   const source = new EventSource(`/api/chat/${id}/events?after=${store.lastSeq}`);
   es = source;
   EVENTS.forEach(t => source.addEventListener(t, e => {
-    if (store.chatId !== id) return;
+    if (es !== source || store.chatId !== id) return;
     const ev = JSON.parse(e.data);
+    if (TRANSIENT.has(ev.type)) { handleEvent(ev); return; }
     if (ev.seq <= store.lastSeq) return;
+    // events were lost (buffer trimmed, server restarted): an approval_request may be among them
+    if (ev.seq > store.lastSeq + 1) syncApprovals(id);
     store.lastSeq = ev.seq; handleEvent(ev);
   }));
+  // every (re)connect: approvals asked while the stream was down are not replayed if their event is gone
+  source.onopen = () => { if (es === source && store.chatId === id) syncApprovals(id); };
   source.onerror = () => {
-    if (source.readyState === EventSource.CLOSED && store.chatId === id) {
-      setTimeout(() => store.chatId === id && connect(), 2000);
+    // only the live stream reconnects; a replaced or closed one stays dead
+    if (source.readyState === EventSource.CLOSED && es === source && store.chatId === id) {
+      setTimeout(() => { if (es === source && store.chatId === id) connect(); }, 2000);
     }
   };
 }
@@ -294,10 +418,31 @@ function enqueueApproval(a) {
   if (!store.approvals.some(x => x.id === a.id)) store.approvals.push(a);
 }
 
+/**
+ * Brings the queue in line with the server's pending approvals: the ones answered elsewhere go, missed ones are
+ * added. A queued entry is kept as it is (its event may carry more, e.g. writeDir).
+ */
+async function syncApprovals(id) {
+  let pending;
+  try { pending = await api(`/api/chat/${id}/approvals`); } catch (e) { return; /* next reconnect or gap retries */ }
+  if (store.chatId !== id || !Array.isArray(pending)) return;
+  const ids = new Set(pending.map(p => p.id));
+  store.approvals = store.approvals.filter(x => ids.has(x.id));
+  pending.forEach(enqueueApproval);
+}
+
+/**
+ * Returns the server's error text when it refused the answer as invalid (400, e.g. a typed folder outside the
+ * project): the approval then stays open for a new choice. Otherwise the approval leaves the queue and null is returned.
+ */
 export async function resolveApproval(a, approved, editedText, remember = false, rememberDir = false) {
   try {
     await post(`/api/chat/${store.chatId}/approvals/${a.id}`, { approved, editedText: approved ? editedText ?? null : null,
       remember: approved && remember, rememberDir: approved && rememberDir });
-  } catch (e) { toast(e.message, 'error'); }
+  } catch (e) {
+    toast(e.message, 'error');
+    if (e.status === 400) return e.message;
+  }
   store.approvals = store.approvals.filter(x => x.id !== a.id);
+  return null;
 }

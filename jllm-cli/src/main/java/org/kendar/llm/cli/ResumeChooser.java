@@ -74,7 +74,7 @@ final class ResumeChooser {
         if (from > 0) out.println("... " + from + " earlier message(s)");
         for (int i = from; i < messages.size(); i++) {
             JsonNode m = messages.get(i);
-            out.println("[" + m.path("role").asText() + "] " + abbreviate(text(m.path("content"))));
+            out.println("[" + m.path("role").asText() + "] " + abbreviate(Renderer.clean(text(m.path("content")))));
         }
     }
 

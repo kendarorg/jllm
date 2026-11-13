@@ -6,8 +6,8 @@ A `SandboxExecutor` decides three things: where a chat works (the work directory
 
 | Executor | Used by | Work dir | Scratch dir | Isolation |
 |---|---|---|---|---|
-| `CwdSandboxExecutor` | CLI | the project directory, for every chat | `<cwd>/.kendhar/scratchpad/<chatId>/<agentId>` | none |
-| `ChatDirSandboxExecutor` | web | `<X>/<chatId>` | `<X>/<chatId>/.kendhar/scratchpad/<agentId>` | none |
+| `CwdSandboxExecutor` | CLI | the project directory, for every chat | `<cwd>/.jllm/scratchpad/<chatId>/<agentId>` | none |
+| `ChatDirSandboxExecutor` | web | `<X>/<chatId>` | `<X>/<chatId>/.jllm/scratchpad/<agentId>` | none |
 | `LocalDirSandboxExecutor` | library default | `<sandbox.tempDir>/<chatId>` | `<work dir>/<agentId>` | none |
 | `DockerSandboxExecutor` | CLI and web with `sandbox.backend: docker`; library | that of the executor it wraps (project directory or chat directory), mounted in a container | that of the wrapped executor | container |
 
@@ -24,7 +24,13 @@ A `SandboxExecutor` decides three things: where a chat works (the work directory
   every mode, including plan mode.
 - **Timeouts.** `bash` uses `sandbox.timeoutSeconds` (default 120); the tool caps a requested timeout at 600 s. On
   timeout the process and its descendants are killed.
-- **Bounded output.** The last 50 KB of output are kept; the full output goes to `bash-N.log` in the scratch directory.
+- **Bounded output.** The last 50 KB of output are kept; beyond that the output also goes to `bash-N.log` in the
+  scratch directory. The log itself is capped (`SandboxExecutor.outputLogLimit`, default 50 KB, `0` unlimited): it then
+  holds the start of the output and ends with `[log truncated at N bytes]`, while the result holds the end.
+- **Background children.** A command returns when its shell exits, with the shell's exit code, even if a background
+  child (`cmd &`) still holds the output pipe: output is read for 2 more seconds, later output is discarded. The local
+  executors leave such a child running; the daemon kills it (see [Lifecycle](#lifecycle)).
+- **Links.** Deleting a work or scratch directory removes symbolic links and Windows junctions without following them.
 - **Shell description.** `shellEnvironment()` tells the model which OS and shell it has (Windows `cmd /c`, `bash -c`,
   or `sh -c` in the container), so it writes matching syntax.
 
@@ -33,9 +39,9 @@ A `SandboxExecutor` decides three things: where a chat works (the work directory
 Used by the CLI. The work directory is the real project directory for every chat, so the agent edits your files in
 place.
 
-- Scratch: `<cwd>/.kendhar/scratchpad/<chatId>/<agentId>`. If the project directory is not writable (checked by creating
+- Scratch: `<cwd>/.jllm/scratchpad/<chatId>/<agentId>`. If the project directory is not writable (checked by creating
   a probe file), scratch and history fall back to `sandbox.tempDir`, still under the chat id.
-- History: `<cwd>/.kendhar/history/<chatId>/<agentId>/`.
+- History: `<cwd>/.jllm/history/<chatId>/<agentId>/`.
 - Deleting a chat removes its scratch directories only. The project directory is never touched.
 - Commands run as the user of the JVM, with full access to everything that user can reach.
 
@@ -45,7 +51,7 @@ Used by the web application. Each chat is self-contained under a base directory:
 
 ```
 <X>/<chatId>/              work dir
-<X>/<chatId>/.kendhar/     history, scratchpad, checkpoints
+<X>/<chatId>/.jllm/     history, scratchpad, checkpoints
 ```
 
 - Chats cannot see each other through the file tools.
@@ -130,7 +136,8 @@ The command runs with `sh -c` (POSIX sh, not bash), on Linux.
   read-only at `/project`. This is the only executor that can enforce a read-only working directory. The local
   executors only start `bash` in the scratch directory; they cannot stop a command writing elsewhere.
 - **Availability.** Docker is checked at first use with `docker version`; success is cached, failure is retried. A
-  remote daemon (`DOCKER_HOST` not local) is refused, because a bind mount would use the wrong files.
+  remote daemon (`DOCKER_HOST` not local or, when it is unset, a current `docker context` whose endpoint is not a local
+  socket/pipe or loopback address) is refused, because a bind mount would use the wrong files.
 - **Fallback.** When Docker is unavailable and `sandbox.localFallback` is `true` (the default), commands run
   without isolation in the wrapped local executor. Set it to `false` to fail instead; the error tells the model
   that Docker is missing.
@@ -155,8 +162,9 @@ AgentHarness.builder()
 `sandbox.docker.mode: daemon` (`--docker-mode daemon`). Instead of one `docker run --rm` per command, a container stays
 up and runs a small HTTP daemon, `sandbox-agent.py` (Python standard library only). Every tool goes through it:
 `bash`, `read_file`, `write_file`, `edit_file`, `glob`, `grep`. Tool names, schemas and results do not change; only
-where they run does. Files, installed packages and background processes survive between calls and a command no longer
-pays container startup. Each command is still a fresh `sh -c`: `cd` and exported variables do not carry over.
+where they run does. Files and installed packages survive between calls and a command no longer pays container
+startup. Each command is still a fresh `sh -c`: `cd` and exported variables do not carry over, and background jobs it
+starts (`cmd &`) are killed when it ends (see [Lifecycle](#lifecycle)).
 
 ```sh
 java -jar jllm-cli.jar --sandbox docker --docker-mode daemon --docker-image maven:3-eclipse-temurin-21
@@ -172,12 +180,12 @@ without Python, install it or build an image on top.
 |---|---|---|
 | Container | one per startup directory, named `jllm-cli-<hash of the directory>` | one per chat, named `jllm-web-<chatId>` |
 | `/workspace` | bind mount of the project directory | anonymous volume inside the container, not on the host |
-| Scratchpad | `/workspace/.kendhar/scratchpad/<agentId>` | `/workspace/.kendhar/scratchpad/<agentId>` |
-| History, sessions, settings | `<project>/.kendhar/history` on the host (visible through the mount) | `<X>/<chatId>/.kendhar/history` on the host, outside the container |
+| Scratchpad | `/workspace/.jllm/scratchpad/<agentId>` | `/workspace/.jllm/scratchpad/<agentId>` |
+| History, sessions, settings | `<project>/.jllm/history` on the host (visible through the mount) | `<X>/<chatId>/.jllm/history` on the host, outside the container |
 | Deleting | the container is kept; see [cleaning](#cleaning) | the container is removed with `docker rm -f -v`: files and scratchpad go with the chat |
 
-- The docker daemon must be local, unless you allow [remote docker](#remote-docker): a remote `DOCKER_HOST` is refused
-  otherwise, since the published port and the bind mount would not reach it.
+- The docker daemon must be local, unless you allow [remote docker](#remote-docker): a remote `DOCKER_HOST` (or docker
+  context endpoint) is refused otherwise, since the published port and the bind mount would not reach it.
 - **Docker missing.** The agent does not silently run on the host and does not just fail: it asks you
   ("Docker is unavailable: run without isolation?", an approval dialog in the CLI and the web UI). If you agree, that
   chat uses the host directories and plain processes from then on (the project directory, as with `--sandbox local`) and
@@ -205,7 +213,8 @@ A docker daemon on another machine cannot bind-mount your project or be reached 
 ```
 
 or `--docker-remote --docker-remote-host 192.168.1.45` (CLI and web). `remoteHost` is the address at which this machine
-reaches the ports the remote host publishes; blank, it is taken from `DOCKER_HOST` (`tcp://host:2375`), else `127.0.0.1`.
+reaches the ports the remote host publishes; blank, it is taken from `DOCKER_HOST` (`tcp://host:2375`) or the current
+docker context's endpoint, else `127.0.0.1`.
 The docker CLI itself still talks to the remote daemon through `DOCKER_HOST` or a docker context.
 
 What changes:
@@ -213,16 +222,19 @@ What changes:
 - `/workspace` is a volume in the container in both front ends (nothing is mounted), and the daemon script is sent in the
   environment instead of being mounted.
 - **Setup.** When a container is created, the workspace is uploaded: the CLI sends the project directory, the web sends
-  the chat's last backup (`<X>/<chatId>/.kendhar/workspace-backup.zip`) if there is one. Reusing a running container
+  the chat's last backup (`<X>/<chatId>/.jllm/workspace-backup.zip`) if there is one. Reusing a running container
   uploads nothing.
 - **Backup.** The container's workspace is downloaded into the project directory (CLI; files are overwritten, files
   deleted in the container are not deleted locally) or into the chat's backup file (web). It happens when the session ends
   (CLI exit, web shutdown), on `/sandbox backup`, and before `/sandbox clean`. Between backups the only copy is in the
-  container: if the remote host loses it, those changes are lost. `--sandbox-clean` does not back up first.
-- **The scratchpad is lost**: `.kendhar/scratchpad` is neither uploaded nor backed up. The history is not lost: it is
+  container: if the remote host loses it, those changes are lost. `--sandbox-clean` does not back up first. When the
+  backup fails (e.g. the host has a symlink or junction where the archive has a directory: writing through it is
+  refused), `/sandbox clean` and web shutdown keep the container and say how to recover (`docker cp`, or fix and retry).
+- **The scratchpad is lost**: `.jllm/scratchpad` is neither uploaded nor backed up. The history is not lost: it is
   always on this machine (never in the container), so it is simply not part of the archive. Checkpoints
-  (`.kendhar/checkpoints`) travel with the workspace.
-- Symbolic links are not copied. Executable bits are kept (by a `.jllm-exec` list in the archive).
+  (`.jllm/checkpoints`) travel with the workspace.
+- Symbolic links and Windows junctions are not copied, and the backup never writes through one on the host.
+  Executable bits are kept (by a `.jllm-exec` list in the archive).
 - Large projects (`node_modules`, build output, `.git`) are uploaded whole: start the agent from a smaller directory or
   clean first.
 - The port is published on all interfaces of the remote host (`0.0.0.0`) and the traffic is plain HTTP: the token is the
@@ -259,11 +271,15 @@ user accounts.
 - **Web.** The container is removed on chat delete and on shutdown. At startup, `jllm.kind=web` containers whose chat no
   longer exists are removed. CLI containers are never touched by that sweep. A new web volume is handed to the container
   user with a one-off `chown` before the daemon starts.
-- A command that is cancelled or times out has its process group killed (`DELETE /exec/{id}`); the container stays up.
+- A command runs in its own process group. It finishes when its shell exits, not when its output pipe closes: a
+  background job that inherited the output does not keep it running (its output after the shell exited is discarded).
+  Once the result is read the harness releases the command (`DELETE /exec/{id}`), which kills the whole process group:
+  background jobs do not outlive the command that started them, whether it finished, timed out or was cancelled. Only
+  a process that leaves the group (`setsid`) survives. The container stays up.
 
 ### Cleaning
 
-CLI only. Project files and `.kendhar` are never removed.
+CLI only. Project files and `.jllm` are never removed.
 
 | | |
 |---|---|
@@ -275,22 +291,24 @@ CLI only. Project files and `.kendhar` are never removed.
 ### Differences from `oneshot`
 
 - `grep` uses the daemon's regular expressions (Python `re`), not Java's; they agree on ordinary patterns.
-- Checkpoints (`/undo`) work, but are kept inside the container under `/workspace/.kendhar/checkpoints`, so they live
+- Checkpoints (`/undo`) work, but are kept inside the container under `/workspace/.jllm/checkpoints`, so they live
   and die with it. In the web, deleting the chat removes them.
 - Paths shown to the model are container paths (`/workspace/...`); `/where` shows them too.
-- Full command output beyond 50 KB goes to `bash-N.log` in the agent's scratch directory inside the container.
+- Command output beyond 50 KB goes to `bash-N.log` in the agent's scratch directory inside the container, capped like
+  the local log (the request's `logMaxBytes`, else `JLLM_LOG_MAX_BYTES`, default 50 KB).
 
 ### The daemon
 
-All endpoints require the token. Paths are jailed to the root (symlinks resolved); `root=workspace` (default) or
+All endpoints require the token; the body of a request without it is never read (empty `401`, connection closed), and
+a body over 256 MB is refused with `413` before it is read. Paths are jailed to the root (symlinks resolved); `root=workspace` (default) or
 `root=scratch` selects `/workspace` or the scratchpad.
 
 | Endpoint | Does |
 |---|---|
 | `GET /health` | readiness |
-| `POST /exec` `{command, cwd, timeoutSeconds, logDir}` | runs `sh -c` in its own process group, returns `{id}` |
-| `GET /exec/{id}?wait=N` | `{running:true}`, or once finished `{stdout (last 50 KB), exitCode, timedOut, omittedLines, logPath}` |
-| `DELETE /exec/{id}` | kills the process group |
+| `POST /exec` `{command, cwd, timeoutSeconds, logDir, logMaxBytes}` | runs `sh -c` in its own process group, returns `{id}` |
+| `GET /exec/{id}?wait=N` | `{running:true}`, or once the shell exited `{stdout (last 50 KB), exitCode, timedOut, omittedLines, logPath}` |
+| `DELETE /exec/{id}` | kills the process group (background jobs included) and forgets the command |
 | `GET /file?path&offset&limit` | raw bytes |
 | `PUT /file?path&append` | writes the body, creating parent directories |
 | `DELETE /file?path` | deletes a file or a tree (not the root) |
@@ -301,14 +319,14 @@ All endpoints require the token. Paths are jailed to the root (symlinks resolved
 | `GET /list?path&long&all&format=json` | like `ls -p`: sorted, trailing `/` on directories; `long=1` is the `ls -l` form; `all=1` includes dotfiles; capped at 1000 entries with a `... N more` line |
 | `GET /tree?path&depth` | capped recursive tree, symlinks not followed |
 | `GET /download?path` | raw bytes |
-| `GET /backup` | zip of the whole workspace, without `.kendhar/scratchpad` (and `.kendhar/history`, which is never in the container) |
+| `GET /backup` | zip of the whole workspace, without `.jllm/scratchpad` (and `.jllm/history`, which is never in the container) |
 | `POST /setup` | extracts the zip in the body into the workspace, overwriting |
 
 A real-container integration test, `DockerWslIntegrationTest`, runs only on request, e.g. against the docker of a WSL
 distribution: `mvn test -DargLine="-Djllm.it.wsl=Ubuntu"`. It uses remote mode (Windows paths cannot be bind-mounted into
 WSL's docker) and removes the containers it creates.
 
-The Python tests (`python -m unittest jllm-harness/src/test/python/test_sandbox_agent.py`) cover the token, the
+The Python tests (`python -m unittest core/jllm-harness/src/test/python/test_sandbox_agent.py`) cover the token, the
 environment, execution, the jail and the endpoints; they need `python` and `sh`.
 
 ### Web application: file explorer
@@ -324,7 +342,7 @@ files are not on the host.
 | `GET /fs/tree?depth=` | new, daemon mode only |
 | `PUT /fs/content`, `POST /fs`, `POST /fs/upload`, `POST /fs/rename`, `DELETE /fs` | writes, executed in the container |
 
-`.kendhar` stays hidden in the workspace root.
+`.jllm` stays hidden in the workspace root.
 
 ## Which one to use
 

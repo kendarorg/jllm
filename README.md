@@ -19,15 +19,16 @@ They're not separate products or mandatory dependencies. They're working example
 
 | Module | What | Doc |
 |---|---|---|
-| [jllm-harness](jllm-harness) | the library: framework-free (no Spring, JPA or Micrometer), Jackson, JDK `HttpClient`, jsoup | [README](jllm-harness/README.md) |
+| [jllm-harness](core/jllm-harness) | the library: framework-free (no Spring, JPA or Micrometer), Jackson, JDK `HttpClient`, jsoup | [README](core/jllm-harness/README.md) |
 | [jllm-cli](jllm-cli) | terminal front end, one shaded runnable jar | [README](jllm-cli/README.md) |
-| [jllm-web](jllm-web) | Spring Boot REST + SSE API with a no-build Vue 3 chat UI | [README](jllm-web/README.md) |
+| [jllm-web-commons](jllm-web-commons) | REST + SSE chat and file API over the harness, independent of sign-in | [README](jllm-web-commons/README.md) |
+| [jllm-web](jllm-web) | Spring Boot application: startup, sample sign-in and permissions, no-build Vue 3 chat UI | [README](jllm-web/README.md) |
 
 Also: [HISTORY](docs/HISTORY.md) (how the harness evolved) and [HARNESSES-COMPARE](docs/HARNESSES-COMPARE.md) (feature matrix against mini-swe-agent, Pi, OpenCode, Qwen Code, Hermes Agent).
 
 What is still missing (more in [FUTURE](docs/FUTURE.md)):
 
-* OAuth & token support on MCP/API calls (static headers only)
+* Provider (model) OAuth logins: the `OAuthLogin` SPI exists, no provider login is shipped
 * Authentication & authorization on the web UI: `jllm-web` is a reference front end meant for localhost or a trusted
   network. Do not expose it publicly without a reverse proxy that handles authentication.
 
@@ -64,7 +65,7 @@ surprises.
 |---|---|---|
 | **Your Java code** | a `HarnessTool` (or `SimpleTool` with a lambda): name, description, JSON schema, group, kind | `db_query`, `create_ticket`, ... whatever you register |
 | **MCP servers** | a `mcpServers` entry in the settings file: URL and headers | `mcp__<server>__<tool>`, discovered at startup from the server's `tools/list` |
-| **REST APIs** | a `restApis` entry: OpenAPI URL, base URL, `allowedPaths` | `<api>__<operationId>`, one tool per allowed operation |
+| **REST APIs** | a `restApis` entry: OpenAPI URL, base URL, `allowedPaths` / `denyPaths` | `<api>__<operationId>`, one tool per visible operation |
 
 Your own tool, in a few lines:
 
@@ -88,9 +89,19 @@ MCP servers and REST APIs need no code, only configuration:
 ```
 
 - **MCP**: streamable-HTTP servers or stdio child processes (`command`/`args`/`env`), static headers (`${ENV_VAR}` expanded), tools listed at startup. A server that is
-  down does not stop the harness. No OAuth.
-- **REST**: the OpenAPI 3 spec is parsed and each operation matching `allowedPaths` becomes a tool whose input schema
-  comes from the spec. Nothing outside the allowlist is reachable. GET/HEAD are read-only, other methods need approval.
+  down does not stop the harness. OAuth with `"oauth": true` (`/login mcp:<name>`, see [MCP](docs/MCP.md#oauth)),
+  shared or with each user's own token.
+- **REST**: the OpenAPI 3 spec is parsed and each operation that passes `allowedPaths` and `denyPaths` becomes a tool whose
+  input schema comes from the spec. Hidden operations are not reachable. GET/HEAD are read-only, other methods need approval.
+  OAuth2 per API (`oauth`: authorization code, device code or client credentials; endpoints from the issuer or the
+  spec): every call carries the token of the user behind the chat, and a missing login is a tool result asking the
+  user to connect, never a changed tool list ([MCP](docs/MCP.md#oauth-1)).
+- **Token storage**: one `TokenStore` for every login: a file (encrypted with `JLLM_TOKEN_KEY` when there are users),
+  the OS secret store (macOS Keychain, Windows DPAPI, Linux Secret Service) for a single user, or your own
+  ([MCP](docs/MCP.md#6-token-storage)).
+- **Visibility lists**: MCP `allowList`/`denyList` (tool names) and REST `allowedPaths`/`denyPaths` (`METHOD /path`).
+  Absent allow = all, `[]` = none, `["*"]` = all; deny hides matches. Hidden tools never reach the model. Separate from the
+  `permissions` rules, which decide approval of visible tools.
 - **Built-in tools** are also there: files (confined to the working directory), shell, web search and fetch, sub-agents
   (`task`), skills.
 - All sources can be switched on and off at runtime (`/tools`, `/mcp`, `/apis` in any front end, or the `tools()` and
@@ -110,7 +121,7 @@ MCP servers and REST APIs need no code, only configuration:
 - **Isolation**: the default sandbox has none. For untrusted input set `sandbox.backend` to `docker` (CLI
   `--sandbox docker`, optionally `--docker-mode daemon`) or use your own `SandboxExecutor`.
 
-Details: [harness README](jllm-harness/README.md), [EXTENDING](docs/EXTENDING.md) (custom tools, hooks, policies,
+Details: [harness README](core/jllm-harness/README.md), [EXTENDING](docs/EXTENDING.md) (custom tools, hooks, policies,
 providers, stores), [MCP and REST](docs/MCP.md), [TOOLS](docs/TOOLS.md).
 
 ## Models
@@ -134,13 +145,13 @@ java -jar jllm-web/target/jllm-web-1.0.0.jar --provider anthropic
 ```
 
 Set `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`, `GROK_API_KEY`, `QWEN_API_KEY`) first. Embedding the library is shown above and in the
-[harness README](jllm-harness/README.md#embedding).
+[harness README](core/jllm-harness/README.md#embedding).
 
 ## Documentation
 
 | Document | Content |
 |---|---|
-| [jllm-harness](jllm-harness/README.md) | embedding, settings file, hooks, plugins, modes, context strategies, fast model |
+| [jllm-harness](core/jllm-harness/README.md) | embedding, settings file, hooks, plugins, modes, context strategies, fast model |
 | [jllm-cli](jllm-cli/README.md) | flags, directories, interactive session, slash commands, local models |
 | [jllm-pdf](docs/TOOLS.md#document-readers) / [jllm-docs](docs/TOOLS.md#document-readers) | optional `read_file` readers for pdf and docx (plugins: jar in the plugin directory, enabled under `plugins` in the settings) |
 | [jllm-js](docs/JS.md) | optional `run_js` tool: JavaScript (GraalJS, regex supported, synchronous `tools.*` calls without `await`) in a sandbox whose only view of the world is the harness tools; installing it removes `bash` (plugin: jar in the plugin directory, enabled under `plugins`) |

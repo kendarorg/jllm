@@ -266,7 +266,7 @@ cache creation), timestamps.
 
 Saves happen after the user message, after each assistant message, after each tool-result message, and when a context
 strategy reports `logChanged`. The CLI and web use `FileChatSessionStore` (chats) and `FileHistorySubAgentRunLog`
-(sub-agent runs), under `.kendhar/history/` (web: `<chatId>/.kendhar/history/`):
+(sub-agent runs), under `.jllm/history/` (web: `<chatId>/.jllm/history/`):
 
 ```
 <root>/.lock                              held by the running process

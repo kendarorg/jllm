@@ -18,11 +18,10 @@
     </licenses>
 
     <modules>
-        <module>jllm-harness</module>
-        <module>jllm-pdf</module>
-        <module>jllm-js</module>
-        <module>jllm-docs</module>
+        <module>core</module>
+        <module>plugins</module>
         <module>jllm-cli</module>
+        <module>jllm-web-commons</module>
         <module>jllm-web</module>
     </modules>
 

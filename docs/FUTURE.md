@@ -1,7 +1,8 @@
 # Future work
 
 Features jllm does not have yet, taken from the gaps in [HARNESSES-COMPARE](HARNESSES-COMPARE.md). Nothing here is
-scheduled. Each item says what it is and how it could fit the harness.
+scheduled. Each item says what it is and how it could fit the harness. Model streaming, stuck detection and
+verify-on-stop are implemented (see [HISTORY](HISTORY.md#12-loop-guards-and-streaming)).
 
 ## Messaging gateway (chat apps)
 
@@ -16,22 +17,10 @@ Talk to the agent from Telegram, Discord, Slack, WhatsApp and similar apps inste
   split to the app's message limit; messages sent during a run go to `steer` or `followUp`.
 - Best as a separate module (for example `jllm-gateway`), so the harness keeps no chat-app SDKs.
 
-## Model streaming
-
-Today a model call returns once; only turn-level events reach the front ends (SSE in `jllm-web`). Pi, OpenCode, Qwen
-Code and Hermes Agent stream text, thinking and tool-call argument deltas, with abort in mid-stream.
-
-- Add a streaming variant to `ModelClient` for the Anthropic and OpenAI-compatible clients, emitting delta events
-  (text, thinking, tool-call arguments) into the existing event sink, then assemble the same final response the loop
-  uses now.
-- Cancel must be able to stop a call in progress.
-- Keep the non-streaming path, as fallback and for the small model used for helper tasks.
-- Check the interaction with prompt caching and with thinking blocks (signatures) before changing the history format.
-
 ## Provider OAuth logins
 
 Log in to a model provider with a subscription account instead of an API key (Pi, OpenCode, Qwen Code and Hermes Agent
-do). jllm has the generic OAuth utilities and MCP OAuth (`OAuthLogin`, `TokenStore`, `/login`) but no provider login.
+do). jllm has the generic OAuth utilities, MCP and REST API OAuth (per user or shared), the `TokenStore` (file or OS secret store) and `/login`, but no provider login.
 
 - Implement `OAuthLogin` per provider, discovered through `ServiceLoader` as now, and let a provider entry in the
   settings use the stored token instead of `apiKey`, refreshing it when it expires.

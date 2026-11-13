@@ -94,7 +94,7 @@ Sub-agents, until then always read-only, became full agents:
   context, so the cache is unaffected.
 - Writable sub-agents run one after another in `edit` and `auto` mode to avoid concurrent edits to the same file.
 
-Sessions and sub-agent histories can be stored as files under `.kendhar/history`, and IDs are v7 UUIDs.
+Sessions and sub-agent histories can be stored as files under `.jllm/history`, and IDs are v7 UUIDs.
 
 ## 4. Mnemonic context and small models
 A second context strategy was added, modelled on mnemonic-proxy:
@@ -169,11 +169,74 @@ only. Not done on purpose: restoring the last `/model`.
   Code and Hermes Agent (competitor columns are from memory and unverified). The root `history.md` was removed in
   favour of this file; README links updated.
 
+## 9. Hardening review
+
+A full code review produced about 70 findings, each decided (fix, design choice, or accepted) and then fixed in
+parallel by area:
+
+- **Security:** the file-tool jail checks real paths (symlinks, Windows junctions, `.git` aliases), checkpoints and
+  backup unpacking can no longer write outside the work dir, REST tool paths are resolved before allow/deny checks,
+  project settings can only add deny rules and need a trust answer before starting stdio MCP servers, web slash
+  commands are scoped to the chat owner (admin-only for global ones), tool/MCP/skill toggles are per chat, and taint
+  from untrusted content lasts while that content is in context.
+- **Robustness:** ordered and complete event delivery, atomic writes for files, session logs and state, per-path edit
+  locks, charset and line-ending preserving edits, bounded output, fetch and read sizes, a log that always pairs
+  `tool_use` with `tool_result`, sub-agents reporting partial, refused or cancelled outcomes, MCP sources that reconnect
+  once and are then disabled, and a startup failure on tool-name collisions.
+- **Context:** fixes to compaction (summaries built from unpruned messages, the fixed part counted once, previous
+  summary kept on retry, cuts inside long turns), thinking blocks stripped after rewrites, sub-agent task and recall ids
+  kept under the mnemonic strategy, and a corrupt mnemonic state quarantined instead of failing every turn.
+- **Layout:** the per-workdir runtime directory `.kendhar` became `.jllm`, the same name as the configuration
+  directory. Existing `.kendhar` directories are not migrated.
+
+New settings: `files.maxReadBytes`, `web.fetchMaxBytes`, `sandbox.outputLogMaxBytes`. The decisions and plans are in
+the root `todo.md`.
+
+## 10. Web commons
+`jllm-web` was split in two. `jllm-web-commons` holds the chat and file API, the harness wiring and the `jllm.*`
+properties, and asks the application for `WebAuthentication`, `ChatAccess` and `HarnessIdentity`. `jllm-web` keeps the
+startup, the UI and the sample sign-in and permissions that implement them.
+
+## 11. Users and administration
+`jllm-web` became a reference implementation of a multi-user front end; `jllm-web-commons` was not touched.
+- **Real sign-in:** login and password instead of the picker. The default password was then the hex SHA-256 of the login (now the login itself);
+  stored passwords are PBKDF2 hashes. The cookie holds a random in-memory session token instead of the user id, and
+  repeated failures lock the login for a while.
+- **Administration page** for the `admin` role: users, roles and global skills. The `admin` role is fixed. A role's
+  tool list takes `*` patterns, so a whole MCP server or REST API is granted with one entry; the editor lists every
+  tool, MCP server and REST API of the harness, disabled ones too.
+- **User settings:** every user changes their password, switches off tools their role allows (never more than the
+  role) and switches skills on or off, for all their chats rather than per chat. Users write their own skills; admins
+  write global ones.
+- **Harness:** `UserPolicy` gained the user's extra skills and a filter over the settings skills; the `skill` tool
+  exists whenever a user policy resolver is set. Existing chats are not migrated.
+
+## 12. Loop guards and streaming
+A second comparison, against the harnesses in the agent-harness survey (OpenHands, Gemini CLI, Claude Code, Codex,
+Hermes Agent, mini-swe-agent), picked three gaps, planned in the root `extend.md` and then implemented.
+- **Stuck detection:** a per-run detector of repeated calls, repeated errors, A-B-A-B alternation and malformed
+  output. The first hit adds a corrective note, the second ends the run as `STUCK` (headless) or asks (interactive),
+  so a headless embedder no longer spends its whole `maxTurns` budget on a loop.
+- **Verify-on-stop:** `STOP` moves inside the loop, fires for sub-agents too, and can return `continueWith` to send
+  the agent back to work, bounded by `maxReentries` (then `UNVERIFIED`). A settings-level command hook (`mvn -q
+  test`) runs in the sandbox and makes the common case one line of configuration.
+- **Model streaming:** `ModelClient.stream` with a fallback to `complete`, Anthropic and OpenAI-compatible SSE
+  parsing that assembles a response byte-identical to the non-streamed one, `text_delta` events coalesced for SSE,
+  retry and provider fallback only before the first delta.
+
+- **API:** `HarnessConfig.Loop` (stuck and verify settings), `HookResult.continueWith`, `HookContext.stop` with agent
+  and attempt, new outcomes `STUCK` and `UNVERIFIED`, events `stuck`, `verify_failed`, `text_delta`, `thinking_delta`,
+  `text_reset`, and `outcome` in `run_finished`. The CLI and the web UI show the new events.
+
+`HARNESSES-COMPARE.md` gained the stuck-detection and verify-on-stop rows, and its jllm column lists the three
+features. Model streaming moved out of `FUTURE.md`.
+
 ## Overall direction
 - **Where it lives:** an embedded component, then a standalone library with a CLI, then a web front end.
 - **Model target:** Anthropic, then local llama.cpp/Qwen, then small models.
 - **Context management:** three-tier compaction, then opencode-style compaction, then a second strategy that never
   rewrites the log, then a budgeted one with offloading and a task list.
 - **Permissions:** one approval flag, then a mode-by-tool-kind matrix, then sub-agents inheriting the parent's
-  permissions.
+  permissions, then per-user roles narrowed by each user's own settings.
+- **Hardening:** a full review pass closing jail escapes, races and unbounded reads before adding features.
 - **Unchanged throughout:** the prompt-cache prefix must stay byte-stable.

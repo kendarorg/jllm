@@ -95,7 +95,7 @@ flowchart TD
     M --> N["AgentHarness + plugin commands registered"]
 ```
 
-`jllm-cli` Main additionally wires `CwdSandboxExecutor` (workdir = project dir, scratch under `.kendhar/scratchpad`) and `FileHistory*` stores (`.kendhar/history/<chatId>/<agentId>/messages.jsonl`).
+`jllm-cli` Main additionally wires `CwdSandboxExecutor` (workdir = project dir, scratch under `.jllm/scratchpad`) and `FileHistory*` stores (`.jllm/history/<chatId>/<agentId>/messages.jsonl`).
 
 ## 3. One user turn, end to end
 
@@ -130,7 +130,8 @@ sequenceDiagram
         loop up to maxTurns (default 40)
             L->>CM: compactIfNeeded (see section 6)
             L->>Hk: PRE_LLM (can deny)
-            L->>LLM: complete(ModelRequest)
+            L->>LLM: stream(ModelRequest, listener)
+            LLM-->>FE: text_delta (coalesced, live only)
             LLM-->>L: ModelResponse (content, stop_reason, usage)
             L->>Hk: POST_LLM
             L-->>FE: events usage, text
@@ -138,16 +139,22 @@ sequenceDiagram
                 L->>T: executeTool x N in parallel (section 4)
                 T-->>L: tool_result blocks
                 L->>L: append user msg with results, save
+                L->>L: StuckDetector.record: nudge, ask or stop (STUCK)
             else end_turn / stop_sequence
-                L->>L: return final text
+                L->>Hk: STOP (agent, answer, attempt)
+                alt a hook returned continueWith and re-entries are left
+                    L->>L: append "The stop check failed..." + message, save
+                    L-->>FE: event verify_failed
+                else
+                    L->>L: return final text (COMPLETED, or UNVERIFIED)
+                end
             end
         end
         L->>Hk: POST_AGENT
         opt mode = PLAN and answer not blank
             L-->>FE: event plan_ready
         end
-        L->>Hk: STOP
-        S-->>FE: event run_finished
+        S-->>FE: event run_finished {cancelled, outcome}
     end
 ```
 
@@ -163,6 +170,18 @@ sequenceDiagram
 | context-overflow error | `compactNow` once, retry same turn (`turn--`); second failure is an `error` event |
 | cancel | `cancelled` event, return |
 | `maxTurns` reached | interactive run: approval of type `continue` (approve = another `maxTurns`); otherwise, or when rejected, warning "Stopped after N turns" |
+
+Two more ways a run ends:
+
+- **Stuck** (`StuckDetector`, one per run of the loop, so per agent): after each round of tool results it records one
+  step (sorted `(name, hash of the canonical input, isError, hash of the result)` per call) in a ring of 8 and looks for
+  the same step 3 times in a row, the same failing call 3 times, an A-B-A-B alternation of 3 cycles, or 3 steps whose
+  calls could not run. First detection: a note is appended after the tool results and `stuck {action: nudge}` is
+  sent. Second: an interactive run asks (`approval_request` type `stuck`), a sub-agent ends `STUCK` (task status
+  `stuck`). It reads what the loop observed, not the message log, so compaction and masking do not affect it.
+- **Unverified**: a `STOP` hook vetoed the stop (`HookResult.continueWith`) more than `loop.verify.maxReentries`
+  times, or with the same message twice in a row. The re-entry message is appended at the tail, so the cache prefix
+  is unchanged.
 
 ## 4. Tool call pipeline (`AgentLoop.executeTool`)
 
@@ -358,7 +377,7 @@ Every model call in the system, who makes it, and with what:
 ```mermaid
 flowchart LR
     subgraph Calls["Call sites"]
-        C1["AgentLoop.loop<br/>complete(ModelRequest, cancelToken)<br/>tools, history, maxTokens=8192"]
+        C1["AgentLoop.loop<br/>stream(ModelRequest, cancelToken, listener)<br/>tools, history, maxTokens=8192"]
         C2["ContextManager.summaryOnPrefix<br/>complete(agent's request + summary ask)"]
         C3["ContextManager.summarizeSpan fallback<br/>simpleComplete, 3000 tokens"]
         C4["ToolSelector.chooseGroups<br/>simpleComplete, 256 tokens"]
@@ -369,7 +388,7 @@ flowchart LR
     C3 & C4 & C5 & C6 --> FASTQ["fast ModelClient if set, else main"]
     MAIN & FASTQ --> LMC["LimitedModelClient<br/>fair semaphore, maxParallel slots (default 1)"]
     LMC --> P{"provider"}
-    P --> ANT["AnthropicModelClient<br/>POST /v1/messages (non-streaming)"]
+    P --> ANT["AnthropicModelClient<br/>POST /v1/messages (SSE when streaming)"]
     P --> OAI["OpenAiCompatModelClient<br/>POST /chat/completions<br/>retry on 429 / 5xx with backoff or retry-after"]
 ```
 
@@ -381,7 +400,17 @@ Anthropic request layout (prompt-cache friendly):
 3. `messages` as is; RAG tool results (`search_local_knowledge`) are converted to `search_result` blocks when citations are on.
 4. `tool_choice` only set when non-auto or parallel tool use is disabled; forced choice is dropped if extended thinking is on.
 
-Cancel: `CancelToken` aborts the in-flight HTTP call and backoff sleeps (`ModelCancelledException`). `LimitedModelClient` waiters are interrupted by it too.
+Cancel: `CancelToken` aborts the in-flight HTTP call and backoff sleeps (`ModelCancelledException`). `LimitedModelClient` waiters are interrupted by it too. A streamed call is aborted by closing the response body.
+
+Streaming (`ModelClient.stream`, provider setting `stream`, default on; the other call sites stay non-streaming):
+the clients read server-sent events (`StreamingCall`) and rebuild the JSON a non-streamed call returns (Anthropic:
+`message_start`, `content_block_*` with `text_delta`, `thinking_delta`, `signature_delta`, `input_json_delta`,
+`citations_delta`, `message_delta`; OpenAI: `delta.content`, `delta.reasoning_content`, `delta.tool_calls[i]` by
+index, final `usage`), then parse it as before, so the stored message, the cache prefix and the stop-reason handling
+are unchanged. Retries and provider fallback happen only before the first delta; a stream that breaks after it is
+retried as a whole after `StreamListener.onReset`. Tool arguments cut off mid-JSON are kept as `_raw_arguments`.
+`AgentLoop` passes a `DeltaCoalescer` (flush every ~50 ms or 200 chars) for the main agent; sub-agents use
+`complete`.
 
 ## 9. Hooks
 
@@ -399,11 +428,11 @@ sequenceDiagram
         L->>H: PRE_TOOL (deny, rewrite input, add context)
         L->>H: POST_TOOL (add context to result)
     end
+    L->>H: STOP (once per completion attempt, main and sub-agents; continueWith = keep working)
     L->>H: POST_AGENT (observe, always, even on failure)
-    L->>H: STOP (observe, main agent only)
 ```
 
-Hooks run in registration order. The first denial stops the chain; input rewrites chain; added context is concatenated. A hook that throws is logged and skipped. Sub-agents fire `PRE/POST_AGENT` and `PRE/POST_LLM` nested inside the parent's `task` tool call, with `ctx.agent()` = type name (`main` for the main agent).
+Hooks run in registration order. The first denial stops the chain; input rewrites chain; added context and `continueWith` messages are concatenated. A hook that throws is logged and skipped. Sub-agents fire `PRE/POST_AGENT` and `PRE/POST_LLM` nested inside the parent's `task` tool call, with `ctx.agent()` = type name (`main` for the main agent).
 
 ## 10. Events, cancellation, approvals (front-end contract)
 
@@ -429,10 +458,13 @@ sequenceDiagram
         S->>S: token.cancel(), approvals.cancelAll(chatId)
         L-->>FE: cancelled
     end
-    S-->>FE: run_finished {cancelled}
+    S-->>FE: run_finished {cancelled, outcome}
 ```
 
-Event types: `run_started`, `run_queued`, `text`, `usage`, `tool_call`, `tool_result`, `approval_request`, `classifier`, `compaction`, `warning`, `error`, `cancelled`, `plan_ready`, `run_finished`.
+Event types: `run_started`, `run_queued`, `text_delta`, `thinking_delta`, `text_reset`, `text`, `usage`, `tool_call`, `tool_result`, `approval_request`, `classifier`, `compaction`, `stuck`, `verify_failed`, `warning`, `error`, `cancelled`, `plan_ready`, `run_finished`.
+
+The deltas (`text_delta`, `thinking_delta`, `text_reset`) have `seq` 0 and are not buffered: a reconnecting client is
+not replayed them and gets the final `text` instead.
 
 ## 11. Sessions and persistence
 
@@ -449,7 +481,7 @@ flowchart LR
     BASH["bash tool"] --> SE["SandboxExecutor.execute(chatId, runDir, readOnlyDir, cmd, timeout)"]
     FT["file tools"] --> JAIL["path jail: workDir(chatId)<br/>(PLAN: scratch only)"]
     SE --> L["LocalDirSandboxExecutor<br/>no isolation, process as user"]
-    SE --> CW["CwdSandboxExecutor<br/>workDir = project dir<br/>scratch = .kendhar/scratchpad"]
+    SE --> CW["CwdSandboxExecutor<br/>workDir = project dir<br/>scratch = .jllm/scratchpad"]
     SE --> DK["DockerSandboxExecutor<br/>docker run: --network none, memory/cpus/pids limits,<br/>workdir mounted, read-only in PLAN"]
 ```
 
