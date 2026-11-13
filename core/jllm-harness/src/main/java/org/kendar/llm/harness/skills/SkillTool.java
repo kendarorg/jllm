@@ -1,41 +1,77 @@
 package org.kendar.llm.harness.skills;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import org.kendar.llm.harness.settings.SkillSettings;
 import org.kendar.llm.harness.tools.HarnessTool;
 import org.kendar.llm.harness.tools.SimpleTool;
 import org.kendar.llm.harness.tools.ToolContext;
 import org.kendar.llm.harness.tools.ToolKind;
 
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Predicate;
 
 /**
  * Loads the instructions of a skill. The description lists the enabled skills, so toggling one updates it. A view
- * made by {@link #forChat} lists and loads only the skills its filter lets through (the chat's own tool set).
+ * made by {@link #forChat} lists and loads only the skills its filter lets through (the chat's own tool set and the
+ * user's policy), plus the user's own skills.
  */
 public final class SkillTool implements HarnessTool {
 
     private final SkillCatalog catalog;
     /** null = every enabled skill */
     private final Predicate<String> allowed;
+    /** the user's own skills, by name; never shadowing a catalog skill */
+    private final Map<String, SkillCatalog.Skill> extra;
 
     public SkillTool(SkillCatalog catalog) {
-        this(catalog, null);
+        this(catalog, null, Map.of());
     }
 
-    private SkillTool(SkillCatalog catalog, Predicate<String> allowed) {
+    private SkillTool(SkillCatalog catalog, Predicate<String> allowed, Map<String, SkillCatalog.Skill> extra) {
         this.catalog = catalog;
         this.allowed = allowed;
+        this.extra = extra;
     }
 
     /** The same tool restricted to the skills {@code allowed} accepts (by name). */
     public SkillTool forChat(Predicate<String> allowed) {
-        return new SkillTool(catalog, allowed);
+        return forChat(allowed, List.of());
+    }
+
+    /**
+     * The same tool restricted to the catalog skills {@code allowed} accepts, plus {@code extra} skills (the user's
+     * own). An extra skill whose file is missing, or whose name is a catalog skill, is left out.
+     */
+    public SkillTool forChat(Predicate<String> allowed, List<SkillSettings> extra) {
+        Map<String, SkillCatalog.Skill> own = new LinkedHashMap<>();
+        for (SkillSettings s : extra == null ? List.<SkillSettings>of() : extra) {
+            if (s == null || s.name() == null || s.path() == null || catalog.contains(s.name())) continue;
+            Path path = Path.of(s.path());
+            if (!Files.isRegularFile(path)) continue;
+            if (allowed != null && !allowed.test(s.name())) continue;
+            String description = s.description() != null ? s.description() : SkillCatalog.frontMatterDescription(path);
+            own.putIfAbsent(s.name(), new SkillCatalog.Skill(s.name(), description, path));
+        }
+        return new SkillTool(catalog, allowed, own);
+    }
+
+    /** Whether the harness itself has no skill (the tool then only serves users' own skills). */
+    public boolean catalogEmpty() {
+        return catalog.isEmpty();
     }
 
     /** The enabled skills this tool offers. */
     public List<SkillCatalog.Skill> offered() {
-        return catalog.enabled().stream().filter(s -> allowed == null || allowed.test(s.name())).toList();
+        List<SkillCatalog.Skill> out = new ArrayList<>(
+                catalog.enabled().stream().filter(s -> allowed == null || allowed.test(s.name())).toList());
+        out.addAll(extra.values());
+        return out;
     }
 
     @Override public String name() { return "skill"; }
@@ -62,6 +98,8 @@ public final class SkillTool implements HarnessTool {
     @Override
     public String execute(ToolContext ctx, JsonNode input) throws Exception {
         String name = input.path("name").asText();
+        SkillCatalog.Skill own = extra.get(name);
+        if (own != null) return Files.readString(own.path(), StandardCharsets.UTF_8);
         if (allowed != null && !allowed.test(name)) {
             throw new IllegalArgumentException("Skill disabled for this chat: " + name);
         }

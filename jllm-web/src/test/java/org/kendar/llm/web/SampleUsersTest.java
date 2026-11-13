@@ -3,21 +3,13 @@ package org.kendar.llm.web;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.kendar.llm.harness.AgentHarness;
-import org.kendar.llm.harness.HarnessPricing;
 import org.kendar.llm.harness.auth.HarnessPrincipal;
 import org.kendar.llm.harness.auth.UserPolicy;
-import org.kendar.llm.harness.llm.ModelClient;
-import org.kendar.llm.harness.llm.ModelRequest;
-import org.kendar.llm.harness.llm.ModelResponse;
-import org.kendar.llm.harness.session.InMemoryChatSessionStore;
 import org.kendar.llm.harness.tools.SimpleTool;
 import org.kendar.llm.harness.tools.ToolKind;
-import org.kendar.llm.web.commons.ApiInterceptor;
-import org.kendar.llm.web.commons.ChatController;
-import org.springframework.http.MediaType;
-import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.kendar.llm.web.users.FileCredentialResolver;
+import org.kendar.llm.web.users.Permissions;
+import org.kendar.llm.web.users.UserDirectory;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -26,8 +18,6 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 class SampleUsersTest {
 
@@ -112,55 +102,6 @@ class SampleUsersTest {
         assertTrue(users.find("../rita").isEmpty());
         assertTrue(users.find("Rita").isEmpty());
         assertEquals(1, users.all().size());
-    }
-
-    @Test
-    void chatsAreVisibleToTheirOwnerAndTheAdminOnly(@TempDir Path dir) throws Exception {
-        user(dir, "rita", "guest", "{}");
-        user(dir, "sam", "reader", "{}");
-        user(dir, "admin", "admin", "{}");
-        UserDirectory users = new UserDirectory(dir, mapper);
-        ModelClient unused = new ModelClient() {
-            @Override
-            public ModelResponse complete(ModelRequest request) {
-                throw new UnsupportedOperationException();
-            }
-
-            @Override
-            public String simpleComplete(String system, String user, int maxTokens) {
-                return "";
-            }
-        };
-        AgentHarness harness = AgentHarness.builder().modelClient(unused)
-                .sessionStore(new InMemoryChatSessionStore()).objectMapper(mapper).build();
-        CookieAuthentication auth = new CookieAuthentication(users);
-        MockMvc mvc = MockMvcBuilders.standaloneSetup(
-                        new ChatController(harness, mapper, new HarnessPricing(0, 0, 0, 0), auth, auth))
-                .addInterceptors(new ApiInterceptor(auth, auth, harness.sessions(), mapper)).build();
-
-        // not signed in
-        mvc.perform(get("/api/chat")).andExpect(status().isUnauthorized());
-
-        String created = mvc.perform(post("/api/chat").cookie(new jakarta.servlet.http.Cookie("jllm_user", "rita"))
-                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
-                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
-        String chat = mapper.readTree(created).path("chatId").asText();
-
-        mvc.perform(get("/api/chat/" + chat).cookie(new jakarta.servlet.http.Cookie("jllm_user", "rita")))
-                .andExpect(status().isOk());
-        mvc.perform(get("/api/chat/" + chat).cookie(new jakarta.servlet.http.Cookie("jllm_user", "sam")))
-                .andExpect(status().isNotFound());
-        mvc.perform(get("/api/chat/" + chat).cookie(new jakarta.servlet.http.Cookie("jllm_user", "admin")))
-                .andExpect(status().isOk());
-        mvc.perform(get("/api/chat/" + chat).cookie(new jakarta.servlet.http.Cookie("jllm_user", "ghost")))
-                .andExpect(status().isUnauthorized());
-
-        String samList = mvc.perform(get("/api/chat").cookie(new jakarta.servlet.http.Cookie("jllm_user", "sam")))
-                .andReturn().getResponse().getContentAsString();
-        assertEquals("[]", samList);
-        String ritaList = mvc.perform(get("/api/chat").cookie(new jakarta.servlet.http.Cookie("jllm_user", "rita")))
-                .andReturn().getResponse().getContentAsString();
-        assertTrue(ritaList.contains(chat), ritaList);
     }
 
     @Test

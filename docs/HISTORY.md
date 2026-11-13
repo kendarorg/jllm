@@ -197,12 +197,26 @@ the root `todo.md`.
 properties, and asks the application for `WebAuthentication`, `ChatAccess` and `HarnessIdentity`. `jllm-web` keeps the
 startup, the UI and the sample sign-in and permissions that implement them.
 
+## 11. Users and administration
+`jllm-web` became a reference implementation of a multi-user front end; `jllm-web-commons` was not touched.
+- **Real sign-in:** login and password instead of the picker. The default password is the hex SHA-256 of the login;
+  stored passwords are PBKDF2 hashes. The cookie holds a random in-memory session token instead of the user id, and
+  repeated failures lock the login for a while.
+- **Administration page** for the `admin` role: users, roles and global skills. The `admin` role is fixed. A role's
+  tool list takes `*` patterns, so a whole MCP server or REST API is granted with one entry; the editor lists every
+  tool, MCP server and REST API of the harness, disabled ones too.
+- **User settings:** every user changes their password, switches off tools their role allows (never more than the
+  role) and switches skills on or off, for all their chats rather than per chat. Users write their own skills; admins
+  write global ones.
+- **Harness:** `UserPolicy` gained the user's extra skills and a filter over the settings skills; the `skill` tool
+  exists whenever a user policy resolver is set. Existing chats are not migrated.
+
 ## Overall direction
 - **Where it lives:** an embedded component, then a standalone library with a CLI, then a web front end.
 - **Model target:** Anthropic, then local llama.cpp/Qwen, then small models.
 - **Context management:** three-tier compaction, then opencode-style compaction, then a second strategy that never
   rewrites the log, then a budgeted one with offloading and a task list.
 - **Permissions:** one approval flag, then a mode-by-tool-kind matrix, then sub-agents inheriting the parent's
-  permissions.
+  permissions, then per-user roles narrowed by each user's own settings.
 - **Hardening:** a full review pass closing jail escapes, races and unbounded reads before adding features.
 - **Unchanged throughout:** the prompt-cache prefix must stay byte-stable.

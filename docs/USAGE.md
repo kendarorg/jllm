@@ -309,7 +309,11 @@ String owner = h.sessions().principal(chat);                      // "alice"; re
 - MCP sessions are kept per principal. The tool list of an MCP server is discovered once, without a principal, so
   per-user tool lists are not supported yet.
 
-The `jllm-web` sample shows the wiring with a fake sign-in picker (no password, not authentication); see its README.
+- A `UserPolicy` can also carry the user's own skills and a filter over the settings skills
+  ([SKILLS](SKILLS.md#per-user-skills)).
+
+The `jllm-web` module is a reference implementation of the wiring: password sign-in, roles, per-user tool and skill
+settings and an administration page; see its README.
 
 ### Front-end contract
 

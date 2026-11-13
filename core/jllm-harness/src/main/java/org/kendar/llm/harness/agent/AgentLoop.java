@@ -583,16 +583,20 @@ public class AgentLoop {
         tools.removeIf(t -> !policy.allows(t));
         // the chat's own tool set (tools switched off for this chat only)
         tools.removeIf(t -> !sessions.chatAllowsTool(chatId, t.name()));
-        chatSkills(chatId, tools);
+        chatSkills(chatId, tools, policy);
         return tools;
     }
 
-    /** Restricts the skill tool to the skills of the chat's own set; drops it when none is left. */
-    private void chatSkills(String chatId, List<HarnessTool> tools) {
+    /**
+     * Restricts the skill tool to the skills of the chat's own set and of the user's policy, adds the user's own
+     * skills; drops it when none is left.
+     */
+    private void chatSkills(String chatId, List<HarnessTool> tools, org.kendar.llm.harness.auth.UserPolicy policy) {
         for (int i = tools.size() - 1; i >= 0; i--) {
             if (tools.get(i) instanceof org.kendar.llm.harness.skills.SkillTool st) {
-                var view = st.forChat(skill -> sessions.chatAllowsSkill(chatId, skill));
-                if (view.offered().isEmpty() && !st.offered().isEmpty()) tools.remove(i);
+                var view = st.forChat(skill -> policy.keepsSkill(skill) && sessions.chatAllowsSkill(chatId, skill),
+                        policy.skills());
+                if (view.offered().isEmpty() && (st.catalogEmpty() || !st.offered().isEmpty())) tools.remove(i);
                 else tools.set(i, view);
             }
         }
@@ -703,7 +707,7 @@ public class AgentLoop {
             org.kendar.llm.harness.auth.UserPolicy policy = identity.policyOf(chatId);
             tools.removeIf(t -> !policy.allows(t));
             tools.removeIf(t -> !sessions.chatAllowsTool(chatId, t.name()));
-            chatSkills(chatId, tools);
+            chatSkills(chatId, tools, policy);
             extra = systemPrompt + "\n\n" + roleNote;
             pinned = "chatId=" + chatId + "; subagent";
         }

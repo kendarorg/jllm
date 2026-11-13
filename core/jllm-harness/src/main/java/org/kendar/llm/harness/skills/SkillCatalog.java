@@ -52,6 +52,11 @@ public final class SkillCatalog {
         return skills.isEmpty();
     }
 
+    /** Whether a skill of that name exists, enabled or not. */
+    public boolean contains(String name) {
+        return skills.containsKey(name);
+    }
+
     public boolean isEnabled(String name) {
         return skills.containsKey(name) && !disabled.contains(name);
     }
@@ -71,7 +76,8 @@ public final class SkillCatalog {
         return Files.readString(skills.get(name).path(), StandardCharsets.UTF_8);
     }
 
-    private static String frontMatterDescription(Path path) {
+    /** The {@code description:} line of a skill file; empty when there is none. */
+    static String frontMatterDescription(Path path) {
         try {
             for (String line : Files.readAllLines(path, StandardCharsets.UTF_8)) {
                 if (line.startsWith("description:")) return line.substring("description:".length()).strip();

@@ -9,14 +9,19 @@ import ChatComposer from './components/ChatComposer.js';
 import ApprovalDialog from './components/ApprovalDialog.js';
 import FilesPanel from './components/FilesPanel.js';
 import HistoryPanel from './components/HistoryPanel.js';
+import SettingsPanel from './components/SettingsPanel.js';
+import AdminPanel from './components/AdminPanel.js';
 
 const TABS = [['chat', 'Chat'], ['files', 'Files'], ['history', 'History']];
 
 export default {
-  components: { SignIn, SessionList, ChatToolbar, MessageStream, ChatComposer, ApprovalDialog, FilesPanel, HistoryPanel },
+  components: { SignIn, SessionList, ChatToolbar, MessageStream, ChatComposer, ApprovalDialog, FilesPanel, HistoryPanel,
+    SettingsPanel, AdminPanel },
   setup() {
     // undefined: checking; null: signed out (show the picker); otherwise the signed-in user
     const me = ref(undefined);
+    // chat | settings | admin; the chat view stays mounted underneath
+    const view = ref('chat');
     onMounted(async () => {
       try {
         me.value = await api('/api/me');
@@ -29,6 +34,8 @@ export default {
       me.value = user;
       await init();
     }
+    function show(v) { view.value = view.value === v ? 'chat' : v; }
+    function onPasswordChanged() { if (me.value) me.value = { ...me.value, defaultPassword: false }; }
     async function signOut() {
       await post('/api/logout', {});
       location.reload();
@@ -40,16 +47,27 @@ export default {
       store.tab = TABS[(n + TABS.length) % TABS.length][0];
       e.preventDefault();
     }
-    return { store, TABS, onKey, continueOffer, dismissOffer, newChat, shortId, me, onSignedIn, signOut };
+    return { store, TABS, onKey, continueOffer, dismissOffer, newChat, shortId, me, onSignedIn, signOut, view, show,
+      onPasswordChanged };
   },
   template: `
   <header>
     <h1><span class="logo">⬡</span> jllm</h1>
     <span v-if="me" class="whoami">{{ me.name }} <small>({{ me.role }})</small>
+      <button v-if="view !== 'chat'" class="btn-sm" @click="view = 'chat'">Chats</button>
+      <button class="btn-sm" :class="{ active: view === 'settings' }" @click="show('settings')">Settings</button>
+      <button v-if="me.role === 'admin'" class="btn-sm" :class="{ active: view === 'admin' }"
+              @click="show('admin')">Administration</button>
       <button class="btn-sm" @click="signOut">Sign out</button></span>
   </header>
+  <div v-if="me && me.defaultPassword && view !== 'settings'" class="banner banner-info pw-banner" role="alert">
+    You are using the default password.
+    <button class="btn-sm" @click="view = 'settings'">Change it</button>
+  </div>
   <SignIn v-if="me === null" @signed-in="onSignedIn" />
-  <div v-else-if="me" class="chat-layout">
+  <SettingsPanel v-if="me && view === 'settings'" :me="me" @password-changed="onPasswordChanged" />
+  <AdminPanel v-if="me && me.role === 'admin' && view === 'admin'" :me="me" />
+  <div v-if="me" v-show="view === 'chat'" class="chat-layout">
     <SessionList />
     <section class="chat-main" aria-label="Workspace">
       <div v-if="!store.chatId && store.resumeOffer" class="resume-banner" role="alert">

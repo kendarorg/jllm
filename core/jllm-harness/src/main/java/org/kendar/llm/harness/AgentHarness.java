@@ -780,7 +780,8 @@ public final class AgentHarness {
             all.removeIf(t -> removedTools.contains(t.name()));
             all.addAll(tools);
             SkillCatalog skills = new SkillCatalog(settings.skills());
-            if (!skills.isEmpty()) all.add(new SkillTool(skills));
+            // registered even without skills: a user policy may bring the user's own (dropped per chat when none)
+            if (!skills.isEmpty() || userPolicies != null) all.add(new SkillTool(skills));
             HarnessToolRegistry registry = new HarnessToolRegistry(all, approvalPolicy, replacedTools, nameChecks);
             PermissionRules permissionRules = settings.permissionRules();
             registry.hideIf(permissionRules::hides);

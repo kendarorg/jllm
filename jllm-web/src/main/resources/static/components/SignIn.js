@@ -1,30 +1,39 @@
-import {onMounted, ref} from 'vue';
-import {api, post} from '../api.js';
+import {ref} from 'vue';
+import {post} from '../api.js';
 
-/** Sample sign-in: pick a user. No password; this is not authentication. */
+/** Sign-in with login and password. */
 export default {
   emits: ['signed-in'],
   setup(_, {emit}) {
-    const users = ref([]);
+    const id = ref('');
+    const password = ref('');
     const error = ref('');
-    onMounted(async () => {
-      try { users.value = await api('/api/users'); } catch (e) { error.value = e.message; }
-    });
-    async function pick(u) {
+    const busy = ref(false);
+    async function submit() {
+      if (!id.value || !password.value || busy.value) return;
       error.value = '';
-      try { emit('signed-in', await post('/api/login', {id: u.id})); } catch (e) { error.value = e.message; }
+      busy.value = true;
+      try {
+        emit('signed-in', await post('/api/login', {id: id.value.trim(), password: password.value}));
+      } catch (e) {
+        error.value = e.message;
+        password.value = '';
+      } finally {
+        busy.value = false;
+      }
     }
-    return {users, error, pick};
+    return {id, password, error, busy, submit};
   },
   template: `
-  <section class="signin" aria-label="Sign in">
+  <section class="signin card" aria-label="Sign in">
     <h2>Sign in</h2>
-    <p class="muted">Sample picker, no password. It shows per-user tools and credentials; it is not authentication.</p>
-    <ul class="signin-list">
-      <li v-for="u in users" :key="u.id">
-        <button class="btn-primary" @click="pick(u)">{{ u.name }} <small>({{ u.role }})</small></button>
-      </li>
-    </ul>
+    <form @submit.prevent="submit">
+      <label for="signin-id">Login</label>
+      <input id="signin-id" type="text" v-model="id" autocomplete="username" autofocus required />
+      <label for="signin-password">Password</label>
+      <input id="signin-password" type="password" v-model="password" autocomplete="current-password" required />
+      <button class="btn-primary signin-submit" type="submit" :disabled="busy || !id || !password">Sign in</button>
+    </form>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
   </section>
 `,

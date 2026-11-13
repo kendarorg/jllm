@@ -1,4 +1,4 @@
-package org.kendar.llm.web;
+package org.kendar.llm.web.auth;
 
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
@@ -6,33 +6,45 @@ import org.kendar.llm.harness.session.ChatSessionData;
 import org.kendar.llm.web.commons.ChatAccess;
 import org.kendar.llm.web.commons.WebAuthentication;
 import org.kendar.llm.web.commons.WebPrincipal;
+import org.kendar.llm.web.users.UserDirectory;
+import org.kendar.llm.web.users.WebUser;
 
 import java.util.Optional;
 import java.util.Set;
 
 /**
- * Sample sign-in by cookie (the fake picker sets it): the cookie names a user of the {@link UserDirectory}. A chat is
+ * Sign-in by session cookie: the cookie holds a token of the {@link SessionStore}, which names a user of the
+ * {@link UserDirectory}. A deleted user is signed out at once; a role change applies on the next request. A chat is
  * visible to its owner and to the admin.
  */
 public class CookieAuthentication implements WebAuthentication, ChatAccess {
 
-    public static final String COOKIE = "jllm_user";
+    public static final String COOKIE = "jllm_session";
 
-    private static final Set<String> OPEN = Set.of("/api/users", "/api/me", "/api/login", "/api/logout");
+    private static final Set<String> OPEN = Set.of("/api/me", "/api/login", "/api/logout");
 
     private final UserDirectory users;
+    private final SessionStore sessions;
 
-    public CookieAuthentication(UserDirectory users) {
+    public CookieAuthentication(UserDirectory users, SessionStore sessions) {
         this.users = users;
+        this.sessions = sessions;
     }
 
-    /** The user named by the sign-in cookie, if it is a known user. */
-    public Optional<WebUser> signedIn(HttpServletRequest request) {
+    /** The session token of the request, if it carries one. */
+    public static Optional<String> token(HttpServletRequest request) {
         if (request.getCookies() == null) return Optional.empty();
         for (Cookie c : request.getCookies()) {
-            if (COOKIE.equals(c.getName())) return users.find(c.getValue());
+            if (COOKIE.equals(c.getName()) && c.getValue() != null && !c.getValue().isBlank()) {
+                return Optional.of(c.getValue());
+            }
         }
         return Optional.empty();
+    }
+
+    /** The user of the request's live session, if it is a known user. */
+    public Optional<WebUser> signedIn(HttpServletRequest request) {
+        return token(request).flatMap(sessions::find).flatMap(users::find);
     }
 
     @Override
