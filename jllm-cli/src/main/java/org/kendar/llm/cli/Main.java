@@ -107,11 +107,15 @@ public final class Main {
         // a stdio MCP server defined only by the project file starts a local process: ask once (answer remembered)
         boolean canAsk = !a.containsKey("prompt") && System.in.available() == 0;
         HarnessSettings settings = HarnessSettings.loadLayered(
-                a.containsKey("settings") ? Path.of(a.get("settings")) : null, projectDir,
+                new org.kendar.llm.harness.settings.FileSettingsSource(
+                        a.containsKey("settings") ? Path.of(a.get("settings")) : null, projectDir),
+                projectDir, System::getenv,
                 (dir, server, cmd) -> canAsk ? askYesNo("The project settings of " + dir + " define "
                         + (server.startsWith(HarnessSettings.STOP_HOOK_TRUST_PREFIX) ? "a stop hook"
                         : "the MCP server '" + server + "'") + ", which runs the local command:\n  " + cmd
-                        + "\nRun it?") : null);
+                        + "\nRun it?") : null,
+                org.kendar.llm.harness.settings.FileProjectMcpTrust.user(),
+                org.slf4j.LoggerFactory.getLogger(Main.class)::warn);
         var promptFiles = org.kendar.llm.harness.instructions.SystemPromptFiles.load(projectDir);
         String promptReplace = a.containsKey("system-prompt-replace")
                 ? org.kendar.llm.harness.instructions.SystemPromptFiles.readFile(Path.of(a.get("system-prompt-replace")))

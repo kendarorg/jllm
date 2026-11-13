@@ -1,6 +1,7 @@
 package org.kendar.llm.harness.skills;
 
 import org.kendar.llm.harness.settings.SkillSettings;
+import org.kendar.llm.harness.settings.SkillText;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -14,12 +15,13 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
-/** The skills of a harness. A skill can be disabled at runtime; its text is read from disk on every load. */
+/** The skills of a harness. A skill can be disabled at runtime; its text is read on every load. */
 public final class SkillCatalog {
 
     private static final Logger log = LoggerFactory.getLogger(SkillCatalog.class);
 
-    public record Skill(String name, String description, Path path) {
+    /** @param text reads the instructions, on every load */
+    public record Skill(String name, String description, SkillText text) {
     }
 
     private final Map<String, Skill> skills = new LinkedHashMap<>();
@@ -34,7 +36,8 @@ public final class SkillCatalog {
                 continue;
             }
             String description = s.description() != null ? s.description() : frontMatterDescription(path);
-            if (skills.putIfAbsent(s.name(), new Skill(s.name(), description, path)) != null) {
+            if (skills.putIfAbsent(s.name(), new Skill(s.name(), description,
+                    () -> Files.readString(path, StandardCharsets.UTF_8))) != null) {
                 throw new IllegalArgumentException("Duplicate skill '" + s.name() + "'");
             }
         }
@@ -73,7 +76,7 @@ public final class SkillCatalog {
             throw new IllegalArgumentException("No enabled skill '" + name + "'. Available: "
                     + enabled().stream().map(Skill::name).toList());
         }
-        return Files.readString(skills.get(name).path(), StandardCharsets.UTF_8);
+        return skills.get(name).text().read();
     }
 
     /** The {@code description:} line of a skill file; empty when there is none. */

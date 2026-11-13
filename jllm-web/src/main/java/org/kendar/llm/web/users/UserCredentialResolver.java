@@ -1,5 +1,6 @@
 package org.kendar.llm.web.users;
 
+import org.kendar.llm.web.commons.users.UserRepository;
 import org.kendar.llm.harness.auth.CredentialResolver;
 import org.kendar.llm.harness.auth.HarnessPrincipal;
 import org.slf4j.Logger;
@@ -9,17 +10,17 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * Headers from the user's file for each call. {@code env:NAME} values are read from the environment when the call is
+ * Headers from the user's record for each call. {@code env:NAME} values are read from the environment when the call is
  * made, so a rotated secret takes effect without a restart. Literal values are not accepted: secrets stay out of the
- * users directory.
+ * user store.
  */
-public final class FileCredentialResolver implements CredentialResolver {
+public final class UserCredentialResolver implements CredentialResolver {
 
-    private static final Logger log = LoggerFactory.getLogger(FileCredentialResolver.class);
+    private static final Logger log = LoggerFactory.getLogger(UserCredentialResolver.class);
 
-    private final UserDirectory users;
+    private final UserRepository users;
 
-    public FileCredentialResolver(UserDirectory users) {
+    public UserCredentialResolver(UserRepository users) {
         this.users = users;
     }
 

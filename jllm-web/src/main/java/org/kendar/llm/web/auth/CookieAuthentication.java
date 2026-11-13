@@ -6,15 +6,15 @@ import org.kendar.llm.harness.session.ChatSessionData;
 import org.kendar.llm.web.commons.ChatAccess;
 import org.kendar.llm.web.commons.WebAuthentication;
 import org.kendar.llm.web.commons.WebPrincipal;
-import org.kendar.llm.web.users.UserDirectory;
-import org.kendar.llm.web.users.WebUser;
+import org.kendar.llm.web.commons.users.UserRepository;
+import org.kendar.llm.web.commons.users.WebUser;
 
 import java.util.Optional;
 import java.util.Set;
 
 /**
  * Sign-in by session cookie: the cookie holds a token of the {@link SessionStore}, which names a user of the
- * {@link UserDirectory}. A deleted user is signed out at once; a role change applies on the next request. A chat is
+ * {@link UserRepository}. A deleted user is signed out at once; a role change applies on the next request. A chat is
  * visible to its owner and to the admin.
  */
 public class CookieAuthentication implements WebAuthentication, ChatAccess {
@@ -23,10 +23,10 @@ public class CookieAuthentication implements WebAuthentication, ChatAccess {
 
     private static final Set<String> OPEN = Set.of("/api/me", "/api/login", "/api/logout");
 
-    private final UserDirectory users;
+    private final UserRepository users;
     private final SessionStore sessions;
 
-    public CookieAuthentication(UserDirectory users, SessionStore sessions) {
+    public CookieAuthentication(UserRepository users, SessionStore sessions) {
         this.users = users;
         this.sessions = sessions;
     }

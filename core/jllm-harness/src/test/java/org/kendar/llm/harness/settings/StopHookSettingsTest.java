@@ -31,7 +31,7 @@ class StopHookSettingsTest {
         home = tmp.resolve("home");
         project = tmp.resolve("proj");
         System.setProperty("jllm.home", home.toString());
-        trust = new ProjectMcpTrust(home.resolve(".jllm/trusted-mcp.json"));
+        trust = new FileProjectMcpTrust(home.resolve(".jllm/trusted-mcp.json"));
     }
 
     @AfterEach
@@ -45,7 +45,7 @@ class StopHookSettingsTest {
     }
 
     private HarnessSettings load(ProjectMcpTrust.Prompt prompt) {
-        return HarnessSettings.loadLayered(null, project, k -> null, prompt, trust, warnings::add);
+        return HarnessSettings.loadLayered(new FileSettingsSource(null, project), project, k -> null, prompt, trust, warnings::add);
     }
 
     @Test

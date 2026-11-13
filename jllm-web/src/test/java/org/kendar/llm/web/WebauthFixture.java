@@ -1,5 +1,8 @@
 package org.kendar.llm.web;
 
+import org.kendar.llm.web.users.FileSkillRepository;
+import org.kendar.llm.web.users.FileUserRepository;
+import org.kendar.llm.web.users.FileRoleRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.Cookie;
@@ -26,8 +29,8 @@ import org.kendar.llm.web.commons.ApiInterceptor;
 import org.kendar.llm.web.commons.ChatController;
 import org.kendar.llm.web.me.MeController;
 import org.kendar.llm.web.users.Permissions;
-import org.kendar.llm.web.users.SkillFiles;
-import org.kendar.llm.web.users.UserDirectory;
+import org.kendar.llm.web.commons.users.SkillRepository;
+import org.kendar.llm.web.commons.users.UserRepository;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
@@ -49,9 +52,9 @@ final class WebauthFixture {
     static final ObjectMapper MAPPER = new ObjectMapper();
 
     final Path root;
-    final UserDirectory users;
+    final UserRepository users;
     final Permissions permissions;
-    final SkillFiles skills;
+    final SkillRepository skills;
     final SessionStore sessions = new SessionStore();
     final LoginThrottle throttle = new LoginThrottle();
     final AgentHarness harness;
@@ -72,9 +75,9 @@ final class WebauthFixture {
         user("rita", "reader");
         user("gus", "guest");
         Path pdf = Files.writeString(root.resolve("pdf.md"), "---\ndescription: PDFs\n---\nUse pdftotext.");
-        users = new UserDirectory(root.resolve("users"), MAPPER);
-        permissions = new Permissions(root.resolve("permissions"), MAPPER);
-        skills = new SkillFiles(root);
+        users = new FileUserRepository(root.resolve("users"), MAPPER);
+        permissions = new Permissions(new FileRoleRepository(root.resolve("permissions"), MAPPER));
+        skills = new FileSkillRepository(root);
         ModelClient unused = new ModelClient() {
             @Override
             public ModelResponse complete(ModelRequest request) {

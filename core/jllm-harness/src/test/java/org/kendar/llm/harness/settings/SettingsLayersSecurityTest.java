@@ -29,7 +29,7 @@ class SettingsLayersSecurityTest {
         home = tmp.resolve("home");
         project = tmp.resolve("proj");
         System.setProperty("jllm.home", home.toString());
-        trust = new ProjectMcpTrust(home.resolve(".jllm/trusted-mcp.json"));
+        trust = new FileProjectMcpTrust(home.resolve(".jllm/trusted-mcp.json"));
     }
 
     @AfterEach
@@ -43,7 +43,7 @@ class SettingsLayersSecurityTest {
     }
 
     private HarnessSettings load(ProjectMcpTrust.Prompt prompt) {
-        return HarnessSettings.loadLayered(null, project, k -> null, prompt, trust, warnings::add);
+        return HarnessSettings.loadLayered(new FileSettingsSource(null, project), project, k -> null, prompt, trust, warnings::add);
     }
 
     @Test
@@ -123,7 +123,7 @@ class SettingsLayersSecurityTest {
         Path explicit = tmp.resolve("explicit.json");
         write(explicit, STDIO);
         write(project.resolve(".jllm/settings.json"), "{}");
-        assertEquals(2, HarnessSettings.loadLayered(explicit, project, k -> null, ProjectMcpTrust.Prompt.NONE, trust,
+        assertEquals(2, HarnessSettings.loadLayered(new FileSettingsSource(explicit, project), project, k -> null, ProjectMcpTrust.Prompt.NONE, trust,
                 warnings::add).mcpServers().size());
     }
 }

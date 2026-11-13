@@ -12,7 +12,12 @@ import org.kendar.llm.harness.session.FileChatSessionStore;
 import org.kendar.llm.harness.session.HistoryRootLock;
 import org.kendar.llm.harness.session.FileHistorySubAgentRunLog;
 import org.kendar.llm.harness.session.InMemorySubAgentRunLog;
+import org.kendar.llm.harness.settings.FileProjectMcpTrust;
+import org.kendar.llm.harness.settings.FileSettingsSource;
 import org.kendar.llm.harness.settings.HarnessSettings;
+import org.kendar.llm.harness.settings.ProjectMcpTrust;
+import org.kendar.llm.harness.settings.SettingsSource;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -38,12 +43,19 @@ public class HarnessConfiguration {
 
     @Bean
     public AgentHarness agentHarness(JllmProperties p, ModelClient modelClient, HarnessPricing pricing,
-                                     ObjectMapper mapper, HarnessIdentity identity) {
+                                     ObjectMapper mapper, HarnessIdentity identity,
+                                     ObjectProvider<SettingsSource> settingsSource,
+                                     ObjectProvider<ProjectMcpTrust> projectTrust) {
         String settingsFile = JllmProperties.blankToNull(p.settings());
         Path projectDir = Path.of(p.workdir() == null ? "" : p.workdir()).toAbsolutePath().normalize();
-        // global ~/.jllm/settings.json, then project .jllm/settings.json, then the settings file; later wins
-        HarnessSettings settings = HarnessSettings.loadLayered(settingsFile == null ? null : Path.of(settingsFile),
-                projectDir);
+        // default: global ~/.jllm/settings.json, then project .jllm/settings.json, then the settings file; later wins.
+        // An application keeping the layers elsewhere (a database) supplies a SettingsSource bean, and where the trust
+        // answers are remembered with a ProjectMcpTrust bean.
+        SettingsSource source = settingsSource.getIfAvailable(() ->
+                new FileSettingsSource(settingsFile == null ? null : Path.of(settingsFile), projectDir));
+        HarnessSettings settings = HarnessSettings.loadLayered(source, projectDir, System::getenv,
+                ProjectMcpTrust.Prompt.NONE, projectTrust.getIfAvailable(FileProjectMcpTrust::user),
+                org.slf4j.LoggerFactory.getLogger(HarnessConfiguration.class)::warn);
         var promptFiles = org.kendar.llm.harness.instructions.SystemPromptFiles.load(projectDir);
         String promptReplace = JllmProperties.blankToNull(p.systemPromptReplace()) != null
                 ? org.kendar.llm.harness.instructions.SystemPromptFiles.readFile(Path.of(p.systemPromptReplace()))
@@ -102,6 +114,7 @@ public class HarnessConfiguration {
                 .userPolicyResolver(identity.policies())
                 .principalDirectory(identity.principals())
                 .tokenStoreDir(identity.tokenDir())
+                .tokenStore(identity.tokenStore())
                 .discoverPlugins()
                 .build();
         harness.enforceChatRetention(settings.chatRetentionLimit(), null);

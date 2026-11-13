@@ -42,4 +42,12 @@ public interface HarnessIdentity {
     default java.nio.file.Path tokenDir() {
         return null;
     }
+
+    /**
+     * Where the users' OAuth tokens are kept (e.g. a database); null = the store the {@code tokenStore} settings
+     * describe, with {@link #tokenDir()} as default directory.
+     */
+    default org.kendar.llm.harness.auth.TokenStore tokenStore() {
+        return null;
+    }
 }

@@ -2,8 +2,8 @@
   <configuration default="false" name="Web Cubi" type="Application" factoryName="Application">
     <option name="MAIN_CLASS_NAME" value="org.kendar.llm.web.JllmWebApplication" />
     <module name="jllm-web" />
-    <option name="PROGRAM_PARAMETERS" value="--jllm.webauth-dir=$PROJECT_DIR$/webauth --jllm.context-strategy=compaction --jllm.small-model=true --jllm.provider=llamacpp --jllm.model=qwen-local --jllm.base-url=http://192.168.1.96:17001/v1 --jllm.api-key=none --jllm.context-tokens=120000 --jllm.plugin-dir=$PROJECT_DIR$/target/plugins --jllm.plugins.pdf.enabled=true --jllm.plugins.docs.enabled=true --jllm.plugins.js.enabled=true" />
-    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/tmp" />
+    <option name="PROGRAM_PARAMETERS" value="--jllm.webauth-dir=$PROJECT_DIR$/runConfig/webauth --jllm.context-strategy=compaction --jllm.small-model=true --jllm.provider=llamacpp --jllm.model=qwen-local --jllm.base-url=http://192.168.1.96:17001/v1 --jllm.api-key=none --jllm.context-tokens=120000 --jllm.plugin-dir=$PROJECT_DIR$/target/plugins --jllm.plugins.pdf.enabled=true --jllm.plugins.docs.enabled=true --jllm.plugins.js.enabled=true" />
+    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/runConfig/tmp" />
     <method v="2">
       <option name="Make" enabled="true" />
     </method>
