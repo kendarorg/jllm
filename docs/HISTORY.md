@@ -211,9 +211,9 @@ startup, the UI and the sample sign-in and permissions that implement them.
 - **Harness:** `UserPolicy` gained the user's extra skills and a filter over the settings skills; the `skill` tool
   exists whenever a user policy resolver is set. Existing chats are not migrated.
 
-## 12. Loop guards and streaming (planned)
+## 12. Loop guards and streaming
 A second comparison, against the harnesses in the agent-harness survey (OpenHands, Gemini CLI, Claude Code, Codex,
-Hermes Agent, mini-swe-agent), picked three gaps. The plan is in the root `extend.md`; nothing is implemented yet.
+Hermes Agent, mini-swe-agent), picked three gaps, planned in the root `extend.md` and then implemented.
 - **Stuck detection:** a per-run detector of repeated calls, repeated errors, A-B-A-B alternation and malformed
   output. The first hit adds a corrective note, the second ends the run as `STUCK` (headless) or asks (interactive),
   so a headless embedder no longer spends its whole `maxTurns` budget on a loop.
@@ -224,8 +224,12 @@ Hermes Agent, mini-swe-agent), picked three gaps. The plan is in the root `exten
   parsing that assembles a response byte-identical to the non-streamed one, `text_delta` events coalesced for SSE,
   retry and provider fallback only before the first delta.
 
-`HARNESSES-COMPARE.md` gained the stuck-detection and verify-on-stop rows; the three items are marked planned in the
-jllm column. Model streaming moved from `FUTURE.md` to the plan.
+- **API:** `HarnessConfig.Loop` (stuck and verify settings), `HookResult.continueWith`, `HookContext.stop` with agent
+  and attempt, new outcomes `STUCK` and `UNVERIFIED`, events `stuck`, `verify_failed`, `text_delta`, `thinking_delta`,
+  `text_reset`, and `outcome` in `run_finished`. The CLI and the web UI show the new events.
+
+`HARNESSES-COMPARE.md` gained the stuck-detection and verify-on-stop rows, and its jllm column lists the three
+features. Model streaming moved out of `FUTURE.md`.
 
 ## Overall direction
 - **Where it lives:** an embedded component, then a standalone library with a CLI, then a web front end.

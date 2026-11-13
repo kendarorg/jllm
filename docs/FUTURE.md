@@ -2,7 +2,7 @@
 
 Features jllm does not have yet, taken from the gaps in [HARNESSES-COMPARE](HARNESSES-COMPARE.md). Nothing here is
 scheduled. Each item says what it is and how it could fit the harness. Model streaming, stuck detection and
-verify-on-stop are planned and have moved to [extend.md](../extend.md).
+verify-on-stop are implemented (see [HISTORY](HISTORY.md#12-loop-guards-and-streaming)).
 
 ## Messaging gateway (chat apps)
 
