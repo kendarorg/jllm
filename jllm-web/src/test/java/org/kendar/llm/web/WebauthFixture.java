@@ -24,7 +24,8 @@ import org.kendar.llm.web.admin.ToolCatalogView;
 import org.kendar.llm.web.auth.AuthController;
 import org.kendar.llm.web.auth.CookieAuthentication;
 import org.kendar.llm.web.auth.LoginThrottle;
-import org.kendar.llm.web.auth.SessionStore;
+import org.kendar.llm.web.auth.InMemoryLoginSessionRepository;
+import org.kendar.llm.web.commons.users.LoginSessionRepository;
 import org.kendar.llm.web.commons.ApiInterceptor;
 import org.kendar.llm.web.commons.ChatController;
 import org.kendar.llm.web.me.MeController;
@@ -55,7 +56,7 @@ final class WebauthFixture {
     final UserRepository users;
     final Permissions permissions;
     final SkillRepository skills;
-    final SessionStore sessions = new SessionStore();
+    final LoginSessionRepository sessions = new InMemoryLoginSessionRepository();
     final LoginThrottle throttle = new LoginThrottle();
     final AgentHarness harness;
     final MockMvc mvc;

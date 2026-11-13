@@ -1,5 +1,6 @@
 package org.kendar.llm.web.auth;
 
+import org.kendar.llm.web.commons.users.LoginSessionRepository;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import org.kendar.llm.harness.session.ChatSessionData;
@@ -13,7 +14,7 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * Sign-in by session cookie: the cookie holds a token of the {@link SessionStore}, which names a user of the
+ * Sign-in by session cookie: the cookie holds a token of the {@link LoginSessionRepository}, which names a user of the
  * {@link UserRepository}. A deleted user is signed out at once; a role change applies on the next request. A chat is
  * visible to its owner and to the admin.
  */
@@ -24,9 +25,9 @@ public class CookieAuthentication implements WebAuthentication, ChatAccess {
     private static final Set<String> OPEN = Set.of("/api/me", "/api/login", "/api/logout");
 
     private final UserRepository users;
-    private final SessionStore sessions;
+    private final LoginSessionRepository sessions;
 
-    public CookieAuthentication(UserRepository users, SessionStore sessions) {
+    public CookieAuthentication(UserRepository users, LoginSessionRepository sessions) {
         this.users = users;
         this.sessions = sessions;
     }

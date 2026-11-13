@@ -11,7 +11,7 @@ import org.kendar.llm.web.admin.ToolCatalogView;
 import org.kendar.llm.web.auth.CookieAuthentication;
 import org.kendar.llm.web.auth.LoginThrottle;
 import org.kendar.llm.web.auth.PasswordHasher;
-import org.kendar.llm.web.auth.SessionStore;
+import org.kendar.llm.web.commons.users.LoginSessionRepository;
 import org.kendar.llm.web.commons.WebPrincipal;
 import org.kendar.llm.web.users.Permissions;
 import org.kendar.llm.web.commons.users.Role;
@@ -36,12 +36,12 @@ public class MeController {
     private final UserRepository users;
     private final Permissions permissions;
     private final SkillRepository skills;
-    private final SessionStore sessions;
+    private final LoginSessionRepository sessions;
     private final LoginThrottle throttle;
     private final AgentHarness harness;
     private final ToolCatalogView catalog;
 
-    public MeController(UserRepository users, Permissions permissions, SkillRepository skills, SessionStore sessions,
+    public MeController(UserRepository users, Permissions permissions, SkillRepository skills, LoginSessionRepository sessions,
                         LoginThrottle throttle, AgentHarness harness, ToolCatalogView catalog) {
         this.users = users;
         this.permissions = permissions;

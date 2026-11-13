@@ -1,21 +1,17 @@
 package org.kendar.llm.web.auth;
 
+import org.kendar.llm.web.commons.users.LoginSessionRepository;
 import java.security.SecureRandom;
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * Sign-in sessions, in memory: a random token (the cookie value) names a user id until it expires (sliding) or is
- * revoked. A restart signs everybody out.
- */
-public final class SessionStore {
+/** The {@link LoginSessionRepository} in memory: a restart signs everybody out. */
+public final class InMemoryLoginSessionRepository implements LoginSessionRepository {
 
-    public static final Duration TTL = Duration.ofDays(7);
     private static final SecureRandom RANDOM = new SecureRandom();
 
     private record Session(String userId, Instant expiresAt) {
@@ -24,14 +20,15 @@ public final class SessionStore {
     private final Map<String, Session> sessions = new ConcurrentHashMap<>();
     private final Clock clock;
 
-    public SessionStore() {
+    public InMemoryLoginSessionRepository() {
         this(Clock.systemUTC());
     }
 
-    public SessionStore(Clock clock) {
+    public InMemoryLoginSessionRepository(Clock clock) {
         this.clock = clock;
     }
 
+    @Override
     public String create(String userId) {
         byte[] b = new byte[32];
         RANDOM.nextBytes(b);
@@ -40,7 +37,7 @@ public final class SessionStore {
         return token;
     }
 
-    /** The user id of a live session; extends it. */
+    @Override
     public Optional<String> find(String token) {
         if (token == null) return Optional.empty();
         Session s = sessions.get(token);
@@ -54,11 +51,12 @@ public final class SessionStore {
         return Optional.of(s.userId());
     }
 
+    @Override
     public void revoke(String token) {
         if (token != null) sessions.remove(token);
     }
 
-    /** Signs a user out everywhere, except the session {@code keep} (null = none kept). */
+    @Override
     public void revokeUser(String userId, String keep) {
         sessions.entrySet().removeIf(e -> e.getValue().userId().equals(userId) && !e.getKey().equals(keep));
     }

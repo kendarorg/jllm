@@ -1,5 +1,6 @@
 package org.kendar.llm.web.auth;
 
+import org.kendar.llm.web.commons.users.LoginSessionRepository;
 import jakarta.servlet.http.HttpServletRequest;
 import org.kendar.llm.web.Api;
 import org.kendar.llm.web.commons.users.UserRepository;
@@ -14,16 +15,16 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 
-/** Sign-in with login and password; the session cookie names a {@link SessionStore} session. */
+/** Sign-in with login and password; the session cookie names a {@link LoginSessionRepository} session. */
 @RestController
 public class AuthController {
 
     private final UserRepository users;
     private final CookieAuthentication authentication;
-    private final SessionStore sessions;
+    private final LoginSessionRepository sessions;
     private final LoginThrottle throttle;
 
-    public AuthController(UserRepository users, CookieAuthentication authentication, SessionStore sessions,
+    public AuthController(UserRepository users, CookieAuthentication authentication, LoginSessionRepository sessions,
                           LoginThrottle throttle) {
         this.users = users;
         this.authentication = authentication;
@@ -69,7 +70,7 @@ public class AuthController {
         throttle.success(addressKey);
         String token = sessions.create(user.get().id());
         return ResponseEntity.ok()
-                .header(HttpHeaders.SET_COOKIE, cookie(token, SessionStore.TTL.toSeconds(), request).toString())
+                .header(HttpHeaders.SET_COOKIE, cookie(token, LoginSessionRepository.TTL.toSeconds(), request).toString())
                 .body(visible(user.get()));
     }
 

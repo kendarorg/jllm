@@ -8,7 +8,8 @@ import org.kendar.llm.harness.auth.UserPolicyResolver;
 import org.kendar.llm.web.admin.ToolCatalogView;
 import org.kendar.llm.web.auth.CookieAuthentication;
 import org.kendar.llm.web.auth.LoginThrottle;
-import org.kendar.llm.web.auth.SessionStore;
+import org.kendar.llm.web.auth.InMemoryLoginSessionRepository;
+import org.kendar.llm.web.commons.users.LoginSessionRepository;
 import org.kendar.llm.web.commons.HarnessIdentity;
 import org.kendar.llm.web.commons.users.RoleRepository;
 import org.kendar.llm.web.commons.users.SkillRepository;
@@ -33,8 +34,8 @@ import java.util.function.Function;
 /**
  * Sign-in, users, roles and skills of the reference implementation. With {@code jllm.store=file} (the default) they
  * are kept under {@code jllm.webauth-dir} (default {@code webauth}, relative to the start folder); another store
- * supplies its own {@link UserRepository}, {@link RoleRepository} and {@link SkillRepository} beans. Supplies the
- * authentication and authorization the common web API needs.
+ * supplies its own {@link UserRepository}, {@link RoleRepository}, {@link SkillRepository} and
+ * {@link LoginSessionRepository} beans. Supplies the authentication and authorization the common web API needs.
  */
 @Configuration
 public class WebAuthConfiguration {
@@ -75,9 +76,11 @@ public class WebAuthConfiguration {
         return new Permissions(roles);
     }
 
+    /** Sign-in sessions in memory. */
     @Bean
-    public SessionStore sessionStore() {
-        return new SessionStore();
+    @ConditionalOnProperty(name = "jllm.store", havingValue = "file", matchIfMissing = true)
+    public LoginSessionRepository loginSessionRepository() {
+        return new InMemoryLoginSessionRepository();
     }
 
     @Bean
@@ -87,7 +90,7 @@ public class WebAuthConfiguration {
 
     /** Both the {@code WebAuthentication} and the {@code ChatAccess} of the common API. */
     @Bean
-    public CookieAuthentication cookieAuthentication(UserRepository users, SessionStore sessions) {
+    public CookieAuthentication cookieAuthentication(UserRepository users, LoginSessionRepository sessions) {
         return new CookieAuthentication(users, sessions);
     }
 
