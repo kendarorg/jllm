@@ -110,7 +110,7 @@ public interface Hook { HookResult run(HookContext ctx) throws Exception; }
 | `PRE_TOOL` | before the permission check | `tool`, `input` | deny, rewrite input, add context to the result |
 | `POST_TOOL` | after the tool ran | `tool`, `input`, `output`, `isError`, `durationMs` | add context to the result |
 | `POST_AGENT` | agent end, also on failure | `agent`, `text` (answer or error), `isError` | observe |
-| `STOP` | end of a main-agent turn | `text` (final answer) | observe |
+| `STOP` | an agent (main or sub-agent) is about to finish; once per attempt; not in plan mode or on cancel | `agent` (`main` or the sub-agent label `"<type> #<n>"`), `text` (final answer), `attempt` (1, 2, ...) | veto with `HookResult.continueWith(message)`: the agent is told the message and keeps working |
 
 ```mermaid
 sequenceDiagram
@@ -130,13 +130,22 @@ sequenceDiagram
             L->>H: POST_TOOL
         end
     end
+    L->>H: STOP (main; again after each continueWith re-entry)
     L->>H: POST_AGENT (main)
-    L->>H: STOP
 ```
 
 Chain semantics (`Hooks.run`): hooks run in registration order; the first denial stops the chain; input rewrites
-chain (each hook sees the previous rewrite); added context is joined with newlines; a hook that throws is logged and
-skipped. A `PRE_TOOL` denial is reported to the model as `Denied by a hook: <reason>`.
+chain (each hook sees the previous rewrite); added context is joined with newlines, `continueWith` messages with blank
+lines; a hook that throws is logged and skipped.
+
+**Verify on stop.** A `STOP` hook that returns `HookResult.continueWith(message)` keeps the agent working: the loop
+appends "The stop check failed. Fix the problem and finish again." and the message as a user message, sends
+`verify_failed`, and calls the model again. After `loop.verify.maxReentries` (default 3) re-entries, or the same
+message twice in a row, the run ends `UNVERIFIED` (a sub-agent reports status `unverified`). Existing `STOP` hooks
+that assumed the main agent should check `ctx.agent()`. A test run needs no code: `hooks.stop` in the settings
+([USAGE](USAGE.md#verify-on-stop)) registers a `CommandStopHook`. An LLM judge is a plugin `STOP` hook that asks the
+fast model and returns `continueWith` with its objection. `AgentLoop.changedInRun(chatId, agent)` tells a hook
+whether a tool that changes things ran in the run. A `PRE_TOOL` denial is reported to the model as `Denied by a hook: <reason>`.
 
 ```java
 builder.beforeToolCall(ctx -> ctx.tool().equals("bash") && ctx.input().path("command").asText().contains("rm -rf")

@@ -22,6 +22,12 @@ public class AgentService {
 
     private static final Logger log = LoggerFactory.getLogger(AgentService.class);
     private static final int MAX_BUFFERED_EVENTS = 2000;
+    /**
+     * Streaming deltas: delivered live with seq 0, never buffered, so a reconnecting client is not replayed thousands
+     * of pieces; it gets the final {@code text} event instead.
+     */
+    public static final java.util.Set<String> TRANSIENT_EVENTS = java.util.Set.of("text_delta", "thinking_delta",
+            "text_reset");
 
     public static class RunAlreadyActiveException extends RuntimeException {
         public RunAlreadyActiveException(String chatId) {
@@ -139,6 +145,7 @@ public class AgentService {
         EventSink sink = (type, data) -> publish(run, type, data);
         sink.emit("run_started", mapper.createObjectNode().put("text", userText));
         boolean locked = false;
+        AgentLoop.Outcome outcome = AgentLoop.Outcome.FAILED;
         try {
             locked = acquireRunSlot(chatId, run, sink);
             if (run.token.isCancelled()) return;
@@ -155,7 +162,7 @@ public class AgentService {
                 }
             };
             turnStarted(chatId, sink, userText);
-            loop.run(chatId, userText, sink, run.token, inbox);
+            outcome = loop.run(chatId, userText, sink, run.token, inbox);
             // a message queued just as the loop finished starts the next turn instead of being lost
             while (!run.token.isCancelled()) {
                 String next;
@@ -169,10 +176,11 @@ public class AgentService {
                 }
                 sink.emit("steer_applied", mapper.createObjectNode().put("text", next));
                 turnStarted(chatId, sink, next);
-                loop.run(chatId, next, sink, run.token, inbox);
+                outcome = loop.run(chatId, next, sink, run.token, inbox);
             }
         } catch (Throwable t) {
             log.error("Agent run failed for chat {}", chatId, t);
+            outcome = AgentLoop.Outcome.FAILED;
             sink.emit("error", mapper.createObjectNode().put("message", String.valueOf(t.getMessage())));
         } finally {
             if (locked) runSlot.release();
@@ -180,7 +188,10 @@ public class AgentService {
             // the run lock, so a new run's start() cannot clear the buffer between the two
             synchronized (run) {
                 run.running = false;
-                publish(run, "run_finished", mapper.createObjectNode().put("cancelled", run.cancelRequested));
+                // outcome: how the last turn ended (completed, stuck, unverified, max_turns, ...), for embedders
+                publish(run, "run_finished", mapper.createObjectNode().put("cancelled", run.cancelRequested)
+                        .put("outcome", (run.cancelRequested ? AgentLoop.Outcome.CANCELLED : outcome).name()
+                                .toLowerCase(java.util.Locale.ROOT)));
             }
         }
     }
@@ -225,6 +236,18 @@ public class AgentService {
     private void publish(ChatRun run, String type, JsonNode data) {
         AgentEvent ev;
         List<Consumer<AgentEvent>> targets;
+        if (TRANSIENT_EVENTS.contains(type)) {
+            ev = new AgentEvent(0, type, data);
+            for (Consumer<AgentEvent> l : run.listeners) {
+                try {
+                    if (l instanceof OrderedListener o) o.acceptTransient(ev);
+                    else l.accept(ev);
+                } catch (RuntimeException e) {
+                    run.listeners.remove(l);
+                }
+            }
+            return;
+        }
         synchronized (run.events) {
             ev = new AgentEvent(run.nextSeq++, type, data);
             run.events.add(ev);
@@ -254,6 +277,11 @@ public class AgentService {
         OrderedListener(Consumer<AgentEvent> target, long next) {
             this.target = target;
             this.next = next;
+        }
+
+        /** A streaming delta (seq 0): delivered at once, outside the seq order. */
+        synchronized void acceptTransient(AgentEvent ev) {
+            target.accept(ev);
         }
 
         @Override

@@ -29,7 +29,8 @@ public final class Hooks {
 
     /**
      * Runs the hooks of the event. The first denial wins and stops the chain; input rewrites are applied in
-     * sequence (each hook sees the previous result); added context is concatenated.
+     * sequence (each hook sees the previous result); added context and {@code continueWith} messages of every hook are
+     * joined.
      */
     public HookResult run(HookContext ctx) {
         List<Hook> list = hooks.get(ctx.event());
@@ -37,11 +38,12 @@ public final class Hooks {
         JsonNode input = ctx.input();
         boolean modified = false;
         List<String> context = new ArrayList<>();
+        List<String> again = new ArrayList<>();
         for (Hook h : list) {
             HookResult r;
             try {
                 r = h.run(new HookContext(ctx.event(), ctx.chatId(), ctx.text(), ctx.tool(), input, ctx.output(),
-                        ctx.isError(), ctx.agent(), ctx.durationMs(), ctx.usage(), ctx.parent()));
+                        ctx.isError(), ctx.agent(), ctx.durationMs(), ctx.usage(), ctx.parent(), ctx.attempt()));
             } catch (Exception e) {
                 log.warn("Hook for {} failed and was ignored: {}", ctx.event(), e.toString());
                 continue;
@@ -53,7 +55,9 @@ public final class Hooks {
                 modified = true;
             }
             if (r.addedContext() != null && !r.addedContext().isBlank()) context.add(r.addedContext());
+            if (r.continueWith() != null) again.add(r.continueWith());
         }
-        return new HookResult(null, modified ? input : null, context.isEmpty() ? null : String.join("\n", context));
+        return new HookResult(null, modified ? input : null, context.isEmpty() ? null : String.join("\n", context),
+                again.isEmpty() ? null : String.join("\n\n", again));
     }
 }

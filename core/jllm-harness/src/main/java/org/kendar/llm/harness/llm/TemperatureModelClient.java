@@ -27,6 +27,11 @@ public final class TemperatureModelClient implements ModelClient {
     }
 
     @Override
+    public ModelResponse stream(ModelRequest request, CancelToken cancel, StreamListener listener) {
+        return delegate.stream(apply(request), cancel, listener);
+    }
+
+    @Override
     public String simpleComplete(String system, String user, int maxTokens) {
         return delegate.simpleComplete(system, user, maxTokens);
     }

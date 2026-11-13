@@ -40,6 +40,11 @@ public final class ModelSwitch implements ModelClient {
     }
 
     @Override
+    public ModelResponse stream(ModelRequest request, CancelToken cancel, StreamListener listener) {
+        return current.stream(request, cancel, listener);
+    }
+
+    @Override
     public String simpleComplete(String system, String user, int maxTokens) {
         return current.simpleComplete(system, user, maxTokens);
     }

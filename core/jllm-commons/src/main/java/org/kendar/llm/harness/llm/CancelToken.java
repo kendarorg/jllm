@@ -113,8 +113,23 @@ public class CancelToken implements BooleanSupplier {
 
     /** Sends the request asynchronously and aborts it (closing the connection) if this token is cancelled. */
     public HttpResponse<String> send(HttpClient http, HttpRequest request) throws IOException, InterruptedException {
+        return send(http, request, HttpResponse.BodyHandlers.ofString());
+    }
+
+    /**
+     * As {@link #send(HttpClient, HttpRequest)} for a streamed body: returns once the headers are in. The caller reads
+     * the stream and closes it; to abort the read on cancel it registers {@link #onCancel} with a hook that closes
+     * the stream.
+     */
+    public HttpResponse<java.io.InputStream> sendStreaming(HttpClient http, HttpRequest request)
+            throws IOException, InterruptedException {
+        return send(http, request, HttpResponse.BodyHandlers.ofInputStream());
+    }
+
+    private <T> HttpResponse<T> send(HttpClient http, HttpRequest request, HttpResponse.BodyHandler<T> handler)
+            throws IOException, InterruptedException {
         if (cancelled) throw new ModelCancelledException();
-        CompletableFuture<HttpResponse<String>> f = http.sendAsync(request, HttpResponse.BodyHandlers.ofString());
+        CompletableFuture<HttpResponse<T>> f = http.sendAsync(request, handler);
         Runnable unregister = onCancel(() -> f.cancel(true));
         try {
             return f.get();

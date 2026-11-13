@@ -836,6 +836,16 @@ public final class AgentHarness {
             loop.builtinFileTools(fileTools);
             loop.identity(identity);
             ref[0] = loop;
+            // verify-on-stop from the settings: after the hooks added in code and by plugins
+            if (!settings.stopHooks().isEmpty()) {
+                var sanitizer = new org.kendar.llm.harness.safety.ToolOutputSanitizer(
+                        org.kendar.llm.harness.safety.ToolOutputSanitizer.Mode.parse(config.output().sanitize()),
+                        config.output().extraPatterns());
+                for (HarnessSettings.StopHook h : settings.stopHooks()) {
+                    hooks.add(HookEvent.STOP, new org.kendar.llm.harness.hooks.CommandStopHook(h, box,
+                            loop::changedInRun, sanitizer));
+                }
+            }
             if (!inputValidators.isEmpty() || !defaultInputValidator) {
                 List<org.kendar.llm.harness.tools.ToolInputValidator> chain = new ArrayList<>();
                 if (defaultInputValidator) chain.add(new org.kendar.llm.harness.tools.JsonSchemaToolInputValidator());

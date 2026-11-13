@@ -108,8 +108,10 @@ public final class Main {
         boolean canAsk = !a.containsKey("prompt") && System.in.available() == 0;
         HarnessSettings settings = HarnessSettings.loadLayered(
                 a.containsKey("settings") ? Path.of(a.get("settings")) : null, projectDir,
-                (dir, server, cmd) -> canAsk ? askYesNo("The project settings of " + dir + " define the MCP server '"
-                        + server + "', which runs the local command:\n  " + cmd + "\nRun it?") : null);
+                (dir, server, cmd) -> canAsk ? askYesNo("The project settings of " + dir + " define "
+                        + (server.startsWith(HarnessSettings.STOP_HOOK_TRUST_PREFIX) ? "a stop hook"
+                        : "the MCP server '" + server + "'") + ", which runs the local command:\n  " + cmd
+                        + "\nRun it?") : null);
         var promptFiles = org.kendar.llm.harness.instructions.SystemPromptFiles.load(projectDir);
         String promptReplace = a.containsKey("system-prompt-replace")
                 ? org.kendar.llm.harness.instructions.SystemPromptFiles.readFile(Path.of(a.get("system-prompt-replace")))
@@ -582,6 +584,14 @@ public final class Main {
         }
         String writeDir = Renderer.clean(d.path("writeDir").asText(""));
         String host = Renderer.clean(d.path("host").asText());
+        if ("stuck".equals(d.path("type").asText())) {
+            ask("Let the agent continue? [y/N] ");
+            String c = answer(in);
+            if (c == null) return;
+            harness.resolveApproval(chatId, id, !c.equals(EOF) && c.strip().toLowerCase().startsWith("y"), null,
+                    false, false);
+            return;
+        }
         if ("insecure_cert".equals(d.path("type").asText())) {
             ask("Continue without checking the certificate of " + host + " (this call only)? [y/N] ");
             String c = answer(in);

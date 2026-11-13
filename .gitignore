@@ -45,4 +45,9 @@ build/
 .kendhar/
 node_modules/
 /jllm-web/tmp/
-todo.md
+/*.md
+!/README.md
+!/LICENSE*
+!/NOTICE*
+!/CHANGELOG.md
+!/CONTRIBUTING.md

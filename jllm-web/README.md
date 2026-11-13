@@ -154,9 +154,14 @@ All paths are under `/api/chat`. Errors are `{"error": "..."}`.
 `GET /api/chat/{id}/events?after=<seq>` replays the buffered events with `seq` greater than `after`, then streams new
 ones. Each SSE message has `id` = `seq`, `event` = the event type and the event JSON as data. A reconnecting client
 passes the last `seq` it saw and gets no gap and no duplicate; `GET /api/chat/{id}` returns `lastSeq` for the first
-subscription. The event types and their data are the harness ones (`run_started`, `text`, `tool_call`, `tool_result`,
-`approval_request`, `usage`, `compaction`, `warning`, `error`, `cancelled`, `plan_ready`, `run_finished`): see the
-[front-end contract](../docs/USAGE.md#front-end-contract).
+subscription. The event types and their data are the harness ones (`run_started`, `text_delta`, `text_reset`, `text`,
+`tool_call`, `tool_result`, `approval_request`, `usage`, `compaction`, `stuck`, `verify_failed`, `warning`, `error`,
+`cancelled`, `plan_ready`, `run_finished`): see the [front-end contract](../docs/USAGE.md#front-end-contract).
+
+Streaming: `text_delta` (and `thinking_delta`, `text_reset`) are sent without an SSE `id` and with `seq` 0: they are
+live only and never replayed, so they must not move the client's last `seq`. The UI appends them to an open
+assistant bubble; the final `text` event replaces its content and closes it, `text_reset` drops it, a cancel or an
+error leaves it marked as cut off.
 
 Typical turn: `POST /messages` → events until `run_finished`; on `approval_request` answer with
 `POST /approvals/{id}`.

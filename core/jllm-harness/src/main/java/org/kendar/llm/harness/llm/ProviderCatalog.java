@@ -56,7 +56,7 @@ public final class ProviderCatalog {
                 settings.model(), settings.maxTokens() != null ? settings.maxTokens() : defaultMaxTokens,
                 settings.maxRetries(), settings.timeoutSeconds(), settings.requireApiKey(),
                 settings.useMaxCompletionTokens(), settings.contextTokens(), settings.smallModel(),
-                settings.temperature(), settings.order(), settings.thinking());
+                settings.temperature(), settings.order(), settings.thinking(), settings.stream());
         return CUSTOM;
     }
 
@@ -89,6 +89,10 @@ public final class ProviderCatalog {
 
     private ModelClient single(ProviderSettings p) {
         ModelClient c = ModelClients.from(p.toLlmSettings(), mapper);
+        if (!p.streams()) {
+            if (c instanceof AnthropicModelClient a) a.streaming(false);
+            else if (c instanceof OpenAiCompatModelClient o) o.streaming(false);
+        }
         // Anthropic never receives a temperature: Claude 5 models and the current API version reject it
         if (p.temperature() != null && !p.effectiveType().equals("anthropic")) {
             c = new TemperatureModelClient(c, p.temperature());

@@ -15,7 +15,10 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 
-/** Anthropic Messages API over plain HTTP (non-streaming), keeping messages as raw JSON. */
+/**
+ * Anthropic Messages API over plain HTTP, keeping messages as raw JSON. {@link #stream} uses server-sent events and
+ * rebuilds the same message a non-streamed call returns.
+ */
 
 public class AnthropicModelClient implements ModelClient {
 
@@ -31,6 +34,13 @@ public class AnthropicModelClient implements ModelClient {
 
     private final long backoffBaseMs;
     private volatile org.kendar.llm.harness.auth.AuthProvider auth;
+    private volatile boolean streaming = true;
+
+    /** false: {@link #stream} makes a plain call (for proxies whose streaming misbehaves). Default true. */
+    public AnthropicModelClient streaming(boolean on) {
+        this.streaming = on;
+        return this;
+    }
 
     /** Headers come from the provider (OAuth, rotating keys) instead of the static {@code apiKey}. */
     public AnthropicModelClient authProvider(org.kendar.llm.harness.auth.AuthProvider provider) {
@@ -56,11 +66,167 @@ public class AnthropicModelClient implements ModelClient {
 
     @Override
     public ModelResponse complete(ModelRequest req, CancelToken cancel) {
+        checkKey();
+        return toResponse(send(buildBody(req), cancel));
+    }
+
+    @Override
+    public ModelResponse stream(ModelRequest req, CancelToken cancel, StreamListener listener) {
+        if (!streaming || listener == null) return complete(req, cancel);
+        checkKey();
+        ObjectNode body = buildBody(req);
+        body.put("stream", true);
+        String payload;
+        try {
+            payload = mapper.writeValueAsString(body);
+        } catch (IOException e) {
+            throw new ModelException("Cannot serialize request", e);
+        }
+        JsonNode json = StreamingCall.run(http, () -> request(payload), auth, cancel, listener, props.maxRetries(),
+                backoffBaseMs, s -> s == 429 || s == 529 || s >= 500, s -> "Anthropic API error " + s,
+                "Anthropic API call failed: ", () -> this::assemble);
+        return toResponse(json);
+    }
+
+    private void checkKey() {
         if (auth == null && (props.apiKey() == null || props.apiKey().isBlank())) {
             throw new ModelException("Anthropic API key (ANTHROPIC_API_KEY) is not configured");
         }
-        ObjectNode body = buildBody(req);
-        JsonNode json = send(body, cancel);
+    }
+
+    /**
+     * Rebuilds the message of a streamed response: {@code message_start} gives the envelope, each content block is
+     * started, filled by its deltas and closed, {@code message_delta} carries the stop reason and the output usage.
+     */
+    JsonNode assemble(StreamingCall.Events events, StreamListener listener) throws IOException {
+        ObjectNode message = null;
+        java.util.Map<Integer, StringBuilder> json = new java.util.HashMap<>();
+        for (StreamingCall.Event ev = events.next(); ev != null; ev = events.next()) {
+            JsonNode data;
+            try {
+                data = mapper.readTree(ev.data());
+            } catch (IOException e) {
+                throw new ModelException("Anthropic API returned a malformed stream event: " + truncate(ev.data()));
+            }
+            String type = data.path("type").asText(ev.event() == null ? "" : ev.event());
+            switch (type) {
+                case "message_start" -> {
+                    message = data.path("message").isObject() ? (ObjectNode) data.get("message").deepCopy()
+                            : mapper.createObjectNode();
+                    if (!message.path("content").isArray()) message.putArray("content");
+                }
+                case "content_block_start" -> {
+                    ArrayNode content = content(message);
+                    int i = data.path("index").asInt(content.size());
+                    ObjectNode block = data.path("content_block").isObject()
+                            ? (ObjectNode) data.get("content_block").deepCopy() : mapper.createObjectNode();
+                    while (content.size() <= i) content.addNull();
+                    content.set(i, block);
+                    if (block.has("input")) {
+                        json.put(i, new StringBuilder());
+                        listener.onToolCall(i, block.path("id").asText(null), block.path("name").asText(null), "");
+                    }
+                }
+                case "content_block_delta" -> {
+                    int i = data.path("index").asInt();
+                    ObjectNode block = block(message, i);
+                    JsonNode d = data.path("delta");
+                    switch (d.path("type").asText()) {
+                        case "text_delta" -> {
+                            String t = d.path("text").asText("");
+                            block.put("text", block.path("text").asText("") + t);
+                            listener.onText(i, t);
+                        }
+                        case "thinking_delta" -> {
+                            String t = d.path("thinking").asText("");
+                            block.put("thinking", block.path("thinking").asText("") + t);
+                            listener.onThinking(i, t);
+                        }
+                        case "signature_delta" ->
+                                block.put("signature", block.path("signature").asText("") + d.path("signature").asText(""));
+                        case "input_json_delta" -> {
+                            String part = d.path("partial_json").asText("");
+                            json.computeIfAbsent(i, k -> new StringBuilder()).append(part);
+                            listener.onToolCall(i, null, null, part);
+                        }
+                        case "citations_delta" -> {
+                            ArrayNode c = block.path("citations").isArray() ? (ArrayNode) block.get("citations")
+                                    : block.putArray("citations");
+                            c.add(d.path("citation"));
+                        }
+                        default -> { }
+                    }
+                }
+                case "content_block_stop" -> {
+                    int i = data.path("index").asInt();
+                    StringBuilder raw = json.remove(i);
+                    if (raw != null) block(message, i).set("input", input(raw.toString()));
+                }
+                case "message_delta" -> {
+                    if (message == null) throw new StreamingCall.StreamError("message_delta before message_start", true);
+                    JsonNode d = data.path("delta");
+                    for (var it = d.fields(); it.hasNext(); ) {
+                        var f = it.next();
+                        message.set(f.getKey(), f.getValue());
+                    }
+                    if (data.path("usage").isObject()) {
+                        ObjectNode u = message.path("usage").isObject() ? (ObjectNode) message.get("usage")
+                                : message.putObject("usage");
+                        for (var it = data.get("usage").fields(); it.hasNext(); ) {
+                            var f = it.next();
+                            if (!f.getValue().isNull()) u.set(f.getKey(), f.getValue());
+                        }
+                    }
+                }
+                case "message_stop" -> {
+                    if (message == null) throw new StreamingCall.StreamError("stream ended without a message", true);
+                    // blocks still open (should not happen) keep what arrived
+                    for (var e : json.entrySet()) block(message, e.getKey()).set("input", input(e.getValue().toString()));
+                    return message;
+                }
+                case "error" -> {
+                    String et = data.path("error").path("type").asText("");
+                    String em = data.path("error").path("message").asText("");
+                    boolean retry = et.equals("overloaded_error") || et.equals("api_error");
+                    throw new StreamingCall.StreamError("Anthropic API error: " + (et.isEmpty() ? "" : et + ": ")
+                            + truncate(em.isEmpty() ? data.toString() : em), retry);
+                }
+                default -> { } // ping and unknown events
+            }
+        }
+        throw new StreamingCall.StreamError("the stream ended before message_stop", true);
+    }
+
+    private ArrayNode content(ObjectNode message) throws IOException {
+        if (message == null) throw new StreamingCall.StreamError("stream event before message_start", true);
+        return (ArrayNode) message.get("content");
+    }
+
+    private ObjectNode block(ObjectNode message, int i) throws IOException {
+        ArrayNode content = content(message);
+        while (content.size() <= i) content.addNull();
+        if (!(content.get(i) instanceof ObjectNode o)) {
+            ObjectNode b = mapper.createObjectNode();
+            content.set(i, b);
+            return b;
+        }
+        return o;
+    }
+
+    /** The input of a streamed tool call: {} when empty; arguments cut off mid-JSON are kept raw. */
+    private JsonNode input(String raw) {
+        if (raw.isBlank()) return mapper.createObjectNode();
+        try {
+            JsonNode n = mapper.readTree(raw);
+            if (n != null && n.isObject()) return n;
+        } catch (IOException ignored) {
+            // cut off: below
+        }
+        return mapper.createObjectNode().put(PartialToolCall.RAW, raw);
+    }
+
+    /** The response of a message JSON, streamed or not. */
+    private ModelResponse toResponse(JsonNode json) {
         // a proxy may answer 200 with an error body ({"type":"error","error":{...}})
         if ("error".equals(json.path("type").asText()) || json.path("error").isObject()) {
             JsonNode err = json.path("error");
@@ -264,6 +430,23 @@ public class AnthropicModelClient implements ModelClient {
         if ("1h".equals(props.cacheTtl())) cc.put("ttl", "1h");
     }
 
+    private HttpRequest request(String payload) {
+        HttpRequest.Builder rb = HttpRequest.newBuilder(URI.create(props.baseUrl().replaceAll("/+$", "") + "/v1/messages"))
+                .timeout(Duration.ofSeconds(Math.max(1, props.timeoutSeconds())))
+                .header("content-type", "application/json")
+                .header("anthropic-version", API_VERSION);
+        if (auth != null) {
+            try {
+                auth.headers().forEach(rb::header);
+            } catch (RuntimeException e) {
+                throw new ModelException("Authentication failed: " + e.getMessage(), e);
+            }
+        } else {
+            rb.header("x-api-key", props.apiKey());
+        }
+        return rb.POST(HttpRequest.BodyPublishers.ofString(payload)).build();
+    }
+
     private JsonNode send(ObjectNode body, CancelToken cancel) {
         String payload;
         try {
@@ -271,22 +454,7 @@ public class AnthropicModelClient implements ModelClient {
         } catch (IOException e) {
             throw new ModelException("Cannot serialize request", e);
         }
-        java.util.function.Supplier<HttpRequest> build = () -> {
-            HttpRequest.Builder rb = HttpRequest.newBuilder(URI.create(props.baseUrl().replaceAll("/+$", "") + "/v1/messages"))
-                    .timeout(Duration.ofSeconds(Math.max(1, props.timeoutSeconds())))
-                    .header("content-type", "application/json")
-                    .header("anthropic-version", API_VERSION);
-            if (auth != null) {
-                try {
-                    auth.headers().forEach(rb::header);
-                } catch (RuntimeException e) {
-                    throw new ModelException("Authentication failed: " + e.getMessage(), e);
-                }
-            } else {
-                rb.header("x-api-key", props.apiKey());
-            }
-            return rb.POST(HttpRequest.BodyPublishers.ofString(payload)).build();
-        };
+        java.util.function.Supplier<HttpRequest> build = () -> request(payload);
         HttpRequest request = build.get();
         boolean authRetried = false;
 

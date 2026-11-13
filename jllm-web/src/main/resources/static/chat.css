@@ -30,6 +30,8 @@ body { height: 100vh; overflow: hidden; }
   .msg.assistant { background: var(--surface); }
   .msg.notice { white-space: pre-wrap; background: none; border-style: dashed; color: var(--text-muted); font-size: 0.78rem; }
   .msg.error { border-color: rgba(248,113,113,0.4); color: var(--red); }
+  .msg.assistant.streaming { border-style: dashed; }
+  .msg.assistant.partial { border-style: dashed; opacity: 0.75; }
 
   .toolgroup { max-width: 860px; border: 1px dashed var(--border); border-radius: var(--radius); font-size: 0.78rem; }
   .toolgroup > summary { padding: 0.4rem 0.75rem; cursor: pointer; color: var(--text-muted); }

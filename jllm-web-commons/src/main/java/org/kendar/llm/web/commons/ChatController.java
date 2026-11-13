@@ -255,10 +255,10 @@ public class ChatController {
         Runnable subscription = agentService.subscribe(id, after, ev -> {
             if (closed.get()) return;
             try {
-                emitter.send(SseEmitter.event()
-                        .id(String.valueOf(ev.seq()))
-                        .name(ev.type())
-                        .data(mapper.writeValueAsString(ev)));
+                SseEmitter.SseEventBuilder sse = SseEmitter.event();
+                // a streaming delta (seq 0) is not replayable: no id, so the browser's Last-Event-ID stays put
+                if (ev.seq() > 0) sse.id(String.valueOf(ev.seq()));
+                emitter.send(sse.name(ev.type()).data(mapper.writeValueAsString(ev)));
             } catch (IOException | IllegalStateException e) {
                 cleanup.run();
                 emitter.completeWithError(e);

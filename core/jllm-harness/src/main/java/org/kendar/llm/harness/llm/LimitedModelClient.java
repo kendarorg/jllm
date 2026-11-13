@@ -30,6 +30,11 @@ public final class LimitedModelClient implements ModelClient {
     }
 
     @Override
+    public ModelResponse stream(ModelRequest request, CancelToken cancel, StreamListener listener) {
+        return limited(cancel, () -> delegate.stream(request, cancel, listener));
+    }
+
+    @Override
     public String simpleComplete(String system, String user, int maxTokens) {
         return limited(CancelToken.NONE, () -> delegate.simpleComplete(system, user, maxTokens));
     }

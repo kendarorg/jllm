@@ -76,8 +76,11 @@ public class AgentLoop {
     public record ActiveSubAgent(String label, String chatId, String prompt, long startedAtMillis) {
     }
 
-    /** How a run of the loop ended. */
-    enum Outcome { COMPLETED, TRUNCATED, REFUSED, MAX_TURNS, CANCELLED, FAILED }
+    /**
+     * How a run of the loop ended. {@code STUCK}: the stuck detector stopped a repeating agent; {@code UNVERIFIED}: a
+     * STOP hook kept vetoing the stop and the re-entries ran out.
+     */
+    public enum Outcome { COMPLETED, TRUNCATED, REFUSED, MAX_TURNS, CANCELLED, FAILED, STUCK, UNVERIFIED }
 
     /** Final text of a run of the loop and how it ended. */
     record LoopResult(String text, Outcome outcome) {
@@ -86,7 +89,7 @@ public class AgentLoop {
     /**
      * A sub-agent ended without a final answer (cut off, refused, out of turns, cancelled).
      *
-     * @see #status() {@code partial}, {@code refused} or {@code cancelled}
+     * @see #status() {@code partial}, {@code refused}, {@code cancelled}, {@code stuck} or {@code unverified}
      */
     public static final class SubAgentIncompleteException extends RuntimeException {
         private final String status;
@@ -287,6 +290,9 @@ public class AgentLoop {
                     throw new org.kendar.llm.harness.tools.ToolCatalog.ToolCallException(az.denial());
                 }
                 ObjectNode r;
+                if (tool.kind() != ToolKind.READ_ONLY) {
+                    changed.add(changeKey(ctx.chatId(), label == null ? HookContext.MAIN : label));
+                }
                 try {
                     r = runTool(tool, az.input(), inner.withToolUseId(id), id, true);
                 } catch (SandboxUnavailableException e) {
@@ -512,22 +518,23 @@ public class AgentLoop {
         String pollFollowUp();
     }
 
-    public void run(String chatId, String userText, EventSink sink, BooleanSupplier cancelled) {
-        run(chatId, userText, sink, cancelled, null);
+    public Outcome run(String chatId, String userText, EventSink sink, BooleanSupplier cancelled) {
+        return run(chatId, userText, sink, cancelled, null);
     }
 
-    public void run(String chatId, String userText, EventSink sink, BooleanSupplier cancelled, Inbox inbox) {
+    /** @return how the run ended; {@code FAILED} when a hook blocked the prompt or the agent */
+    public Outcome run(String chatId, String userText, EventSink sink, BooleanSupplier cancelled, Inbox inbox) {
         HookResult prompt = hooks.run(HookContext.prompt(chatId, userText));
         if (prompt.denied()) {
             sink.emit("warning", mapper.createObjectNode()
                     .put("message", "Prompt blocked by a hook: " + prompt.denyReason()));
-            return;
+            return Outcome.FAILED;
         }
         HookResult entering = hooks.run(HookContext.before(HookEvent.PRE_AGENT, chatId, HookContext.MAIN, userText));
         if (entering.denied()) {
             sink.emit("warning", mapper.createObjectNode()
                     .put("message", "Agent blocked by a hook: " + entering.denyReason()));
-            return;
+            return Outcome.FAILED;
         }
         ChatSessionData session = sessions.get(chatId);
         ArrayNode messages = sessions.messages(session);
@@ -542,10 +549,13 @@ public class AgentLoop {
 
         String answer = "";
         boolean failed = true;
+        Outcome outcome;
         try {
-            answer = loop(chatId, messages, () -> chatTools(chatId, userText), sessions.pinnedPrefix(session),
-                systemPrompt, PermissionMode.parse(session.mode()), sink, cancelled, true, true, HookContext.MAIN,
-                    model, new int[]{0}, null, inbox).text();
+            LoopResult r = loop(chatId, messages, () -> chatTools(chatId, userText), sessions.pinnedPrefix(session),
+                    systemPrompt, PermissionMode.parse(session.mode()), sink, cancelled, true, true, HookContext.MAIN,
+                    model, new int[]{0}, null, inbox);
+            answer = r.text();
+            outcome = r.outcome();
             failed = false;
         } finally {
             hooks.run(HookContext.after(HookEvent.POST_AGENT, chatId, HookContext.MAIN, answer, failed));
@@ -554,8 +564,8 @@ public class AgentLoop {
             sink.emit("plan_ready", mapper.createObjectNode().put("message",
                     "Plan ready. Type /edit to let the agent change files, or /auto to run without asking."));
         }
-        hooks.run(HookContext.stop(chatId, answer));
         if (noisePruner != null) noisePruner.afterTurn(chatId);
+        return outcome;
     }
 
     private org.kendar.llm.harness.context.noise.NoiseCommandPruner noisePruner;
@@ -771,11 +781,15 @@ public class AgentLoop {
             case REFUSED -> "The model declined to answer (refusal)";
             case MAX_TURNS -> "Stopped at the turn limit";
             case CANCELLED -> "Cancelled by the user";
+            case STUCK -> "Stopped: the sub-agent kept repeating itself";
+            case UNVERIFIED -> "Finished, but the stop check still fails";
             default -> "Ended without a final answer";
         };
         return switch (r.outcome()) {
             case COMPLETED -> null;
             case REFUSED -> new SubAgentIncompleteException("refused", r.text(), why);
+            case STUCK -> new SubAgentIncompleteException("stuck", r.text(), why);
+            case UNVERIFIED -> new SubAgentIncompleteException("unverified", r.text(), why);
             case CANCELLED -> new SubAgentIncompleteException("cancelled", r.text(), "Cancelled by the user");
             default -> new SubAgentIncompleteException("partial", r.text(), why);
         };
@@ -937,6 +951,11 @@ public class AgentLoop {
         Usage last = null;
         String finalText = "";
 
+        StuckDetector stuck = new StuckDetector(config.loop().stuck());
+        String agentName = label == null ? HookContext.MAIN : label;
+        String changeKey = changeKey(chatId, agentName);
+        changed.remove(changeKey);
+        int[] stopAttempts = {0};
         boolean turnHadThinking = false; // a thinking block of this turn is in the log
         boolean thinkingOff = false;     // history was rewritten mid-turn: their signatures are void, stop thinking
         int[] turnLimit = {config.maxTurns()};
@@ -990,7 +1009,14 @@ public class AgentLoop {
                         .put("status", status).put("attempt", attempt).put("max", max).put("delayMs", delayMs)
                         .put("message", "Model call failed" + (status > 0 ? " (HTTP " + status + ")" : "")
                                 + ", retry " + attempt + "/" + max + " in " + Math.max(1, delayMs / 1000) + " s")));
-                resp = client.complete(request, token);
+                // deltas are for display only: the response is used once it is complete, as without streaming. Only
+                // the main agent's are shown (a sub-agent's events stay out of the chat stream)
+                DeltaCoalescer deltas = label == null ? new DeltaCoalescer(sink, mapper, null) : null;
+                try {
+                    resp = deltas == null ? client.complete(request, token) : client.stream(request, token, deltas);
+                } finally {
+                    if (deltas != null) deltas.flush();
+                }
                 metrics.modelCall(java.time.Duration.ofNanos(System.nanoTime() - modelStart), "ok");
                 hooks.run(HookContext.afterLlm(chatId, agent, responseText(resp), false,
                         (System.nanoTime() - modelStart) / 1_000_000L, resp.usage()));
@@ -1121,7 +1147,11 @@ public class AgentLoop {
                             chatId, persist)) {
                         continue;
                     }
-                    return new LoopResult(finalText, Outcome.COMPLETED);
+                    Outcome checked = stopCheck(chatId, agentName, finalText, mode, messages, sink, cancelled, persist,
+                            stopAttempts, stuck);
+                    if (checked == null) continue;
+                    changed.remove(changeKey);
+                    return new LoopResult(finalText, checked);
                 }
             }
 
@@ -1155,12 +1185,111 @@ public class AgentLoop {
                 unhook.run();
             }
             if (cut != null) results.add(truncatedResult(cut, windowFull, tctx));
+            StuckDetector.Detection loopSeen = stuck.record(toolUses, results);
+            if (loopSeen != null && onStuck(loopSeen, stuck, results, chatId, sink, cancelled, interactive, label)) {
+                if (persist) sessions.saveMessages(chatId, messages);
+                return new LoopResult(finalText, Outcome.STUCK);
+            }
             if (persist) sessions.saveMessages(chatId, messages);
             // every tool_use has its tool_result: a safe boundary for the user's steering messages
             injectSteering(inbox, messages, sink, chatId, persist);
         }
         sink.emit("warning", mapper.createObjectNode().put("message", "Stopped after " + turnLimit[0] + " turns."));
         return new LoopResult(finalText, Outcome.MAX_TURNS);
+    }
+
+    /** Opens the user message that re-enters the loop after a STOP hook vetoed the stop. */
+    static final String VERIFY_NOTE = "The stop check failed. Fix the problem and finish again.";
+
+    /** Agents (chat + agent name) in which a tool that changes things ran during the current run. */
+    private final java.util.Set<String> changed = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    private static String changeKey(String chatId, String agent) {
+        return chatId + "\u0000" + agent;
+    }
+
+    /**
+     * Whether a tool that may change things (anything not read-only: file edits, shell, scripts) ran in the current
+     * run of the agent. {@code agent} is {@value HookContext#MAIN} or a sub-agent label, as in
+     * {@link HookContext#agent()} of {@code STOP}. Meant for STOP hooks ({@code onlyIfChanged}).
+     */
+    public boolean changedInRun(String chatId, String agent) {
+        return changed.contains(changeKey(chatId, agent == null ? HookContext.MAIN : agent));
+    }
+
+    /**
+     * Fires STOP for a completion attempt.
+     *
+     * @return the outcome that ends the run, or null when a hook vetoed the stop and the agent goes on (the veto
+     * message was appended to the log)
+     */
+    private Outcome stopCheck(String chatId, String agent, String answer, PermissionMode mode, ArrayNode messages,
+                              EventSink sink, BooleanSupplier cancelled, boolean persist, int[] attempts,
+                              StuckDetector stuck) {
+        // plan mode changed nothing to verify; a cancelled run is not checked
+        if (mode == PermissionMode.PLAN || cancelled.getAsBoolean()) return Outcome.COMPLETED;
+        int attempt = ++attempts[0];
+        HookResult r = hooks.run(HookContext.stop(chatId, agent, answer, attempt));
+        if (!r.continues()) return Outcome.COMPLETED;
+        String message = r.continueWith();
+        int max = config.loop().verify().maxReentries();
+        if (stuck.verifyRepeated(message)) {
+            sink.emit("stuck", mapper.createObjectNode().put("pattern", "verify_repeat").put("tool", "")
+                    .put("count", 2).put("action", "stop").put("agent", agent)
+                    .put("message", "The stop check failed twice with the same output"));
+            sink.emit("warning", mapper.createObjectNode().put("message", "The stop check failed twice with the same "
+                    + "output: stopping, the result is not verified."));
+            return Outcome.UNVERIFIED;
+        }
+        if (attempt > max) {
+            sink.emit("warning", mapper.createObjectNode().put("message", "The stop check still fails after " + max
+                    + " re-entr" + (max == 1 ? "y" : "ies") + ": the result is not verified."));
+            return Outcome.UNVERIFIED;
+        }
+        appendUserText(messages, VERIFY_NOTE + "\n\n" + message);
+        if (persist) sessions.saveMessages(chatId, messages);
+        sink.emit("verify_failed", mapper.createObjectNode().put("agent", agent).put("attempt", attempt)
+                .put("message", message));
+        return null;
+    }
+
+    /**
+     * The stuck detector fired. The first time the agent is nudged (a note appended to the tool results); after that
+     * an interactive run asks the user, a headless one stops.
+     *
+     * @return true when the run must end as {@code STUCK}
+     */
+    private boolean onStuck(StuckDetector.Detection d, StuckDetector stuck, ArrayNode results, String chatId,
+                            EventSink sink, BooleanSupplier cancelled, boolean interactive, String label) {
+        java.util.function.Function<String, ObjectNode> event = action -> {
+            ObjectNode ev = mapper.createObjectNode().put("pattern", d.pattern()).put("tool", d.tool())
+                    .put("count", d.count()).put("action", action).put("message", d.what());
+            if (label != null) ev.put("agent", label);
+            return ev;
+        };
+        if (stuck.detections() == 1) {
+            results.addObject().put("type", "text")
+                    .put("text", Prompts.load("stuck-note.md").replace("{what}", d.what()));
+            sink.emit("stuck", event.apply("nudge"));
+            return false;
+        }
+        if (interactive && !cancelled.getAsBoolean()) {
+            String title = (label == null ? "" : "[" + label + "] ") + "The agent seems stuck";
+            ApprovalService.ApprovalDecision a = approvals.await(chatId, "stuck", title, d.what()
+                    + ".\n\nIt was already told once to change approach. Let it continue?", null, req -> {
+                ObjectNode ev = mapper.valueToTree(req);
+                if (label != null) ev.put("agent", label);
+                sink.emit("approval_request", ev);
+            }, cancelled);
+            metrics.approval("stuck", a.approved());
+            if (a.approved()) {
+                sink.emit("stuck", event.apply("continue"));
+                return false;
+            }
+        }
+        sink.emit("stuck", event.apply("stop"));
+        sink.emit("warning", mapper.createObjectNode().put("message", "Stopped: " + d.what() + "."));
+        return true;
     }
 
     /**
@@ -1275,6 +1404,9 @@ public class AgentLoop {
                 if (az.denial() != null) {
                     result = toolResult(id, az.denial(), true);
                 } else {
+                    if (tool.kind() != ToolKind.READ_ONLY) {
+                        changed.add(changeKey(ctx.chatId(), label == null ? HookContext.MAIN : label));
+                    }
                     try {
                         result = runTool(tool, input, ctx.withToolUseId(id), id);
                     } catch (SandboxUnavailableException e) {

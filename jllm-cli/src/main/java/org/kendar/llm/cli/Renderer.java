@@ -32,6 +32,14 @@ final class Renderer {
     private final Map<String, JsonNode[]> pending = new HashMap<>(); // id -> {input}
     private final List<Call> calls = new ArrayList<>();
     private int counter;
+    /** Fancy mode: text blocks being streamed, by block index; whole lines are printed as they complete. */
+    private final java.util.TreeMap<Integer, Streamed> streamed = new java.util.TreeMap<>();
+
+    /** A block being streamed: what arrived and how much of it was printed. */
+    private static final class Streamed {
+        final StringBuilder text = new StringBuilder();
+        int printed;
+    }
 
     Renderer(Consumer<String> out, Consumer<String> err, boolean fancy) {
         this.out = out;
@@ -42,7 +50,20 @@ final class Renderer {
     synchronized void render(AgentEvent ev) {
         JsonNode d = ev.data();
         switch (ev.type()) {
-            case "text" -> out.accept(fancy ? CYAN + "● " + RESET + clean(d.path("text").asText()) : clean(d.path("text").asText()));
+            case "text" -> text(d.path("text").asText());
+            case "text_delta" -> {
+                if (fancy) delta(d.path("block").asInt(0), d.path("text").asText(""));
+            }
+            case "text_reset" -> {
+                if (fancy && streamed.values().stream().anyMatch(s -> s.printed > 0)) {
+                    out.accept(color(DIM, "[retrying: the partial answer above is discarded]"));
+                }
+                streamed.clear();
+            }
+            case "stuck" -> out.accept(color(YELLOW, "[stuck] " + clean(d.path("message").asText(d.path("pattern").asText()))
+                    + " (" + clean(d.path("action").asText()) + ")"));
+            case "verify_failed" -> out.accept(color(YELLOW, "[stop check failed, attempt " + d.path("attempt").asInt()
+                    + "] ") + clean(d.path("message").asText()));
             case "tool_call" -> {
                 if (fancy) pending.put(d.path("id").asText(), new JsonNode[]{d.path("input")});
                 else out.accept("[tool] " + clean(d.path("name").asText()) + " " + clean(d.path("input").toString()));
@@ -50,14 +71,61 @@ final class Renderer {
             case "tool_result" -> toolResult(d);
             case "warning" -> out.accept(color(YELLOW, "[warning] " + clean(d.path("message").asText())));
             case "retry" -> out.accept(color(YELLOW, "[retry] " + clean(d.path("message").asText())));
-            case "error" -> err.accept(color(RED, "[error] " + clean(d.path("message").asText())));
+            case "error" -> {
+                closeStreamed();
+                err.accept(color(RED, "[error] " + clean(d.path("message").asText())));
+            }
             case "compaction" -> out.accept(color(DIM, "[compaction] " + clean(d.toString())));
             case "plan_ready" -> out.accept("[plan] " + clean(d.path("message").asText()));
-            case "cancelled" -> out.accept(color(YELLOW, "[cancelled]"));
+            case "cancelled" -> {
+                closeStreamed();
+                out.accept(color(YELLOW, "[cancelled]"));
+            }
             case "steer_queued" -> out.accept(color(DIM, "[queued " + clean(d.path("kind").asText()) + "] " + clean(d.path("text").asText())));
             case "steer_applied" -> out.accept(color(DIM, "[applied] " + clean(d.path("text").asText())));
             default -> { }
         }
+    }
+
+    /** A final text block: what streaming already printed is not printed again. */
+    private void text(String full) {
+        if (!fancy) {
+            out.accept(clean(full));
+            return;
+        }
+        var first = streamed.pollFirstEntry();
+        if (first != null) {
+            Streamed s = first.getValue();
+            String shown = s.text.substring(0, s.printed);
+            if (s.printed > 0 && full.startsWith(shown)) {
+                String rest = full.substring(s.printed);
+                if (!rest.isEmpty()) out.accept(clean(rest));
+                return;
+            }
+        }
+        out.accept(CYAN + "● " + RESET + clean(full));
+    }
+
+    /** Prints the lines of a streamed block that are complete. */
+    private void delta(int block, String piece) {
+        Streamed s = streamed.computeIfAbsent(block, k -> new Streamed());
+        s.text.append(piece);
+        int nl = s.text.lastIndexOf("\n");
+        if (nl < s.printed) return;
+        String lines = s.text.substring(s.printed, nl);
+        out.accept((s.printed == 0 ? CYAN + "● " + RESET : "") + clean(lines));
+        s.printed = nl + 1;
+    }
+
+    /** The run stopped mid-stream: print the incomplete last line, marked. */
+    private void closeStreamed() {
+        for (Streamed s : streamed.values()) {
+            String rest = s.text.substring(s.printed);
+            if (!rest.isEmpty() || s.printed > 0) {
+                out.accept((s.printed == 0 ? CYAN + "● " + RESET : "") + clean(rest) + color(DIM, " …"));
+            }
+        }
+        streamed.clear();
     }
 
     private void toolResult(JsonNode d) {

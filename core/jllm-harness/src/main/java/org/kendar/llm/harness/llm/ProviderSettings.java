@@ -15,11 +15,28 @@ import java.util.Locale;
  * @param thinking       default reasoning effort (minimal | low | medium | high); null = the client's own default
  * @param order          fallback order: when a provider fails, the providers with a higher order are tried in
  *                       ascending order; null = never used as a fallback
+ * @param stream         stream the responses of the agent loop (default true); false for servers whose streaming
+ *                       misbehaves. Helper calls ({@code simpleComplete}) never stream
  */
 public record ProviderSettings(String name, String type, String baseUrl, String apiKey, String model,
                                Integer maxTokens, Integer maxRetries, Integer timeoutSeconds,
                                Boolean requireApiKey, Boolean useMaxCompletionTokens, Integer contextTokens,
-                               Boolean smallModel, Double temperature, Integer order, ThinkingLevel thinking) {
+                               Boolean smallModel, Double temperature, Integer order, ThinkingLevel thinking,
+                               Boolean stream) {
+
+    /** Constructor without the stream switch: streaming on. */
+    public ProviderSettings(String name, String type, String baseUrl, String apiKey, String model,
+                            Integer maxTokens, Integer maxRetries, Integer timeoutSeconds,
+                            Boolean requireApiKey, Boolean useMaxCompletionTokens, Integer contextTokens,
+                            Boolean smallModel, Double temperature, Integer order, ThinkingLevel thinking) {
+        this(name, type, baseUrl, apiKey, model, maxTokens, maxRetries, timeoutSeconds, requireApiKey,
+                useMaxCompletionTokens, contextTokens, smallModel, temperature, order, thinking, null);
+    }
+
+    /** False only when {@code stream} is set to false. */
+    public boolean streams() {
+        return !Boolean.FALSE.equals(stream);
+    }
 
     /** Legacy constructor without a thinking level. */
     public ProviderSettings(String name, String type, String baseUrl, String apiKey, String model,

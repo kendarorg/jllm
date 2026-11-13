@@ -211,6 +211,22 @@ startup, the UI and the sample sign-in and permissions that implement them.
 - **Harness:** `UserPolicy` gained the user's extra skills and a filter over the settings skills; the `skill` tool
   exists whenever a user policy resolver is set. Existing chats are not migrated.
 
+## 12. Loop guards and streaming (planned)
+A second comparison, against the harnesses in the agent-harness survey (OpenHands, Gemini CLI, Claude Code, Codex,
+Hermes Agent, mini-swe-agent), picked three gaps. The plan is in the root `extend.md`; nothing is implemented yet.
+- **Stuck detection:** a per-run detector of repeated calls, repeated errors, A-B-A-B alternation and malformed
+  output. The first hit adds a corrective note, the second ends the run as `STUCK` (headless) or asks (interactive),
+  so a headless embedder no longer spends its whole `maxTurns` budget on a loop.
+- **Verify-on-stop:** `STOP` moves inside the loop, fires for sub-agents too, and can return `continueWith` to send
+  the agent back to work, bounded by `maxReentries` (then `UNVERIFIED`). A settings-level command hook (`mvn -q
+  test`) runs in the sandbox and makes the common case one line of configuration.
+- **Model streaming:** `ModelClient.stream` with a fallback to `complete`, Anthropic and OpenAI-compatible SSE
+  parsing that assembles a response byte-identical to the non-streamed one, `text_delta` events coalesced for SSE,
+  retry and provider fallback only before the first delta.
+
+`HARNESSES-COMPARE.md` gained the stuck-detection and verify-on-stop rows; the three items are marked planned in the
+jllm column. Model streaming moved from `FUTURE.md` to the plan.
+
 ## Overall direction
 - **Where it lives:** an embedded component, then a standalone library with a CLI, then a web front end.
 - **Model target:** Anthropic, then local llama.cpp/Qwen, then small models.

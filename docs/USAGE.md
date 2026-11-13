@@ -126,6 +126,10 @@ ignored.
                  "scope": {"offloadChars": 20000, "overflowOffloadChars": 2000, "previewChars": 1500,
                            "safetyPercent": 2, "reserveCap": 0}},
   "output":     {"toolMaxChars": 30000, "eventMaxChars": 2000, "validation": "lenient"},
+  "loop":       {"stuck": {"enabled": true, "repeat": 3, "alternationCycles": 3, "malformed": 3},
+                 "verify": {"maxReentries": 3}},
+  "hooks":      {"stop": [{"command": "mvn -q test", "timeoutSeconds": 600, "agents": ["main"],
+                           "onlyIfChanged": true, "maxOutputChars": 8000}]},
   "smallModel": false
 }
 ```
@@ -155,6 +159,9 @@ ignored.
 | `output.toolMaxChars` | tool output kept in the context; the rest is cut with `[truncated N chars]` (the head is kept, the tail for `bash`) |
 | `output.eventMaxChars` | tool output carried by the `tool_result` event to the front end |
 | `output.validation` | check of tool-call arguments against the tool schema: `off`, `lenient` (default, repairs `"5"` for 5 and `null` for optional fields) or `strict`; `/validation` overrides it per chat, see [TOOLS §5](TOOLS.md#5-one-tool-call) |
+| `loop.stuck.*` | stuck detection, see [Stuck detection](#stuck-detection). `enabled` (default `true`), `repeat` (3: the same calls with the same results, or the same failing call, in a row), `alternationCycles` (3: A-B-A-B), `malformed` (3: responses whose calls cannot run: unknown tool, invalid arguments, cut off) |
+| `loop.verify.maxReentries` | default `3`: how many times a `STOP` hook may send the agent back to work before the run ends `unverified` |
+| `hooks.stop` | command hooks run when an agent is about to finish, see [Verify on stop](#verify-on-stop). Only from the user settings or `--settings`; one from the project file runs only once trusted, like a project stdio MCP server |
 
 ### System prompt files
 
@@ -183,7 +190,7 @@ settings file. MCP OAuth: see [MCP](MCP.md). No provider login is shipped.
 
 `providers` is a list of named model definitions (`name`, `type` = `anthropic` | `openai` | `gemini` | `grok` | `qwen` | `llamacpp` |
 `ollama`, `baseUrl`, `apiKey`, `model`, `maxTokens`, `maxRetries`, `timeoutSeconds`, `requireApiKey`,
-`useMaxCompletionTokens`, `contextTokens`, `smallModel`, `temperature`, `order`, `thinking`). The old names `anthropic`, `openai`, `gemini`, `grok`, `qwen`,
+`useMaxCompletionTokens`, `contextTokens`, `smallModel`, `temperature`, `order`, `thinking`, `stream`). The old names `anthropic`, `openai`, `gemini`, `grok`, `qwen`,
 `llamacpp`, `ollama` stay valid without a definition. `gemini` uses Google's OpenAI-compatible endpoint
 (`https://generativelanguage.googleapis.com/v1beta/openai`, default model `gemini-2.5-pro`, key from
 `GEMINI_API_KEY`); native Gemini features (image input, Vertex) are not supported.
@@ -200,6 +207,12 @@ settings file. MCP OAuth: see [MCP](MCP.md). No provider login is shipped.
   providers with a higher `order` are tried in ascending order; one without `order` is never a fallback. A request
   refused as too long, and a cancellation, are not passed on to another provider. A fallback that cannot be built
   (for example a missing key) is skipped.
+- **Streaming.** `stream` (default `true`): the agent loop's calls stream, so the answer shows while it is written
+  (`text_delta` events) and a cancel stops it at once. The response used is the same as without streaming. Set it
+  to `false` for a server whose streaming misbehaves. Helper calls (classifier, summaries, tool-group selection)
+  never stream. OpenAI-compatible servers that send no usage in the stream leave the usage of that call empty.
+  A call is retried, or passed to a fallback provider, only before its first delta; a stream that breaks after it
+  is retried as a whole (`text_reset` event first).
 - An agent type may set `"provider": "<name>"` (wins over an inline `model`), `"temperature"` and `"thinking"`.
 - `temperature` (0 to 2) is resolved agent type, then provider, then unset; unset means nothing is sent.
   `explore` uses 0.2 and `plan` 0.3. OpenAI-compatible clients send it, and retry once without it if the server
@@ -238,6 +251,47 @@ the load, naming the rule (`permissions.deny[2]`). Order: `deny`, then `ask`, th
 - Settings only: no flag changes the rules. `/permissions` lists them.
 - A regex on a shell command is a guard rail, not a security boundary (quoting, variables, `python -c`). For real
   isolation use the docker sandbox (`sandbox.backend`: `docker`).
+
+### Stuck detection
+
+The loop watches the tool calls of each agent (main and each sub-agent separately) and notices a loop: the same
+calls with the same results three times in a row, the same call failing with the same error three times, an A-B-A-B
+alternation of two steps for three cycles, or three responses in a row whose calls cannot run. Calls are compared
+on name, arguments (key order does not matter) and result; parallel calls in another order are the same step. An
+edit followed by a test run is not a loop unless the edit is identical each time.
+
+- First time: a note is added after the tool results ("stop repeating it, try a different approach or explain what
+  blocks you") and a `stuck` event with `action: "nudge"` is sent.
+- Second time in the same run: the CLI and the web UI ask (`approval_request` of type `stuck`): continue, or stop.
+  A sub-agent stops at once and its `task` result has status `stuck`.
+- A run that stops this way ends with `run_finished {outcome: "stuck"}`.
+
+`loop.stuck.enabled: false` turns it off: only the turn limit stops a looping agent.
+
+### Verify on stop
+
+A `STOP` hook can refuse to let an agent finish: it returns `HookResult.continueWith(message)`, the agent gets
+"The stop check failed. Fix the problem and finish again." plus the message, and goes on. After
+`loop.verify.maxReentries` (default 3) re-entries, or when the same message comes back twice in a row, the run ends
+`unverified` (a sub-agent reports status `unverified` with its answer). Not run in plan mode or after a cancel.
+
+The common case needs no code: `hooks.stop` in the settings runs a command through the sandbox, in the work
+directory, with the same environment rules as `bash`:
+
+```json
+"hooks": {"stop": [{"command": "mvn -q test", "timeoutSeconds": 600, "agents": ["main"],
+                    "onlyIfChanged": true, "maxOutputChars": 8000}]}
+```
+
+- Exit code 0 lets the agent stop; another code or a timeout sends it back with the last `maxOutputChars` (default
+  8000) of the output, where build and test errors are. The output is sanitized like tool output.
+- `onlyIfChanged` (default `true`): run only if a tool that changes things (anything not read-only: edits, shell,
+  scripts) ran in this run of the agent, so a question does not start a build.
+- `agents`: `main` (default), a sub-agent type (`general`) or label (`general #2`), or `*`.
+- `timeoutSeconds` default 600.
+- A hook from the project's `.jllm/settings.json` runs only after the user trusted it (asked once by the CLI,
+  remembered per project and definition in `~/.jllm/trusted-mcp.json`; the web front end cannot ask and uses only
+  an answer given earlier).
 
 ### Steering a running chat
 
@@ -332,7 +386,8 @@ sequenceDiagram
         S-->>FE: run_queued
     end
     S->>L: run
-    L-->>FE: usage, text, tool_call, tool_result, compaction, classifier, warning, retry
+    L-->>FE: text_delta (live only), usage, text, tool_call, tool_result, compaction, classifier, warning, retry
+    L-->>FE: stuck, verify_failed
     L-->>FE: approval_request {id, type, title, preview, proposed, agent?}
     FE->>H: resolveApproval(chatId, id, approved, edited, remember)
     opt cancel
@@ -340,7 +395,7 @@ sequenceDiagram
         L-->>FE: cancelled
     end
     L-->>FE: plan_ready (plan mode only), error (on failure)
-    S-->>FE: run_finished {cancelled}
+    S-->>FE: run_finished {cancelled, outcome}
 ```
 
 `retry` `{status, attempt, max, delayMs, message}`: a model call failed with HTTP `status` (0 = network error) and the client
@@ -351,19 +406,24 @@ waits `delayMs` before retry `attempt` of `max`; it is followed by the normal ev
 | `run_started` | `text` |
 | `run_queued` | waiting for the run slot (`serializeRuns`) |
 | `usage` | `inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheCreationTokens` |
-| `text` | `text` of one text block |
+| `text_delta` | `block`, `text`: a piece of the answer being streamed (coalesced, about every 50 ms or 200 chars). `seq` 0: live only, never replayed |
+| `thinking_delta` | `block`, `text`: a piece of the reasoning being streamed (`seq` 0) |
+| `text_reset` | the streamed call failed and is retried: drop the pieces shown so far (`seq` 0) |
+| `text` | `text` of one text block, once the response is complete (replaces what the deltas showed) |
+| `stuck` | `pattern` (`repeat`, `same_error`, `alternation`, `malformed`, `verify_repeat`), `tool`, `count`, `action` (`nudge`, `continue`, `stop`), `message`, `agent` |
+| `verify_failed` | `agent`, `attempt`, `message`: a `STOP` hook sent the agent back to work |
 | `tool_call` | `id`, `name`, `input` |
 | `tool_result` | `id`, `name`, `isError`, `output` (cut at `eventMaxChars`) |
-| `approval_request` | `id`, `chatId`, `type` (`tool` or `context`), `title`, `preview`, `proposed`, `agent` |
+| `approval_request` | `id`, `chatId`, `type` (`tool`, `context`, `continue`, `stuck`, `host`, ...), `title`, `preview`, `proposed`, `agent` |
 | `classifier` | `tool`, `verdict` |
 | `compaction` | compaction: `tier`, `cleared`/`estimatedTokens`; mnemonic: `kind`, `masked`, `savedTokens`, `estimatedTokens`; scope: `strategy`, `estimatedTokens` |
 | `todos` | `todos`: the complete list written by `todo_write` (`id`, `content`, `status`) |
 | `warning`, `error` | `message` |
 | `cancelled` | — |
 | `plan_ready` | `message` |
-| `run_finished` | `cancelled` |
+| `run_finished` | `cancelled`, `outcome`: `completed`, `stuck`, `unverified`, `max_turns`, `truncated`, `refused`, `cancelled`, `failed` |
 
-Every event carries a per-chat `seq`. A reconnecting front end subscribes with the last `seq` it saw and gets no gap
+Every event carries a per-chat `seq`, except the streaming deltas (`seq` 0). A reconnecting front end subscribes with the last `seq` it saw and gets no gap
 and no duplicate. The buffer is cleared at the start of every run (earlier runs are in the persisted history).
 
 For `approval_request` of type `context` (tier-3 compaction), `proposed` is the summary to approve; pass the

@@ -40,7 +40,7 @@ public final class FallbackModelClient implements ModelClient {
             try {
                 if (i > 0) onFallback.accept(chain.get(i).name());
                 return call.run(chain.get(i).client().get());
-            } catch (ModelCancelledException e) {
+            } catch (ModelCancelledException | StreamingCall.AfterFirstDelta e) {
                 throw e;
             } catch (ModelException e) {
                 if (ModelException.isContextOverflow(e)) throw e;
@@ -61,6 +61,47 @@ public final class FallbackModelClient implements ModelClient {
     @Override
     public ModelResponse complete(ModelRequest request, CancelToken cancel) {
         return run(c -> c.complete(request, cancel));
+    }
+
+    /** Falls back only while nothing was streamed: a provider must not start over in the middle of shown text. */
+    @Override
+    public ModelResponse stream(ModelRequest request, CancelToken cancel, StreamListener listener) {
+        boolean[] started = {false};
+        StreamListener tracking = new StreamListener() {
+            @Override
+            public void onText(int block, String delta) {
+                started[0] = true;
+                listener.onText(block, delta);
+            }
+
+            @Override
+            public void onThinking(int block, String delta) {
+                started[0] = true;
+                listener.onThinking(block, delta);
+            }
+
+            @Override
+            public void onToolCall(int block, String id, String name, String argsDelta) {
+                started[0] = true;
+                listener.onToolCall(block, id, name, argsDelta);
+            }
+
+            @Override
+            public void onReset() {
+                started[0] = false;
+                listener.onReset();
+            }
+        };
+        return run(c -> {
+            try {
+                return c.stream(request, cancel, tracking);
+            } catch (ModelException e) {
+                if (started[0] && !(e instanceof ModelCancelledException)) {
+                    throw new StreamingCall.AfterFirstDelta(e.getMessage(), e);
+                }
+                throw e;
+            }
+        });
     }
 
     @Override

@@ -3,7 +3,10 @@ import {api, post} from './api.js';
 import {reactive} from 'vue';
 
 const EVENTS = ['run_started', 'text', 'tool_call', 'tool_result', 'approval_request', 'usage', 'compaction',
-  'warning', 'error', 'cancelled', 'run_finished', 'plan_ready', 'login'];
+  'warning', 'error', 'cancelled', 'run_finished', 'plan_ready', 'login', 'stuck', 'verify_failed',
+  'text_delta', 'text_reset'];
+// streaming deltas carry seq 0: shown live, never replayed (the final 'text' event is)
+const TRANSIENT = new Set(['text_delta', 'text_reset']);
 
 let uid = 0;
 const nextKey = () => ++uid;
@@ -69,6 +72,45 @@ export function toast(text, type = '') {
 export function addMsg(role, text, cls) {
   group = null;
   store.items.push({ key: nextKey(), kind: 'msg', role, text, cls: cls || role });
+}
+
+// assistant bubbles being streamed, by content block index; the final 'text' event replaces and closes them
+let streaming = new Map();
+
+function streamDelta(block, text) {
+  let item = streaming.get(block);
+  if (!item) {
+    addMsg('assistant', '', 'assistant streaming');
+    item = store.items[store.items.length - 1];   // reactive proxy
+    streaming.set(block, item);
+  }
+  item.text += text;
+}
+
+/** The final text of the next streamed block, or a new bubble when nothing was streamed. */
+function streamFinal(text) {
+  if (streaming.size) {
+    const block = Math.min(...streaming.keys());
+    const item = streaming.get(block);
+    streaming.delete(block);
+    item.text = text; item.cls = 'assistant';
+    group = null;
+    return;
+  }
+  addMsg('assistant', text);
+}
+
+function streamDrop() {
+  if (!streaming.size) return;
+  const open = new Set(streaming.values());
+  store.items = store.items.filter(it => !open.has(it));
+  streaming = new Map();
+}
+
+/** The run ended with bubbles still open (cancel, error): they keep what arrived, marked as cut off. */
+function streamClose() {
+  streaming.forEach(item => { item.text += ' …'; item.cls = 'assistant partial'; });
+  streaming = new Map();
 }
 
 function addTool(id, name, input, status, output, dropped) {
@@ -139,7 +181,7 @@ export function closeChat() {
   closeStream();
   remember(null);
   delete store.tabs[store.chatId];
-  store.chatId = null; store.items = []; store.usage = null; group = null;
+  store.chatId = null; store.items = []; store.usage = null; group = null; streaming = new Map();
 }
 
 export const newChat = guard(async () => {
@@ -162,6 +204,7 @@ export async function openChat(id) {
   closeStream();
   if (!store.tabs[id]) store.tabs[id] = 'chat';   // never opened before: start on Chat; otherwise keep its own tab
   store.chatId = id; store.approvals = []; store.menuOpen = false; group = null; store.items = []; store.resumeOffer = null;
+  streaming = new Map();
   store.msgCount = undefined;   // the poll must not compare the new chat against the old count while loading
   remember(id);
   try {
@@ -196,7 +239,16 @@ function handleEvent(ev) {
       store.running = true;
       if (store.pendingUser === d.text) store.pendingUser = null; else addMsg('user', d.text);
       break;
-    case 'text': addMsg('assistant', d.text); break;
+    case 'text': streamFinal(d.text); break;
+    case 'text_delta': streamDelta(d.block ?? 0, d.text || ''); break;
+    case 'text_reset': streamDrop(); break;
+    case 'stuck':
+      addMsg('notice', (d.action === 'stop' ? 'Stopped, the agent was stuck: ' : d.action === 'continue'
+        ? 'Continuing although the agent seems stuck: ' : 'The agent seems stuck, told to change approach: ') + (d.message || d.pattern));
+      break;
+    case 'verify_failed':
+      addMsg('notice', 'Stop check failed (attempt ' + d.attempt + '), the agent goes on:\n' + (d.message || ''));
+      break;
     case 'tool_call': addTool(d.id, d.name, d.input, 'run', ''); break;
     case 'tool_result': {
       const t = findTool(d.id);
@@ -209,9 +261,11 @@ function handleEvent(ev) {
     case 'plan_ready': addMsg('notice', d.message); break;
     case 'warning': addMsg('notice', d.message); break;
     case 'login': addMsg(d.ok ? 'notice' : 'error', d.message); toast(d.message, d.ok ? '' : 'error'); break;
-    case 'error': addMsg('error', d.message); break;
-    case 'cancelled': addMsg('notice', 'Cancelled.'); break;
+    case 'error': streamClose(); addMsg('error', d.message); break;
+    case 'cancelled': streamClose(); addMsg('notice', 'Cancelled.'); break;
     case 'run_finished':
+      streamClose();
+      if (d.outcome === 'stuck' || d.outcome === 'unverified') toast('Run ended: ' + d.outcome, 'error');
       store.approvals = []; store.running = false; refreshUsage(); loadSessions(); markSynced();
       break;
   }
@@ -226,6 +280,7 @@ function connect() {
   EVENTS.forEach(t => source.addEventListener(t, e => {
     if (es !== source || store.chatId !== id) return;
     const ev = JSON.parse(e.data);
+    if (TRANSIENT.has(ev.type)) { handleEvent(ev); return; }
     if (ev.seq <= store.lastSeq) return;
     // events were lost (buffer trimmed, server restarted): an approval_request may be among them
     if (ev.seq > store.lastSeq + 1) syncApprovals(id);

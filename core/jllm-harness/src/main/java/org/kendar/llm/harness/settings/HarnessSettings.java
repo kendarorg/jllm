@@ -38,6 +38,8 @@ import java.util.regex.Pattern;
  *                         plugins found by discovery are loaded
  * @param chatRetentionLimit maximum number of saved chats; at startup the oldest beyond it are deleted. Null or
  *                         absent = unlimited (default)
+ * @param loop             optional stuck detection and verify-on-stop settings
+ * @param hooks            optional command hooks ({@code stop}); from the project file only when trusted
  */
 public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSettings> restApis,
                               List<SkillSettings> skills, List<String> instructionFiles,
@@ -46,7 +48,93 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
                               List<ProviderSettings> providers, String defaultProvider,
                               Integer chatRetentionLimit, JsonNode plugins, Storage storage,
                               List<String> whitelistedEnvVars, List<String> toolsWhitelistedEnvVars,
-                              FileLimits files, WebLimits web) {
+                              FileLimits files, WebLimits web, Loop loop, HookSettings hooks) {
+
+    /** The 21 components before {@code loop} and {@code hooks}: defaults, no command hooks. */
+    public HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSettings> restApis,
+                           List<SkillSettings> skills, List<String> instructionFiles,
+                           List<AgentSettings> agents, Execution execution, Sandbox sandbox, Context context,
+                           LlmSettings fastModel, Output output, Boolean smallModel, Permissions permissions,
+                           List<ProviderSettings> providers, String defaultProvider,
+                           Integer chatRetentionLimit, JsonNode plugins, Storage storage,
+                           List<String> whitelistedEnvVars, List<String> toolsWhitelistedEnvVars,
+                           FileLimits files, WebLimits web) {
+        this(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context, fastModel, output,
+                smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage,
+                whitelistedEnvVars, toolsWhitelistedEnvVars, files, web, null, null);
+    }
+
+    /**
+     * Run-loop guards; unset values keep the defaults of {@link HarnessConfig.Loop}.
+     *
+     * @param stuck  {@code enabled} (true), {@code repeat} (3), {@code alternationCycles} (3), {@code malformed} (3)
+     * @param verify {@code maxReentries} (3): times a STOP hook may send the agent back to work
+     */
+    public record Loop(Stuck stuck, Verify verify) {
+        public record Stuck(Boolean enabled, Integer repeat, Integer alternationCycles, Integer malformed) {
+        }
+
+        public record Verify(Integer maxReentries) {
+        }
+
+        HarnessConfig.Loop over(HarnessConfig.Loop d) {
+            HarnessConfig.Stuck s = d.stuck();
+            HarnessConfig.Stuck st = stuck == null ? s : new HarnessConfig.Stuck(
+                    stuck.enabled() != null ? stuck.enabled() : s.enabled(),
+                    stuck.repeat() != null ? stuck.repeat() : s.repeat(),
+                    stuck.alternationCycles() != null ? stuck.alternationCycles() : s.alternationCycles(),
+                    stuck.malformed() != null ? stuck.malformed() : s.malformed());
+            HarnessConfig.Verify v = verify == null || verify.maxReentries() == null ? d.verify()
+                    : new HarnessConfig.Verify(verify.maxReentries());
+            return new HarnessConfig.Loop(st, v);
+        }
+    }
+
+    /** @param stop command hooks run when an agent is about to finish (verify-on-stop) */
+    public record HookSettings(List<StopHook> stop) {
+        public HookSettings {
+            stop = stop == null ? List.of() : List.copyOf(stop);
+        }
+    }
+
+    /**
+     * A shell command run through the sandbox, in the work directory, when an agent is about to finish. Exit code 0
+     * lets it stop; another code or a timeout sends it back to work with the tail of the output.
+     *
+     * @param timeoutSeconds default 600
+     * @param agents         {@code main} (default), a sub-agent type or label, or {@code *} for all
+     * @param onlyIfChanged  run only if a tool that changes things ran in this run (default true)
+     * @param maxOutputChars tail of the output given to the agent (default 8000)
+     */
+    public record StopHook(String command, Integer timeoutSeconds, List<String> agents, Boolean onlyIfChanged,
+                           Integer maxOutputChars) {
+        public StopHook {
+            if (command == null || command.isBlank()) {
+                throw new IllegalArgumentException("hooks.stop: every entry needs a command");
+            }
+            agents = agents == null || agents.isEmpty() ? List.of("main") : List.copyOf(agents);
+        }
+
+        public int timeout() {
+            return timeoutSeconds == null || timeoutSeconds <= 0 ? 600 : timeoutSeconds;
+        }
+
+        public boolean changedOnly() {
+            return onlyIfChanged == null || onlyIfChanged;
+        }
+
+        public int maxChars() {
+            return maxOutputChars == null || maxOutputChars <= 0 ? 8000 : maxOutputChars;
+        }
+    }
+
+    /** The stop command hooks, possibly none. */
+    public List<StopHook> stopHooks() {
+        return hooks == null ? List.of() : hooks.stop();
+    }
+
+    /** Name under which a project stop hook is asked about and remembered in {@link ProjectMcpTrust}. */
+    public static final String STOP_HOOK_TRUST_PREFIX = "stop-hook:";
 
     /** The 19 components before {@code files} and {@code web}: default limits. */
     public HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSettings> restApis,
@@ -193,7 +281,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
                 pluginSettings));
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context,
                 fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, copy, storage,
-                whitelistedEnvVars, toolsWhitelistedEnvVars, files, web);
+                whitelistedEnvVars, toolsWhitelistedEnvVars, files, web, loop, hooks);
     }
 
     /**
@@ -300,7 +388,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution,
                 new Sandbox(s.tempDir(), s.timeoutSeconds(), backend.toLowerCase(), s.localFallback(), s.docker(), s.outputLogMaxBytes()),
                 context, fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
-                toolsWhitelistedEnvVars, files, web);
+                toolsWhitelistedEnvVars, files, web, loop, hooks);
     }
 
     /** Same settings with {@code sandbox.docker.image} replaced (e.g. by a command line flag). */
@@ -312,7 +400,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
                         new Docker(d.binary(), image, d.memory(), d.cpus(), d.pidsLimit(), d.user(), d.network(),
                                 d.mode(), d.remote(), d.remoteHost()), s.outputLogMaxBytes()),
                 context, fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
-                toolsWhitelistedEnvVars, files, web);
+                toolsWhitelistedEnvVars, files, web, loop, hooks);
     }
 
     /** Same settings with {@code sandbox.docker.mode} replaced (e.g. by a command line flag). */
@@ -327,7 +415,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
                         new Docker(d.binary(), d.image(), d.memory(), d.cpus(), d.pidsLimit(), d.user(), d.network(),
                                 mode.toLowerCase(), d.remote(), d.remoteHost()), s.outputLogMaxBytes()),
                 context, fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
-                toolsWhitelistedEnvVars, files, web);
+                toolsWhitelistedEnvVars, files, web, loop, hooks);
     }
 
     /** Same settings with {@code sandbox.docker.remote} and {@code remoteHost} replaced (command line flags). */
@@ -340,7 +428,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
                                 d.mode(), remote != null ? remote : d.remote(),
                                 remoteHost != null ? remoteHost : d.remoteHost()), s.outputLogMaxBytes()),
                 context, fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
-                toolsWhitelistedEnvVars, files, web);
+                toolsWhitelistedEnvVars, files, web, loop, hooks);
     }
 
     /** True when the docker backend runs in daemon mode (long-running container). */
@@ -479,6 +567,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
                     output.extraPatterns() != null ? output.extraPatterns() : o.extraPatterns(),
                     output.validation() != null ? output.validation() : o.validation()));
         }
+        if (loop != null) c = c.withLoop(loop.over(c.loop()));
         return c;
     }
 
@@ -488,7 +577,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox,
                 new Context(maxTokens, c.keepRecentTurns(), c.auto(), c.keepTokens(), c.buffer(), c.strategy(),
                         c.mnemonic(), c.scope(), c.noiseCommands(), c.deferCompactionOnThinkingOverflow()), fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
-                toolsWhitelistedEnvVars, files, web);
+                toolsWhitelistedEnvVars, files, web, loop, hooks);
     }
 
     /** Same settings with {@code context.strategy} replaced (e.g. by a command line flag). */
@@ -498,7 +587,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox,
                 new Context(c.maxTokens(), c.keepRecentTurns(), c.auto(), c.keepTokens(), c.buffer(), strategy,
                         c.mnemonic(), c.scope(), c.noiseCommands(), c.deferCompactionOnThinkingOverflow()), fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
-                toolsWhitelistedEnvVars, files, web);
+                toolsWhitelistedEnvVars, files, web, loop, hooks);
     }
 
     /** False when {@code context.noiseCommands} is set to false. */
@@ -510,14 +599,14 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
     public HarnessSettings withSmallModel(boolean small) {
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context,
                 fastModel, output, small, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
-                toolsWhitelistedEnvVars, files, web);
+                toolsWhitelistedEnvVars, files, web, loop, hooks);
     }
 
     /** Same settings with {@code chatRetentionLimit} replaced. */
     public HarnessSettings withChatRetentionLimit(Integer limit) {
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context,
                 fastModel, output, smallModel, permissions, providers, defaultProvider, limit, plugins, storage, whitelistedEnvVars,
-                toolsWhitelistedEnvVars, files, web);
+                toolsWhitelistedEnvVars, files, web, loop, hooks);
     }
 
     /** Concurrency limit: {@code 1} serialized (default), {@code N} bounded, {@code -1} unlimited. */
@@ -694,6 +783,8 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
             }
             if (projectTree != null) dropUntrustedProjectServers((ObjectNode) merged, projectTree, otherTrees,
                     projectDir, prompt == null ? ProjectMcpTrust.Prompt.NONE : prompt, trust, warn);
+            if (projectTree != null) dropUntrustedProjectHooks((ObjectNode) merged, projectTree, otherTrees,
+                    projectDir, prompt == null ? ProjectMcpTrust.Prompt.NONE : prompt, trust, warn);
             return mapper.treeToValue(expand(merged, env), HarnessSettings.class);
         } catch (IOException e) {
             throw new UncheckedIOException("Cannot read settings", e);
@@ -731,6 +822,43 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
             if (!Boolean.TRUE.equals(ok)) {
                 warn.accept("MCP server '" + name + "' from the project settings skipped: "
                         + (ok == null ? "it starts a local process and was never trusted (no prompt available here)"
+                        : "not trusted"));
+                it.remove();
+            }
+        }
+    }
+
+    /**
+     * Removes from {@code merged} the stop command hooks that only the project file defines and that the user did not
+     * trust: like a stdio MCP server, a hook runs a command chosen by whoever wrote the project. Asked once per
+     * project and hook definition ({@link #STOP_HOOK_TRUST_PREFIX} + command), answer remembered.
+     */
+    private static void dropUntrustedProjectHooks(ObjectNode merged, JsonNode projectTree, List<JsonNode> others,
+                                                  Path projectDir, ProjectMcpTrust.Prompt prompt,
+                                                  ProjectMcpTrust trust, java.util.function.Consumer<String> warn) {
+        if (!(merged.path("hooks").get("stop") instanceof ArrayNode hooks)) return;
+        List<JsonNode> fromProject = new ArrayList<>();
+        projectTree.path("hooks").path("stop").forEach(fromProject::add);
+        if (fromProject.isEmpty()) return;
+        // a layer after the project file replaces the array: what is left from the project is what the project gave
+        for (Iterator<JsonNode> it = hooks.iterator(); it.hasNext(); ) {
+            JsonNode h = it.next();
+            if (!fromProject.contains(h)) continue;
+            boolean elsewhere = false;
+            for (JsonNode t : others) {
+                for (JsonNode o : t.path("hooks").path("stop")) elsewhere |= o.equals(h);
+            }
+            if (elsewhere) continue;
+            String command = h.path("command").asText("");
+            String name = STOP_HOOK_TRUST_PREFIX + command;
+            Boolean ok = trust.lookup(projectDir, name, h);
+            if (ok == null) {
+                ok = prompt.ask(projectDir, name, command);
+                if (ok != null) trust.remember(projectDir, name, h, ok);
+            }
+            if (!Boolean.TRUE.equals(ok)) {
+                warn.accept("Stop hook '" + command + "' from the project settings skipped: "
+                        + (ok == null ? "it runs a local command and was never trusted (no prompt available here)"
                         : "not trusted"));
                 it.remove();
             }

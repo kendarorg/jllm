@@ -1,6 +1,6 @@
 # Feature matrix
 
-Legend: yes, no, partial. All columns except jllm are from memory and unverified; Hermes Agent has the lowest confidence. For source-pinned comparisons use the paper's tables, not this document.
+Legend: yes, no, partial. "planned" in the jllm column means not implemented yet; the cell shows the current state (see [`extend.md`](../extend.md)). All columns except jllm are from memory and unverified; Hermes Agent has the lowest confidence. For source-pinned comparisons use the paper's tables, not this document.
 
 <table>
 <tr><th>Functionality</th><th>mini-swe-agent</th><th>Pi</th><th>OpenCode</th><th>Qwen Code</th><th>Hermes Agent</th><th>jllm</th></tr>
@@ -8,7 +8,7 @@ Legend: yes, no, partial. All columns except jllm are from memory and unverified
 <tr><td>Terminal UI</td><td>partial</td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 yes</td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 yes</td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 yes</td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 yes</td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 yes</td></tr>
 <tr><td><em>Web UI</em></td><td bgcolor="#ffc7ce" style="background-color:#ffc7ce;color:#000">🔴 <em>no</em></td><td bgcolor="#ffc7ce" style="background-color:#ffc7ce;color:#000">🔴 <em>no</em></td><td><em>partial (desktop and web client)</em></td><td bgcolor="#ffc7ce" style="background-color:#ffc7ce;color:#000">🔴 <em>no</em></td><td bgcolor="#ffc7ce" style="background-color:#ffc7ce;color:#000">🔴 <em>no</em></td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 <em>yes</em></td></tr>
 <tr><td>Messaging gateway (chat apps)</td><td bgcolor="#ffc7ce" style="background-color:#ffc7ce;color:#000">🔴 no</td><td bgcolor="#ffc7ce" style="background-color:#ffc7ce;color:#000">🔴 no</td><td bgcolor="#ffc7ce" style="background-color:#ffc7ce;color:#000">🔴 no</td><td bgcolor="#ffc7ce" style="background-color:#ffc7ce;color:#000">🔴 no</td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 yes</td><td bgcolor="#ffc7ce" style="background-color:#ffc7ce;color:#000">🔴 no</td></tr>
-<tr><td><em>Model streaming</em></td><td bgcolor="#ffc7ce" style="background-color:#ffc7ce;color:#000">🔴 <em>no</em></td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 <em>yes</em></td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 <em>yes</em></td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 <em>yes</em></td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 <em>yes</em></td><td bgcolor="#ffc7ce" style="background-color:#ffc7ce;color:#000">🔴 <em>no</em></td></tr>
+<tr><td><em>Model streaming</em></td><td bgcolor="#ffc7ce" style="background-color:#ffc7ce;color:#000">🔴 <em>no</em></td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 <em>yes</em></td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 <em>yes</em></td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 <em>yes</em></td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 <em>yes</em></td><td bgcolor="#ffc7ce" style="background-color:#ffc7ce;color:#000">🔴 <em>no (planned)</em></td></tr>
 <tr><td>Image input</td><td bgcolor="#ffc7ce" style="background-color:#ffc7ce;color:#000">🔴 no</td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 yes</td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 yes</td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 yes</td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 yes</td><td bgcolor="#ffc7ce" style="background-color:#ffc7ce;color:#000">🔴 no</td></tr>
 <tr><td><em>Broad provider support</em></td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 <em>yes (LiteLLM)</em></td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 <em>yes</em></td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 <em>yes</em></td><td><em>partial (OpenAI-compatible)</em></td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 <em>yes</em></td><td><em>partial</em></td></tr>
 <tr><td>Model registry</td><td>partial (LiteLLM)</td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 yes</td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 yes</td><td bgcolor="#ffc7ce" style="background-color:#ffc7ce;color:#000">🔴 no</td><td>partial</td><td bgcolor="#ffc7ce" style="background-color:#ffc7ce;color:#000">🔴 no</td></tr>
@@ -44,6 +44,8 @@ Legend: yes, no, partial. All columns except jllm are from memory and unverified
 <tr><td>Custom commands</td><td bgcolor="#ffc7ce" style="background-color:#ffc7ce;color:#000">🔴 no</td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 yes</td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 yes</td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 yes</td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 yes</td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 yes (plugins)</td></tr>
 <tr><td><em>Scheduled tasks</em></td><td bgcolor="#ffc7ce" style="background-color:#ffc7ce;color:#000">🔴 <em>no</em></td><td bgcolor="#ffc7ce" style="background-color:#ffc7ce;color:#000">🔴 <em>no</em></td><td bgcolor="#ffc7ce" style="background-color:#ffc7ce;color:#000">🔴 <em>no</em></td><td bgcolor="#ffc7ce" style="background-color:#ffc7ce;color:#000">🔴 <em>no</em></td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 <em>yes</em></td><td bgcolor="#ffc7ce" style="background-color:#ffc7ce;color:#000">🔴 <em>no</em></td></tr>
 <tr><td>Non-interactive or headless mode</td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 yes</td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 yes</td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 yes</td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 yes</td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 yes</td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 yes </td></tr>
+<tr><td><em>Stuck or loop detection</em></td><td><em>partial (malformed-output cap)</em></td><td bgcolor="#ffc7ce" style="background-color:#ffc7ce;color:#000">🔴 <em>no</em></td><td><em>partial (repeated identical tool calls)</em></td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 <em>yes (from Gemini CLI)</em></td><td bgcolor="#ffc7ce" style="background-color:#ffc7ce;color:#000">🔴 <em>no</em></td><td><em>partial (turn cap only; planned)</em></td></tr>
+<tr><td>Verify-on-stop</td><td bgcolor="#ffc7ce" style="background-color:#ffc7ce;color:#000">🔴 no</td><td bgcolor="#ffc7ce" style="background-color:#ffc7ce;color:#000">🔴 no</td><td bgcolor="#ffc7ce" style="background-color:#ffc7ce;color:#000">🔴 no</td><td bgcolor="#ffc7ce" style="background-color:#ffc7ce;color:#000">🔴 no</td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 yes</td><td bgcolor="#ffc7ce" style="background-color:#ffc7ce;color:#000">🔴 no (planned)</td></tr>
 <tr><td><em>JSON or RPC protocol mode</em></td><td bgcolor="#ffc7ce" style="background-color:#ffc7ce;color:#000">🔴 <em>no</em></td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 <em>yes</em></td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 <em>yes (server)</em></td><td><em>partial (JSON output)</em></td><td><em>partial</em></td><td bgcolor="#ffc7ce" style="background-color:#ffc7ce;color:#000">🔴 <em>no</em></td></tr>
 <tr><td>Trajectory export for training</td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 yes</td><td bgcolor="#ffc7ce" style="background-color:#ffc7ce;color:#000">🔴 no</td><td bgcolor="#ffc7ce" style="background-color:#ffc7ce;color:#000">🔴 no</td><td bgcolor="#ffc7ce" style="background-color:#ffc7ce;color:#000">🔴 no</td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 yes</td><td bgcolor="#ffc7ce" style="background-color:#ffc7ce;color:#000">🔴 no</td></tr>
 <tr><td><em>Cost and token metrics</em></td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 <em>yes</em></td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 <em>yes</em></td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 <em>yes</em></td><td><em>partial</em></td><td><em>partial</em></td><td bgcolor="#c6efce" style="background-color:#c6efce;color:#000">🟢 <em>yes</em></td></tr>
@@ -70,7 +72,7 @@ Legend: yes, no, partial. All columns except jllm are from memory and unverified
 | *OpenCode* | *Full client/server coding agent* | *Provider breadth, LSP, UX, sharing* | *No sandbox, not embeddable in the JVM* |
 | Qwen Code | Gemini CLI fork tuned for Qwen | Qwen integration, vision, sandbox options | Narrow model focus, not embeddable in the JVM |
 | *Hermes Agent* | *Persistent self-improving assistant* | *Memory, skills, scheduling, chat gateway* | *Less focused on coding and embedding* |
-| jllm | Embeddable Java harness | Permissions, sandbox, sub-agents, MCP, OpenAPI, context strategies | No streaming, images, model registry, fork/rewind, cross-session memory, scheduling |
+| jllm | Embeddable Java harness | Permissions, sandbox, sub-agents, MCP, OpenAPI, context strategies | No streaming, stuck detection or verify-on-stop (all planned), images, model registry, fork/rewind, cross-session memory, scheduling |
 
 ---
 
@@ -90,7 +92,7 @@ Basis: jllm side from `core/jllm-harness/README.md` and `gaps.md` (code not read
 | Context limits | None beyond cost and step limits. | Compaction, handoff notes, `history_recall`, retry when the provider rejects a request as too long. |
 | *Models* | *LiteLLM, broad provider coverage.* | *Anthropic (caching, thinking) and OpenAI-compatible endpoints, including Gemini, Ollama, llama.cpp. Fallback chains, fast model for helper tasks. No streaming, no image input.* |
 | Safety | Mostly relies on the sandbox. | `plan`/`edit`/`auto` modes, regex deny/ask/allow rules, approval policy, per-chat grants, classifier in auto mode. |
-| *Control flow* | *Step and cost limits; a "task finished" marker command ends the run.* | *Cancel, steering and follow-up messages, continuation of cut-off responses, hooks at agent, model-call and tool-call level.* |
+| *Control flow* | *Step and cost limits; a "task finished" marker command ends the run; consecutive malformed responses are capped.* | *Cancel, steering and follow-up messages, continuation of cut-off responses, hooks at agent, model-call and tool-call level. `maxTurns` only; stuck detection is planned.* |
 | Extensibility | Subclass or swap config and templates. | Plugins via ServiceLoader, skills, instruction files, slash commands, custom agent types. |
 | *Interface* | *CLI and Python API, trajectory output.* | *Java library, terminal chat, browser chat with REST and SSE.* |
 | Auth | API keys through LiteLLM. | API keys, plus OAuth utilities (PKCE, device code, token store, MCP OAuth). |
@@ -117,7 +119,7 @@ Basis: `gaps.md`, which compares jllm with Pi (pi-ai, pi-agent-core, pi-coding-a
 | *Goal* | *Minimal, extensible terminal coding agent, layered as pi-ai, pi-agent-core, pi-coding-agent.* | *Embeddable Java library plus CLI and web front ends.* |
 | Language | TypeScript | Java 21 |
 | *Providers* | *Anthropic, OpenAI, Google/Gemini, Vertex, Bedrock, Azure, Mistral, OpenRouter, native clients.* | *Anthropic and OpenAI-compatible endpoints; Gemini through its OpenAI-compatible endpoint. No native Gemini, Bedrock or Vertex.* |
-| Streaming | Text, thinking and tool-call argument deltas, mid-stream abort. | None model-side; turn-level events only (SSE in jllm-web). |
+| Streaming | Text, thinking and tool-call argument deltas, mid-stream abort. | None model-side; turn-level events only (SSE in jllm-web). Text, thinking and tool-argument deltas planned ([`extend.md`](../extend.md)). |
 | *Image input* | *Yes* | *No* |
 | Model registry | Per-model context window, max output, cost, capabilities. | Per-provider or manual (`HarnessPricing`). |
 | *Cross-provider handoff* | *Converts thinking blocks and tool-call IDs on mid-chat model switch.* | *No transform layer.* |
@@ -147,7 +149,7 @@ Basis: `gaps.md`, which compares jllm with Pi (pi-ai, pi-agent-core, pi-coding-a
 
 - **mini-swe-agent**: smallest; bash only; for benchmarks.
 - **Pi**: richest model layer and coding-agent UX; intentionally minimal core with extensions.
-- **jllm**: strongest on safety, sandboxing, sub-agents, MCP and context management; weakest on streaming, images and model abstraction.
+- **jllm**: strongest on safety, sandboxing, sub-agents, MCP and context management; weakest on streaming (planned), images and model abstraction.
 
 ---
 
@@ -162,7 +164,7 @@ Basis: OpenCode side from memory (sst/opencode, TypeScript on Bun), not verified
 | *Architecture* | *Client/server: a local server with HTTP API and SDK; TUI and other clients attach to it.* | *In-process library; `jllm-web` adds REST and SSE.* |
 | Providers | Broad (75+ through Vercel AI SDK and models.dev registry), including subscription logins and Copilot. | Anthropic and OpenAI-compatible endpoints; no provider logins. |
 | *Model metadata* | *Registry with context, cost, capabilities.* | *Per-provider or manual.* |
-| Streaming | Yes, text, thinking, tool calls. | No model-side streaming. |
+| Streaming | Yes, text, thinking, tool calls. | No model-side streaming (planned). |
 | *Image input* | *Yes* | *No* |
 | Built-in tools | read, write, edit, patch, bash, grep, glob, list, webfetch, todo, task. LSP diagnostics fed back to the model. | Files, shell, web search and fetch, `ls`, `todo_write`, `task`. No LSP. |
 | *Agents* | *`build` (full access), `plan` (read-only), `general` subagent; custom agents with per-agent model, prompt, tools, permissions.* | *`plan`/`edit`/`auto` modes; `general`, `explore`, `plan` and custom sub-agent types.* |
@@ -176,6 +178,7 @@ Basis: OpenCode side from memory (sst/opencode, TypeScript on Bun), not verified
 | *Instructions* | *`AGENTS.md`, global and project config.* | *`KENDAR.md` instruction files, layered settings, system prompt files.* |
 | Extensibility | JS/TS plugins, custom tools, custom commands (markdown), hooks, themes, formatters. | Java `HarnessPlugin`, hooks, skills, slash commands. No prompt templates, formatters or themes. |
 | *Run modes* | *TUI, `run` (non-interactive), server, ACP, GitHub integration.* | *CLI chat, `--prompt`, web.* |
+| Loop detection | "Doom loop" check on repeated identical tool calls. | `maxTurns` plus an interactive "continue?" question; stuck detection planned ([`extend.md`](../extend.md)). |
 
 ## Where each fits
 
@@ -189,7 +192,7 @@ Basis: OpenCode side from memory (sst/opencode, TypeScript on Bun), not verified
 | *mini-swe-agent* | *Bash only, linear history* | *Simplicity, benchmarking* | *No safety, context management or extensions* |
 | Pi | Minimal core, extensions | Model layer, session tree, run modes | Fewer built-in safety features |
 | *OpenCode* | *Full client/server coding agent* | *Provider breadth, LSP, UX, sharing* | *No sandbox, not embeddable in the JVM* |
-| jllm | Embeddable Java harness | Permissions, sandbox, sub-agents, MCP, OpenAPI, context strategies | No streaming, images, model registry, fork/rewind |
+| jllm | Embeddable Java harness | Permissions, sandbox, sub-agents, MCP, OpenAPI, context strategies | No streaming (planned), images, model registry, fork/rewind |
 
 ---
 
@@ -202,7 +205,7 @@ Basis: Qwen Code side from memory (QwenLM/qwen-code, a TypeScript CLI forked fro
 | *Goal* | *Terminal coding agent tuned for Qwen models.* | *Embeddable Java library plus CLI and web front ends.* |
 | Language | TypeScript (Node) | Java 21 |
 | *Providers* | *OpenAI-compatible APIs (Qwen, OpenRouter, local), Qwen OAuth login.* | *Anthropic and OpenAI-compatible endpoints; no provider logins. Local Qwen supported through llama.cpp, vLLM, Ollama and a `--small-model` prompt.* |
-| Streaming | Yes | No model-side streaming. |
+| Streaming | Yes | No model-side streaming (planned). |
 | *Image input* | *Yes, through a vision model.* | *No* |
 | Built-in tools | read, write, edit, read-many-files, ls, glob, grep, shell, web fetch, web search, memory, todo, task. | Files, shell, web search and fetch, `ls`, `todo_write`, `task`, document readers (pdf, docx). |
 | *Approval modes* | *plan, default, auto-edit, yolo.* | *`plan`, default, `edit`, `auto`, plus regex rules and a fast-model classifier.* |
@@ -216,6 +219,7 @@ Basis: Qwen Code side from memory (QwenLM/qwen-code, a TypeScript CLI forked fro
 | *Extensibility* | *Custom commands, extensions, hooks, IDE integration.* | *Java `HarnessPlugin`, hooks, skills, slash commands.* |
 | Run modes | Interactive, headless with JSON output. | CLI chat, `--prompt`, web. |
 | *Embedding* | *Node SDK, not designed as a JVM library.* | *Java library with ports for stores, sandbox, approvals and metrics.* |
+| Loop detection | Likely inherited from Gemini CLI's loop detection. | `maxTurns` plus an interactive "continue?" question; stuck detection planned ([`extend.md`](../extend.md)). |
 
 ## Where each fits
 
@@ -230,7 +234,7 @@ Basis: Qwen Code side from memory (QwenLM/qwen-code, a TypeScript CLI forked fro
 | Pi | Minimal core, extensions | Model layer, session tree, run modes | Fewer built-in safety features |
 | *OpenCode* | *Full client/server coding agent* | *Provider breadth, LSP, UX, sharing* | *No sandbox, not embeddable in the JVM* |
 | Qwen Code | Gemini CLI fork tuned for Qwen | Qwen integration, vision, sandbox options | Narrow model focus, not embeddable in the JVM |
-| *jllm* | *Embeddable Java harness* | *Permissions, sandbox, sub-agents, MCP, OpenAPI, context strategies* | *No streaming, images, model registry, fork/rewind* |
+| *jllm* | *Embeddable Java harness* | *Permissions, sandbox, sub-agents, MCP, OpenAPI, context strategies* | *No streaming or stuck detection (both planned), images, model registry, fork/rewind* |
 
 ---
 
@@ -254,6 +258,7 @@ Basis: Hermes Agent (Nous Research) side from memory, with low confidence; verif
 | Context | Compression of long conversations. | Three strategies: `compaction`, `mnemonic`, `scope`. |
 | *Research use* | *Trajectory export for model training and RL.* | *No trajectory export built for training.* |
 | Embedding | Python package and CLI, not a library for host applications. | Java library with ports for stores, sandbox, approvals and metrics. |
+| *Stop control* | *A verify-on-stop guard can veto the loop's exit and send the agent back to work.* | *STOP hook observes only; verify-on-stop with a bounded number of re-entries planned ([`extend.md`](../extend.md)).* |
 
 ## Where each fits
 
