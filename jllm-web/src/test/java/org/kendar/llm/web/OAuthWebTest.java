@@ -30,7 +30,8 @@ import org.kendar.llm.web.auth.AuthController;
 import org.kendar.llm.web.auth.CookieAuthentication;
 import org.kendar.llm.web.auth.LoginThrottle;
 import org.kendar.llm.web.auth.PasswordHasher;
-import org.kendar.llm.web.auth.SessionStore;
+import org.kendar.llm.web.auth.InMemoryLoginSessionRepository;
+import org.kendar.llm.web.commons.users.LoginSessionRepository;
 import org.kendar.llm.web.commons.ApiInterceptor;
 import org.kendar.llm.web.commons.ChatController;
 import org.kendar.llm.web.commons.JllmProperties;
@@ -111,7 +112,7 @@ class OAuthWebTest {
                 new TokenCipher(Base64.getDecoder().decode(TokenCipher.newKey()), null));
         harness = build(new HarnessSettings(null, List.of(crm, shared), null, null, null, null), store, permissions,
                 skills);
-        SessionStore sessions = new SessionStore();
+        LoginSessionRepository sessions = new InMemoryLoginSessionRepository();
         CookieAuthentication auth = new CookieAuthentication(users, sessions);
         OAuthController oauth = new OAuthController(harness, auth, props(PUBLIC));
         oauth.check();
@@ -270,7 +271,7 @@ class OAuthWebTest {
         Permissions permissions = new Permissions(new FileRoleRepository(root.resolve("permissions"), MAPPER));
         SkillRepository skills = new FileSkillRepository(root);
         AgentHarness plain = build(settings, new FileTokenStore(root.resolve("plain")), permissions, skills);
-        CookieAuthentication auth = new CookieAuthentication(users, new SessionStore());
+        CookieAuthentication auth = new CookieAuthentication(users, new InMemoryLoginSessionRepository());
         IllegalStateException e = assertThrows(IllegalStateException.class,
                 () -> new OAuthController(plain, auth, props(PUBLIC)).check());
         assertTrue(e.getMessage().contains("JLLM_TOKEN_KEY"), e.getMessage());

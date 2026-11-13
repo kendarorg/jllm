@@ -5,7 +5,7 @@ import org.kendar.llm.harness.skills.SkillCatalog;
 import org.kendar.llm.web.Api;
 import org.kendar.llm.web.auth.AuthController;
 import org.kendar.llm.web.auth.PasswordHasher;
-import org.kendar.llm.web.auth.SessionStore;
+import org.kendar.llm.web.commons.users.LoginSessionRepository;
 import org.kendar.llm.web.commons.WebPrincipal;
 import org.kendar.llm.web.me.MeController;
 import org.kendar.llm.web.users.Permissions;
@@ -31,11 +31,11 @@ public class AdminController {
     private final UserRepository users;
     private final Permissions permissions;
     private final SkillRepository skills;
-    private final SessionStore sessions;
+    private final LoginSessionRepository sessions;
     private final AgentHarness harness;
     private final ToolCatalogView catalog;
 
-    public AdminController(UserRepository users, Permissions permissions, SkillRepository skills, SessionStore sessions,
+    public AdminController(UserRepository users, Permissions permissions, SkillRepository skills, LoginSessionRepository sessions,
                            AgentHarness harness, ToolCatalogView catalog) {
         this.users = users;
         this.permissions = permissions;
