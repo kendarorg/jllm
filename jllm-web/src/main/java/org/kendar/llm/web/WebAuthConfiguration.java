@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.kendar.llm.harness.AgentHarness;
 import org.kendar.llm.harness.auth.CredentialResolver;
 import org.kendar.llm.harness.auth.HarnessPrincipal;
+import org.kendar.llm.harness.auth.TokenStore;
 import org.kendar.llm.harness.auth.UserPolicyResolver;
 import org.kendar.llm.web.admin.ToolCatalogView;
 import org.kendar.llm.web.auth.CookieAuthentication;
@@ -22,6 +23,7 @@ import org.kendar.llm.web.users.Permissions;
 import org.kendar.llm.web.users.UserCredentialResolver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
@@ -99,10 +101,13 @@ public class WebAuthConfiguration {
         return new ToolCatalogView(harness);
     }
 
+    /** A {@link TokenStore} bean (e.g. a database) replaces the token files. */
     @Bean
     public HarnessIdentity harnessIdentity(UserRepository users, Permissions permissions, SkillRepository skills,
+                                           ObjectProvider<TokenStore> tokenStoreBean,
                                            @Value("${jllm.webauth-dir:webauth}") String webauthDir) {
         Path tokens = root(webauthDir).resolve("tokens");
+        TokenStore tokenStore = tokenStoreBean.getIfAvailable();
         CredentialResolver credentials = new UserCredentialResolver(users);
         UserPolicyResolver policies = permissions.resolver(users, skills);
         Function<String, HarnessPrincipal> principals = id -> users.find(id).map(WebUser::principal).orElse(null);
@@ -126,6 +131,11 @@ public class WebAuthConfiguration {
             @Override
             public Path tokenDir() {
                 return tokens;
+            }
+
+            @Override
+            public TokenStore tokenStore() {
+                return tokenStore;
             }
         };
     }

@@ -250,7 +250,7 @@ roles and skills, plugged in through the common module's `WebAuthentication`, `C
 The file repositories are used with `jllm.store=file` (the default); another store supplies its own
 `UserRepository`, `RoleRepository`, `SkillRepository` and `LoginSessionRepository` beans. The harness settings layers come from a
 `SettingsSource` bean (default: the settings files) and the project trust answers from a `ProjectMcpTrust` bean;
-`HarnessIdentity.tokenStore()` can replace the OAuth token files.
+a `TokenStore` bean (passed through `HarnessIdentity.tokenStore()`) can replace the OAuth token files.
 
 Tests: `SampleUsersTest`, `LoginTest`, `MeControllerTest`, `AdminControllerTest`, `JllmWebApplicationArgsTest`
 (`mvn -pl jllm-web -am test`).
@@ -278,7 +278,7 @@ harness. A short list:
       (`NoSuchElementException`): map duplicate-key and zero-rows-updated to those.
 - [ ] OAuth tokens: a `TokenStore` on a `oauth_tokens(principal_id, name, ciphertext, version)` table, encrypted with
       `JLLM_TOKEN_KEY` as the files are, `compareAndPut` as `UPDATE ... WHERE version = ?`, `crossProcess()` true;
-      return it from `HarnessIdentity.tokenStore()`.
+      exposed as a `TokenStore` bean (`WebAuthConfiguration` passes it to `HarnessIdentity.tokenStore()`).
 - [ ] Harness settings: a `SettingsSource` bean reading one JSON document per layer
       (`settings_layer(kind GLOBAL|PROJECT|EXPLICIT, doc)`), and a `ProjectMcpTrust` bean on
       `mcp_trust(project_key, name, sha256, trusted)` (`ProjectMcpTrust.projectKey`/`fingerprint`).
