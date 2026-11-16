@@ -68,7 +68,17 @@ public final class FileUserRepository implements UserRepository {
     }
 
     @Override
-    public WebUser create(String id, String name, String role, String passwordHash) {
+    public WebUser create(String id, String name, String role, String passwordHash, String email) {
+        return write(id, name, role, passwordHash, email, null);
+    }
+
+    @Override
+    public WebUser createExternal(String id, String name, String role, String email, String externalId) {
+        if (externalId == null || externalId.isBlank()) throw new IllegalArgumentException("externalId is required");
+        return write(id, name, role, null, email, externalId);
+    }
+
+    private WebUser write(String id, String name, String role, String passwordHash, String email, String externalId) {
         if (!UserRepository.validId(id)) throw new IllegalArgumentException("Invalid user id: " + id);
         synchronized (JsonFiles.LOCK) {
             if (exists(id)) throw new IllegalStateException("User " + id + " exists");
@@ -76,10 +86,42 @@ public final class FileUserRepository implements UserRepository {
                 n.put("name", name == null || name.isBlank() ? id : name);
                 n.put("role", role);
                 if (passwordHash != null) n.put("password", passwordHash);
+                if (email != null && !email.isBlank()) n.put("email", email.strip());
+                if (externalId != null) n.put("externalId", externalId);
                 n.putObject("credentials");
             });
         }
         return find(id).orElseThrow();
+    }
+
+    @Override
+    public Optional<WebUser> findByExternal(String issuer, String sub) {
+        if (issuer == null || sub == null) return Optional.empty();
+        String key = UserRepository.externalKey(issuer, sub);
+        return all().stream().filter(u -> key.equals(u.externalId())).findFirst();
+    }
+
+    @Override
+    public List<WebUser> findByEmail(String email) {
+        if (email == null || email.isBlank()) return List.of();
+        String wanted = email.strip();
+        return all().stream().filter(u -> u.email() != null && u.email().equalsIgnoreCase(wanted)).toList();
+    }
+
+    @Override
+    public WebUser setExternalId(String id, String externalId) {
+        return update(id, n -> {
+            if (externalId == null || externalId.isBlank()) n.remove("externalId");
+            else n.put("externalId", externalId);
+        });
+    }
+
+    @Override
+    public WebUser setEmail(String id, String email) {
+        return update(id, n -> {
+            if (email == null || email.isBlank()) n.remove("email");
+            else n.put("email", email.strip());
+        });
     }
 
     @Override
@@ -160,6 +202,8 @@ public final class FileUserRepository implements UserRepository {
         });
         String password = n.path("password").isTextual() ? n.path("password").asText() : null;
         return new WebUser(fileId, n.path("name").asText(fileId), n.path("role").asText("none"), creds, password,
-                strings(n.path("disabledTools")), strings(n.path("disabledSkills")));
+                strings(n.path("disabledTools")), strings(n.path("disabledSkills")),
+                n.path("externalId").isTextual() ? n.path("externalId").asText() : null,
+                n.path("email").isTextual() ? n.path("email").asText() : null);
     }
 }

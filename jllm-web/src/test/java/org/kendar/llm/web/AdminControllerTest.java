@@ -37,6 +37,21 @@ class AdminControllerTest {
     }
 
     @Test
+    void emailsAreUnique() throws Exception {
+        WebauthFixture f = new WebauthFixture(dir);
+        Cookie admin = f.signIn("admin");
+        f.send(admin, "PUT", "/api/admin/users/rita", Map.of("email", "rita@example.com")).andExpect(status().isOk());
+        f.send(admin, "PUT", "/api/admin/users/rita", Map.of("email", "Rita@Example.com")).andExpect(status().isOk());
+        f.send(admin, "PUT", "/api/admin/users/gus", Map.of("email", "RITA@example.com")).andExpect(status().isConflict());
+        f.send(admin, "POST", "/api/admin/users", Map.of("id", "eve", "role", "guest", "email", "rita@example.com"))
+                .andExpect(status().isConflict());
+        assertFalse(f.users.exists("eve"));
+        assertNull(f.users.find("gus").orElseThrow().email());
+        f.send(admin, "PUT", "/api/admin/users/rita", Map.of("email", "")).andExpect(status().isOk());
+        f.send(admin, "PUT", "/api/admin/users/gus", Map.of("email", "rita@example.com")).andExpect(status().isOk());
+    }
+
+    @Test
     void usersAreCreatedEditedResetAndDeleted() throws Exception {
         WebauthFixture f = new WebauthFixture(dir);
         Cookie admin = f.signIn("admin");

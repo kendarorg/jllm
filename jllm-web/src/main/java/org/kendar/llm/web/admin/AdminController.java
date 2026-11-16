@@ -55,6 +55,11 @@ public class AdminController {
         return m;
     }
 
+    /** Whether another user than {@code except} has this email (ignoring case); the sign-in links by it. */
+    private boolean emailTaken(String email, String except) {
+        return users.findByEmail(email).stream().anyMatch(u -> !u.id().equals(except));
+    }
+
     private long admins() {
         return users.all().stream().filter(WebUser::admin).count();
     }
@@ -69,9 +74,11 @@ public class AdminController {
         String id = Api.text(body, "id");
         String role = Api.text(body, "role");
         String password = Api.text(body, "password");
+        String email = Api.text(body, "email");
         if (!UserRepository.validId(id)) return Api.error(HttpStatus.BAD_REQUEST, "Login: 1-64 of a-z, 0-9, '_' and '-'");
         if (permissions.role(role).isEmpty()) return Api.error(HttpStatus.BAD_REQUEST, "Unknown role " + role);
         if (users.exists(id)) return Api.error(HttpStatus.CONFLICT, "User " + id + " exists");
+        if (emailTaken(email, null)) return Api.error(HttpStatus.CONFLICT, "Email " + email + " belongs to another user");
         String hash = null;
         if (password != null && !password.isEmpty()) {
             String invalid = MeController.invalidPassword(id, password);
@@ -79,7 +86,7 @@ public class AdminController {
             hash = PasswordHasher.hash(password);
         }
         try {
-            return ResponseEntity.status(HttpStatus.CREATED).body(row(users.create(id, Api.text(body, "name"), role, hash)));
+            return ResponseEntity.status(HttpStatus.CREATED).body(row(users.create(id, Api.text(body, "name"), role, hash, email)));
         } catch (IllegalStateException e) {
             return Api.error(HttpStatus.CONFLICT, e.getMessage());
         }
@@ -98,6 +105,11 @@ public class AdminController {
             }
         }
         WebUser updated = found.get();
+        if (body != null && body.containsKey("email")) {
+            String email = Api.text(body, "email");
+            if (emailTaken(email, id)) return Api.error(HttpStatus.CONFLICT, "Email " + email + " belongs to another user");
+            updated = users.setEmail(id, email);
+        }
         if (name != null && !name.isBlank()) updated = users.setName(id, name);
         if (role != null) updated = users.setRole(id, role);
         return ResponseEntity.ok(row(updated));
@@ -106,7 +118,11 @@ public class AdminController {
     /** Sets a new password, or resets to the default one when none is given; signs the user out everywhere. */
     @PostMapping("/users/{id}/password")
     public ResponseEntity<Object> setPassword(@PathVariable String id, @RequestBody(required = false) Map<String, Object> body) {
-        if (!users.exists(id)) return Api.error(HttpStatus.NOT_FOUND, "Unknown user " + id);
+        Optional<WebUser> target = users.find(id);
+        if (target.isEmpty()) return Api.error(HttpStatus.NOT_FOUND, "Unknown user " + id);
+        if (target.get().passwordless()) {
+            return Api.error(HttpStatus.CONFLICT, "This account signs in through the identity provider");
+        }
         String password = Api.text(body, "password");
         String hash = null;
         if (password != null && !password.isEmpty()) {

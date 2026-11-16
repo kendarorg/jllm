@@ -117,7 +117,7 @@ class OAuthWebTest {
         OAuthController oauth = new OAuthController(harness, auth, props(PUBLIC));
         oauth.check();
         ToolCatalogView catalog = new ToolCatalogView(harness);
-        mvc = MockMvcBuilders.standaloneSetup(new AuthController(users, auth, sessions, new LoginThrottle()),
+        mvc = MockMvcBuilders.standaloneSetup(new AuthController(users, auth, sessions, new LoginThrottle(), new org.kendar.llm.web.auth.OidcProperties(null, null)),
                         new AdminController(users, permissions, skills, sessions, harness, catalog),
                         new ChatController(harness, MAPPER, new HarnessPricing(0, 0, 0, 0), auth, auth), oauth)
                 .addInterceptors(new ApiInterceptor(auth, auth, harness.sessions(), MAPPER),

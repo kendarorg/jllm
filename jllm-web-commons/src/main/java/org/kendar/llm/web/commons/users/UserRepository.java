@@ -36,6 +36,11 @@ public interface UserRepository {
         });
     }
 
+    /** The key of an identity provider account: {@code <issuer>#<sub>}. */
+    static String externalKey(String issuer, String sub) {
+        return issuer + "#" + sub;
+    }
+
     /** The user; empty for an invalid or unknown id, or an unreadable record (logged). */
     Optional<WebUser> find(String id);
 
@@ -50,7 +55,34 @@ public interface UserRepository {
      * @throws IllegalArgumentException on an invalid id
      * @throws IllegalStateException    when the user exists
      */
-    WebUser create(String id, String name, String role, String passwordHash);
+    WebUser create(String id, String name, String role, String passwordHash, String email);
+
+    /**
+     * A user without a password, linked to an identity provider account.
+     *
+     * @param externalId {@code <issuer>#<sub>}
+     * @throws IllegalArgumentException on an invalid id
+     * @throws IllegalStateException    when the user exists
+     */
+    WebUser createExternal(String id, String name, String role, String email, String externalId);
+
+    /** The user linked to the identity provider account {@code issuer}+{@code sub}. */
+    Optional<WebUser> findByExternal(String issuer, String sub);
+
+    /** Users whose email equals {@code email}, ignoring case; empty for a blank address. */
+    List<WebUser> findByEmail(String email);
+
+    /**
+     * @param externalId null = unlink
+     * @throws NoSuchElementException when the user does not exist
+     */
+    WebUser setExternalId(String id, String externalId);
+
+    /**
+     * @param email null or blank = none
+     * @throws NoSuchElementException when the user does not exist
+     */
+    WebUser setEmail(String id, String email);
 
     /** @throws NoSuchElementException when the user does not exist */
     WebUser setName(String id, String name);

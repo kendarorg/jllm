@@ -88,7 +88,10 @@ export default {
               :aria-selected="tab === t[0]" :tabindex="tab === t[0] ? 0 : -1" @click="select(t[0])">{{ t[1] }}</button>
     </div>
     <div class="panel-body">
-      <div v-if="tab === 'password'" role="tabpanel">
+      <div v-if="tab === 'password' && me.source === 'oidc'" role="tabpanel">
+        <p class="card narrow">You sign in through the identity provider; there is no password to change here.</p>
+      </div>
+      <div v-if="tab === 'password' && me.source !== 'oidc'" role="tabpanel">
         <form class="card narrow" @submit.prevent="changePassword">
           <p v-if="me.defaultPassword" class="banner banner-info">You still have the default password. Choose your own.</p>
           <label for="pw-current">Current password</label>

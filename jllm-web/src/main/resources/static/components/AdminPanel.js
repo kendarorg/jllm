@@ -39,6 +39,12 @@ export default {
       await put('/api/admin/users/' + enc(u.id), {name});
       await loadUsers();
     });
+    const setEmail = guard(async u => {
+      const email = prompt('Email of ' + u.id + ' (empty = none)', u.email);
+      if (email === null) return;
+      await put('/api/admin/users/' + enc(u.id), {email: email.trim()});
+      await loadUsers();
+    });
     const pwFor = ref(null);   // user id whose password row is open
     const pwValue = ref('');
     const setPassword = guard(async u => {
@@ -92,7 +98,7 @@ export default {
     }
     onMounted(() => select('users'));
 
-    return {TABS, tab, select, onKey, users, roles, catalog, nu, createUser, setRole, rename,
+    return {TABS, tab, select, onKey, users, roles, catalog, nu, createUser, setRole, rename, setEmail,
       pwFor, pwValue, setPassword, removeUser, lastAdmin, current, newRole, selectedRole, pick, createRole, saveRole,
       deleteRole};
   },
@@ -106,32 +112,33 @@ export default {
 
       <div v-if="tab === 'users'" role="tabpanel">
         <table class="grid">
-          <thead><tr><th>Login</th><th>Name</th><th>Role</th><th>Password</th><th>Own skills</th><th></th></tr></thead>
+          <thead><tr><th>Login</th><th>Name</th><th>Email</th><th>Role</th><th>Sign-in</th><th>Own skills</th><th></th></tr></thead>
           <tbody>
             <template v-for="u in users" :key="u.id">
               <tr>
                 <td><code>{{ u.id }}</code></td>
                 <td>{{ u.name }} <button class="copy-btn" @click="rename(u)" :aria-label="'Rename ' + u.id">✎</button></td>
+                <td>{{ u.email }} <button class="copy-btn" @click="setEmail(u)" :aria-label="'Email of ' + u.id">✎</button></td>
                 <td>
                   <select :value="u.role" @change="setRole(u, $event.target.value)" :disabled="lastAdmin(u)"
                           :title="lastAdmin(u) ? 'The last admin keeps the admin role' : ''" :aria-label="'Role of ' + u.id">
                     <option v-for="r in roles" :key="r.name" :value="r.name">{{ r.name }}</option>
                   </select>
                 </td>
-                <td><span v-if="u.defaultPassword" class="badge warn">default</span><span v-else class="badge">set</span></td>
+                <td><span v-if="u.source === 'oidc'" class="badge">OIDC</span><span v-else-if="u.defaultPassword" class="badge warn">default</span><span v-else class="badge">password</span></td>
                 <td>{{ u.ownSkills }}
                   <small v-if="u.disabledTools.length" class="muted" :title="u.disabledTools.join(', ')">
                     · {{ u.disabledTools.length }} tool(s) off</small>
                   <small v-if="u.disabledSkills.length" class="muted" :title="u.disabledSkills.join(', ')">
                     · {{ u.disabledSkills.length }} skill(s) off</small></td>
                 <td class="row-actions">
-                  <button class="btn-sm" @click="pwFor = pwFor === u.id ? null : u.id; pwValue = ''">Password</button>
+                  <button v-if="u.source !== 'oidc'" class="btn-sm" @click="pwFor = pwFor === u.id ? null : u.id; pwValue = ''">Password</button>
                   <button class="btn-danger" @click="removeUser(u)" :disabled="u.id === me.id || lastAdmin(u)"
                           :title="u.id === me.id ? 'You cannot delete your own account' : ''">Delete</button>
                 </td>
               </tr>
               <tr v-if="pwFor === u.id" class="subrow">
-                <td colspan="6">
+                <td colspan="7">
                   <form class="inline-form" @submit.prevent="setPassword(u)">
                     <input type="password" v-model="pwValue" placeholder="New password; empty = reset to the default"
                            autocomplete="new-password" :aria-label="'New password of ' + u.id" />
@@ -149,6 +156,8 @@ export default {
               <input id="nu-id" type="text" v-model="nu.id" pattern="[a-z0-9_-]{1,64}" required /></div>
             <div class="field"><label for="nu-name">Name</label>
               <input id="nu-name" type="text" v-model="nu.name" /></div>
+            <div class="field"><label for="nu-email">Email</label>
+              <input id="nu-email" type="email" v-model="nu.email" placeholder="links an identity provider account" /></div>
             <div class="field"><label for="nu-role">Role</label>
               <select id="nu-role" v-model="nu.role" required>
                 <option v-for="r in roles" :key="r.name" :value="r.name">{{ r.name }}</option>

@@ -23,9 +23,11 @@ public class AuthController {
     private final CookieAuthentication authentication;
     private final LoginSessionRepository sessions;
     private final LoginThrottle throttle;
+    private final OidcProperties auth;
 
     public AuthController(UserRepository users, CookieAuthentication authentication, LoginSessionRepository sessions,
-                          LoginThrottle throttle) {
+                          LoginThrottle throttle, OidcProperties auth) {
+        this.auth = auth;
         this.users = users;
         this.authentication = authentication;
         this.sessions = sessions;
@@ -45,6 +47,7 @@ public class AuthController {
     @PostMapping("/api/login")
     public ResponseEntity<Map<String, Object>> login(@RequestBody(required = false) Map<String, Object> body,
                                                      HttpServletRequest request) {
+        if (!auth.passwordEnabled()) return Api.error(HttpStatus.NOT_FOUND, "Password sign-in is off");
         String id = Api.text(body, "id");
         String password = Api.text(body, "password");
         String idKey = "id:" + id;
@@ -56,7 +59,12 @@ public class AuthController {
         Optional<WebUser> user = users.find(id);
         boolean ok;
         if (user.isPresent()) {
-            ok = PasswordHasher.verify(user.get().id(), password, user.get().password());
+            if (user.get().passwordless()) {
+                PasswordHasher.burn(password);
+                ok = false;
+            } else {
+                ok = PasswordHasher.verify(user.get().id(), password, user.get().password());
+            }
         } else {
             PasswordHasher.burn(password);
             ok = false;
@@ -92,6 +100,8 @@ public class AuthController {
         out.put("name", u.name() == null ? u.id() : u.name());
         out.put("role", String.valueOf(u.role()));
         out.put("defaultPassword", u.usesDefaultPassword());
+        out.put("source", u.external() ? "oidc" : "password");
+        out.put("email", u.email() == null ? "" : u.email());
         return out;
     }
 }

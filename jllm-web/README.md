@@ -63,7 +63,7 @@ use, so changes (by hand or from the UI) apply without a restart.
 
 | Path | Content |
 |---|---|
-| `webauth/users/<id>.json` | `{name, role, password?, credentials, disabledTools?, disabledSkills?}` |
+| `webauth/users/<id>.json` | `{name, role, email?, externalId?, password?, credentials, disabledTools?, disabledSkills?}` |
 | `webauth/permissions/<role>.json` | `{tools, readOnly?, approval?}` |
 | `webauth/global-skills/<name>.md` | skills written by the admin, offered to every user |
 | `webauth/user-skills/<id>/<name>.md` | a user's own skills |
@@ -76,6 +76,40 @@ use, so changes (by hand or from the UI) apply without a restart.
   in memory (7 days, sliding), so a restart signs everybody out. A deleted user is signed out at once.
 - Five failed attempts for a login or an address lock it for 30 seconds (429). Unknown login and wrong password give
   the same answer.
+
+### Sign-in with OpenID Connect
+
+An alternative to the password, against one identity provider (Google, Entra, Keycloak, Okta, ...), with the
+authorization code flow and PKCE. It ends in the same `jllm_session` cookie.
+
+```properties
+jllm.web.public-url=https://jllm.example.com          # required when the mode is oidc or both
+jllm.auth.mode=both                                    # password (default) | oidc | both
+jllm.auth.oidc.name=Company SSO                        # button label
+jllm.auth.oidc.issuer=https://idp.example.com/realms/x # <issuer>/.well-known/openid-configuration
+jllm.auth.oidc.client-id=jllm
+jllm.auth.oidc.client-secret=env:JLLM_OIDC_SECRET      # env: reference only
+jllm.auth.oidc.scopes=openid profile email
+jllm.auth.oidc.allowed-domains=example.com             # empty = any verified email
+jllm.auth.oidc.auto-provision=false
+jllm.auth.oidc.default-role=user                       # required (and must exist) with auto-provision
+```
+
+- Register `<public-url>/auth/oidc/callback` as the redirect URI (exact match). Keycloak: a confidential client with
+  standard flow and PKCE S256. Google: an OAuth client of type *Web application*; issuer `https://accounts.google.com`.
+- Startup fails naming the key when `public-url`, `issuer`, `client-id` or the secret is missing, when discovery fails,
+  or when `default-role` is blank or unknown. Discovery and token endpoints must be HTTPS.
+- The link is `issuer#sub` (`externalId` in the user file). A user without it is linked on the first login when the
+  token has `email_verified=true`, an allowed domain, and the email equals the `email` of exactly one unlinked user
+  (the admin sets it in the Users tab). Otherwise, with `auto-provision`, a user is created with `default-role`
+  (id = the email local part, a number is added on a collision). Otherwise the sign-in is refused. The provider
+  never changes a role.
+- A user with an `externalId` and no password cannot use `/api/login`, has no default password, and the page
+  hides password changes for them.
+- Failures go to `/?authError=<code>` (`denied`, `invalid_token`, `unknown_user`, `domain_not_allowed`,
+  `email_not_verified`, `expired`). Five refused callbacks lock an address for 30 seconds.
+- `GET /api/auth/config` (open): `{password, oidc?: {name, loginUrl}}`. Mode `oidc` answers 404 on `/api/login`; mode
+  `password` answers 404 on `/auth/oidc/*`. `/api/logout` ends the local session only.
 
 ### Roles
 - `tools`: tool-name patterns, `*` matching any run of characters: `"read_file"`, `"mcp__docs__*"` (a whole MCP
@@ -164,7 +198,7 @@ All paths are under `/api/chat`. Errors are `{"error": "..."}`.
 
 | Method and path | Body | Result |
 |---|---|---|
-| `POST /api/login` | `{id, password}` | user `{id, name, role, defaultPassword}` + cookie; 401 `Invalid credentials`; 429 when locked |
+| `POST /api/login` | `{id, password}` | user `{id, name, role, defaultPassword, source, email}` + cookie; 401 `Invalid credentials`; 429 when locked |
 | `POST /api/logout` | | 204 |
 | `GET /api/me` | | the signed-in user; 401 otherwise |
 | `POST /api/me/password` | `{current, next}` | 204; 401 wrong current; 400 shorter than 8 or equal to the default |
