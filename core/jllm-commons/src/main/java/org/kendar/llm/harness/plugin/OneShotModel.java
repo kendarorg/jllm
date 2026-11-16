@@ -12,8 +12,11 @@ public interface OneShotModel {
      * @param principal the user the work is done for; the task chat belongs to them and shows in their chat list
      * @param title     names the task chat; calls with the same principal and title share one chat
      * @param approved  tools the user already allowed for this chat, so a call to them needs no question
+     * @param tools     tools the task may use: null = those of the agent; empty = none (one plain completion);
+     *                  {@code ["*"]} = every tool the user's role allows; otherwise those names, still limited by the role
      */
-    record Call(String agent, String system, String user, String principal, String title, Set<String> approved) {
+    record Call(String agent, String system, String user, String principal, String title, Set<String> approved,
+                List<String> tools) {
     }
 
     /** Tool calls of the agent needed an approval and the task could not ask, so it stopped without running them. */

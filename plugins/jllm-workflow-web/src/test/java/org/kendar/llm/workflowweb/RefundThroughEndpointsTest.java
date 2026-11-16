@@ -108,6 +108,7 @@ class RefundThroughEndpointsTest {
         // the operator's single select
         JsonNode run = call(h, "POST", "/runs", "ann", false, "{'name':'refund','input':{'order':'A7'}}").body();
         String id = run.path("runId").asText();
+        run = settle(h, id);
         assertEquals("waiting", run.path("status").asText());
         assertEquals("SINGLE", run.path("pending").path("kind").asText());
         assertEquals("operator", run.path("pending").path("who").asText());
@@ -116,10 +117,12 @@ class RefundThroughEndpointsTest {
                 "an answer outside the options is refused");
 
         // the customer's free text
-        run = call(h, "POST", "/runs/" + id + "/answer", "ann", false, "{'answer':'approve'}").body();
+        call(h, "POST", "/runs/" + id + "/answer", "ann", false, "{'answer':'approve'}");
+        run = settle(h, id);
         assertEquals("TEXT", run.path("pending").path("kind").asText());
         assertEquals("customer", run.path("pending").path("who").asText());
-        run = call(h, "POST", "/runs/" + id + "/answer", "ann", false, "{'answer':'Thanks, send it by post'}").body();
+        call(h, "POST", "/runs/" + id + "/answer", "ann", false, "{'answer':'Thanks, send it by post'}");
+        run = settle(h, id);
         assertEquals("completed", run.path("status").asText());
         assertEquals("Thanks, send it by post", run.path("result").path("reply").asText());
         assertEquals(0, call(h, "GET", "/waiting/count", "ann", false, null).body().path("count").asInt());
@@ -134,8 +137,71 @@ class RefundThroughEndpointsTest {
 
         // cancelling a waiting run
         JsonNode second = call(h, "POST", "/runs", "ann", false, "{'name':'refund','input':{'order':'B1'}}").body();
+        settle(h, second.path("runId").asText());
         assertEquals("cancelled", call(h, "POST", "/runs/" + second.path("runId").asText() + "/cancel", "ann", false,
                 null).body().path("status").asText());
+    }
+
+    /** Runs are walked in the background: waits until the run is no longer pending or running. */
+    private JsonNode settle(WebPluginHost h, String id) throws Exception {
+        for (int i = 0; i < 200; i++) {
+            JsonNode run = call(h, "GET", "/runs/" + id, "ann", false, null).body();
+            String st = run.path("status").asText();
+            if (!st.equals("pending") && !st.equals("running")) {
+                Thread.sleep(50); // the end event follows the last save
+                return call(h, "GET", "/runs/" + id, "ann", false, null).body();
+            }
+            Thread.sleep(25);
+        }
+        throw new AssertionError("run " + id + " did not settle");
+    }
+
+    @Test
+    void editorEndpointsAndAdminSeesEveryGlobalFlow() throws Exception {
+        Rec rec = new Rec();
+        MemoryPluginStorage mem = new MemoryPluginStorage();
+        rec.services.publish(PluginStorages.class, id -> mem);
+        new WorkflowsPlugin().install(rec, j("{'dir':'" + Path.of(System.getProperty("java.io.tmpdir"))
+                .toString().replace("\\", "/") + "'}"));
+        WebPluginHost h = new WebPluginHost(rec.services, id -> mem, j("{'jllm-workflow-web':{'enabled':true}}"));
+        h.load(List.of(new WorkflowWebPlugin()));
+
+        String restricted = FLOW.replace("'name':'refund'", "'name':'fin'").replace("'roles':[]", "'roles':['finance']");
+        assertEquals(200, call(h, "PUT", "/flows/global", "root", true, restricted).status());
+        assertEquals(200, call(h, "PUT", "/flows/personal", "ann", false,
+                "{'name':'mine','start':'e','steps':{'e':{'type':'finish'}}}").status());
+
+        // ann does not see the restricted flow; the administrator sees it, marked as not shared with them
+        JsonNode annList = call(h, "GET", "/flows", "ann", false, null).body();
+        assertEquals(1, annList.size());
+        assertEquals("mine", annList.get(0).path("name").asText());
+        assertTrue(annList.get(0).path("canEdit").asBoolean());
+        JsonNode rootList = call(h, "GET", "/flows", "root", true, null).body();
+        assertEquals(1, rootList.size());
+        assertEquals("fin", rootList.get(0).path("name").asText());
+        assertEquals("finance", rootList.get(0).path("roles").get(0).asText());
+        assertTrue(rootList.get(0).path("canEdit").asBoolean());
+        assertFalse(rootList.get(0).path("sharedWithYou").asBoolean());
+        assertEquals(200, call(h, "GET", "/flows/global/fin", "root", true, null).status());
+        assertEquals(403, call(h, "GET", "/flows/global/fin", "ann", false, null).status());
+        assertEquals(403, call(h, "DELETE", "/flows/global/fin", "ann", false, null).status());
+
+        // catalog and validation: nothing is stored by validate
+        JsonNode cat = call(h, "GET", "/catalog", "root", true, null).body();
+        assertTrue(cat.path("canManageGlobal").asBoolean());
+        assertTrue(cat.path("actions").isArray());
+        assertFalse(call(h, "GET", "/catalog", "ann", false, null).body().path("canManageGlobal").asBoolean());
+        JsonNode bad = call(h, "POST", "/flows/validate", "ann", false,
+                "{'scope':'personal','flow':{'name':'broken','start':'a','steps':{'a':{'type':'task','task':'t','next':'zz'}}}}")
+                .body();
+        assertFalse(bad.path("errors").isEmpty());
+        assertEquals(1, call(h, "GET", "/flows", "ann", false, null).body().size(), "validate stores nothing");
+        JsonNode good = call(h, "POST", "/flows/validate", "ann", false,
+                "{'scope':'personal','flow':{'name':'ok','start':'e','steps':{'e':{'type':'finish'}}}}").body();
+        assertTrue(good.path("errors").isEmpty(), good.toString());
+        JsonNode notAdmin = call(h, "POST", "/flows/validate", "ann", false,
+                "{'scope':'global','flow':{'name':'ok','start':'e','steps':{'e':{'type':'finish'}}}}").body();
+        assertFalse(notAdmin.path("errors").isEmpty());
     }
 
     @Test

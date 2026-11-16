@@ -19,8 +19,14 @@ import java.util.function.Function;
  * and a run only by the user who started it. A global flow runs as the starting user.
  */
 public final class Workflows {
-    /** One line of a flow listing. */
-    public record Entry(String scope, String name) {
+    /**
+     * One line of a flow listing.
+     *
+     * @param roles      the roles a global flow is shared with (empty: everybody)
+     * @param canEdit    whether the user may change or delete it
+     * @param sharedWithYou false when an administrator sees a global flow only because administrators see everything
+     */
+    public record Entry(String scope, String name, List<String> roles, boolean canEdit, boolean sharedWithYou) {
     }
 
     private final FlowEngine engine;
@@ -56,12 +62,17 @@ public final class Workflows {
         }
     }
 
-    private boolean isAdmin(String user) {
+    public boolean isAdmin(String user) {
         return rolesOf.apply(user).contains(adminRole);
     }
 
-    /** A global flow without {@code roles} is for everybody. */
+    /** Administrators see every global flow, whatever its roles. */
     private boolean mayRun(FlowDef f, String user) {
+        return isAdmin(user) || sharedWith(f, user);
+    }
+
+    /** A global flow without {@code roles} is for everybody. */
+    private boolean sharedWith(FlowDef f, String user) {
         JsonNode r = f.doc().path("roles");
         if (!r.isArray() || r.isEmpty()) return true;
         Set<String> mine = rolesOf.apply(user);
@@ -69,10 +80,19 @@ public final class Workflows {
         return false;
     }
 
+    private static List<String> rolesField(FlowDef f) {
+        List<String> out = new ArrayList<>();
+        if (f.doc().path("roles").isArray()) f.doc().path("roles").forEach(n -> out.add(n.asText()));
+        return out;
+    }
+
     public List<Entry> list(String user) {
+        boolean admin = isAdmin(user);
         List<Entry> out = new ArrayList<>();
-        for (FlowDef f : flows.listGlobal()) if (mayRun(f, user)) out.add(new Entry(FlowLibrary.GLOBAL, f.name()));
-        for (FlowDef f : flows.listPersonal(user)) out.add(new Entry(FlowLibrary.PERSONAL, f.name()));
+        for (FlowDef f : flows.listGlobal()) {
+            if (mayRun(f, user)) out.add(new Entry(FlowLibrary.GLOBAL, f.name(), rolesField(f), admin, sharedWith(f, user)));
+        }
+        for (FlowDef f : flows.listPersonal(user)) out.add(new Entry(FlowLibrary.PERSONAL, f.name(), List.of(), true, true));
         return out;
     }
 
@@ -100,13 +120,32 @@ public final class Workflows {
         ObjectNode doc = flow.doc().deepCopy();
         doc.put("scope", scope);
         FlowDef f = FlowDef.parse(doc.toString());
-        List<String> problems = new ArrayList<>(FlowValidator.check(f, registry));
-        if (FlowLibrary.GLOBAL.equals(scope)) problems.addAll(checkActionRoles(f));
-        problems.addAll(FlowLibrary.checkChildren(f, library, user));
+        List<String> problems = problems(user, scope, f);
         if (!problems.isEmpty()) {
             throw new FlowException(FlowException.Kind.INVALID_FLOW, "Flow '" + f.name() + "' is invalid: " + problems);
         }
         flows.save(scope, user, f);
+    }
+
+    /** The save-time checks without saving; the same list a save would refuse with. */
+    public List<String> validate(String user, String scope, FlowDef flow) {
+        ObjectNode doc = flow.doc().deepCopy();
+        doc.put("scope", scope);
+        List<String> problems = problems(user, scope, FlowDef.parse(doc.toString()));
+        if (FlowLibrary.GLOBAL.equals(scope) && !isAdmin(user)) problems.add(0, "Only administrators manage global flows");
+        return problems;
+    }
+
+    private List<String> problems(String user, String scope, FlowDef f) {
+        List<String> problems = new ArrayList<>(FlowValidator.check(f, registry));
+        if (FlowLibrary.GLOBAL.equals(scope)) problems.addAll(checkActionRoles(f));
+        else if (f.doc().has("roles")) problems.add("'roles' is only for global flows");
+        problems.addAll(FlowLibrary.checkChildren(f, library, user));
+        return problems;
+    }
+
+    public Registry registry() {
+        return registry;
     }
 
     public void delete(String user, String scope, String name) {
@@ -164,6 +203,22 @@ public final class Workflows {
 
     public FlowEngine.RunResult start(String user, String name, String scope, JsonNode input) {
         return engine.run(resolve(user, name, scope), input, user);
+    }
+
+    /** Stores a new run without walking it; {@link #proceed} walks it. Returns the run id. */
+    public String prepare(String user, String name, String scope, JsonNode input) {
+        return engine.prepare(resolve(user, name, scope), input, user, Map.of()).runId;
+    }
+
+    /** Records the answer of a waiting run without walking it; {@link #proceed} walks it. */
+    public void accept(String user, String runId, JsonNode answer) {
+        run(user, runId);
+        engine.accept(runId, answer, user);
+    }
+
+    public void proceed(String user, String runId) {
+        run(user, runId);
+        engine.proceed(runId);
     }
 
     public List<RunRecord> runs(String user) {

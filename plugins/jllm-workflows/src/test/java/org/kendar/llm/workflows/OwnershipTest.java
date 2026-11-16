@@ -7,6 +7,7 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -71,6 +72,32 @@ class OwnershipTest {
         w.save("root", FlowLibrary.GLOBAL, flow(uses.formatted(",'roles':['finance']")));
         assertTrue(w.list("ann").isEmpty(), "restricted: not shared with ann");
         assertThrows(FlowException.class, () -> w.start("ann", "pay", null, null));
+    }
+
+    @Test
+    void administratorSeesEditsAndStartsEveryGlobalFlow() {
+        var w = wf(new Registry());
+        w.save("root", FlowLibrary.GLOBAL, flow("{'name':'fin','roles':['finance'],'start':'e','steps':{'e':{'type':'finish','result':{'r':'x'}}}}"));
+        assertEquals(1, w.list("root").size());
+        assertFalse(w.list("root").get(0).sharedWithYou());
+        assertTrue(w.list("root").get(0).canEdit());
+        assertEquals(List.of("finance"), w.list("root").get(0).roles());
+        assertEquals("x", w.start("root", "fin", null, null).result().path("r").asText());
+        w.save("root", FlowLibrary.GLOBAL, flow("{'name':'fin','roles':['finance'],'start':'e','steps':{'e':{'type':'finish','result':{'r':'y'}}}}"));
+        assertThrows(FlowException.class, () -> w.copyToPersonal("ann", "fin", "c"));
+        w.copyToPersonal("root", "fin", "c");
+        w.delete("root", FlowLibrary.GLOBAL, "fin");
+        assertTrue(w.list("root").stream().noneMatch(e -> e.scope().equals("global")));
+    }
+
+    @Test
+    void validateListsProblemsWithoutSavingAndRolesAreChecked() {
+        var w = wf(new Registry());
+        assertTrue(w.validate("ann", FlowLibrary.PERSONAL, flow("{'name':'ok','start':'e','steps':{'e':{'type':'finish'}}}")).isEmpty());
+        assertFalse(w.validate("ann", FlowLibrary.PERSONAL, flow("{'name':'p','roles':['x'],'start':'e','steps':{'e':{'type':'finish'}}}")).isEmpty());
+        assertFalse(w.validate("root", FlowLibrary.GLOBAL, flow("{'name':'g','roles':'x','start':'e','steps':{'e':{'type':'finish'}}}")).isEmpty());
+        assertFalse(w.validate("ann", FlowLibrary.GLOBAL, flow("{'name':'g','start':'e','steps':{'e':{'type':'finish'}}}")).isEmpty());
+        assertTrue(w.list("ann").isEmpty());
     }
 
     @Test

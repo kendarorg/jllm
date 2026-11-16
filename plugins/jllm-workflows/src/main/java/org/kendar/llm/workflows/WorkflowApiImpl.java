@@ -38,8 +38,43 @@ public final class WorkflowApiImpl implements WorkflowApi {
     public JsonNode list(String user, Set<String> r) {
         who(user, r);
         ArrayNode a = Json.M.createArrayNode();
-        for (Workflows.Entry e : workflows.list(user)) a.addObject().put("scope", e.scope()).put("name", e.name());
+        for (Workflows.Entry e : workflows.list(user)) {
+            ObjectNode o = a.addObject().put("scope", e.scope()).put("name", e.name());
+            ArrayNode rl = o.putArray("roles");
+            e.roles().forEach(rl::add);
+            o.put("canEdit", e.canEdit()).put("sharedWithYou", e.sharedWithYou());
+        }
         return a;
+    }
+
+    @Override
+    public JsonNode validate(String user, Set<String> r, String scope, JsonNode flow) {
+        who(user, r);
+        ObjectNode o = Json.M.createObjectNode();
+        ArrayNode errs = o.putArray("errors");
+        try {
+            workflows.validate(user, scope, FlowDef.parse(flow.toString())).forEach(errs::add);
+        } catch (FlowException e) {
+            errs.add(e.getMessage());
+        }
+        return o;
+    }
+
+    @Override
+    public JsonNode catalog(String user, Set<String> r) {
+        who(user, r);
+        Registry reg = workflows.registry();
+        ObjectNode o = Json.M.createObjectNode();
+        ArrayNode actions = o.putArray("actions");
+        for (String n : reg.actionNames()) {
+            ObjectNode a = actions.addObject().put("name", n).put("asks", reg.asks(n));
+            ArrayNode rl = a.putArray("roles");
+            reg.rolesOf(n).stream().sorted().forEach(rl::add);
+        }
+        ArrayNode choosers = o.putArray("choosers");
+        for (String n : reg.chooserNames()) choosers.addObject().put("name", n).put("asks", reg.chooserAsks(n));
+        o.put("canManageGlobal", workflows.isAdmin(user));
+        return o;
     }
 
     @Override
@@ -78,6 +113,26 @@ public final class WorkflowApiImpl implements WorkflowApi {
         ObjectNode in = input != null && input.isObject() ? ((ObjectNode) input).deepCopy() : Json.M.createObjectNode();
         if (chatHistory != null) in.set("chat", chatHistory); // optional input; never part of the flow history
         return view(workflows.run(user, workflows.start(user, name, scope, in).runId()));
+    }
+
+    @Override
+    public JsonNode prepareStart(String user, Set<String> r, String name, String scope, JsonNode input) {
+        who(user, r);
+        ObjectNode in = input != null && input.isObject() ? ((ObjectNode) input).deepCopy() : Json.M.createObjectNode();
+        return view(workflows.run(user, workflows.prepare(user, name, scope, in)));
+    }
+
+    @Override
+    public void prepareAnswer(String user, Set<String> r, String runId, JsonNode answer) {
+        who(user, r);
+        workflows.accept(user, runId, answer);
+    }
+
+    @Override
+    public JsonNode proceed(String user, Set<String> r, String runId) {
+        who(user, r);
+        workflows.proceed(user, runId);
+        return view(workflows.run(user, runId));
     }
 
     @Override
@@ -135,6 +190,7 @@ public final class WorkflowApiImpl implements WorkflowApi {
         ObjectNode o = Json.M.createObjectNode();
         o.put("runId", rec.runId).put("status", rec.status).put("flow", rec.flow.path("name").asText(""));
         o.put("user", rec.user);
+        o.put("startedAt", rec.startedAt).put("endedAt", rec.endedAt);
         if (rec.pending != null) o.set("pending", rec.pending);
         if (rec.result != null) o.set("result", rec.result);
         if (rec.error != null) o.set("error", rec.error);

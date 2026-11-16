@@ -15,6 +15,8 @@ export const workflows = reactive({
 
 export const wf = {
   flows: () => api(BASE + '/flows'),
+  catalog: () => api(BASE + '/catalog'),
+  validate: (scope, flow) => post(BASE + '/flows/validate', {scope, flow}),
   flow: (scope, name) => api(`${BASE}/flows/${scope}/${encodeURIComponent(name)}`),
   inputs: (scope, name) => api(`${BASE}/flows/${scope}/${encodeURIComponent(name)}/inputs`),
   save: (scope, flow) => put(`${BASE}/flows/${scope}`, flow),

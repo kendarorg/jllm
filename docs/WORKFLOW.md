@@ -78,6 +78,7 @@ result: {"summary":"..."}
 |---|---|
 | `name` | required; the name used to start the flow |
 | `scope` | `personal` (default) or `global` |
+| `roles` | global flows only: the roles the flow is shared with (list of names); missing or empty means everybody. Administrators always see every global flow |
 | `start` | id of the first step |
 | `steps` | map of step id to step |
 | `tasks` | map of task name to task (see 4) |
@@ -363,10 +364,17 @@ Creating and editing global flows is done in the web UI; it is not built on the 
 | `POST /runs`, `GET /runs`, `GET /runs/{id}`, `GET /runs/{id}/history` | start, list, inspect |
 | `POST /runs/{id}/answer`, `POST /runs/{id}/requests`, `POST /runs/{id}/cancel` | answer, request, cancel |
 | `GET /waiting`, `GET /waiting/count` | open questions of the user, and their number |
+| `GET /catalog` | registered actions (`asks`, role limits) and choosers, `canManageGlobal`; feeds the editor pickers |
+| `POST /flows/validate` | `{scope, flow}`: the save-time problems as `{errors:[...]}`, nothing is stored |
 
-The screens in `jllm-web` show a Workflows view (both scopes, start, copy, edit, delete, runs with history, cancel and
-the open question by kind), a badge with the number of waiting questions and a strip in the chat view. They appear only
-when the plugin answers and follow its live events.
+`GET /flows` returns `{scope, name, roles, canEdit, sharedWithYou}` per flow. `sharedWithYou` is false for a global flow an
+administrator sees only because administrators see everything.
+
+The screens in `jllm-web` are a Flows screen (personal and global flows; a designer with the flow structure as a graph on
+top and the data of the selected step below, tabs for the error handler, tasks and flow settings, a JSON escape hatch,
+validation before every save, start, copy, delete) and a Runs screen (runs with history, cancel and the open question by
+kind), a badge with the number of waiting questions and a strip in the chat view. They appear only when the plugin
+answers and follow its live events. Skills have their own Skills screen, for every user.
 
 ## 7. Ownership: personal and global flows
 
@@ -380,6 +388,83 @@ when the plugin answers and follow its live events.
 - A run belongs to its starter: only that user sees its history and answers its questions.
 
 Files (when no host storage is used): `dir/global/<name>.json` and `dir/users/<user>/<name>.json`.
+
+### Your own persistence (for example SQL)
+
+Flow definitions and runs are kept behind two interfaces, so any storage can hold them. Which one is used is decided in
+`WorkflowsPlugin.install`, in this order:
+
+1. the host publishes a `PluginStorages` service: flows and runs go through it (`PluginStores.Flows`, `PluginStores.Runs`);
+2. otherwise files under `dir` (`FlowStore.Files`, `RunStore.Files`).
+
+There are two ways to plug in a database.
+
+**A. Implement the host's plugin storage (recommended; it also serves every other plugin).** Implement
+`org.kendar.llm.harness.plugin.PluginStorage` and `PluginStorages` and publish them. In the web application, define a
+`PluginStorages` bean; `HarnessConfiguration` then uses it instead of `FilePluginStorage` (which keeps documents in
+`<project>/.jllm/plugin-data`).
+
+```java
+public interface PluginStorage {
+    Optional<JsonNode> get(String owner, String collection, String id);
+    void put(String owner, String collection, String id, JsonNode doc);   // insert or replace
+    void delete(String owner, String collection, String id);
+    List<String> ids(String owner, String collection);                    // sorted
+    List<String> owners(String collection);                               // users, and "_global" if present
+}
+```
+
+One table is enough:
+
+```sql
+CREATE TABLE plugin_doc (
+  plugin_id  VARCHAR(100) NOT NULL,
+  owner      VARCHAR(200) NOT NULL,   -- user name, or '_global' (PluginStorage.GLOBAL)
+  collection VARCHAR(100) NOT NULL,
+  id         VARCHAR(200) NOT NULL,
+  doc        TEXT NOT NULL,           -- the JSON document
+  PRIMARY KEY (plugin_id, owner, collection, id)
+);
+```
+
+`forPlugin(id)` returns an object that fixes `plugin_id`. `put` is an upsert, `ids` is `ORDER BY id`, `owners` is
+`SELECT DISTINCT owner`. The flows plugin uses the collections `flows` (owner = the user, or `_global` for global flows),
+`runs` (owner = the starting user) and `runindex` (owner `_global`, id = run id, document `{"user": ...}`, used to find a
+run by its id).
+
+**B. Implement `FlowStore` and `RunStore` directly** (a different schema, such as one row per step or indexed columns).
+Construct them in your own plugin or host and pass them to `WorkflowApiImpl.create(registry, runs, flows, adminRole)`;
+`WorkflowsPlugin.install` shows the wiring.
+
+```java
+public interface FlowStore {
+    List<FlowDef> listGlobal();
+    List<FlowDef> listPersonal(String user);
+    Optional<FlowDef> get(String scope, String user, String name);   // scope: "global" or "personal"; user is null for global
+    void save(String scope, String user, FlowDef flow);              // insert or replace; flow.doc() is the JSON, flow.name() the key
+    void delete(String scope, String user, String name);
+}
+
+public interface RunStore {
+    void save(RunRecord run);                 // insert or replace; run.toJson() / RunRecord.fromJson(...)
+    Optional<RunRecord> load(String runId);
+    List<RunRecord> list(String user);
+    List<RunRecord> listAll();                // all users; system use only (expiring waits)
+}
+```
+
+Rules every implementation must follow:
+
+- Store the flow as the JSON of `flow.doc()` and read it back with `FlowDef.parse(json)`; do not interpret the content.
+- `save` replaces; there are no versions. Runs keep their own snapshot of the flow (see Snapshots), so editing a flow row
+  never changes a run in progress.
+- A run is saved after every step and read again on resume or after a restart, so `RunStore.save` must be durable when
+  it returns. Use a transaction per save.
+- Global flows (`user == null`) and personal flows are separate namespaces; the same name may exist in both.
+- Reads for one user must never return another user's personal flows or runs.
+- Names are used as keys: accept the same characters the file store does (`[A-Za-z0-9._@-]+`) or map them safely.
+Test the store by swapping it for the file stores in `OwnershipTest` (see its `Workflows` construction), and check
+that a run started before a restart resumes.
 
 ### Snapshots
 

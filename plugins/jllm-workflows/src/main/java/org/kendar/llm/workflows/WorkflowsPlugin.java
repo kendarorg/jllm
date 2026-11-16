@@ -42,7 +42,7 @@ public final class WorkflowsPlugin implements HarnessPlugin {
             try {
                 return services.lookup(OneShotModel.class)
                         .orElseThrow(() -> new IllegalStateException("The host offers no model for flows"))
-                        .complete(new OneShotModel.Call(c.agent(), c.system(), c.user(), c.owner(), c.title(), c.approved()));
+                        .complete(new OneShotModel.Call(c.agent(), c.system(), c.user(), c.owner(), c.title(), c.approved(), c.tools()));
             } catch (OneShotModel.ApprovalRequiredException e) { // the engine asks the user, or fails an unattended flow
                 throw new Registry.ApprovalNeededException(e.getMessage(), e.tools());
             }

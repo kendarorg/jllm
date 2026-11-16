@@ -90,7 +90,7 @@ use, so changes (by hand or from the UI) apply without a restart.
 - **Password**: change it (current password required); the other sessions of the user are signed out.
 - **Tools**: switch off tools the role allows (`disabledTools`, patterns too). A tool works only if the role allows
   it and the user has not switched it off: a user can narrow the role, never widen it.
-- **Skills**: one list of the skills of the settings file, the global skills and the user's own; each can be switched
+- **Skills** (own screen in the header, for every user; administrators also manage the global skills there): one list of the skills of the settings file, the global skills and the user's own; each can be switched
   off (`disabledSkills`). Users add, edit and delete their own skills (64 KB each, at most 50); an own skill cannot
   take the name of a shared one, and a global skill created later with its name hides it until it is renamed. Own
   skills need the role to allow the `skill` tool.
@@ -99,7 +99,14 @@ use, so changes (by hand or from the UI) apply without a restart.
 
 ### Administration (role `admin`)
 Users (create, rename, change role, set or reset password, delete with their own skills), roles (with every tool,
-MCP server and REST API the harness knows, also disabled or failing sources) and global skills.
+MCP server and REST API the harness knows, also disabled or failing sources). Global skills are edited in the Skills screen.
+
+### Flows and runs (when the `jllm-workflow-web` plugin answers)
+- **Flows** (every user): personal and global flows. The designer shows the flow structure as a graph on top and the data
+  of the selected step below; further tabs for the error handler, tasks and flow settings; raw JSON as a fallback. The
+  server validates before every save. Global flows: administrators see and edit all of them (and choose the roles they
+  are shared with); other users see the ones shared with them, read only, and can start or copy them.
+- **Runs**: the user's runs, their open questions, history and cancel.
 
 ### Chats and credentials
 - Chats belong to the user who created them. Others get 404; the admin sees all chats.
@@ -296,3 +303,10 @@ harness. A short list:
 Still on disk after all of the above: the sandbox workspace of each chat (the files the tools read and write) and
 the `HistoryRootLock` that allows one process per base folder. Several instances behind a load balancer would also
 need a shared workspace (or the docker daemon sandbox on a shared host) and that lock replaced.
+
+## Sample global flows
+
+`jllm.flows-seed-dir` names a folder of flow files (`--jllm.flows-seed-dir=$PROJECT_DIR$/runConfig/flows` in the sample
+run configurations; it holds `develop-app`: plan, implement, review loop, test loop). At startup `SampleFlows` adds each
+`*.json` to the global flows of the `jllm-workflows` plugin when no flow of that name exists; nothing is overwritten.
+Not set: nothing happens. The flows plugin ships no flows.

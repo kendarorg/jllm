@@ -2,27 +2,24 @@ import {computed, onMounted, reactive, ref} from 'vue';
 import {api, del, post, put} from '../api.js';
 import {toast} from '../store.js';
 import RoleEditor from './RoleEditor.js';
-import SkillEditor from './SkillEditor.js';
 
-const TABS = [['users', 'Users'], ['roles', 'Roles'], ['skills', 'Skills']];
+const TABS = [['users', 'Users'], ['roles', 'Roles']];
 const enc = encodeURIComponent;
 
-/** Administration: users, roles (with everything they can be granted) and global skills. Admins only. */
+/** Administration: users, roles (with everything they can be granted). Admins only (skills live in the Skills screen). */
 export default {
-  components: {RoleEditor, SkillEditor},
+  components: {RoleEditor},
   props: {me: {type: Object, required: true}},
   setup(props) {
     const tab = ref('users');
     const users = ref([]);
     const roles = ref([]);
     const catalog = ref(null);
-    const skills = ref([]);
 
     const guard = fn => async (...a) => { try { return await fn(...a); } catch (e) { toast(e.message, 'error'); } };
     const loadUsers = guard(async () => { users.value = await api('/api/admin/users'); });
     const loadRoles = guard(async () => { roles.value = await api('/api/admin/roles'); });
     const loadCatalog = guard(async () => { catalog.value = await api('/api/admin/catalog'); });
-    const loadSkills = guard(async () => { skills.value = await api('/api/admin/skills'); });
 
     // users
     const nu = reactive({id: '', name: '', role: '', password: ''});
@@ -81,30 +78,10 @@ export default {
       await loadRoles();
     });
 
-    // skills
-    const editing = ref(null);   // {skill, editable}
-    const openSkill = guard(async s => {
-      const full = await api('/api/admin/skills/' + enc(s.name));
-      editing.value = {skill: full, editable: s.source === 'global'};
-    });
-    const saveSkill = guard(async form => {
-      if (editing.value.skill) await put('/api/admin/skills/' + enc(form.name), form);
-      else await post('/api/admin/skills', form);
-      editing.value = null;
-      toast('Skill saved', 'success');
-      await loadSkills();
-    });
-    const removeSkill = guard(async s => {
-      if (!confirm('Delete the global skill ' + s.name + '?')) return;
-      await del('/api/admin/skills/' + enc(s.name));
-      await loadSkills();
-    });
-
     function select(t) {
       tab.value = t;
       if (t === 'users') { loadUsers(); loadRoles(); }
       if (t === 'roles') { loadRoles(); loadCatalog(); }
-      if (t === 'skills') loadSkills();
     }
     function onKey(e) {
       const i = TABS.findIndex(t => t[0] === tab.value);
@@ -115,9 +92,9 @@ export default {
     }
     onMounted(() => select('users'));
 
-    return {TABS, tab, select, onKey, users, roles, catalog, skills, nu, createUser, setRole, rename,
+    return {TABS, tab, select, onKey, users, roles, catalog, nu, createUser, setRole, rename,
       pwFor, pwValue, setPassword, removeUser, lastAdmin, current, newRole, selectedRole, pick, createRole, saveRole,
-      deleteRole, editing, openSkill, saveSkill, removeSkill};
+      deleteRole};
   },
   template: `
   <section class="panel" aria-label="Administration">
@@ -203,33 +180,6 @@ export default {
           <p v-else-if="selectedRole" class="spinner"></p>
           <p v-else class="empty">Select a role.</p>
         </div>
-      </div>
-
-      <div v-if="tab === 'skills'" role="tabpanel">
-        <p>Global skills are offered to every user whose role has the skill tool; each user can switch them off for
-          themselves. Skills of the settings file are read-only here.</p>
-        <SkillEditor v-if="editing" :skill="editing.skill" :editable="editing.editable"
-                     @save="saveSkill" @cancel="editing = null" />
-        <template v-else>
-          <table class="grid">
-            <thead><tr><th>Name</th><th>Source</th><th>Description</th><th></th></tr></thead>
-            <tbody>
-              <tr v-for="s in skills" :key="s.source + s.name">
-                <td><code>{{ s.name }}</code></td>
-                <td><span class="badge" :class="s.source">{{ s.source }}</span>
-                  <span v-if="s.shadows.length" class="badge warn" :title="'Hides the own skill of: ' + s.shadows.join(', ')">
-                    hides {{ s.shadows.length }}</span></td>
-                <td class="muted">{{ s.description }}</td>
-                <td class="row-actions">
-                  <button class="btn-sm" @click="openSkill(s)">{{ s.source === 'global' ? 'Edit' : 'View' }}</button>
-                  <button v-if="s.source === 'global'" class="btn-danger" @click="removeSkill(s)">Delete</button>
-                </td>
-              </tr>
-              <tr v-if="!skills.length"><td colspan="4" class="empty">No skills.</td></tr>
-            </tbody>
-          </table>
-          <div class="row-actions"><button class="btn-primary" @click="editing = {skill: null, editable: true}">New global skill</button></div>
-        </template>
       </div>
     </div>
   </section>

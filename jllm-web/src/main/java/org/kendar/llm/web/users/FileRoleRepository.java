@@ -42,7 +42,7 @@ public final class FileRoleRepository implements RoleRepository {
 
     @Override
     public Optional<Role> find(String name) {
-        if (!Permissions.validName(name) || WebUser.ADMIN_ROLE.equals(name)) return Optional.empty();
+        if (!Permissions.validName(name)) return Optional.empty();
         Path file = dir.resolve(name + ".json");
         if (!Files.isRegularFile(file)) return Optional.empty();
         try {

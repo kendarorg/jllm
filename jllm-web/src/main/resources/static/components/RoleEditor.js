@@ -25,13 +25,13 @@ export default {
   template: `
   <div class="role-editor">
     <h3>Role <code>{{ role.name }}</code> <small class="muted">· {{ role.users }} user(s)</small></h3>
-    <p v-if="role.fixed" class="banner banner-info">The admin role is fixed: every tool, no approval prompts.</p>
+    <p v-if="role.fixed" class="banner banner-info">The admin role always has every tool; only its approval can be set.</p>
     <div class="form-row">
       <label class="tp-check"><input type="checkbox" v-model="form.readOnly" :disabled="role.fixed" @change="touch" />
         Read-only tools only</label>
       <div class="field-sm">
         <label for="role-approval">Approval</label>
-        <select id="role-approval" v-model="form.approval" :disabled="role.fixed" @change="touch">
+        <select id="role-approval" v-model="form.approval" @change="touch">
           <option value="ask">ask (harness policy)</option>
           <option value="off">off (no prompts)</option>
         </select>
@@ -39,9 +39,9 @@ export default {
     </div>
     <ToolPicker :catalog="catalog" :model-value="form.tools" mode="grant" :readonly="role.fixed"
                 @update:model-value="onTools" />
-    <div v-if="!role.fixed" class="row-actions sticky-actions">
+    <div class="row-actions sticky-actions">
       <button class="btn-primary" :disabled="!form.dirty" @click="save">Save role</button>
-      <button class="btn-danger" :disabled="role.users > 0" :title="role.users > 0 ? 'Users still hold this role' : ''"
+      <button v-if="!role.fixed" class="btn-danger" :disabled="role.users > 0" :title="role.users > 0 ? 'Users still hold this role' : ''"
               @click="emit('delete')">Delete role</button>
     </div>
   </div>

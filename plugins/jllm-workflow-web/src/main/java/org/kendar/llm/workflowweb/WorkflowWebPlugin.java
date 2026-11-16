@@ -15,7 +15,9 @@ import org.kendar.llm.workflows.api.WorkflowApi;
  * reached through {@link WorkflowApi}; this module maps HTTP to it and pushes live events.
  *
  * <pre>
- * GET    /flows                         flows the user may run, both scopes
+ * GET    /flows                         flows the user may run, both scopes ({scope,name,roles,canEdit,sharedWithYou})
+ * GET    /catalog                       registered actions and choosers, canManageGlobal
+ * POST   /flows/validate                {scope, flow}: the save-time problems, nothing stored
  * GET    /flows/{scope}/{name}          definition        GET .../inputs   expected inputs
  * PUT    /flows/{scope}                 save (body = flow; global needs admin)
  * DELETE /flows/{scope}/{name}
@@ -44,6 +46,13 @@ public final class WorkflowWebPlugin implements WebPlugin {
         var events = ctx.events();
 
         route(ctx, "GET", "/flows", r -> ok(api.list(r.user(), r.roles())));
+        route(ctx, "GET", "/catalog", r -> ok(api.catalog(r.user(), r.roles())));
+        route(ctx, "POST", "/flows/validate", r -> {
+            JsonNode b = need(r);
+            if (!b.path("flow").isObject()) throw new IllegalArgumentException("'flow' must be an object");
+            String scope = text(b, "scope");
+            return ok(api.validate(r.user(), r.roles(), scope == null ? "personal" : scope, b.get("flow")));
+        });
         route(ctx, "GET", "/flows/{scope}/{name}", r -> ok(api.flow(r.user(), r.roles(), r.param("name"), r.param("scope"))));
         route(ctx, "GET", "/flows/{scope}/{name}/inputs", r -> {
             ArrayNode a = JsonNodeFactory.instance.arrayNode();
@@ -63,29 +72,32 @@ public final class WorkflowWebPlugin implements WebPlugin {
 
         route(ctx, "POST", "/runs", r -> {
             JsonNode b = need(r);
-            JsonNode run = api.start(r.user(), r.roles(), text(b, "name"), text(b, "scope"),
-                    b.path("input").isMissingNode() ? null : b.get("input"), null);
-            changed(api, events, r, run);
+            JsonNode run = api.prepareStart(r.user(), r.roles(), text(b, "name"), text(b, "scope"),
+                    b.path("input").isMissingNode() ? null : b.get("input"));
+            changed(api, events, r.user(), r.roles(), run);
+            background(api, events, r.user(), r.roles(), run.path("runId").asText());
             return ok(run);
         });
         route(ctx, "GET", "/runs", r -> ok(api.runs(r.user(), r.roles())));
         route(ctx, "GET", "/runs/{id}", r -> ok(api.run(r.user(), r.roles(), r.param("id"))));
         route(ctx, "GET", "/runs/{id}/history", r -> ok(api.history(r.user(), r.roles(), r.param("id"))));
         route(ctx, "POST", "/runs/{id}/answer", r -> {
-            JsonNode run = api.answer(r.user(), r.roles(), r.param("id"), need(r).path("answer"));
-            changed(api, events, r, run);
+            api.prepareAnswer(r.user(), r.roles(), r.param("id"), need(r).path("answer"));
+            JsonNode run = api.run(r.user(), r.roles(), r.param("id"));
+            changed(api, events, r.user(), r.roles(), run);
+            background(api, events, r.user(), r.roles(), r.param("id"));
             return ok(run);
         });
         route(ctx, "POST", "/runs/{id}/requests", r -> {
             JsonNode b = need(r);
             JsonNode run = api.request(r.user(), r.roles(), r.param("id"), text(b, "kind"), b.path("payload"));
-            changed(api, events, r, run);
+            changed(api, events, r.user(), r.roles(), run);
             return ok(run);
         });
         route(ctx, "POST", "/runs/{id}/cancel", r -> {
             api.cancel(r.user(), r.roles(), r.param("id"));
             JsonNode run = api.run(r.user(), r.roles(), r.param("id"));
-            changed(api, events, r, run);
+            changed(api, events, r.user(), r.roles(), run);
             return ok(run);
         });
         route(ctx, "GET", "/waiting", r -> ok(api.waiting(r.user(), r.roles())));
@@ -93,11 +105,31 @@ public final class WorkflowWebPlugin implements WebPlugin {
     }
 
     /** A run changed: tell the user's open streams, with the new number of questions waiting. */
-    private static void changed(WorkflowApi api, org.kendar.llm.harness.plugin.PluginEvents events, WebRequest r,
-                                JsonNode run) {
-        events.push(r.user(), "run", obj().put("runId", run.path("runId").asText())
+    private static void changed(WorkflowApi api, org.kendar.llm.harness.plugin.PluginEvents events, String user,
+                                java.util.Set<String> roles, JsonNode run) {
+        events.push(user, "run", obj().put("runId", run.path("runId").asText())
                 .put("status", run.path("status").asText()));
-        events.push(r.user(), "waiting", obj().put("count", api.waiting(r.user(), r.roles()).size()));
+        events.push(user, "waiting", obj().put("count", api.waiting(user, roles).size()));
+    }
+
+    /** Runs are walked here, aside from the request and chat threads; the user's streams hear when it ends. */
+    private static final java.util.concurrent.ExecutorService RUNNER = java.util.concurrent.Executors.newCachedThreadPool(rn -> {
+        Thread t = new Thread(rn, "flow-runner");
+        t.setDaemon(true);
+        return t;
+    });
+
+    private static void background(WorkflowApi api, org.kendar.llm.harness.plugin.PluginEvents events, String user,
+                                    java.util.Set<String> roles, String runId) {
+        java.util.Set<String> rl = java.util.Set.copyOf(roles);
+        RUNNER.execute(() -> {
+            try {
+                changed(api, events, user, rl, api.proceed(user, rl, runId));
+            } catch (RuntimeException e) {
+                System.getLogger(ID).log(System.Logger.Level.ERROR, "flow run " + runId + " failed: " + e, e);
+                try { changed(api, events, user, rl, api.run(user, rl, runId)); } catch (RuntimeException ignored) { /* gone */ }
+            }
+        });
     }
 
     private static ObjectNode obj() {

@@ -163,7 +163,13 @@ public class AdminController {
 
     @PutMapping("/roles/{name}")
     public ResponseEntity<Object> updateRole(@PathVariable String name, @RequestBody(required = false) Map<String, Object> body) {
-        if (WebUser.ADMIN_ROLE.equals(name)) return Api.error(HttpStatus.FORBIDDEN, "The admin role is fixed");
+        if (WebUser.ADMIN_ROLE.equals(name)) { // every tool stays; only the approval changes
+            try {
+                return ResponseEntity.ok(row(permissions.save(Role.admin(Api.text(body, "approval"))), users.all()));
+            } catch (IllegalArgumentException e) {
+                return Api.error(HttpStatus.BAD_REQUEST, e.getMessage());
+            }
+        }
         if (permissions.role(name).isEmpty()) return Api.error(HttpStatus.NOT_FOUND, "Unknown role " + name);
         return saveRole(name, body, HttpStatus.OK);
     }

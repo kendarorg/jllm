@@ -21,8 +21,19 @@ public interface WorkflowApi {
     /** Run states. */
     enum RunStatus { PENDING, RUNNING, WAITING, COMPLETED, FAILED, CANCELLED }
 
-    /** @return {@code [{scope, name}]}: the flows the user may run, both scopes, labelled */
+    /**
+     * @return {@code [{scope, name, roles[], canEdit, sharedWithYou}]}: the flows the user may run, both scopes,
+     * labelled. Administrators see every global flow; {@code sharedWithYou} is false when that is the only reason.
+     */
     JsonNode list(String user, Set<String> roles);
+
+    /** The save-time checks without saving: {@code {errors:[text]}}, empty when the flow could be saved. */
+    JsonNode validate(String user, Set<String> roles, String scope, JsonNode flow);
+
+    /**
+     * What the editor offers: {@code {actions:[{name, asks, roles[]}], choosers:[{name, asks}], canManageGlobal}}.
+     */
+    JsonNode catalog(String user, Set<String> roles);
 
     /** The definition of a flow the user may see; {@code scope} may be null when the name is unambiguous. */
     JsonNode flow(String user, Set<String> roles, String name, String scope);
@@ -40,6 +51,15 @@ public interface WorkflowApi {
 
     /** Starts a run as the user. {@code chatHistory} (may be null) is copied in as optional context. */
     JsonNode start(String user, Set<String> roles, String name, String scope, JsonNode input, JsonNode chatHistory);
+
+    /** Stores a new run and returns its view (status pending) without walking it; {@link #proceed} walks it. */
+    JsonNode prepareStart(String user, Set<String> roles, String name, String scope, JsonNode input);
+
+    /** Records the answer of a waiting run without walking it; {@link #proceed} walks it. */
+    void prepareAnswer(String user, Set<String> roles, String runId, JsonNode answer);
+
+    /** Walks a run made by prepareStart or prepareAnswer, on the calling thread; returns the run's view afterwards. */
+    JsonNode proceed(String user, Set<String> roles, String runId);
 
     /** Answers the open question of a run; a refused answer throws and leaves the question open. */
     JsonNode answer(String user, Set<String> roles, String runId, JsonNode answer);

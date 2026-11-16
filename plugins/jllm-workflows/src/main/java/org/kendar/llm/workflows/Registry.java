@@ -62,9 +62,10 @@ public final class Registry {
      * @param owner    the user the run belongs to
      * @param title    names the chat the host keeps for the tasks of one run
      * @param approved tools the user has already allowed for this run
+     * @param tools    tools the task may use: null = the agent's own, empty = none, {@code ["*"]} = all of the user's role
      */
     public record ModelCall(String agent, String system, String user, String owner, String title,
-                            java.util.Set<String> approved) {
+                            java.util.Set<String> approved, java.util.List<String> tools) {
     }
 
     /** The agent behind a task step wanted to call tools that need an approval; none of them ran. */
@@ -110,6 +111,16 @@ public final class Registry {
     public Registry askingChooser(String chooser) {
         askingChoosers.add(chooser);
         return this;
+    }
+
+    /** Names of the registered actions, sorted. */
+    public java.util.List<String> actionNames() {
+        return actions.keySet().stream().sorted().toList();
+    }
+
+    /** Names of the registered choosers, sorted. */
+    public java.util.List<String> chooserNames() {
+        return choosers.keySet().stream().sorted().toList();
     }
 
     public boolean asks(String action) {

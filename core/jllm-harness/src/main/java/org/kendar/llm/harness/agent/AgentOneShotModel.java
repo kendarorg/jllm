@@ -11,7 +11,7 @@ import java.util.function.Supplier;
 
 /**
  * The host's {@link OneShotModel}: one task for a named agent. An agent that lists tools runs in the real agent
- * loop, once, with its tools, permissions and approvals; a call that would need an approval is not run: the task stops with {@link OneShotModel.ApprovalRequiredException}. An agent without tools (or a name that
+ * loop, once, with its tools, permissions and approvals (the call can set the tools: all of the role with {@code "*"}); a call that would need an approval is not run: the task stops with {@link OneShotModel.ApprovalRequiredException}. An agent without tools (or a name that
  * is not a known agent) gets one plain completion with its model client and prompt, or the host's client.
  */
 public final class AgentOneShotModel implements OneShotModel {
@@ -41,7 +41,15 @@ public final class AgentOneShotModel implements OneShotModel {
         String user = call.user();
         AgentDefinition def = agent == null || agent.isBlank() ? null : agents.get(agent);
         AgentLoop l = loop == null ? null : loop.get();
-        if (def != null && !def.tools().isEmpty() && l != null && sessions != null) {
+        java.util.List<String> tools = call.tools();
+        boolean agentic = tools != null ? !tools.isEmpty() : def != null && !def.tools().isEmpty();
+        if (agentic && l != null && sessions != null) {
+            if (tools != null) { // the task chooses its tools; the user's role still limits them in the loop
+                AgentDefinition base = def != null ? def : agents.get(AgentCatalog.DEFAULT);
+                def = new AgentDefinition(base.name(), base.description(),
+                        tools.contains("*") ? java.util.List.of() : tools, base.prompt(), base.inheritContext(),
+                        base.model(), base.readOnly(), base.temperature(), base.thinking());
+            }
             String prompt = system == null || system.isBlank() ? user : system + "\n\n" + user;
             Set<String> approved = call.approved() == null ? Set.of() : call.approved();
             return l.runAgentTask(chat(call.principal(), call.title()), prompt, def, false, approved);

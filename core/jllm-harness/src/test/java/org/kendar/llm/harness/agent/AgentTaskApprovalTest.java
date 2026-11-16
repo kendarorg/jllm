@@ -23,7 +23,7 @@ class AgentTaskApprovalTest {
     }
 
     private static OneShotModel.Call call(String agent, String user, Set<String> approved) {
-        return new OneShotModel.Call(agent, "", user, "ann", "flow: t 1", approved);
+        return new OneShotModel.Call(agent, "", user, "ann", "flow: t 1", approved, null);
     }
 
     @Test

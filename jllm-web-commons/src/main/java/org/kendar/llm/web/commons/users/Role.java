@@ -9,7 +9,7 @@ import org.kendar.llm.harness.util.Wildcard;
 import java.util.List;
 
 /**
- * A role.
+ * A role. The {@code admin} role always has every tool; its approval is the only thing that can be set.
  *
  * @param tools    tool name patterns ({@code *} = any run of characters); ["*"] = all
  * @param readOnly only READ_ONLY tools
@@ -17,8 +17,12 @@ import java.util.List;
  */
 public record Role(String name, List<String> tools, boolean readOnly, String approval) {
 
-    /** The fixed administrator role: every tool, no prompts. */
-    public static final Role ADMIN = new Role(WebUser.ADMIN_ROLE, List.of("*"), false, "off");
+    /** The administrator role: every tool; only its approval setting can be changed (default: ask). */
+    public static final Role ADMIN = admin("ask");
+
+    public static Role admin(String approval) {
+        return new Role(WebUser.ADMIN_ROLE, List.of("*"), false, approval);
+    }
 
     public Role {
         tools = tools == null ? List.of() : List.copyOf(tools);

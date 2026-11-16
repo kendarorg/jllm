@@ -94,7 +94,11 @@ class AdminControllerTest {
         assertTrue(roles.get(0).path("fixed").asBoolean());
 
         f.send(admin, "POST", "/api/admin/roles", Map.of("name", "admin", "tools", List.of())).andExpect(status().isConflict());
-        f.send(admin, "PUT", "/api/admin/roles/admin", Map.of("tools", List.of())).andExpect(status().isForbidden());
+        // every tool stays whatever is sent; only the approval is stored
+        f.send(admin, "PUT", "/api/admin/roles/admin", Map.of("tools", List.of(), "approval", "off")).andExpect(status().isOk());
+        assertEquals("off", f.permissions.role("admin").orElseThrow().approval());
+        assertTrue(f.permissions.role("admin").orElseThrow().allowsName("anything"));
+        f.send(admin, "PUT", "/api/admin/roles/admin", Map.of("approval", "ask")).andExpect(status().isOk());
         f.send(admin, "DELETE", "/api/admin/roles/admin", null).andExpect(status().isForbidden());
 
         f.send(admin, "POST", "/api/admin/roles", Map.of("name", "docs", "tools", List.of("mcp__docs__*", "grep"),
@@ -124,7 +128,10 @@ class AdminControllerTest {
         Files.writeString(dir.resolve("permissions/admin.json"), "{\"tools\":[]}");
         var p = f.permissions.forRole("admin").orElseThrow();
         assertTrue(p.allows(tool("write_file", ToolKind.FILE_EDIT)));
-        assertFalse(p.approval().requiresApproval(tool("write_file", ToolKind.FILE_EDIT)));
+        assertNull(p.approval(), "admin is asked for approvals unless its file says off");
+        Files.writeString(dir.resolve("permissions/admin.json"), "{\"tools\":[],\"approval\":\"off\"}");
+        assertFalse(f.permissions.forRole("admin").orElseThrow().approval()
+                .requiresApproval(tool("write_file", ToolKind.FILE_EDIT)));
     }
 
     @Test

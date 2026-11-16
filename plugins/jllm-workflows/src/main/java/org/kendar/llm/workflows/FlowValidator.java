@@ -27,6 +27,11 @@ public final class FlowValidator {
                 errs.add("limit '" + k + "' must be a whole number >= 0");
             }
         }
+        if (doc.has("roles")) {
+            boolean ok = doc.get("roles").isArray();
+            if (ok) for (JsonNode n : doc.get("roles")) ok &= n.isTextual() && !n.asText().isBlank();
+            if (!ok) errs.add("'roles' must be a list of role names");
+        }
         if (doc.has("unattended") && !doc.get("unattended").isBoolean()) errs.add("'unattended' must be true or false");
         checkTasks(flow, registry, errs);
         checkAccepts("", doc.path("accepts"), flow, errs);
@@ -97,6 +102,10 @@ public final class FlowValidator {
                 }
             }
             if (!t.has("instead") && !t.path("agent").isTextual()) errs.add(p + "no agent");
+            JsonNode tl = t.path("tools");
+            boolean toolsOk = tl.isMissingNode() || tl.isTextual() && tl.asText().equals("*") || tl.isArray();
+            if (tl.isArray()) for (JsonNode n : tl) toolsOk &= n.isTextual() && !n.asText().isBlank();
+            if (!toolsOk) errs.add(p + "tools must be \"*\" (all tools of the role) or a list of tool names");
             JsonNode a = t.path("answer");
             if (a.isObject()) {
                 for (Iterator<Map.Entry<String, JsonNode>> f = a.fields(); f.hasNext(); ) {

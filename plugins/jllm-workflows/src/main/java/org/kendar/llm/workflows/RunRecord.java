@@ -42,6 +42,9 @@ public final class RunRecord {
     /** Redirects taken; each one starts a fresh set of journal keys. {@code redirectTo} is where the walk starts. */
     public int epoch;
     public String redirectTo;
+    /** Epoch ms: when the run was created, and when it completed, failed or was cancelled (0 while it is open). */
+    public long startedAt = System.currentTimeMillis();
+    public long endedAt;
 
     public RunRecord(String runId, String user, JsonNode flow, JsonNode input) {
         this.runId = runId;
@@ -72,6 +75,7 @@ public final class RunRecord {
         o.set("requests", requests);
         o.set("requestData", requestData);
         o.put("epoch", epoch);
+        o.put("startedAt", startedAt).put("endedAt", endedAt);
         if (redirectTo != null) o.put("redirectTo", redirectTo);
         return o;
     }
@@ -99,6 +103,8 @@ public final class RunRecord {
         if (o.has("requests")) r.requests = (ArrayNode) o.get("requests");
         r.requestData.setAll((ObjectNode) o.path("requestData"));
         r.epoch = o.path("epoch").asInt();
+        r.startedAt = o.path("startedAt").asLong(0);
+        r.endedAt = o.path("endedAt").asLong(0);
         if (o.has("redirectTo")) r.redirectTo = o.get("redirectTo").asText();
         return r;
     }

@@ -101,6 +101,11 @@ public final class FlowEngine {
      *                 is reused instead of asking the chooser again
      */
     public RunResult run(FlowDef flow, JsonNode input, String user, Map<String, String> recorded) {
+        return execute(prepare(flow, input, user, recorded), false);
+    }
+
+    /** Checks and stores a new run (status pending) without walking it; {@link #proceed} does the walking. */
+    public RunRecord prepare(FlowDef flow, JsonNode input, String user, Map<String, String> recorded) {
         List<String> problems = FlowValidator.check(flow, registry);
         if (!problems.isEmpty()) {
             throw new FlowException(FlowException.Kind.INVALID_FLOW, "Flow '" + flow.name() + "' is invalid: " + problems);
@@ -116,7 +121,39 @@ public final class FlowEngine {
         rec.maxDepth = flow.limit("depth", null, FlowDef.DEFAULT_DEPTH); // the started flow decides for the chain
         rec.chain.add(flow.scope() + "/" + flow.name());
         recorded.forEach(rec.decisions::put);
-        return execute(rec, false);
+        store.save(rec);
+        return rec;
+    }
+
+    /**
+     * Records the answer of a waiting run (or of the child it waits for) and marks it running, without walking it;
+     * {@link #proceed} does the walking. A refused answer throws and leaves the question open.
+     */
+    public void accept(String runId, JsonNode answer, String by) {
+        RunRecord rec = waitingRun(runId);
+        if (rec.pending.has("childRunId")) {
+            accept(rec.pending.get("childRunId").asText(), answer, by);
+            return;
+        }
+        Question q = Question.fromJson(rec.pending);
+        q.validate(answer);
+        ObjectNode a = Json.M.createObjectNode();
+        a.set("value", answer);
+        a.put("by", by);
+        rec.answers.set(q.key(), a);
+        rec.status = RunRecord.RUNNING;
+        store.save(rec);
+    }
+
+    /** Walks a run made by {@link #prepare} or {@link #accept}; for a run waiting on a child, the child that was accepted. */
+    public void proceed(String runId) {
+        RunRecord rec = store.load(runId).orElseThrow(() -> new FlowException(FlowException.Kind.INVALID_FLOW,
+                "Unknown run " + runId));
+        while (RunRecord.WAITING.equals(rec.status) && rec.pending != null && rec.pending.has("childRunId")) {
+            rec = store.load(rec.pending.get("childRunId").asText()).orElse(null);
+            if (rec == null) return;
+        }
+        if (RunRecord.PENDING.equals(rec.status) || RunRecord.RUNNING.equals(rec.status)) execute(rec, true);
     }
 
     /**
@@ -165,6 +202,7 @@ public final class FlowEngine {
                 "Unknown run " + runId));
         if (rec.status.equals(RunRecord.COMPLETED) || rec.status.equals(RunRecord.FAILED)) return;
         rec.status = RunRecord.CANCELLED;
+        rec.endedAt = System.currentTimeMillis();
         rec.pending = null;
         store.save(rec);
         rec.children.fields().forEachRemaining(c -> cancel(c.getValue().asText())); // cancelling a parent cancels below
@@ -291,6 +329,7 @@ public final class FlowEngine {
         FlowDef flow = FlowDef.parse(rec.flow.toString());
         Run r = new Run(rec, flow);
         rec.status = RunRecord.RUNNING;
+        store.save(rec); // visible as running while the walk (a model call can take minutes) is in progress
         RunResult res = r.go();
         store.save(rec);
         if (propagate && rec.parentRunId != null) {
@@ -318,6 +357,9 @@ public final class FlowEngine {
 
         void log(String step, String kind, String detail, JsonNode data) {
             history.add(new Event(Instant.now(), step, kind, detail, data));
+            // progress is visible while the run walks, not only at its end
+            rec.history = historyNode();
+            store.save(rec);
         }
 
         RunResult go() {
@@ -390,18 +432,23 @@ public final class FlowEngine {
             rec.status = s == Status.COMPLETED ? RunRecord.COMPLETED : RunRecord.FAILED;
             rec.result = result;
             rec.error = error;
+            rec.endedAt = System.currentTimeMillis();
             rec.pending = null;
             return result(s, result, error, null);
         }
 
-        RunResult result(Status s, JsonNode result, JsonNode error, Question pending) {
+        ArrayNode historyNode() {
             ArrayNode h = Json.M.createArrayNode();
             for (Event e : history) {
                 ObjectNode o = h.addObject();
                 o.put("at", e.at().toString()).put("step", e.step()).put("kind", e.kind()).put("detail", e.detail());
                 if (e.data() != null) o.set("data", e.data());
             }
-            rec.history = h;
+            return h;
+        }
+
+        RunResult result(Status s, JsonNode result, JsonNode error, Question pending) {
+            rec.history = historyNode();
             Map<String, String> d = new LinkedHashMap<>();
             rec.decisions.fields().forEachRemaining(e -> d.put(e.getKey(), e.getValue().asText()));
             return new RunResult(ctx.runId(), s, result, error, List.copyOf(history), d, ctx, pending);
@@ -694,7 +741,7 @@ public final class FlowEngine {
             while (true) {
                 try {
                     raw = gw.complete(new Registry.ModelCall(task.path("agent").asText(), task.path("system").asText(""),
-                            prompt, rec.user, title, Set.copyOf(approved)));
+                            prompt, rec.user, title, Set.copyOf(approved), taskTools(task)));
                     break;
                 } catch (Registry.ApprovalNeededException e) {
                     approve(id, key, step, e, approved);
@@ -705,6 +752,16 @@ public final class FlowEngine {
                 }
             }
             return AnswerShape.validate(task.path("answer"), raw);
+        }
+
+        /** The task's {@code tools}: absent = the agent's own (null), "*" = all of the role, or a list of tool names. */
+        static List<String> taskTools(JsonNode task) {
+            JsonNode t = task.path("tools");
+            if (t.isMissingNode() || t.isNull()) return null;
+            if (t.isTextual()) return List.of(t.asText());
+            List<String> out = new ArrayList<>();
+            t.forEach(n -> out.add(n.asText()));
+            return out;
         }
 
         static final String APPROVE = "approve";
@@ -826,7 +883,7 @@ public final class FlowEngine {
                     + "\nAnswer with exactly one of these words and nothing else: " + names(s.path("outcomes"));
             try {
                 return gw.complete(new Registry.ModelCall(s.path("agent").asText(), "You choose one option from a closed list.",
-                        prompt, rec.user, null, Set.of()));
+                        prompt, rec.user, null, Set.of(), List.of()));
             } catch (FlowException e) {
                 throw e;
             } catch (Exception e) {

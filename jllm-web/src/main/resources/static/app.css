@@ -180,8 +180,9 @@ input[type=file]::file-selector-button {
 
 /* ── Toast ───────────────────────────────────────────────────────────────── */
 
-#toast { position: fixed; bottom: 1.5rem; right: 1.5rem; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 0.75rem 1rem; font-size: 0.875rem; opacity: 0; transform: translateY(8px); transition: opacity 0.2s, transform 0.2s; pointer-events: none; max-width: 340px; z-index: 999; }
-#toast.show { opacity: 1; transform: translateY(0); }
+#toast { position: fixed; bottom: 1.5rem; right: 1.5rem; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 0.75rem 1rem; font-size: 0.875rem; opacity: 0; transform: translateY(8px); transition: opacity 0.2s, transform 0.2s; pointer-events: none; max-width: 340px; z-index: 999; display: flex; gap: 0.75rem; align-items: center; }
+#toast.show { opacity: 1; transform: translateY(0); pointer-events: auto; }
+#toast:not(.show) { visibility: hidden; }
 #toast.success { border-color: var(--green); color: var(--green); }
 #toast.error   { border-color: var(--red);   color: var(--red); }
 
