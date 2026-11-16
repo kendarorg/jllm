@@ -6,6 +6,8 @@ Add one library, give it a model, and your application gets a tool-using AI agen
 
 Includes a **JavaScript sandbox** (`jllm-js`): the agent can run scripts with no host access, reaching your tools only through the secured tools.
 
+Includes optional **deterministic flows** (`jllm-workflows`): business processes written as JSON maps of steps, where your application decides the path and the model only does bounded fuzzy work inside a step.
+
 Built for Java 21, with a Maven multi-module architecture.
 
 JLLM includes two ready-made front ends built on the same library:
@@ -22,13 +24,15 @@ They're not separate products or mandatory dependencies. They're working example
 | [jllm-harness](core/jllm-harness) | the library: framework-free (no Spring, JPA or Micrometer), Jackson, JDK `HttpClient`, jsoup | [README](core/jllm-harness/README.md) |
 | [jllm-cli](jllm-cli) | terminal front end, one shaded runnable jar | [README](jllm-cli/README.md) |
 | [jllm-web-commons](jllm-web-commons) | REST + SSE chat and file API over the harness, independent of sign-in | [README](jllm-web-commons/README.md) |
-| [jllm-web](jllm-web) | Spring Boot application: startup, sample sign-in and permissions, no-build Vue 3 chat UI | [README](jllm-web/README.md) |
+| [jllm-web](jllm-web) | Spring Boot application: startup, sample sign-in and permissions, no-build Vue 3 chat UI, flow editor and runs screens | [README](jllm-web/README.md) |
+| [jllm-workflows](plugins/jllm-workflows) / [jllm-workflow-web](plugins/jllm-workflow-web) | optional plugins: the flow engine with chat commands and command line, and its web endpoints | [WORKFLOW](docs/WORKFLOW.md) |
 
 Also: [HISTORY](docs/HISTORY.md) (how the harness evolved) and [HARNESSES-COMPARE](docs/HARNESSES-COMPARE.md) (feature matrix against mini-swe-agent, Pi, OpenCode, Qwen Code, Hermes Agent).
 
 What is still missing (more in [FUTURE](docs/FUTURE.md)):
 
 * Provider (model) OAuth logins: the `OAuthLogin` SPI exists, no provider login is shipped
+* Flows: question routing by `who` is a label only, not enforced ([WORKFLOW](docs/WORKFLOW.md#12-runs-history-and-resume))
 * Authentication & authorization on the web UI: `jllm-web` is a reference front end meant for localhost or a trusted
   network. Sign-in is password or one OpenID Connect provider ([setup](jllm-web/README.md#sign-in-with-openid-connect)); no
   other providers, no IdP role mapping. Do not expose it publicly without a reverse proxy or TLS.
@@ -125,6 +129,46 @@ MCP servers and REST APIs need no code, only configuration:
 Details: [harness README](core/jllm-harness/README.md), [EXTENDING](docs/EXTENDING.md) (custom tools, hooks, policies,
 providers, stores), [MCP and REST](docs/MCP.md), [TOOLS](docs/TOOLS.md).
 
+## Flows
+
+Optional [`jllm-workflows`](docs/WORKFLOW.md) plugin. A flow is a JSON file of steps; the engine, not the model, decides
+what runs next. "Deterministic" means the orchestration: the same flow with the same inputs and decisions walks the same
+path. The model's answers are not deterministic, so every model call sits in a bounded step.
+
+- **Steps**: `task` (a prompt with slots and an enforced answer shape, run by a harness agent), `action` (a Java action,
+  no model), `decide` (a turning point), `ask` (pause and ask a person), `call` (start another flow) and `finish`.
+- **Turning points** pick one declared outcome, decided by a Java chooser, by the model from a closed list, or by a
+  person. The model can never invent a path. Decisions are recorded and reused on resume.
+- **Run, wait, resume**: a run that needs an answer goes to `waiting`, survives restarts and resumes without repeating
+  finished steps. Journaled model replies and decisions are not requested again.
+- **Questions**: `ask` steps (text, single or multi select, pattern, timeout), `clarify` on tasks (the reply is checked
+  for a question and the run pauses to ask its owner), and customer requests sent to a running flow.
+- **Nested flows**: `call` runs a child flow as a run of its own with explicit input and a declared result; depth and
+  loops are checked.
+- **Task approvals**: a task whose agent has tools runs in the real agent loop; a tool that needs approval asks the run's
+  owner (allow or refuse). The role and the user's disabled tools can only narrow the task's tools.
+- **Ownership**: personal flows per user, global flows defined by an admin and shareable with roles; global flows run as
+  the user who starts them. Java actions can be restricted to roles, checked when a flow is saved.
+- **Unattended** flows (`"unattended": true`) never ask; a flow that could ask is refused at save time.
+- **Error handler**, retries and limits per flow; every flow is validated when saved.
+
+```
+/flow-start refund {"order": "A-1001", "message": "I want my money back"}
+run 7c1e...: WAITING
+Approve the refund of 120? [single, asks operator]
+/flow-resume 7c1e... approve
+```
+
+Run them from any front end with `/flows`, `/flow-start`, `/flow-resume`, `/flow-request` and `/flow-cancel`; from a
+command line with `WorkflowCli` (`list`, `start`, `resume`, `history`, `cancel`; no chat needed); or from the `jllm-web`
+Flows screen (graph designer with server-side validation, personal and global flows) and Runs screen (history, cancel,
+open questions, a badge with the waiting count). Enable both plugins under `plugins` in the settings file. A sample
+flow, `develop-app` (plan, implement, review loop, test loop), is in [runConfig/flows](runConfig/flows) and seeded as a
+global flow by `jllm.flows-seed-dir` ([jllm-web](jllm-web/README.md#sample-global-flows)).
+
+Not yet: the `who` label of a question (operator, customer) is shown but not enforced; the run's owner answers every
+question. Details: [WORKFLOW](docs/WORKFLOW.md).
+
 ## Models
 
 Anthropic (prompt caching, thinking, citations) and any OpenAI-compatible endpoint (OpenAI, Qwen, llama.cpp, vLLM,
@@ -165,7 +209,7 @@ Set `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`, `GROK_API_KEY`, `QWEN_API_KEY`) fi
 | [EXTENDING](docs/EXTENDING.md) | custom tools, hooks, plugins, policies, providers, agent types, context strategies, stores, sandbox, tests |
 | [CACHES](docs/CACHES.md) | prompt-cache layout, compaction, mnemonic and scope algorithms |
 | [INTERNALS](docs/INTERNALS.md) | architecture, run lifecycle, loop, approvals, sub-agents, concurrency, persistence |
-| [WORKFLOW](docs/WORKFLOW.md) | optional `jllm-workflows` plugin: deterministic flows (JSON steps, Java actions, three choosers, questions, nested flows, error handler), chat commands, command line, web API; design notes in [deterministic](docs/deterministic.md) |
+| [WORKFLOW](docs/WORKFLOW.md) | optional `jllm-workflows` plugin: deterministic flows (JSON steps, Java actions, three choosers, questions and `clarify`, nested flows, task approvals, personal and global flows with roles, unattended runs, error handler), chat commands, command line, web API and flow editor |
 | [FLOW](docs/FLOW.md) | step-by-step diagrams of every pipeline |
 
 ## Credits
