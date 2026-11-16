@@ -54,7 +54,9 @@ public class HarnessConfiguration {
                                      ObjectProvider<ChatSessionStore> sessionStore,
                                      ObjectProvider<SubAgentRunLog> subAgentRunLog,
                                      ObjectProvider<MnemonicStore> mnemonicStore,
-                                     ObjectProvider<StateStore> stateStore) {
+                                     ObjectProvider<StateStore> stateStore,
+                                     org.kendar.llm.harness.plugin.ServiceRegistry services,
+                                     ObjectProvider<org.kendar.llm.harness.plugin.PluginStorages> pluginStorages) {
         String settingsFile = JllmProperties.blankToNull(p.settings());
         Path projectDir = Path.of(p.workdir() == null ? "" : p.workdir()).toAbsolutePath().normalize();
         // default: global ~/.jllm/settings.json, then project .jllm/settings.json, then the settings file; later wins.
@@ -94,6 +96,8 @@ public class HarnessConfiguration {
                         e.getValue().settings() == null ? null : mapper.valueToTree(e.getValue().settings()));
             }
         }
+        services.publish(org.kendar.llm.web.commons.plugins.PluginsSettings.class,
+                new org.kendar.llm.web.commons.plugins.PluginsSettings(settings.plugins()));
         HarnessConfig config = settings.applyTo(HarnessConfig.defaults());
         String searchKey = JllmProperties.blankToNull(p.searchApiKey());
         if (searchKey == null) searchKey = System.getenv("BRAVE_API_KEY");
@@ -103,7 +107,11 @@ public class HarnessConfiguration {
 
         ChatDirSandboxExecutor sandbox = new ChatDirSandboxExecutor(config, projectDir);
         HistoryRootLock.acquire(sandbox.location()); // one process per base directory; held until the process ends
-        AgentHarness.Builder builder = AgentHarness.builder();
+        // plugins find the host's plugin storage in the shared registry (files unless the application supplies another)
+        services.publish(org.kendar.llm.harness.plugin.PluginStorages.class, pluginStorages.getIfAvailable(() ->
+                new org.kendar.llm.web.commons.plugins.FilePluginStorage(
+                        projectDir.resolve(".jllm").resolve("plugin-data"), mapper)));
+        AgentHarness.Builder builder = AgentHarness.builder().services(services);
         if (JllmProperties.blankToNull(p.pluginDir()) != null) builder.pluginDir(Path.of(p.pluginDir()));
         else if (java.nio.file.Files.isDirectory(Path.of("plugins"))) builder.pluginDir(Path.of("plugins"));
         AgentHarness harness = builder

@@ -1,9 +1,11 @@
 package org.kendar.llm.harness.auth;
 
 import org.kendar.llm.harness.permission.ToolApprovalPolicy;
+import org.kendar.llm.harness.permission.ToolPermission;
 import org.kendar.llm.harness.tools.HarnessTool;
 
 import java.util.List;
+import java.util.function.Function;
 import java.util.function.Predicate;
 
 /**
@@ -15,9 +17,10 @@ import java.util.function.Predicate;
  * @param skills      skills of this user on top of the harness ones (their text is read on each load); a name
  *                    already taken by a harness skill is ignored; null = none
  * @param skillFilter harness skills (by name) the user keeps; null = all
+ * @param toolPermission the administrator's allow / ask / deny per tool; null or returning null = no decision
  */
 public record UserPolicy(Predicate<HarnessTool> toolFilter, ToolApprovalPolicy approval, List<UserSkill> skills,
-                         Predicate<String> skillFilter) {
+                         Predicate<String> skillFilter, Function<HarnessTool, ToolPermission> toolPermission) {
 
     /** Every tool, the harness approval policy: the single-user default. */
     public static final UserPolicy ALL = new UserPolicy(null, null);
@@ -31,7 +34,12 @@ public record UserPolicy(Predicate<HarnessTool> toolFilter, ToolApprovalPolicy a
 
     /** No skills of the user's own, every harness skill. */
     public UserPolicy(Predicate<HarnessTool> toolFilter, ToolApprovalPolicy approval) {
-        this(toolFilter, approval, null, null);
+        this(toolFilter, approval, null, null, null);
+    }
+
+    /** The administrator's decision for the tool, or null when none applies (the usual approval flow decides). */
+    public ToolPermission permissionOf(HarnessTool tool) {
+        return toolPermission == null ? null : toolPermission.apply(tool);
     }
 
     public boolean allows(HarnessTool tool) {

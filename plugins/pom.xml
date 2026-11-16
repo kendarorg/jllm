@@ -19,5 +19,7 @@
         <module>jllm-pdf</module>
         <module>jllm-js</module>
         <module>jllm-docs</module>
+        <module>jllm-workflows</module>
+        <module>jllm-workflow-web</module>
     </modules>
 </project>

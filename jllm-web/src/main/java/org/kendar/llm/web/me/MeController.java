@@ -65,6 +65,7 @@ public class MeController {
         Optional<WebUser> found = user(principal);
         if (found.isEmpty()) return Api.error(HttpStatus.UNAUTHORIZED, "Sign in first");
         WebUser u = found.get();
+        if (u.passwordless()) return Api.error(HttpStatus.CONFLICT, "This account signs in through the identity provider");
         String key = "id:" + u.id();
         long locked = throttle.lockedFor(key);
         if (locked > 0) return Api.error(HttpStatus.TOO_MANY_REQUESTS, "Too many failed attempts; retry in " + locked + " s");

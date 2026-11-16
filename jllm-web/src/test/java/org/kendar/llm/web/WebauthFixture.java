@@ -103,7 +103,7 @@ final class WebauthFixture {
         CookieAuthentication auth = new CookieAuthentication(users, sessions);
         ToolCatalogView catalog = new ToolCatalogView(harness);
         mvc = MockMvcBuilders.standaloneSetup(
-                        new AuthController(users, auth, sessions, throttle),
+                        new AuthController(users, auth, sessions, throttle, new org.kendar.llm.web.auth.OidcProperties(null, null)),
                         new MeController(users, permissions, skills, sessions, throttle, harness, catalog),
                         new AdminController(users, permissions, skills, sessions, harness, catalog),
                         new ChatController(harness, MAPPER, new HarnessPricing(0, 0, 0, 0), auth, auth))

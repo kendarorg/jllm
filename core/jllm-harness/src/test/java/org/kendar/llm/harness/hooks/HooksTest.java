@@ -171,7 +171,7 @@ class HooksTest {
         HarnessPlugin plugin = new TestPlugin("plug-test", r -> r
                 .tool(tool("plug", "Plug", ToolKind.READ_ONLY, (c, i) -> "plugged"))
                 .hook(HookEvent.POST_TOOL, ctx -> { seen.add(ctx.tool()); return HookResult.allow(); })
-                .command("/deploy", "Deploy it", (chat, arg) -> "deploying " + arg));
+                .command("/deploy", "Deploy it", (chat, arg, hist) -> "deploying " + arg));
         ScriptedModel model = new ScriptedModel().enqueue(toolUse("t1", "plug", "{}"), text("ok"));
         AgentHarness h = builder(model).plugin(plugin).build();
 

@@ -31,6 +31,9 @@ public interface PluginRegistrar {
      */
     PluginRegistrar toolNameCheck(java.util.function.Consumer<java.util.Collection<String>> check);
 
+    /** The host's service registry: publish a service for other plugins and the host, or look one up. */
+    ServiceRegistry services();
+
     /** A lazy handle: sees the tools collected later, including MCP and REST ones. */
     org.kendar.llm.harness.tools.ToolCatalog catalog();
 }

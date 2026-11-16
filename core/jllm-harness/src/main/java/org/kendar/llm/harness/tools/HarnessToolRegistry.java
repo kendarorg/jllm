@@ -102,7 +102,7 @@ public class HarnessToolRegistry {
         for (HarnessTool t : tools) {
             if (replaced.contains(t.name())) {
                 throw new IllegalStateException("Tool '" + t.name() + "' is replaced by a plugin and cannot be added "
-                        + "(source '" + source + "'): run_js replaces bash.");
+                        + "(source '" + source + "').");
             }
         }
         Map<String, List<HarnessTool>> next = new LinkedHashMap<>(sources);

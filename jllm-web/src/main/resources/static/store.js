@@ -65,7 +65,13 @@ let toastTimer = null;
 export function toast(text, type = '') {
   store.toast = { text, type };
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { store.toast = { text: '', type: '' }; }, 3000);
+  // errors stay until dismissed; everything else fades after a few seconds
+  if (type !== 'error') toastTimer = setTimeout(dismissToast, 5000);
+}
+
+export function dismissToast() {
+  clearTimeout(toastTimer);
+  store.toast = { text: '', type: '' };
 }
 
 // ── rendering helpers ───────────────────────────────────────────────────────

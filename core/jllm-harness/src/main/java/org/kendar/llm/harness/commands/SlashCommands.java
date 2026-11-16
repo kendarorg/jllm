@@ -327,7 +327,7 @@ public final class SlashCommands {
                     sessions.setTitle(chatId, arg);
                     yield new Result("Title: " + arg, null, true);
                 }
-                default -> custom.containsKey(name) ? Result.text(custom.get(name).run(chatId, arg))
+                default -> custom.containsKey(name) ? Result.text(custom.get(name).run(chatId, arg, history(chatId)))
                         : Result.text("unknown command " + name);
             };
         } catch (AgentService.RunAlreadyActiveException e) {
@@ -508,6 +508,22 @@ public final class SlashCommands {
         }
         return firstMessage + (t.isAlive() ? "\nFinish the login in the browser; the result is reported when it ends"
                 + " (/login lists who is logged in)." : "");
+    }
+
+    /** The conversation as plain text lines, for plugin commands. */
+    private java.util.List<CustomCommand.ChatLine> history(String chatId) {
+        java.util.List<CustomCommand.ChatLine> out = new java.util.ArrayList<>();
+        var s = harness.sessions().get(chatId);
+        if (s == null) return out;
+        for (var m : harness.sessions().messages(s)) {
+            String role = m.path("role").asText("?");
+            var content = m.path("content");
+            StringBuilder sb = new StringBuilder();
+            if (content.isTextual()) sb.append(content.asText());
+            else for (var b : content) if ("text".equals(b.path("type").asText())) sb.append(b.path("text").asText());
+            if (!sb.isEmpty()) out.add(new CustomCommand.ChatLine(role, sb.toString()));
+        }
+        return out;
     }
 
     private String export(String chatId, String arg) throws java.io.IOException {

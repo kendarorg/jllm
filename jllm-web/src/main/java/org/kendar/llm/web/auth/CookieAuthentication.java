@@ -22,7 +22,7 @@ public class CookieAuthentication implements WebAuthentication, ChatAccess {
 
     public static final String COOKIE = "jllm_session";
 
-    private static final Set<String> OPEN = Set.of("/api/me", "/api/login", "/api/logout");
+    private static final Set<String> OPEN = Set.of("/api/me", "/api/login", "/api/logout", "/api/auth/config");
 
     private final UserRepository users;
     private final LoginSessionRepository sessions;

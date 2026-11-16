@@ -390,7 +390,7 @@ String owner = h.sessions().principal(chat);                      // "alice"; re
 - A `UserPolicy` can also carry the user's own skills and a filter over the settings skills
   ([SKILLS](SKILLS.md#per-user-skills)).
 
-The `jllm-web` module is a reference implementation of the wiring: password sign-in, roles, per-user tool and skill
+The `jllm-web` module is a reference implementation of the wiring: password or OpenID Connect sign-in ([setup](../jllm-web/README.md#sign-in-with-openid-connect)), roles, per-user tool and skill
 settings and an administration page; see its README.
 
 ### Front-end contract

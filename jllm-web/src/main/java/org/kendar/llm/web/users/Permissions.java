@@ -19,8 +19,8 @@ import java.util.regex.Pattern;
 
 /**
  * The roles and what they let a user do. The roles an admin defines are kept by a {@link RoleRepository}; a role
- * without a valid record gets no tools. The {@code admin} role is fixed: every tool, no prompts, whatever is stored
- * under its name. A user narrows their role with {@code disabledTools}; their skills (global and own, minus
+ * without a valid record gets no tools. The {@code admin} role always has every tool; whether it is asked for approvals
+ * is stored under its name (default: asked). A user narrows their role with {@code disabledTools}; their skills (global and own, minus
  * {@code disabledSkills}) travel in the policy.
  */
 public final class Permissions {
@@ -40,7 +40,10 @@ public final class Permissions {
 
     /** The role, or empty when it has no valid record. {@code admin} always exists. */
     public Optional<Role> role(String name) {
-        if (WebUser.ADMIN_ROLE.equals(name)) return Optional.of(Role.ADMIN);
+        if (WebUser.ADMIN_ROLE.equals(name)) {
+            return Optional.of(roles.find(name).map(r -> Role.admin(r.approval(), r.toolPermissions()))
+                    .orElse(Role.ADMIN));
+        }
         if (!validName(name)) return Optional.empty();
         return roles.find(name);
     }
@@ -53,9 +56,12 @@ public final class Permissions {
         return out;
     }
 
-    /** Stores a role. @throws IllegalArgumentException for {@code admin} or an invalid name */
+    /** Stores a role (for {@code admin} only its approval). @throws IllegalArgumentException for an invalid name */
     public Role save(Role role) {
-        if (role.fixed()) throw new IllegalArgumentException("The admin role cannot be changed");
+        if (role.fixed()) { // tools are always all of them; only the approval is kept
+            roles.save(Role.admin(role.approval(), role.toolPermissions()));
+            return role(role.name()).orElseThrow();
+        }
         if (!validName(role.name())) throw new IllegalArgumentException("Invalid role name: " + role.name());
         roles.save(role);
         return role(role.name()).orElseThrow();
@@ -115,6 +121,7 @@ public final class Permissions {
                         .orElseThrow(() -> new NoSuchFileException("own skill " + s.name())).content()));
             }
         }
-        return new UserPolicy(filter, approvals, extra, name -> !disabledSkills.contains(name));
+        return new UserPolicy(filter, approvals, extra, name -> !disabledSkills.contains(name),
+                role.toolPermissions().isEmpty() ? null : role::permissionOf);
     }
 }

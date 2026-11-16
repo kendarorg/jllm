@@ -661,6 +661,39 @@ public class AgentLoop {
     /** @param runId id the run is recorded under in the {@link SubAgentRunLog} */
     public String runSubAgent(String chatId, String toolUseId, String prompt, AgentDefinition agentType,
                               PermissionMode parentMode, AgentRun run, String runId) {
+        return runAgent(chatId, toolUseId, prompt, agentType, parentMode, run, runId, true, null);
+    }
+
+    /**
+     * One task for an outside caller (a flow step) in the loop of the given agent type, with that agent's tools,
+     * permissions and approvals. With {@code interactive} false a call that would need an approval is not asked
+     * about and not run: the task fails with {@link org.kendar.llm.harness.plugin.OneShotModel.ApprovalRequiredException}.
+     */
+    public String runAgentTask(String chatId, String prompt, AgentDefinition agentType, boolean interactive,
+                               java.util.Set<String> approved) {
+        approved.forEach(t -> approvals.grant(chatId, t));
+        List<String> denied = new ArrayList<>();
+        String answer;
+        try {
+            answer = runAgent(chatId, null, prompt, agentType, PermissionMode.DEFAULT, null, Uuids.v7String(),
+                    interactive, denied);
+        } catch (RuntimeException e) {
+            if (!denied.isEmpty()) throw approvalRequired(denied);
+            throw e;
+        }
+        if (!denied.isEmpty()) throw approvalRequired(denied);
+        return answer;
+    }
+
+    private static org.kendar.llm.harness.plugin.OneShotModel.ApprovalRequiredException approvalRequired(List<String> denied) {
+        List<String> tools = denied.stream().distinct().toList();
+        return new org.kendar.llm.harness.plugin.OneShotModel.ApprovalRequiredException(
+                "Approval needed for " + String.join(", ", tools) + " and no interactive approver is attached", tools);
+    }
+
+    private String runAgent(String chatId, String toolUseId, String prompt, AgentDefinition agentType,
+                            PermissionMode parentMode, AgentRun run, String runId, boolean interactive,
+                            List<String> denied) {
         ArrayNode messages = mapper.createArrayNode();
         int[] inherited = {0};
         if (agentType != null && agentType.inheritContext()) inherited[0] = copyParentContext(chatId, messages);
@@ -729,7 +762,9 @@ public class AgentLoop {
         EventSink parentSink = run == null ? EventSink.NOOP : run.sink();
         BooleanSupplier cancelled = run == null ? () -> false : run.cancelled();
         EventSink errors = (type, data) -> {
-            if ("approval_request".equals(type) || "login_required".equals(type)) parentSink.emit(type, data);
+            if ("approval_unavailable".equals(type)) {
+                if (denied != null) denied.add(data.path("tool").asText("a tool"));
+            } else if ("approval_request".equals(type) || "login_required".equals(type)) parentSink.emit(type, data);
             else if ("error".equals(type)) failure[0] = data.path("message").asText("sub-agent failed");
             else if ("warning".equals(type)) warning[0] = data.path("message").asText(null);
             else if ("usage".equals(type)) {
@@ -746,7 +781,7 @@ public class AgentLoop {
         activeSubAgents.put(label, new ActiveSubAgent(label, chatId, prompt, System.currentTimeMillis()));
         try {
             result = loop(chatId, messages, () -> subTools, pinned, extra,
-                    mode, errors, cancelled, false, true, agentName, client, inherited, label, null, frame);
+                    mode, errors, cancelled, false, interactive, agentName, client, inherited, label, null, frame);
             if (failure[0] == null) incomplete = incomplete(result, warning[0]);
         } catch (RuntimeException e) {
             if (failure[0] == null) failure[0] = String.valueOf(e.getMessage());
@@ -1462,9 +1497,17 @@ public class AgentLoop {
         if (!sessions.chatAllowsTool(ctx.chatId(), name)) {
             return new Authz("Tool disabled for this chat: " + name, pre, input);
         }
+        // the administrator's decision for this tool and role: deny never runs; allow runs unattended, whatever the
+        // mode, the taint and the approval policy (hooks, deny rules and plan confinement still apply)
+        org.kendar.llm.harness.permission.ToolPermission adminPermission = policy.permissionOf(tool);
+        if (adminPermission == org.kendar.llm.harness.permission.ToolPermission.DENY) {
+            return new Authz("Denied by the administrator for this user's role: " + name, pre, input);
+        }
+        boolean adminAllowed = adminPermission == org.kendar.llm.harness.permission.ToolPermission.ALLOW;
         PermissionGate userGate = policy.approval() == null ? gate : new PermissionGate(policy.approval(), gate.rules());
-        Decision decision = free ? Decision.ALLOW : userGate.check(mode, tool);
-        if (!free && decision == Decision.ALLOW && mode == PermissionMode.AUTO && classifier != null
+        Decision decision = free || adminAllowed ? Decision.ALLOW : userGate.check(mode, tool);
+        if (adminPermission == org.kendar.llm.harness.permission.ToolPermission.ASK && !free) decision = Decision.ASK;
+        if (!free && !adminAllowed && decision == Decision.ALLOW && mode == PermissionMode.AUTO && classifier != null
                 && tool.kind() != ToolKind.READ_ONLY && !pre.denied()) {
             // auto mode: the fast model may wave the call through; anything else goes to the user
             ToolClassifier.Verdict v = classifier.classify(name, input, ctx.workDir(), intent);
@@ -1473,7 +1516,8 @@ public class AgentLoop {
         }
         // settings rules: deny wins in every mode and over any grant; ask forces the question; allow skips it
         PermissionRules.Match rule = gate.rules().match(name, input, ctx.workDir());
-        if (!free && rule != null && rule.kind() == PermissionRules.Kind.ASK && decision == Decision.ALLOW) {
+        if (!free && !adminAllowed && rule != null && rule.kind() == PermissionRules.Kind.ASK
+                && decision == Decision.ALLOW) {
             decision = Decision.ASK;
         }
         // a grant only replaces the question; deny rules, hooks and plan confinement stay as they are
@@ -1485,13 +1529,17 @@ public class AgentLoop {
             decision = Decision.ALLOW;
         }
         // outside content is in the context: side effects need an explicit yes, even over grants and allow rules
-        if (!free && decision == Decision.ALLOW && tool.kind() != ToolKind.READ_ONLY && isTainted(ctx.chatId())
+        if (!free && !adminAllowed && decision == Decision.ALLOW && tool.kind() != ToolKind.READ_ONLY
+                && isTainted(ctx.chatId())
                 && (rule == null || rule.kind() != PermissionRules.Kind.DENY)) {
             decision = Decision.ASK;
             sink.emit("warning", mapper.createObjectNode().put("message", "Confirming '" + name
                     + "': the conversation holds untrusted tool output that could contain injected instructions"));
         }
-        if (decision == Decision.ASK && !interactive) decision = Decision.DENY;
+        if (decision == Decision.ASK && !interactive) {
+            decision = Decision.DENY;
+            sink.emit("approval_unavailable", mapper.createObjectNode().put("tool", name));
+        }
         if (pre.denied()) return new Authz("Denied by a hook: " + pre.denyReason(), pre, input);
         if (rule != null && rule.kind() == PermissionRules.Kind.DENY) {
             return new Authz("Denied by permission rule: " + rule.rule(), pre, input);

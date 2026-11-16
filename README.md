@@ -30,7 +30,8 @@ What is still missing (more in [FUTURE](docs/FUTURE.md)):
 
 * Provider (model) OAuth logins: the `OAuthLogin` SPI exists, no provider login is shipped
 * Authentication & authorization on the web UI: `jllm-web` is a reference front end meant for localhost or a trusted
-  network. Do not expose it publicly without a reverse proxy that handles authentication.
+  network. Sign-in is password or one OpenID Connect provider ([setup](jllm-web/README.md#sign-in-with-openid-connect)); no
+  other providers, no IdP role mapping. Do not expose it publicly without a reverse proxy or TLS.
 
 ## The idea
 
@@ -154,7 +155,7 @@ Set `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`, `GROK_API_KEY`, `QWEN_API_KEY`) fi
 | [jllm-harness](core/jllm-harness/README.md) | embedding, settings file, hooks, plugins, modes, context strategies, fast model |
 | [jllm-cli](jllm-cli/README.md) | flags, directories, interactive session, slash commands, local models |
 | [jllm-pdf](docs/TOOLS.md#document-readers) / [jllm-docs](docs/TOOLS.md#document-readers) | optional `read_file` readers for pdf and docx (plugins: jar in the plugin directory, enabled under `plugins` in the settings) |
-| [jllm-js](docs/JS.md) | optional `run_js` tool: JavaScript (GraalJS, regex supported, synchronous `tools.*` calls without `await`) in a sandbox whose only view of the world is the harness tools; installing it removes `bash` (plugin: jar in the plugin directory, enabled under `plugins`) |
+| [jllm-js](docs/JS.md) | optional `run_js` tool: JavaScript (GraalJS, regex supported, synchronous `tools.*` calls without `await`) in a sandbox whose only view of the world is the harness tools; `bash` stays available to the roles that list it (plugin: jar in the plugin directory, enabled under `plugins`) |
 | [jllm-web](jllm-web/README.md) | `jllm.*` properties, REST and SSE API, frontend structure |
 | [USAGE](docs/USAGE.md) | harness build, permission modes, settings file, embedding, events |
 | [TOOLS](docs/TOOLS.md) | built-in tools, kinds, path jail, per-chat tool set, tool-call pipeline |
@@ -164,6 +165,7 @@ Set `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`, `GROK_API_KEY`, `QWEN_API_KEY`) fi
 | [EXTENDING](docs/EXTENDING.md) | custom tools, hooks, plugins, policies, providers, agent types, context strategies, stores, sandbox, tests |
 | [CACHES](docs/CACHES.md) | prompt-cache layout, compaction, mnemonic and scope algorithms |
 | [INTERNALS](docs/INTERNALS.md) | architecture, run lifecycle, loop, approvals, sub-agents, concurrency, persistence |
+| [WORKFLOW](docs/WORKFLOW.md) | optional `jllm-workflows` plugin: deterministic flows (JSON steps, Java actions, three choosers, questions, nested flows, error handler), chat commands, command line, web API; design notes in [deterministic](docs/deterministic.md) |
 | [FLOW](docs/FLOW.md) | step-by-step diagrams of every pipeline |
 
 ## Credits

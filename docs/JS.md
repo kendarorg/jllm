@@ -29,13 +29,13 @@ or in code: `AgentHarness.builder().plugin(new JsPlugin())`.
 
 ## Honest scope
 
-**Installing the plugin removes the `bash` tool.** A host shell would be a second, unrestricted way out (a helper
-script written with `write_file` and run with `bash python3 x.py` has the whole network and filesystem). The plugin
-declares `replaces("bash")`: the tool is absent, not hidden, and a `bash` tool added later through MCP or REST is
-refused. Sub-agents inherit the tool set, so they have no `bash` either. A `deny` rule on `bash` is not a substitute:
-`python -c` and quoting bypass a regex.
+**The plugin does not remove `bash`.** Which of `run_js` and `bash` a user gets is decided by their role (web) or the
+harness permissions: a role may have either or both. A host shell is a second, unrestricted way out (a helper script
+written with `write_file` and run with `bash python3 x.py` has the whole network and filesystem), so only a role that
+lists `bash` (for example `poweru`, or `admin`) has it. Scripts never see `bash` either way. A `deny` rule on `bash` is
+not a substitute for leaving it out of the role: `python -c` and quoting bypass a regex.
 
-The guarantee "no host access except tools" holds only in a profile where no tool gives host access. Outside the
+The guarantee "no host access except tools" holds only for a user whose role gives no tool with host access. Outside the
 sandbox and out of its reach:
 
 - MCP stdio servers start host processes from the settings file. That is configuration, not a model action.

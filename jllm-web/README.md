@@ -63,7 +63,7 @@ use, so changes (by hand or from the UI) apply without a restart.
 
 | Path | Content |
 |---|---|
-| `webauth/users/<id>.json` | `{name, role, password?, credentials, disabledTools?, disabledSkills?}` |
+| `webauth/users/<id>.json` | `{name, role, email?, externalId?, password?, credentials, disabledTools?, disabledSkills?}` |
 | `webauth/permissions/<role>.json` | `{tools, readOnly?, approval?}` |
 | `webauth/global-skills/<name>.md` | skills written by the admin, offered to every user |
 | `webauth/user-skills/<id>/<name>.md` | a user's own skills |
@@ -77,6 +77,40 @@ use, so changes (by hand or from the UI) apply without a restart.
 - Five failed attempts for a login or an address lock it for 30 seconds (429). Unknown login and wrong password give
   the same answer.
 
+### Sign-in with OpenID Connect
+
+An alternative to the password, against one identity provider (Google, Entra, Keycloak, Okta, ...), with the
+authorization code flow and PKCE. It ends in the same `jllm_session` cookie.
+
+```properties
+jllm.web.public-url=https://jllm.example.com          # required when the mode is oidc or both
+jllm.auth.mode=both                                    # password (default) | oidc | both
+jllm.auth.oidc.name=Company SSO                        # button label
+jllm.auth.oidc.issuer=https://idp.example.com/realms/x # <issuer>/.well-known/openid-configuration
+jllm.auth.oidc.client-id=jllm
+jllm.auth.oidc.client-secret=env:JLLM_OIDC_SECRET      # env: reference only
+jllm.auth.oidc.scopes=openid profile email
+jllm.auth.oidc.allowed-domains=example.com             # empty = any verified email
+jllm.auth.oidc.auto-provision=false
+jllm.auth.oidc.default-role=user                       # required (and must exist) with auto-provision
+```
+
+- Register `<public-url>/auth/oidc/callback` as the redirect URI (exact match). Keycloak: a confidential client with
+  standard flow and PKCE S256. Google: an OAuth client of type *Web application*; issuer `https://accounts.google.com`.
+- Startup fails naming the key when `public-url`, `issuer`, `client-id` or the secret is missing, when discovery fails,
+  or when `default-role` is blank or unknown. Discovery and token endpoints must be HTTPS.
+- The link is `issuer#sub` (`externalId` in the user file). A user without it is linked on the first login when the
+  token has `email_verified=true`, an allowed domain, and the email equals the `email` of exactly one unlinked user
+  (the admin sets it in the Users tab). Otherwise, with `auto-provision`, a user is created with `default-role`
+  (id = the email local part, a number is added on a collision). Otherwise the sign-in is refused. The provider
+  never changes a role.
+- A user with an `externalId` and no password cannot use `/api/login`, has no default password, and the page
+  hides password changes for them.
+- Failures go to `/?authError=<code>` (`denied`, `invalid_token`, `unknown_user`, `domain_not_allowed`,
+  `email_not_verified`, `expired`). Five refused callbacks lock an address for 30 seconds.
+- `GET /api/auth/config` (open): `{password, oidc?: {name, loginUrl}}`. Mode `oidc` answers 404 on `/api/login`; mode
+  `password` answers 404 on `/auth/oidc/*`. `/api/logout` ends the local session only.
+
 ### Roles
 - `tools`: tool-name patterns, `*` matching any run of characters: `"read_file"`, `"mcp__docs__*"` (a whole MCP
   server, also tools it adds later), `"billing__*"` (a REST API), `["*"]` (everything).
@@ -84,13 +118,13 @@ use, so changes (by hand or from the UI) apply without a restart.
   `"ask"` (default) uses the harness policy. A role without a valid file gets no tools.
 - `admin` is fixed: every tool, no prompts, whatever its file says; it cannot be edited, deleted or recreated. At least
   one admin user always remains, and an admin cannot delete their own account.
-- One role per user. Shipped: `guest` (`run_js` and the web tools), `reader` (read-only file tools), `admin`.
+- One role per user. Shipped: `guest` (`run_js` and the web tools), `reader` (`run_js` and read-only file tools), `poweru` (`run_js`, `bash`, file and web tools), `admin`. A role lists `run_js`, `bash`, both or neither.
 
 ### User settings (every user, own account only)
 - **Password**: change it (current password required); the other sessions of the user are signed out.
 - **Tools**: switch off tools the role allows (`disabledTools`, patterns too). A tool works only if the role allows
   it and the user has not switched it off: a user can narrow the role, never widen it.
-- **Skills**: one list of the skills of the settings file, the global skills and the user's own; each can be switched
+- **Skills** (own screen in the header, for every user; administrators also manage the global skills there): one list of the skills of the settings file, the global skills and the user's own; each can be switched
   off (`disabledSkills`). Users add, edit and delete their own skills (64 KB each, at most 50); an own skill cannot
   take the name of a shared one, and a global skill created later with its name hides it until it is renamed. Own
   skills need the role to allow the `skill` tool.
@@ -99,7 +133,14 @@ use, so changes (by hand or from the UI) apply without a restart.
 
 ### Administration (role `admin`)
 Users (create, rename, change role, set or reset password, delete with their own skills), roles (with every tool,
-MCP server and REST API the harness knows, also disabled or failing sources) and global skills.
+MCP server and REST API the harness knows, also disabled or failing sources). Global skills are edited in the Skills screen.
+
+### Flows and runs (when the `jllm-workflow-web` plugin answers)
+- **Flows** (every user): personal and global flows. The designer shows the flow structure as a graph on top and the data
+  of the selected step below; further tabs for the error handler, tasks and flow settings; raw JSON as a fallback. The
+  server validates before every save. Global flows: administrators see and edit all of them (and choose the roles they
+  are shared with); other users see the ones shared with them, read only, and can start or copy them.
+- **Runs**: the user's runs, their open questions, history and cancel.
 
 ### Chats and credentials
 - Chats belong to the user who created them. Others get 404; the admin sees all chats.
@@ -157,7 +198,7 @@ All paths are under `/api/chat`. Errors are `{"error": "..."}`.
 
 | Method and path | Body | Result |
 |---|---|---|
-| `POST /api/login` | `{id, password}` | user `{id, name, role, defaultPassword}` + cookie; 401 `Invalid credentials`; 429 when locked |
+| `POST /api/login` | `{id, password}` | user `{id, name, role, defaultPassword, source, email}` + cookie; 401 `Invalid credentials`; 429 when locked |
 | `POST /api/logout` | | 204 |
 | `GET /api/me` | | the signed-in user; 401 otherwise |
 | `POST /api/me/password` | `{current, next}` | 204; 401 wrong current; 400 shorter than 8 or equal to the default |
@@ -296,3 +337,10 @@ harness. A short list:
 Still on disk after all of the above: the sandbox workspace of each chat (the files the tools read and write) and
 the `HistoryRootLock` that allows one process per base folder. Several instances behind a load balancer would also
 need a shared workspace (or the docker daemon sandbox on a shared host) and that lock replaced.
+
+## Sample global flows
+
+`jllm.flows-seed-dir` names a folder of flow files (`--jllm.flows-seed-dir=$PROJECT_DIR$/runConfig/flows` in the sample
+run configurations; it holds `develop-app`: plan, implement, review loop, test loop). At startup `SampleFlows` adds each
+`*.json` to the global flows of the `jllm-workflows` plugin when no flow of that name exists; nothing is overwritten.
+Not set: nothing happens. The flows plugin ships no flows.

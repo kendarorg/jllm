@@ -1,13 +1,18 @@
 package org.kendar.llm.web;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.kendar.llm.harness.AgentHarness;
 import org.kendar.llm.harness.auth.CredentialResolver;
 import org.kendar.llm.harness.auth.HarnessPrincipal;
 import org.kendar.llm.harness.auth.TokenStore;
 import org.kendar.llm.harness.auth.UserPolicyResolver;
 import org.kendar.llm.web.admin.ToolCatalogView;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.kendar.llm.web.auth.CookieAuthentication;
+import org.kendar.llm.web.auth.OidcClient;
+import org.kendar.llm.web.auth.OidcController;
+import org.kendar.llm.web.auth.OidcProperties;
+import org.kendar.llm.web.commons.JllmProperties;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.kendar.llm.web.auth.LoginThrottle;
 import org.kendar.llm.web.auth.InMemoryLoginSessionRepository;
 import org.kendar.llm.web.commons.users.LoginSessionRepository;
@@ -40,6 +45,7 @@ import java.util.function.Function;
  * {@link LoginSessionRepository} beans. Supplies the authentication and authorization the common web API needs.
  */
 @Configuration
+@EnableConfigurationProperties(OidcProperties.class)
 public class WebAuthConfiguration {
 
     private static final Logger log = LoggerFactory.getLogger(WebAuthConfiguration.class);
@@ -88,6 +94,31 @@ public class WebAuthConfiguration {
     @Bean
     public LoginThrottle loginThrottle() {
         return new LoginThrottle();
+    }
+
+    /**
+     * The OpenID Connect client. With {@code jllm.auth.mode} {@code oidc} or {@code both} the settings are checked and
+     * the provider's discovery document is read at startup; a mistake stops the server naming the key.
+     */
+    @Bean
+    public OidcClient oidcClient(OidcProperties auth, JllmProperties jllm, Permissions permissions, ObjectMapper mapper) {
+        String publicUrl = jllm.web() == null ? null : jllm.web().publicUrl();
+        auth.validate(publicUrl, System::getenv, role -> permissions.role(role).isPresent());
+        OidcClient client = new OidcClient(auth, publicUrl, System::getenv, mapper);
+        if (auth.oidcEnabled()) {
+            try {
+                client.discover();
+            } catch (java.io.IOException e) {
+                throw new IllegalStateException("jllm.auth.oidc.issuer: discovery failed: " + e.getMessage(), e);
+            }
+        }
+        return client;
+    }
+
+    @Bean
+    public OidcController oidcController(OidcProperties auth, OidcClient client, UserRepository users,
+                                         LoginSessionRepository sessions, LoginThrottle throttle) {
+        return new OidcController(auth, client, users, sessions, throttle);
     }
 
     /** Both the {@code WebAuthentication} and the {@code ChatAccess} of the common API. */

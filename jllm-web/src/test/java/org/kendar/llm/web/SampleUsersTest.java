@@ -33,7 +33,7 @@ class SampleUsersTest {
     private static Permissions shipped(Path dir) throws Exception {
         Path src = Path.of("..", "runConfig", "webauth", "permissions");
         if (!Files.isDirectory(src)) src = Path.of("runConfig", "webauth", "permissions");
-        for (String role : List.of("guest", "reader", "admin")) {
+        for (String role : List.of("guest", "reader", "poweru", "admin")) {
             Files.copy(src.resolve(role + ".json"), dir.resolve(role + ".json"));
         }
         return new Permissions(new FileRoleRepository(dir, new ObjectMapper()));
@@ -49,6 +49,8 @@ class SampleUsersTest {
         UserPolicy guest = shipped(dir).forRole("guest").orElseThrow();
         assertTrue(guest.allows(tool("run_js", ToolKind.OTHER)));
         assertTrue(guest.allows(tool("web_fetch", ToolKind.READ_ONLY)));
+        assertFalse(guest.allows(tool("bash", ToolKind.OTHER)));
+        assertEquals(org.kendar.llm.harness.permission.ToolPermission.DENY, guest.permissionOf(tool("bash", ToolKind.OTHER)));
         assertFalse(guest.allows(tool("read_file", ToolKind.READ_ONLY)));
         assertFalse(guest.allows(tool("write_file", ToolKind.FILE_EDIT)));
     }
@@ -60,8 +62,19 @@ class SampleUsersTest {
         assertTrue(reader.allows(tool("grep", ToolKind.READ_ONLY)));
         assertFalse(reader.allows(tool("write_file", ToolKind.FILE_EDIT)));
         assertFalse(reader.allows(tool("edit_file", ToolKind.FILE_EDIT)));
-        assertFalse(reader.allows(tool("run_js", ToolKind.OTHER)));
+        assertTrue(reader.allows(tool("run_js", ToolKind.OTHER)));
+        assertFalse(reader.allows(tool("bash", ToolKind.OTHER)));
+        assertEquals(org.kendar.llm.harness.permission.ToolPermission.DENY, reader.permissionOf(tool("bash", ToolKind.OTHER)));
         assertFalse(reader.allows(tool("web_fetch", ToolKind.READ_ONLY)));
+    }
+
+    @Test
+    void powerUserRunsBothJsAndBash(@TempDir Path dir) throws Exception {
+        UserPolicy p = shipped(dir).forRole("poweru").orElseThrow();
+        assertTrue(p.allows(tool("run_js", ToolKind.OTHER)));
+        assertTrue(p.allows(tool("bash", ToolKind.OTHER)));
+        assertTrue(p.allows(tool("write_file", ToolKind.FILE_EDIT)));
+        assertFalse(p.allows(tool("anything", ToolKind.OTHER)));
     }
 
     @Test
@@ -70,6 +83,21 @@ class SampleUsersTest {
         assertTrue(admin.allows(tool("write_file", ToolKind.FILE_EDIT)));
         assertTrue(admin.allows(tool("anything", ToolKind.OTHER)));
         assertFalse(admin.approval().requiresApproval(tool("write_file", ToolKind.FILE_EDIT)));
+    }
+
+    @Test
+    void toolPermissionsAreStoredAndDecideDenyThenAskThenAllow(@TempDir Path dir) throws Exception {
+        Permissions perms = new Permissions(new FileRoleRepository(dir, new ObjectMapper()));
+        perms.save(new org.kendar.llm.web.commons.users.Role("ops", List.of("*"), false, "ask", Map.of(
+                "send_*", org.kendar.llm.harness.permission.ToolPermission.ALLOW,
+                "send_secret", org.kendar.llm.harness.permission.ToolPermission.DENY,
+                "bash", org.kendar.llm.harness.permission.ToolPermission.ASK)));
+        UserPolicy p = perms.forRole("ops").orElseThrow();
+        assertEquals(org.kendar.llm.harness.permission.ToolPermission.ALLOW, p.permissionOf(tool("send_mail", ToolKind.OTHER)));
+        assertEquals(org.kendar.llm.harness.permission.ToolPermission.DENY, p.permissionOf(tool("send_secret", ToolKind.OTHER)));
+        assertEquals(org.kendar.llm.harness.permission.ToolPermission.ASK, p.permissionOf(tool("bash", ToolKind.OTHER)));
+        assertNull(p.permissionOf(tool("read_file", ToolKind.READ_ONLY)));
+        assertEquals(3, perms.role("ops").orElseThrow().toolPermissions().size(), "reloaded from the file");
     }
 
     @Test

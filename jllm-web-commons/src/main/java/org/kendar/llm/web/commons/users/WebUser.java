@@ -17,9 +17,11 @@ import java.util.Set;
  *                       {@code PasswordHasher#defaultPassword})
  * @param disabledTools  tool name patterns the user switched off for themselves (only narrows the role)
  * @param disabledSkills skill names the user switched off for themselves
+ * @param externalId     {@code <issuer>#<sub>} of the identity provider account linked to the user; null = none
+ * @param email          optional address, used to link a pre-created user to an identity provider account
  */
 public record WebUser(String id, String name, String role, Map<String, Map<String, String>> credentials,
-                      String password, List<String> disabledTools, List<String> disabledSkills)
+                      String password, List<String> disabledTools, List<String> disabledSkills, String externalId, String email)
         implements WebPrincipal {
 
     public static final String ADMIN_ROLE = "admin";
@@ -28,10 +30,12 @@ public record WebUser(String id, String name, String role, Map<String, Map<Strin
         credentials = credentials == null ? Map.of() : credentials;
         disabledTools = disabledTools == null ? List.of() : List.copyOf(disabledTools);
         disabledSkills = disabledSkills == null ? List.of() : List.copyOf(disabledSkills);
+        externalId = externalId == null || externalId.isBlank() ? null : externalId;
+        email = email == null || email.isBlank() ? null : email.strip();
     }
 
     public WebUser(String id, String name, String role, Map<String, Map<String, String>> credentials) {
-        this(id, name, role, credentials, null, null, null);
+        this(id, name, role, credentials, null, null, null, null, null);
     }
 
     @Override
@@ -39,8 +43,19 @@ public record WebUser(String id, String name, String role, Map<String, Map<Strin
         return ADMIN_ROLE.equals(role);
     }
 
+    /** Whether the user is linked to an identity provider account. */
+    public boolean external() {
+        return externalId != null;
+    }
+
+    /** A linked user without a password hash signs in through the identity provider only. */
+    public boolean passwordless() {
+        return external() && (password == null || password.isBlank());
+    }
+
+    /** The default password applies only to users without an identity provider account. */
     public boolean usesDefaultPassword() {
-        return password == null || password.isBlank();
+        return !external() && (password == null || password.isBlank());
     }
 
     public HarnessPrincipal principal() {

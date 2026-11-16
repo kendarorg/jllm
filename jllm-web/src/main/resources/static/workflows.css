@@ -1,0 +1,22 @@
+.wf { padding: 12px 16px; max-width: 960px; margin: 0 auto; }
+.wf-table { width: 100%; border-collapse: collapse; margin: 8px 0; }
+.wf-table th, .wf-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border, #ddd); }
+.wf-table tr.current { background: var(--hover, rgba(127, 127, 127, .12)); }
+.wf-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.wf-scope, .wf-status { font-size: 12px; padding: 1px 8px; border-radius: 10px; border: 1px solid var(--border, #ccc); }
+.wf-status.waiting { border-color: #c80; }
+.wf-status.failed { border-color: #c33; }
+.wf-status.completed { border-color: #3a3; }
+.wf-question, .wf-start, .wf-edit, .wf-run { margin-top: 12px; }
+.wf-question fieldset { border: 0; padding: 0; margin: 8px 0; }
+.wf-option { display: block; padding: 2px 0; }
+.wf-who { font-size: 12px; opacity: .7; margin: 2px 0; }
+.wf-facts { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 8px 0; }
+.wf-facts dt { font-weight: 600; }
+.wf-facts dd { margin: 0; }
+.wf-history { padding-left: 20px; font-size: 13px; }
+.wf-edit textarea { width: 100%; font-family: monospace; }
+.wf-badge { display: inline-block; min-width: 18px; padding: 0 6px; margin-left: 4px; border-radius: 9px; background: #c80;
+  color: #fff; font-size: 12px; text-align: center; }
+.wf-attach { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-top: 1px solid var(--border, #ddd);
+  background: var(--hover, rgba(200, 136, 0, .12)); font-size: 13px; }
