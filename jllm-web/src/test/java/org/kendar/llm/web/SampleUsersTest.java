@@ -73,6 +73,21 @@ class SampleUsersTest {
     }
 
     @Test
+    void toolPermissionsAreStoredAndDecideDenyThenAskThenAllow(@TempDir Path dir) throws Exception {
+        Permissions perms = new Permissions(new FileRoleRepository(dir, new ObjectMapper()));
+        perms.save(new org.kendar.llm.web.commons.users.Role("ops", List.of("*"), false, "ask", Map.of(
+                "send_*", org.kendar.llm.harness.permission.ToolPermission.ALLOW,
+                "send_secret", org.kendar.llm.harness.permission.ToolPermission.DENY,
+                "bash", org.kendar.llm.harness.permission.ToolPermission.ASK)));
+        UserPolicy p = perms.forRole("ops").orElseThrow();
+        assertEquals(org.kendar.llm.harness.permission.ToolPermission.ALLOW, p.permissionOf(tool("send_mail", ToolKind.OTHER)));
+        assertEquals(org.kendar.llm.harness.permission.ToolPermission.DENY, p.permissionOf(tool("send_secret", ToolKind.OTHER)));
+        assertEquals(org.kendar.llm.harness.permission.ToolPermission.ASK, p.permissionOf(tool("bash", ToolKind.OTHER)));
+        assertNull(p.permissionOf(tool("read_file", ToolKind.READ_ONLY)));
+        assertEquals(3, perms.role("ops").orElseThrow().toolPermissions().size(), "reloaded from the file");
+    }
+
+    @Test
     void roleWithoutFileGetsNothing(@TempDir Path dir) throws Exception {
         Permissions perms = shipped(dir);
         assertTrue(perms.forRole("wizard").isEmpty());

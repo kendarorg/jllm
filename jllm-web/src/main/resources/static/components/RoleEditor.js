@@ -10,17 +10,23 @@ export default {
   },
   emits: ['save', 'delete'],
   setup(props, {emit}) {
-    const form = reactive({tools: [], readOnly: false, approval: 'ask', dirty: false});
+    const form = reactive({tools: [], readOnly: false, approval: 'ask', perms: [], dirty: false});
     watch(() => props.role, r => {
       form.tools = [...r.tools];
       form.readOnly = r.readOnly;
       form.approval = r.approval;
+      form.perms = Object.entries(r.toolPermissions || {}).map(([pattern, decision]) => ({pattern, decision}));
       form.dirty = false;
     }, {immediate: true});
     const touch = () => { form.dirty = true; };
     const onTools = v => { form.tools = v; touch(); };
-    const save = () => emit('save', {tools: form.tools, readOnly: form.readOnly, approval: form.approval});
-    return {form, touch, onTools, save, emit};
+    const addPerm = () => { form.perms.push({pattern: '', decision: 'allow'}); touch(); };
+    const removePerm = i => { form.perms.splice(i, 1); touch(); };
+    const save = () => emit('save', {
+      tools: form.tools, readOnly: form.readOnly, approval: form.approval,
+      toolPermissions: Object.fromEntries(form.perms.filter(p => p.pattern.trim()).map(p => [p.pattern.trim(), p.decision])),
+    });
+    return {form, touch, onTools, addPerm, removePerm, save, emit};
   },
   template: `
   <div class="role-editor">
@@ -37,7 +43,23 @@ export default {
         </select>
       </div>
     </div>
-    <ToolPicker :catalog="catalog" :model-value="form.tools" mode="grant" :readonly="role.fixed"
+    <fieldset class="tool-permissions">
+      <legend>Tool permissions</legend>
+      <p class="muted">Per tool name pattern (<code>*</code> = any text). <b>allow</b>: runs with no question, also in
+        unattended flows. <b>ask</b>: always asked. <b>deny</b>: never runs. Deny wins over ask over allow.</p>
+      <div v-for="(p, i) in form.perms" :key="i" class="form-row">
+        <input type="text" v-model.trim="p.pattern" placeholder="tool or pattern, e.g. mcp__docs__*"
+               :aria-label="'Tool pattern ' + (i + 1)" @input="touch" />
+        <select v-model="p.decision" :aria-label="'Permission of ' + p.pattern" @change="touch">
+          <option value="allow">allow (unattended)</option>
+          <option value="ask">ask</option>
+          <option value="deny">deny</option>
+        </select>
+        <button type="button" class="btn-icon" :aria-label="'Remove ' + p.pattern" @click="removePerm(i)">✕</button>
+      </div>
+      <button type="button" class="btn-sm" @click="addPerm">+ Add</button>
+    </fieldset>
+    <ToolPicker :catalog="catalog" :model-value="form.tools" mode="grant" :readonly="role.fixed" :permissions="form.perms"
                 @update:model-value="onTools" />
     <div class="row-actions sticky-actions">
       <button class="btn-primary" :disabled="!form.dirty" @click="save">Save role</button>

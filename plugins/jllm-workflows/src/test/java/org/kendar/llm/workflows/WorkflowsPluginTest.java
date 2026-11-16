@@ -12,7 +12,7 @@ import org.kendar.llm.harness.plugin.PluginStorages;
 import org.kendar.llm.harness.plugin.ServiceRegistry;
 import org.kendar.llm.harness.tools.DocumentReader;
 import org.kendar.llm.harness.tools.HarnessTool;
-import org.kendar.llm.workflows.api.WorkflowApi;
+import org.kendar.llm.harness.workflows.WorkflowApi;
 
 import java.nio.file.Path;
 import java.util.Collection;

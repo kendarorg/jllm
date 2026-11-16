@@ -1,6 +1,6 @@
 package org.kendar.llm.workflows;
 
-import org.kendar.llm.workflows.api.WorkflowApi.QuestionKind;
+import org.kendar.llm.harness.workflows.WorkflowApi.QuestionKind;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;

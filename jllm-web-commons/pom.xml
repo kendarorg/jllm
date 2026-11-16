@@ -18,11 +18,6 @@
     <dependencies>
         <dependency>
             <groupId>org.kendar.llm</groupId>
-            <artifactId>jllm-workflows-api</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.kendar.llm</groupId>
             <artifactId>jllm-harness</artifactId>
             <version>${project.version}</version>
         </dependency>

@@ -1,6 +1,6 @@
 package org.kendar.llm.workflows;
 
-import org.kendar.llm.workflows.api.WorkflowApi.QuestionKind;
+import org.kendar.llm.harness.workflows.WorkflowApi.QuestionKind;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -731,18 +731,104 @@ public final class FlowEngine {
             return result;
         }
 
+        /** Rounds of a task that proceeds or asks after the model's reply was taken for a question. */
+        static final int MAX_CLARIFY = 3;
+
+        static final String CLASSIFY_SYSTEM = "You read the reply of an AI assistant that works on a task and decide whether "
+                + "it stops to ask the user something. Answer with exactly one word.\n"
+                + "none: the reply is a finished result, not a question.\n"
+                + "proceed: it asks something the assistant could decide itself with a sensible default or assumption "
+                + "(names, style, small choices, confirmations).\n"
+                + "ask: it cannot go on without information only the user has (missing requirements, credentials, a choice "
+                + "with real consequences).";
+
         JsonNode callModel(String id, String key, JsonNode step, JsonNode task) {
             Registry.ModelGateway gw = registry.model();
             if (gw == null) throw new FlowException(FlowException.Kind.PERMISSION, "No model is configured");
             String prompt = ctx.render(task.path("prompt").asText());
+            boolean clarify = task.path("clarify").asBoolean(true) && registry.classifier() != null;
+            boolean unattended = flow.doc().path("unattended").asBoolean(false);
+            String raw;
+            boolean waiting = false;
+            try {
+            for (int round = 0; ; round++) {
+                // every reply and verdict is journaled: a resume after a question never calls the model twice
+                String rawKey = key + "/raw:" + round;
+                if (rec.results.has(rawKey)) {
+                    raw = rec.results.get(rawKey).asText();
+                } else {
+                    raw = runModel(id, key, step, task, prompt, gw);
+                    rec.results.put(rawKey, raw);
+                }
+                if (!clarify || round >= MAX_CLARIFY) break;
+                String verdict = verdict(key + "/clarify:" + round, raw);
+                if (verdict.equals("none")) break;
+                if (verdict.equals("ask") && unattended) verdict = "proceed"; // nobody to ask
+                if (verdict.equals("proceed")) {
+                    log(id, "clarify", "proceed", Json.M.createObjectNode().put("round", round));
+                    prompt += "\n\nYour previous reply was:\n" + raw + "\n\nDo not ask questions. Use your best judgement, "
+                            + "state your assumptions briefly, and complete the task.";
+                    continue;
+                }
+                String shown = raw.length() > 2000 ? raw.substring(0, 2000) + "…" : raw;
+                Question q = new Question(key + "/clarify:" + round + "/ask", QuestionKind.TEXT,
+                        "The model needs an answer", shown, List.of(), 0, 0, true, "owner", null, null);
+                JsonNode a = answerFor(key, id, step, q);
+                if (a == null) throw new FlowException(FlowException.Kind.TIMEOUT, "The question of step '" + id + "' timed out");
+                log(id, "clarify", "ask", Json.M.createObjectNode().put("round", round));
+                prompt += "\n\nYour previous reply was:\n" + raw + "\n\nThe user answered:\n" + a.path("value").asText()
+                        + "\n\nContinue and complete the task.";
+            }
+            return AnswerShape.validate(task.path("answer"), raw);
+            } catch (WaitSignal w) {
+                waiting = true; // the replies stay journaled: the resume must not call the model again
+                throw w;
+            } finally {
+                if (!waiting) { // the step ends (or fails and is retried): the next run asks the model afresh
+                    String prefix = key + "/";
+                    List<String> drop = new ArrayList<>();
+                    rec.results.fieldNames().forEachRemaining(k -> {
+                        if (k.startsWith(prefix + "raw:") || k.startsWith(prefix + "clarify:")) drop.add(k);
+                    });
+                    drop.forEach(rec.results::remove);
+                }
+            }
+        }
+
+        /** none, proceed or ask for a reply; a reply that cannot be a question is settled without the model. */
+        String verdict(String vKey, String raw) {
+            if (rec.results.has(vKey)) return rec.results.get(vKey).asText();
+            String v = "none";
+            if (looksLikeQuestion(raw)) {
+                try {
+                    String r = registry.classifier().classify(CLASSIFY_SYSTEM, "Reply:\n" + (raw.length() > 1500 ? raw.substring(raw.length() - 1500) : raw)).strip().toLowerCase();
+                    v = r.startsWith("ask") ? "ask" : r.startsWith("proceed") ? "proceed" : "none";
+                } catch (Exception e) {
+                    v = "none"; // a failing classifier never blocks the flow
+                }
+            }
+            rec.results.put(vKey, v);
+            return v;
+        }
+
+        /** Cheap pre-filter: the reply ends in a question, or says it waits for the user. */
+        static boolean looksLikeQuestion(String raw) {
+            String t = raw.strip();
+            if (t.isEmpty()) return false;
+            String tail = t.length() > 600 ? t.substring(t.length() - 600) : t;
+            String low = tail.toLowerCase();
+            return t.endsWith("?") || tail.contains("?") && (low.contains("please") || low.contains("let me know")
+                    || low.contains("would you") || low.contains("do you") || low.contains("which "))
+                    || low.contains("please confirm") || low.contains("please provide") || low.contains("let me know");
+        }
+
+        String runModel(String id, String key, JsonNode step, JsonNode task, String prompt, Registry.ModelGateway gw) {
             String title = "flow: " + flow.name() + " " + rec.runId.substring(0, Math.min(8, rec.runId.length()));
             Set<String> approved = approvedTools(key);
-            String raw;
             while (true) {
                 try {
-                    raw = gw.complete(new Registry.ModelCall(task.path("agent").asText(), task.path("system").asText(""),
+                    return gw.complete(new Registry.ModelCall(task.path("agent").asText(), task.path("system").asText(""),
                             prompt, rec.user, title, Set.copyOf(approved), taskTools(task)));
-                    break;
                 } catch (Registry.ApprovalNeededException e) {
                     approve(id, key, step, e, approved);
                 } catch (FlowException | WaitSignal e) {
@@ -751,7 +837,6 @@ public final class FlowEngine {
                     throw new FlowException(FlowException.Kind.ACTION, "Model call failed: " + e.getMessage(), e);
                 }
             }
-            return AnswerShape.validate(task.path("answer"), raw);
         }
 
         /** The task's {@code tools}: absent = the agent's own (null), "*" = all of the role, or a list of tool names. */

@@ -21,17 +21,25 @@ public final class AgentOneShotModel implements OneShotModel {
 
     private final AgentCatalog agents;
     private final ModelClient model;
+    private final ModelClient fast;
     private final Supplier<AgentLoop> loop;
     private final ChatSessionService sessions;
     private final Map<String, String> chats = new ConcurrentHashMap<>();
 
     /** @param loop the agent loop; null or returning null runs every agent as a plain completion */
-    public AgentOneShotModel(AgentCatalog agents, ModelClient model, Supplier<AgentLoop> loop,
+    public AgentOneShotModel(AgentCatalog agents, ModelClient model, ModelClient fast, Supplier<AgentLoop> loop,
                              ChatSessionService sessions) {
         this.agents = agents;
         this.model = model;
+        this.fast = fast == null ? model : fast;
         this.loop = loop;
         this.sessions = sessions;
+    }
+
+    /** @param fast the cheap model of the host; null = the main model */
+    @Override
+    public String classify(String system, String user) {
+        return fast.simpleComplete(system, user, 16, 0.0, null);
     }
 
     @Override

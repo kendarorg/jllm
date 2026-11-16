@@ -1,4 +1,4 @@
-package org.kendar.llm.workflows.api;
+package org.kendar.llm.harness.workflows;
 
 import com.fasterxml.jackson.databind.JsonNode;
 

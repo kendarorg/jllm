@@ -5,7 +5,7 @@ import org.kendar.llm.harness.plugin.HarnessPlugin;
 import org.kendar.llm.harness.plugin.OneShotModel;
 import org.kendar.llm.harness.plugin.PluginRegistrar;
 import org.kendar.llm.harness.plugin.PluginStorages;
-import org.kendar.llm.workflows.api.WorkflowApi;
+import org.kendar.llm.harness.workflows.WorkflowApi;
 
 import java.nio.file.Path;
 import java.util.HashSet;
@@ -47,6 +47,8 @@ public final class WorkflowsPlugin implements HarnessPlugin {
                 throw new Registry.ApprovalNeededException(e.getMessage(), e.tools());
             }
         });
+        registry.classifier((sys, question) -> services.lookup(OneShotModel.class)
+                .orElseThrow(() -> new IllegalStateException("The host offers no model for flows")).classify(sys, question));
         // the web application publishes its plugin storage; without it flows live in files
         var storage = services.lookup(PluginStorages.class).map(s -> s.forPlugin(ID));
         RunStore runs = storage.<RunStore>map(PluginStores.Runs::new).orElseGet(() -> new RunStore.Files(dir.resolve("runs")));

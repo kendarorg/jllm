@@ -23,7 +23,9 @@ import java.util.stream.Stream;
  * {
  *   "tools": ["read_file", "mcp__docs__*"],    tool name patterns ({@code *} = any run of characters); ["*"] = all
  *   "readOnly": true,                          only READ_ONLY tools (optional, default false)
- *   "approval": "off"                          no approval prompts (optional; default "ask" = the harness policy)
+ *   "approval": "off",                         no approval prompts (optional; default "ask" = the harness policy)
+ *   "toolPermissions": {"send_mail": "allow",  per tool pattern: allow = runs unattended, never asked;
+ *                       "bash": "deny"}        ask = always asked; deny = never runs (deny, ask, allow order)
  * }
  * </pre>
  * A file for {@code admin} is ignored: that role is fixed ({@link Permissions}).
@@ -76,6 +78,11 @@ public final class FileRoleRepository implements RoleRepository {
             role.tools().forEach(tools::add);
             n.put("readOnly", role.readOnly());
             n.put("approval", role.approval());
+            n.remove("toolPermissions");
+            if (!role.toolPermissions().isEmpty()) {
+                var perms = n.putObject("toolPermissions");
+                role.toolPermissions().forEach((pattern, p) -> perms.put(pattern, p.name().toLowerCase()));
+            }
         });
     }
 
@@ -95,6 +102,14 @@ public final class FileRoleRepository implements RoleRepository {
         if (!tools.isArray()) {
             throw new IllegalArgumentException("'tools' of role " + role + " must be an array");
         }
-        return new Role(role, names(tools), n.path("readOnly").asBoolean(false), n.path("approval").asText("ask"));
+        java.util.Map<String, org.kendar.llm.harness.permission.ToolPermission> perms = new java.util.LinkedHashMap<>();
+        JsonNode p = n.path("toolPermissions");
+        if (!p.isMissingNode() && !p.isNull() && !p.isObject()) {
+            throw new IllegalArgumentException("'toolPermissions' of role " + role + " must be an object");
+        }
+        p.fields().forEachRemaining(e -> perms.put(e.getKey(),
+                org.kendar.llm.harness.permission.ToolPermission.parse(e.getValue().asText())));
+        return new Role(role, names(tools), n.path("readOnly").asBoolean(false), n.path("approval").asText("ask"),
+                perms);
     }
 }

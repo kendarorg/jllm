@@ -31,12 +31,6 @@
         </dependency>
         <dependency>
             <groupId>org.kendar.llm</groupId>
-            <artifactId>jllm-workflows-api</artifactId>
-            <version>${project.version}</version>
-            <scope>provided</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.kendar.llm</groupId>
             <artifactId>jllm-commons</artifactId>
             <version>${project.version}</version>
             <scope>provided</scope>

@@ -3,7 +3,7 @@ package org.kendar.llm.workflows;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import org.kendar.llm.workflows.api.WorkflowApi;
+import org.kendar.llm.harness.workflows.WorkflowApi;
 
 import java.util.List;
 import java.util.Set;

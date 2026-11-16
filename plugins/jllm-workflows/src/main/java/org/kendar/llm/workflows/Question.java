@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import org.kendar.llm.workflows.api.WorkflowApi.QuestionKind;
+import org.kendar.llm.harness.workflows.WorkflowApi.QuestionKind;
 
 import java.util.HashSet;
 import java.util.List;

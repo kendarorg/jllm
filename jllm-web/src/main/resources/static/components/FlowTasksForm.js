@@ -83,6 +83,9 @@ export default {
         <div class="sf-row">
           <div class="field"><label for="tf-agent">Agent</label>
             <input id="tf-agent" type="text" :value="task.agent || ''" :readonly="readOnly" @change="setOpt(task, 'agent', $event.target.value.trim())" /></div>
+          <div class="field"><label class="tp-check"><input type="checkbox" :checked="task.clarify !== false" :disabled="readOnly"
+              @change="task.clarify = $event.target.checked ? undefined : false" />
+            Check the reply for questions (the model proceeds on its own, or the owner is asked)</label></div>
           <div class="field"><label for="tf-tools">Tools</label>
             <input id="tf-tools" type="text" :value="toolsText" :readonly="readOnly" placeholder="* = all tools of the role; or read_file, write_file, …"
                    @change="setTools($event.target.value)" /></div>

@@ -72,6 +72,10 @@ label.tp-check { display: flex; align-items: center; gap: 0.45rem; margin-top: 0
 label.tp-check input { width: auto; margin: 0; accent-color: var(--accent); }
 .tp-indent { margin-left: 1.5rem; }
 .tp-kind, .tp-note, .tp-pattern { color: var(--text-muted); font-size: 0.72rem; }
+.tp-perm { font-size: 0.72rem; padding: 0 0.4em; border-radius: 0.6em; border: 1px solid currentColor; margin-left: 0.4em; }
+.tp-perm-allow { color: var(--success, #2a8a3e); }
+.tp-perm-ask { color: var(--warning, #b7791f); }
+.tp-perm-deny { color: var(--danger, #c0392b); }
 .tp-status { font-size: 0.72rem; font-weight: normal; }
 .tp-status.on { color: var(--green); }
 .tp-status.off { color: var(--text-muted); }

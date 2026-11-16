@@ -45,7 +45,7 @@ class UserSkillsTest {
                 .settings(settings)
                 .userPolicyResolver(user -> user == null ? UserPolicy.ALL
                         : new UserPolicy(null, null, own.getOrDefault(user.id(), List.of()),
-                        name -> !hidden.getOrDefault(user.id(), Set.of()).contains(name)))
+                        name -> !hidden.getOrDefault(user.id(), Set.of()).contains(name), null))
                 .principalDirectory(id -> new HarnessPrincipal(id, Set.of("user"), Map.of()))
                 .build();
     }

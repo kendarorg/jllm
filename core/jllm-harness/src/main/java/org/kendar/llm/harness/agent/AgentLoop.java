@@ -1497,9 +1497,17 @@ public class AgentLoop {
         if (!sessions.chatAllowsTool(ctx.chatId(), name)) {
             return new Authz("Tool disabled for this chat: " + name, pre, input);
         }
+        // the administrator's decision for this tool and role: deny never runs; allow runs unattended, whatever the
+        // mode, the taint and the approval policy (hooks, deny rules and plan confinement still apply)
+        org.kendar.llm.harness.permission.ToolPermission adminPermission = policy.permissionOf(tool);
+        if (adminPermission == org.kendar.llm.harness.permission.ToolPermission.DENY) {
+            return new Authz("Denied by the administrator for this user's role: " + name, pre, input);
+        }
+        boolean adminAllowed = adminPermission == org.kendar.llm.harness.permission.ToolPermission.ALLOW;
         PermissionGate userGate = policy.approval() == null ? gate : new PermissionGate(policy.approval(), gate.rules());
-        Decision decision = free ? Decision.ALLOW : userGate.check(mode, tool);
-        if (!free && decision == Decision.ALLOW && mode == PermissionMode.AUTO && classifier != null
+        Decision decision = free || adminAllowed ? Decision.ALLOW : userGate.check(mode, tool);
+        if (adminPermission == org.kendar.llm.harness.permission.ToolPermission.ASK && !free) decision = Decision.ASK;
+        if (!free && !adminAllowed && decision == Decision.ALLOW && mode == PermissionMode.AUTO && classifier != null
                 && tool.kind() != ToolKind.READ_ONLY && !pre.denied()) {
             // auto mode: the fast model may wave the call through; anything else goes to the user
             ToolClassifier.Verdict v = classifier.classify(name, input, ctx.workDir(), intent);
@@ -1508,7 +1516,8 @@ public class AgentLoop {
         }
         // settings rules: deny wins in every mode and over any grant; ask forces the question; allow skips it
         PermissionRules.Match rule = gate.rules().match(name, input, ctx.workDir());
-        if (!free && rule != null && rule.kind() == PermissionRules.Kind.ASK && decision == Decision.ALLOW) {
+        if (!free && !adminAllowed && rule != null && rule.kind() == PermissionRules.Kind.ASK
+                && decision == Decision.ALLOW) {
             decision = Decision.ASK;
         }
         // a grant only replaces the question; deny rules, hooks and plan confinement stay as they are
@@ -1520,7 +1529,8 @@ public class AgentLoop {
             decision = Decision.ALLOW;
         }
         // outside content is in the context: side effects need an explicit yes, even over grants and allow rules
-        if (!free && decision == Decision.ALLOW && tool.kind() != ToolKind.READ_ONLY && isTainted(ctx.chatId())
+        if (!free && !adminAllowed && decision == Decision.ALLOW && tool.kind() != ToolKind.READ_ONLY
+                && isTainted(ctx.chatId())
                 && (rule == null || rule.kind() != PermissionRules.Kind.DENY)) {
             decision = Decision.ASK;
             sink.emit("warning", mapper.createObjectNode().put("message", "Confirming '" + name

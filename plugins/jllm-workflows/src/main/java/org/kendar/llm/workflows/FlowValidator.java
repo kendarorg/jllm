@@ -102,6 +102,7 @@ public final class FlowValidator {
                 }
             }
             if (!t.has("instead") && !t.path("agent").isTextual()) errs.add(p + "no agent");
+            if (t.has("clarify") && !t.get("clarify").isBoolean()) errs.add(p + "clarify must be true or false");
             JsonNode tl = t.path("tools");
             boolean toolsOk = tl.isMissingNode() || tl.isTextual() && tl.asText().equals("*") || tl.isArray();
             if (tl.isArray()) for (JsonNode n : tl) toolsOk &= n.isTextual() && !n.asText().isBlank();

@@ -31,7 +31,7 @@ class AgentOneShotModelTest {
     void usesAgentClientAndPromptOrTheDefault() {
         AtomicReference<String> own = new AtomicReference<>(), dflt = new AtomicReference<>();
         var writer = new AgentDefinition("writer", "w", List.of(), "Be polite.", false, fake("own", own), false, null, null);
-        var m = new AgentOneShotModel(new AgentCatalog(List.of(writer)), fake("default", dflt), null, null);
+        var m = new AgentOneShotModel(new AgentCatalog(List.of(writer)), fake("default", dflt), null, null, null);
         assertEquals("own", m.complete(call("writer")));
         assertEquals("Be polite.\n\nSys|Hi", own.get());
         assertEquals("default", m.complete(call("unknown")));

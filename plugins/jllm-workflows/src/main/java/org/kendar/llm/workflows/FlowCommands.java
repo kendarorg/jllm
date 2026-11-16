@@ -1,7 +1,7 @@
 package org.kendar.llm.workflows;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import org.kendar.llm.workflows.api.WorkflowApi;
+import org.kendar.llm.harness.workflows.WorkflowApi;
 
 import org.kendar.llm.harness.commands.CustomCommand.ChatLine;
 

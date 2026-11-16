@@ -20,6 +20,7 @@ export default {
     modelValue: {type: Array, required: true},
     mode: {type: String, default: 'grant'},
     readonly: {type: Boolean, default: false},
+    permissions: {type: Array, default: () => []},   // [{pattern, decision}] of the role: shown as a badge per tool
   },
   emits: ['update:modelValue'],
   setup(props, {emit}) {
@@ -49,6 +50,15 @@ export default {
       const srcPatterns = sources.value.map(s => s.pattern);
       return props.modelValue.find(p => p !== name && !srcPatterns.includes(p) && p !== '*' && wildcard(p, name)) || null;
     };
+
+    /** The role's decision for a tool (deny, then ask, then allow, as on the server), or null. */
+    const decisionOf = name => {
+      for (const d of ['deny', 'ask', 'allow']) {
+        if (props.permissions.some(p => p.decision === d && p.pattern && wildcard(p.pattern, name))) return d;
+      }
+      return null;
+    };
+    const decisionLabel = {allow: 'unattended', ask: 'always ask', deny: 'denied'};
 
     function emitList(list) { emit('update:modelValue', [...new Set(list)]); }
 
@@ -96,7 +106,7 @@ export default {
     const remove = p => emitList(props.modelValue.filter(x => x !== p));
 
     return {filter, grant, all, groups, sources, shown, checked, sourceChecked, lockedBy, setTool, setSource,
-      setGroup, setAll, unknown, remove};
+      setGroup, setAll, unknown, remove, decisionOf, decisionLabel};
   },
   template: `
   <div class="toolpicker">
@@ -120,6 +130,7 @@ export default {
                  @change="setTool(t.name, $event.target.checked)" />
           <code>{{ t.name }}</code> <small class="tp-kind">{{ t.kind }}</small>
           <small v-if="lockedBy(t.name)" class="tp-note">via {{ lockedBy(t.name) }}</small>
+          <small v-if="decisionOf(t.name)" class="tp-perm" :class="'tp-perm-' + decisionOf(t.name)">{{ decisionLabel[decisionOf(t.name)] }}</small>
         </label>
       </div>
       <p v-if="!groups.length" class="empty">No tools.</p>
@@ -139,6 +150,7 @@ export default {
           <input type="checkbox" :checked="checked(t.name)"
                  @change="setTool(t.name, $event.target.checked, s)" />
           <code>{{ t.name }}</code> <small class="tp-kind">{{ t.kind }}</small>
+          <small v-if="decisionOf(t.name)" class="tp-perm" :class="'tp-perm-' + decisionOf(t.name)">{{ decisionLabel[decisionOf(t.name)] }}</small>
         </label>
         <p v-if="!s.tools.length" class="tp-indent empty">No tools known (source off or unreachable); the whole-source entry still applies.</p>
       </div>

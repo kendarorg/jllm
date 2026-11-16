@@ -8,7 +8,7 @@ import org.kendar.llm.harness.plugin.WebContext;
 import org.kendar.llm.harness.plugin.WebPlugin;
 import org.kendar.llm.harness.plugin.WebRequest;
 import org.kendar.llm.harness.plugin.WebResponse;
-import org.kendar.llm.workflows.api.WorkflowApi;
+import org.kendar.llm.harness.workflows.WorkflowApi;
 
 /**
  * The web API of the flows plugin: endpoints only, no screens. All logic (running, choosing, storing) is the engine's,

@@ -19,7 +19,7 @@ class AgentTaskApprovalTest {
     Path base;
 
     private AgentOneShotModel model(Rig rig, AgentDefinition def) {
-        return new AgentOneShotModel(new AgentCatalog(List.of(def)), rig.model, () -> rig.loop, rig.sessions);
+        return new AgentOneShotModel(new AgentCatalog(List.of(def)), rig.model, null, () -> rig.loop, rig.sessions);
     }
 
     private static OneShotModel.Call call(String agent, String user, Set<String> approved) {

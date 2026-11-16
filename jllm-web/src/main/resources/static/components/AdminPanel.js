@@ -168,6 +168,8 @@ export default {
                   @click="pick(r.name)">
             <code>{{ r.name }}</code> <small class="muted">{{ r.users }}</small>
             <span v-if="r.fixed" class="badge">fixed</span>
+            <span v-if="Object.values(r.toolPermissions || {}).includes('allow')" class="badge"
+                  title="Has tools that run unattended">unattended: {{ Object.values(r.toolPermissions).filter(d => d === 'allow').length }}</span>
           </button>
           <form class="inline-form" @submit.prevent="createRole">
             <input type="text" v-model="newRole" placeholder="new role" pattern="[a-z0-9_-]{1,64}" aria-label="New role name" />

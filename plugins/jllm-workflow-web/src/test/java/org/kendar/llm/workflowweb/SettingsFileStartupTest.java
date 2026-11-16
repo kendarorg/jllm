@@ -15,7 +15,7 @@ import org.kendar.llm.harness.sandbox.ChatDirSandboxExecutor;
 import org.kendar.llm.harness.session.InMemoryChatSessionStore;
 import org.kendar.llm.harness.settings.HarnessSettings;
 import org.kendar.llm.web.commons.plugins.WebPluginHost;
-import org.kendar.llm.workflows.api.WorkflowApi;
+import org.kendar.llm.harness.workflows.WorkflowApi;
 
 import java.nio.file.Files;
 import java.nio.file.Path;

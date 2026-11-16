@@ -82,7 +82,12 @@ public final class FilePluginStorage implements PluginStorages {
                 Files.createDirectories(d);
                 Path tmp = Files.createTempFile(d, "doc", ".tmp");
                 Files.writeString(tmp, mapper.writeValueAsString(doc));
-                Files.move(tmp, d.resolve(enc(id) + ".json"), StandardCopyOption.REPLACE_EXISTING);
+                Path target = d.resolve(enc(id) + ".json");
+                try { // atomic: a reader never finds the document missing while it is being replaced
+                    Files.move(tmp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+                } catch (java.nio.file.AtomicMoveNotSupportedException e) {
+                    Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
+                }
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
             }

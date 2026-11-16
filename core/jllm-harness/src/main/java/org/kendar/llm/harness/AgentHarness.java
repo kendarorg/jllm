@@ -930,7 +930,7 @@ public final class AgentHarness {
             AgentCatalog catalog = agentCatalog(settings, mapper, maxParallel, providers);
             if (services.lookup(org.kendar.llm.harness.plugin.OneShotModel.class).isEmpty()) {
                 services.publish(org.kendar.llm.harness.plugin.OneShotModel.class,
-                        new org.kendar.llm.harness.agent.AgentOneShotModel(catalog, modelClient, () -> ref[0], sessions));
+                        new org.kendar.llm.harness.agent.AgentOneShotModel(catalog, modelClient, fast, () -> ref[0], sessions));
             }
             SubAgentTool subAgentTool = new SubAgentTool(() -> ref[0], mapper, catalog, maxParallel != 1);
             String instructions = InstructionLoader.load(settings.instructionFiles());

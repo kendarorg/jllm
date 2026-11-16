@@ -14,7 +14,7 @@ Class names below are real; re-check against `plugins/jllm-workflows` when chang
 
 | Module | Content |
 |---|---|
-| `jllm-workflows-api` | the interfaces shared by the engine, the web half and the web application (`WorkflowApi`, question kinds) |
+| (in `jllm-commons`) | `org.kendar.llm.harness.workflows.WorkflowApi`, the interface shared by the engine, the web half and the web application |
 | `jllm-workflows` | the engine, the flow store, the chat slash commands and the command line (`WorkflowCli`) |
 | `jllm-workflow-web` | the web endpoints (API only); the screens live in `jllm-web` |
 
@@ -148,6 +148,16 @@ A task is a prompt with slots and an enforced answer shape. Tasks live in the `t
   question per tool, counted in the step's question limit). On allow the task runs again with that tool allowed for the
   run; on refuse the step fails with a PERMISSION error. In an `unattended` flow nothing is asked and the step fails.
 - Tasks of one run share one chat, owned by the starting user and titled `flow: NAME RUNID`.
+
+### Tools and questions of a task
+
+- `tools`: `"*"` gives the task every tool its running user's role allows, a list names tools (still limited by the role),
+  `[]` is a plain completion. Absent: the agent's own tools. The role and the user's disabled tools can only narrow it.
+- `clarify` (default true): the reply is checked for a question. A cheap pre-filter looks at the end of the reply; only
+  then the host's fast model (the main model when none is configured) sees the last reply, nothing else, and answers
+  `none`, `proceed` or `ask`. `proceed` runs the task again telling it to decide itself; `ask` pauses the run with a
+  free-text question for the owner and continues with the answer. At most 3 rounds. In an `unattended` flow `ask` is
+  treated as `proceed`. Replies and verdicts are journaled while the run waits, so a resume never calls the model again.
 
 ### Turning points (`decide`)
 

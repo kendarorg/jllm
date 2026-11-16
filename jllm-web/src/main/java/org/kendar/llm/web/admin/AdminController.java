@@ -141,6 +141,9 @@ public class AdminController {
         m.put("tools", r.tools());
         m.put("readOnly", r.readOnly());
         m.put("approval", r.approval());
+        Map<String, String> perms = new LinkedHashMap<>();
+        r.toolPermissions().forEach((pattern, p) -> perms.put(pattern, p.name().toLowerCase()));
+        m.put("toolPermissions", perms);
         m.put("fixed", r.fixed());
         m.put("users", all.stream().filter(u -> r.name().equals(u.role())).count());
         return m;
@@ -165,7 +168,8 @@ public class AdminController {
     public ResponseEntity<Object> updateRole(@PathVariable String name, @RequestBody(required = false) Map<String, Object> body) {
         if (WebUser.ADMIN_ROLE.equals(name)) { // every tool stays; only the approval changes
             try {
-                return ResponseEntity.ok(row(permissions.save(Role.admin(Api.text(body, "approval"))), users.all()));
+                return ResponseEntity.ok(row(permissions.save(Role.admin(Api.text(body, "approval"),
+                        toolPermissions(body))), users.all()));
             } catch (IllegalArgumentException e) {
                 return Api.error(HttpStatus.BAD_REQUEST, e.getMessage());
             }
@@ -184,11 +188,25 @@ public class AdminController {
         String approval = Api.text(body, "approval");
         try {
             Role saved = permissions.save(new Role(name, tools.stream().distinct().toList(),
-                    readOnly, approval));
+                    readOnly, approval, toolPermissions(body)));
             return ResponseEntity.status(status).body(row(saved, users.all()));
         } catch (IllegalArgumentException e) {
             return Api.error(HttpStatus.BAD_REQUEST, e.getMessage());
         }
+    }
+
+    /** {@code toolPermissions}: object of tool pattern to allow / ask / deny; absent = none. */
+    private static Map<String, org.kendar.llm.harness.permission.ToolPermission> toolPermissions(
+            Map<String, Object> body) {
+        Object raw = body == null ? null : body.get("toolPermissions");
+        Map<String, org.kendar.llm.harness.permission.ToolPermission> out = new LinkedHashMap<>();
+        if (raw == null) return out;
+        if (!(raw instanceof Map<?, ?> m)) {
+            throw new IllegalArgumentException("'toolPermissions' must be an object of tool pattern to allow, ask or deny");
+        }
+        m.forEach((k, v) -> out.put(String.valueOf(k),
+                org.kendar.llm.harness.permission.ToolPermission.parse(v == null ? null : v.toString())));
+        return out;
     }
 
     @DeleteMapping("/roles/{name}")

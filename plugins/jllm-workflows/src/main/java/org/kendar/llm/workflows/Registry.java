@@ -58,6 +58,12 @@ public final class Registry {
         String complete(ModelCall call) throws Exception;
     }
 
+    /** A short answer to a closed question from a cheap model. */
+    @FunctionalInterface
+    public interface Classifier {
+        String classify(String system, String user) throws Exception;
+    }
+
     /**
      * @param owner    the user the run belongs to
      * @param title    names the chat the host keeps for the tasks of one run
@@ -86,6 +92,7 @@ public final class Registry {
     private final Map<String, Chooser> choosers = new ConcurrentHashMap<>();
     private final Map<String, java.util.Set<String>> actionRoles = new ConcurrentHashMap<>();
     private volatile ModelGateway model;
+    private volatile Classifier classifier;
 
     /** Limits an action to the given roles; an action never restricted is allowed for everyone. */
     public Registry restrict(String action, String... roles) {
@@ -156,5 +163,14 @@ public final class Registry {
 
     public ModelGateway model() {
         return model;
+    }
+
+    public Registry classifier(Classifier c) {
+        this.classifier = c;
+        return this;
+    }
+
+    public Classifier classifier() {
+        return classifier;
     }
 }

@@ -4,9 +4,11 @@ import java.util.List;
 import java.util.Set;
 
 /** A single model call for a named agent, published by the host so plugins can borrow the agent loop for one task. */
-@FunctionalInterface
 public interface OneShotModel {
     String complete(Call call) throws Exception;
+
+    /** One short plain answer to a closed question, from the host's cheap model (the main model when there is none). */
+    String classify(String system, String user) throws Exception;
 
     /**
      * @param principal the user the work is done for; the task chat belongs to them and shows in their chat list

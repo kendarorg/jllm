@@ -41,7 +41,8 @@ public final class Permissions {
     /** The role, or empty when it has no valid record. {@code admin} always exists. */
     public Optional<Role> role(String name) {
         if (WebUser.ADMIN_ROLE.equals(name)) {
-            return Optional.of(roles.find(name).map(r -> Role.admin(r.approval())).orElse(Role.ADMIN));
+            return Optional.of(roles.find(name).map(r -> Role.admin(r.approval(), r.toolPermissions()))
+                    .orElse(Role.ADMIN));
         }
         if (!validName(name)) return Optional.empty();
         return roles.find(name);
@@ -58,7 +59,7 @@ public final class Permissions {
     /** Stores a role (for {@code admin} only its approval). @throws IllegalArgumentException for an invalid name */
     public Role save(Role role) {
         if (role.fixed()) { // tools are always all of them; only the approval is kept
-            roles.save(Role.admin(role.approval()));
+            roles.save(Role.admin(role.approval(), role.toolPermissions()));
             return role(role.name()).orElseThrow();
         }
         if (!validName(role.name())) throw new IllegalArgumentException("Invalid role name: " + role.name());
@@ -120,6 +121,7 @@ public final class Permissions {
                         .orElseThrow(() -> new NoSuchFileException("own skill " + s.name())).content()));
             }
         }
-        return new UserPolicy(filter, approvals, extra, name -> !disabledSkills.contains(name));
+        return new UserPolicy(filter, approvals, extra, name -> !disabledSkills.contains(name),
+                role.toolPermissions().isEmpty() ? null : role::permissionOf);
     }
 }
