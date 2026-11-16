@@ -1,4 +1,4 @@
 {
-  "tools": ["read_file", "ls", "glob", "grep", "grep_code"],
-  "readOnly": true
+  "tools": ["run_js", "read_file", "ls", "glob", "grep", "grep_code"],
+  "toolPermissions": {"bash": "deny"}
 }

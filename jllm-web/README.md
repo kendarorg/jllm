@@ -84,7 +84,7 @@ use, so changes (by hand or from the UI) apply without a restart.
   `"ask"` (default) uses the harness policy. A role without a valid file gets no tools.
 - `admin` is fixed: every tool, no prompts, whatever its file says; it cannot be edited, deleted or recreated. At least
   one admin user always remains, and an admin cannot delete their own account.
-- One role per user. Shipped: `guest` (`run_js` and the web tools), `reader` (read-only file tools), `admin`.
+- One role per user. Shipped: `guest` (`run_js` and the web tools), `reader` (`run_js` and read-only file tools), `poweru` (`run_js`, `bash`, file and web tools), `admin`. A role lists `run_js`, `bash`, both or neither.
 
 ### User settings (every user, own account only)
 - **Password**: change it (current password required); the other sessions of the user are signed out.

@@ -64,22 +64,14 @@ class JsPluginTest {
     }
 
     @Test
-    void runJsIsRegisteredAndBashIsGone() {
+    void runJsIsRegisteredAndBashStays() {
         AgentHarness h = harness(new ScriptedModel());
 
         List<String> names = h.tools().every().stream().map(HarnessTool::name).toList();
 
         assertTrue(names.contains("run_js"));
-        assertFalse(names.contains("bash"));
+        assertTrue(names.contains("bash"));
         assertEquals(ToolKind.OTHER, h.tools().get("run_js").kind());
-    }
-
-    @Test
-    void aBashToolAddedLaterIsRefused() {
-        AgentHarness h = harness(new ScriptedModel());
-
-        assertThrows(IllegalStateException.class, () -> h.tools().setSource("mcp", List.of(
-                new SimpleTool("bash", "x", SimpleTool.schema(), "G", ToolKind.OTHER, (c, i) -> ""))));
     }
 
     @Test

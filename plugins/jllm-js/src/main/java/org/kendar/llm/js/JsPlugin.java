@@ -5,8 +5,9 @@ import org.kendar.llm.harness.plugin.HarnessPlugin;
 import org.kendar.llm.harness.plugin.PluginRegistrar;
 
 /**
- * Adds {@code run_js}, a JavaScript sandbox over the harness tools, and removes {@code bash}: a host shell would be a
- * second, unrestricted way out. Only meaningful in a profile where no tool gives host access.
+ * Adds {@code run_js}, a JavaScript sandbox over the harness tools. {@code bash} is left alone: whether a user may run
+ * the script tool, the shell or both is decided by their role. A user who has {@code bash} has a host shell, a second,
+ * unrestricted way out, so give it only to roles that are trusted with the host.
  */
 public final class JsPlugin implements HarnessPlugin {
 
@@ -18,7 +19,6 @@ public final class JsPlugin implements HarnessPlugin {
     @Override
     public void install(PluginRegistrar registrar, JsonNode settings) {
         JsSettings s = JsSettings.from(settings);
-        registrar.replaces("bash");
         registrar.toolNameCheck(ToolLibrary::checkNames);
         registrar.tool(RunJsTool.create(new JsSandbox(s), registrar.catalog(), new ToolLibrary()));
     }
