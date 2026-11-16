@@ -11,12 +11,14 @@ import FilesPanel from './components/FilesPanel.js';
 import HistoryPanel from './components/HistoryPanel.js';
 import SettingsPanel from './components/SettingsPanel.js';
 import AdminPanel from './components/AdminPanel.js';
+import WorkflowsPanel from './components/WorkflowsPanel.js';
+import {initWorkflows, workflows} from './workflows.js';
 
 const TABS = [['chat', 'Chat'], ['files', 'Files'], ['history', 'History']];
 
 export default {
   components: { SignIn, SessionList, ChatToolbar, MessageStream, ChatComposer, ApprovalDialog, FilesPanel, HistoryPanel,
-    SettingsPanel, AdminPanel },
+    SettingsPanel, AdminPanel, WorkflowsPanel },
   setup() {
     // undefined: checking; null: signed out (show the picker); otherwise the signed-in user
     const me = ref(undefined);
@@ -26,6 +28,7 @@ export default {
       try {
         me.value = await api('/api/me');
         await init();
+        initWorkflows();
       } catch (e) {
         me.value = null;
       }
@@ -33,6 +36,7 @@ export default {
     async function onSignedIn(user) {
       me.value = user;
       await init();
+      initWorkflows();
     }
     function show(v) { view.value = view.value === v ? 'chat' : v; }
     function onPasswordChanged() { if (me.value) me.value = { ...me.value, defaultPassword: false }; }
@@ -47,7 +51,7 @@ export default {
       store.tab = TABS[(n + TABS.length) % TABS.length][0];
       e.preventDefault();
     }
-    return { store, TABS, onKey, continueOffer, dismissOffer, newChat, shortId, me, onSignedIn, signOut, view, show,
+    return { workflows, store, TABS, onKey, continueOffer, dismissOffer, newChat, shortId, me, onSignedIn, signOut, view, show,
       onPasswordChanged };
   },
   template: `
@@ -56,6 +60,9 @@ export default {
     <span v-if="me" class="whoami">{{ me.name }} <small>({{ me.role }})</small>
       <button v-if="view !== 'chat'" class="btn-sm" @click="view = 'chat'">Chats</button>
       <button class="btn-sm" :class="{ active: view === 'settings' }" @click="show('settings')">Settings</button>
+      <button v-if="workflows.available" class="btn-sm" :class="{ active: view === 'workflows' }"
+              @click="show('workflows')">Workflows<span v-if="workflows.count" class="wf-badge"
+              :aria-label="workflows.count + ' waiting'">{{ workflows.count }}</span></button>
       <button v-if="me.role === 'admin'" class="btn-sm" :class="{ active: view === 'admin' }"
               @click="show('admin')">Administration</button>
       <button class="btn-sm" @click="signOut">Sign out</button></span>
@@ -67,6 +74,7 @@ export default {
   <SignIn v-if="me === null" @signed-in="onSignedIn" />
   <SettingsPanel v-if="me && view === 'settings'" :me="me" @password-changed="onPasswordChanged" />
   <AdminPanel v-if="me && me.role === 'admin' && view === 'admin'" :me="me" />
+  <WorkflowsPanel v-if="me && workflows.available && view === 'workflows'" :me="me" />
   <div v-if="me" v-show="view === 'chat'" class="chat-layout">
     <SessionList />
     <section class="chat-main" aria-label="Workspace">
@@ -86,6 +94,10 @@ export default {
         <div v-show="store.tab === 'chat'" class="tabpane" role="tabpanel">
           <ChatToolbar />
           <MessageStream />
+          <div v-if="workflows.count" class="wf-attach" role="status">
+            {{ workflows.count }} workflow question{{ workflows.count === 1 ? '' : 's' }} waiting for you
+            <button class="btn-sm" @click="view = 'workflows'">Open</button>
+          </div>
           <ChatComposer />
         </div>
         <div v-if="store.tab === 'files'" class="tabpane" role="tabpanel"><FilesPanel /></div>

@@ -164,6 +164,7 @@ Set `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`, `GROK_API_KEY`, `QWEN_API_KEY`) fi
 | [EXTENDING](docs/EXTENDING.md) | custom tools, hooks, plugins, policies, providers, agent types, context strategies, stores, sandbox, tests |
 | [CACHES](docs/CACHES.md) | prompt-cache layout, compaction, mnemonic and scope algorithms |
 | [INTERNALS](docs/INTERNALS.md) | architecture, run lifecycle, loop, approvals, sub-agents, concurrency, persistence |
+| [WORKFLOW](docs/WORKFLOW.md) | optional `jllm-workflows` plugin: deterministic flows (JSON steps, Java actions, three choosers, questions, nested flows, error handler), chat commands, command line, web API; design notes in [deterministic](docs/deterministic.md) |
 | [FLOW](docs/FLOW.md) | step-by-step diagrams of every pipeline |
 
 ## Credits

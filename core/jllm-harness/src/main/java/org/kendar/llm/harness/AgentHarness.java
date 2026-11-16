@@ -71,6 +71,7 @@ public final class AgentHarness {
     private org.kendar.llm.harness.tools.Checkpoints checkpoints;
     private org.kendar.llm.harness.tools.StorageQuota quota;
     private final SlashCommands commands = new SlashCommands(this);
+    private org.kendar.llm.harness.plugin.ServiceRegistry services = new org.kendar.llm.harness.plugin.ServiceRegistry();
 
     private AgentHarness(AgentService service, ChatSessionService sessions, HarnessToolRegistry registry,
                          ExternalSources sources, SkillCatalog skills, SandboxExecutor sandbox, SubAgentRunLog subAgentRuns, ContextStrategy context,
@@ -394,6 +395,11 @@ public final class AgentHarness {
         sources.closeSessions(principalId);
     }
 
+    /** Services published by plugins and the host (see {@code PluginRegistrar.services()}). */
+    public org.kendar.llm.harness.plugin.ServiceRegistry services() {
+        return services;
+    }
+
     public SlashCommands commands() {
         return commands;
     }
@@ -478,6 +484,7 @@ public final class AgentHarness {
         private final List<HarnessPlugin> explicitPlugins = new ArrayList<>();
         private boolean discover;
         private Path pluginDir;
+        private org.kendar.llm.harness.plugin.ServiceRegistry services = new org.kendar.llm.harness.plugin.ServiceRegistry();
         private boolean pluginDirExplicit;
         private PluginLoader.Result pluginSummary;
 
@@ -573,6 +580,11 @@ public final class AgentHarness {
          * Adds a plugin passed in code: it needs no entry under {@code plugins}, unless that entry says
          * {@code "enabled": false}. It is installed at {@link #build()}, with the settings given by then.
          */
+        public Builder services(org.kendar.llm.harness.plugin.ServiceRegistry services) {
+            this.services = java.util.Objects.requireNonNull(services);
+            return this;
+        }
+
         public Builder plugin(HarnessPlugin plugin) {
             explicitPlugins.add(java.util.Objects.requireNonNull(plugin));
             return this;
@@ -620,6 +632,11 @@ public final class AgentHarness {
                         removedTools.add(toolName);
                         replacedTools.add(toolName);
                         return this;
+                    }
+
+                    @Override
+                    public org.kendar.llm.harness.plugin.ServiceRegistry services() {
+                        return services;
                     }
 
                     @Override
@@ -910,8 +927,12 @@ public final class AgentHarness {
             ToolSelector selector = new ToolSelector(config, fast != null ? fast : modelClient, mapper);
             RequestToolGroupTool requestToolGroup = new RequestToolGroupTool(registry, sessions, mapper);
             AgentLoop[] ref = new AgentLoop[1];
-            SubAgentTool subAgentTool = new SubAgentTool(() -> ref[0], mapper, agentCatalog(settings, mapper, maxParallel, providers),
-                    maxParallel != 1);
+            AgentCatalog catalog = agentCatalog(settings, mapper, maxParallel, providers);
+            if (services.lookup(org.kendar.llm.harness.plugin.OneShotModel.class).isEmpty()) {
+                services.publish(org.kendar.llm.harness.plugin.OneShotModel.class,
+                        new org.kendar.llm.harness.agent.AgentOneShotModel(catalog, modelClient, () -> ref[0], sessions));
+            }
+            SubAgentTool subAgentTool = new SubAgentTool(() -> ref[0], mapper, catalog, maxParallel != 1);
             String instructions = InstructionLoader.load(settings.instructionFiles());
             String prompt = (systemPromptReplace != null ? systemPromptReplace : basePrompt())
                     + (smallModel || settings.isSmallModel() ? "\n\n" + Prompts.load("small-model.md") : "")
@@ -953,6 +974,7 @@ public final class AgentHarness {
             AgentHarness harness = new AgentHarness(service, sessions, registry, sources, skills, box,
                     subAgentRunLog, context, config, pricing);
             harness.permissionRules = permissionRules;
+            harness.services = services;
             harness.providers = providers;
             harness.checkpoints = harnessCheckpoints;
             harness.quota = quota;

@@ -661,6 +661,39 @@ public class AgentLoop {
     /** @param runId id the run is recorded under in the {@link SubAgentRunLog} */
     public String runSubAgent(String chatId, String toolUseId, String prompt, AgentDefinition agentType,
                               PermissionMode parentMode, AgentRun run, String runId) {
+        return runAgent(chatId, toolUseId, prompt, agentType, parentMode, run, runId, true, null);
+    }
+
+    /**
+     * One task for an outside caller (a flow step) in the loop of the given agent type, with that agent's tools,
+     * permissions and approvals. With {@code interactive} false a call that would need an approval is not asked
+     * about and not run: the task fails with {@link org.kendar.llm.harness.plugin.OneShotModel.ApprovalRequiredException}.
+     */
+    public String runAgentTask(String chatId, String prompt, AgentDefinition agentType, boolean interactive,
+                               java.util.Set<String> approved) {
+        approved.forEach(t -> approvals.grant(chatId, t));
+        List<String> denied = new ArrayList<>();
+        String answer;
+        try {
+            answer = runAgent(chatId, null, prompt, agentType, PermissionMode.DEFAULT, null, Uuids.v7String(),
+                    interactive, denied);
+        } catch (RuntimeException e) {
+            if (!denied.isEmpty()) throw approvalRequired(denied);
+            throw e;
+        }
+        if (!denied.isEmpty()) throw approvalRequired(denied);
+        return answer;
+    }
+
+    private static org.kendar.llm.harness.plugin.OneShotModel.ApprovalRequiredException approvalRequired(List<String> denied) {
+        List<String> tools = denied.stream().distinct().toList();
+        return new org.kendar.llm.harness.plugin.OneShotModel.ApprovalRequiredException(
+                "Approval needed for " + String.join(", ", tools) + " and no interactive approver is attached", tools);
+    }
+
+    private String runAgent(String chatId, String toolUseId, String prompt, AgentDefinition agentType,
+                            PermissionMode parentMode, AgentRun run, String runId, boolean interactive,
+                            List<String> denied) {
         ArrayNode messages = mapper.createArrayNode();
         int[] inherited = {0};
         if (agentType != null && agentType.inheritContext()) inherited[0] = copyParentContext(chatId, messages);
@@ -729,7 +762,9 @@ public class AgentLoop {
         EventSink parentSink = run == null ? EventSink.NOOP : run.sink();
         BooleanSupplier cancelled = run == null ? () -> false : run.cancelled();
         EventSink errors = (type, data) -> {
-            if ("approval_request".equals(type) || "login_required".equals(type)) parentSink.emit(type, data);
+            if ("approval_unavailable".equals(type)) {
+                if (denied != null) denied.add(data.path("tool").asText("a tool"));
+            } else if ("approval_request".equals(type) || "login_required".equals(type)) parentSink.emit(type, data);
             else if ("error".equals(type)) failure[0] = data.path("message").asText("sub-agent failed");
             else if ("warning".equals(type)) warning[0] = data.path("message").asText(null);
             else if ("usage".equals(type)) {
@@ -746,7 +781,7 @@ public class AgentLoop {
         activeSubAgents.put(label, new ActiveSubAgent(label, chatId, prompt, System.currentTimeMillis()));
         try {
             result = loop(chatId, messages, () -> subTools, pinned, extra,
-                    mode, errors, cancelled, false, true, agentName, client, inherited, label, null, frame);
+                    mode, errors, cancelled, false, interactive, agentName, client, inherited, label, null, frame);
             if (failure[0] == null) incomplete = incomplete(result, warning[0]);
         } catch (RuntimeException e) {
             if (failure[0] == null) failure[0] = String.valueOf(e.getMessage());
@@ -1491,7 +1526,10 @@ public class AgentLoop {
             sink.emit("warning", mapper.createObjectNode().put("message", "Confirming '" + name
                     + "': the conversation holds untrusted tool output that could contain injected instructions"));
         }
-        if (decision == Decision.ASK && !interactive) decision = Decision.DENY;
+        if (decision == Decision.ASK && !interactive) {
+            decision = Decision.DENY;
+            sink.emit("approval_unavailable", mapper.createObjectNode().put("tool", name));
+        }
         if (pre.denied()) return new Authz("Denied by a hook: " + pre.denyReason(), pre, input);
         if (rule != null && rule.kind() == PermissionRules.Kind.DENY) {
             return new Authz("Denied by permission rule: " + rule.rule(), pre, input);

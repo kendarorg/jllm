@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.kendar.llm</groupId>
+        <artifactId>jllm</artifactId>
+        <version>1.1.0-jllm</version>
+        <relativePath>../../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>jllm-workflows-api</artifactId>
+    <packaging>jar</packaging>
+    <name>jllm-workflows-api</name>
+    <description>Interfaces of the workflows engine. Sits on the host side so the engine plugin, the web plugin and the
+        web application share it without depending on each other.</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.kendar.llm</groupId>
+            <artifactId>jllm-commons</artifactId>
+            <version>${project.version}</version>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
+</project>
