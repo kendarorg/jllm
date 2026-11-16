@@ -30,7 +30,8 @@ What is still missing (more in [FUTURE](docs/FUTURE.md)):
 
 * Provider (model) OAuth logins: the `OAuthLogin` SPI exists, no provider login is shipped
 * Authentication & authorization on the web UI: `jllm-web` is a reference front end meant for localhost or a trusted
-  network. Do not expose it publicly without a reverse proxy that handles authentication.
+  network. Sign-in is password or one OpenID Connect provider ([setup](jllm-web/README.md#sign-in-with-openid-connect)); no
+  other providers, no IdP role mapping. Do not expose it publicly without a reverse proxy or TLS.
 
 ## The idea
 
