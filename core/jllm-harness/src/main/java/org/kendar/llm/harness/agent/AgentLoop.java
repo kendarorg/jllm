@@ -190,6 +190,15 @@ public class AgentLoop {
     /** Who the calls of each chat are made for: per-user tools and approval. Default: {@code Identity.ANONYMOUS}. */
     private volatile org.kendar.llm.harness.auth.Identity identity = org.kendar.llm.harness.auth.Identity.ANONYMOUS;
 
+    /**
+     * Runs {@code body} with the owner of the chat as the caller of every model call it makes, directly or through
+     * helpers and sub-agents. The one entry point of both scope roots ({@code AgentService} and
+     * {@link #runAgentTask}).
+     */
+    public <T> T inChatScope(String chatId, java.util.function.Supplier<T> body) {
+        return org.kendar.llm.harness.auth.CallerScope.callAs(identity.principalOf(chatId), body);
+    }
+
     public AgentLoop identity(org.kendar.llm.harness.auth.Identity identity) {
         this.identity = identity;
         return this;
@@ -671,18 +680,20 @@ public class AgentLoop {
      */
     public String runAgentTask(String chatId, String prompt, AgentDefinition agentType, boolean interactive,
                                java.util.Set<String> approved) {
-        approved.forEach(t -> approvals.grant(chatId, t));
-        List<String> denied = new ArrayList<>();
-        String answer;
-        try {
-            answer = runAgent(chatId, null, prompt, agentType, PermissionMode.DEFAULT, null, Uuids.v7String(),
-                    interactive, denied);
-        } catch (RuntimeException e) {
+        return inChatScope(chatId, () -> {
+            approved.forEach(t -> approvals.grant(chatId, t));
+            List<String> denied = new ArrayList<>();
+            String answer;
+            try {
+                answer = runAgent(chatId, null, prompt, agentType, PermissionMode.DEFAULT, null, Uuids.v7String(),
+                        interactive, denied);
+            } catch (RuntimeException e) {
+                if (!denied.isEmpty()) throw approvalRequired(denied);
+                throw e;
+            }
             if (!denied.isEmpty()) throw approvalRequired(denied);
-            throw e;
-        }
-        if (!denied.isEmpty()) throw approvalRequired(denied);
-        return answer;
+            return answer;
+        });
     }
 
     private static org.kendar.llm.harness.plugin.OneShotModel.ApprovalRequiredException approvalRequired(List<String> denied) {
@@ -1058,6 +1069,10 @@ public class AgentLoop {
             } catch (RuntimeException e) {
                 hooks.run(HookContext.afterLlm(chatId, agent, String.valueOf(e.getMessage()), true,
                         (System.nanoTime() - modelStart) / 1_000_000L, null));
+                if (e instanceof org.kendar.llm.harness.auth.LoginRequiredException lr) {
+                    // the user has no credential for the provider: tell the client to offer the connect action
+                    sink.emit("login_required", mapper.createObjectNode().put("source", lr.source()));
+                }
                 if (e instanceof ModelCancelledException || cancelled.getAsBoolean()) {
                     // nothing was appended for this turn, so the message log stays consistent
                     metrics.modelCall(java.time.Duration.ofNanos(System.nanoTime() - modelStart), "cancelled");
@@ -1194,7 +1209,7 @@ public class AgentLoop {
             scope.intent = intent;
             List<Future<ObjectNode>> futures = new ArrayList<>();
             for (JsonNode use : toolUses) {
-                futures.add(toolExecutor.submit(() -> executeTool(use, byName, refused, tctx, mode, sink, cancelled, interactive, intent, label)));
+                futures.add(toolExecutor.submit(org.kendar.llm.harness.auth.CallerScope.wrapCallable(() -> executeTool(use, byName, refused, tctx, mode, sink, cancelled, interactive, intent, label))));
             }
             // cancel interrupts the running tool threads; every tool_use still gets a tool_result below
             Runnable unhook = token.onCancel(() -> futures.forEach(f -> f.cancel(true)));

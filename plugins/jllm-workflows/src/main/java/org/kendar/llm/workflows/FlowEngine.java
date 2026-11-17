@@ -801,8 +801,10 @@ public final class FlowEngine {
             String v = "none";
             if (looksLikeQuestion(raw)) {
                 try {
-                    String r = registry.classifier().classify(CLASSIFY_SYSTEM, "Reply:\n" + (raw.length() > 1500 ? raw.substring(raw.length() - 1500) : raw)).strip().toLowerCase();
+                    String r = registry.classifier().classify(rec.user, CLASSIFY_SYSTEM, "Reply:\n" + (raw.length() > 1500 ? raw.substring(raw.length() - 1500) : raw)).strip().toLowerCase();
                     v = r.startsWith("ask") ? "ask" : r.startsWith("proceed") ? "proceed" : "none";
+                } catch (org.kendar.llm.harness.auth.LoginRequiredException e) {
+                    throw e; // a missing login is not a classifier failure: it reaches the user
                 } catch (Exception e) {
                     v = "none"; // a failing classifier never blocks the flow
                 }

@@ -178,7 +178,7 @@ class ThinkingLevelTest {
     void providerCatalogAppliesTheProviderDefault() throws Exception {
         ProviderSettings p = new ProviderSettings("q", "llamacpp", url() + "/v1", null, "m", null, 0, null, null, null,
                 null, null, null, null, ThinkingLevel.LOW);
-        new ProviderCatalog(List.of(p), mapper, 4096).client("q").complete(req());
+        new ProviderCatalog(List.of(p), mapper, 4096, null).client("q").complete(req());
         assertEquals("low", body(0).path("reasoning_effort").asText());
     }
 }

@@ -65,7 +65,7 @@ flowchart TD
     D --> E["HarnessToolRegistry: reject duplicates, sort, policy.registered(each)"]
     E --> F["ExternalSources: discover MCP + REST, setSource per source"]
     F --> G["ChatSessionService, ApprovalService(approvalTimeoutSeconds)"]
-    G --> H1["fast = fastModelClient or settings.fastModel or none"]
+    G --> H1["fast = fastModelClient or the provider marked fast or none"]
     H1 --> I["ContextStrategy (factory, else by config), install(hooks)"]
     I --> J["ToolSelector(fast or main), RequestToolGroupTool,<br/>SubAgentTool(AgentCatalog from settings.agents)"]
     J --> K["system prompt = system-prompt.md + addendum + instruction files (+ mnemonic suffix)"]

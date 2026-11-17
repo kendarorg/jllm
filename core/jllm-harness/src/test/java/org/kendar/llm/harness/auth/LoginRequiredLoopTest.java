@@ -1,5 +1,6 @@
 package org.kendar.llm.harness.auth;
 
+import org.kendar.llm.harness.settings.OAuthSettings;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -66,7 +67,7 @@ class LoginRequiredLoopTest {
     @Test
     void missingLoginIsAToolErrorWithOneEventAndTheToolListNeverChanges() throws Exception {
         RestApiSettings api = new RestApiSettings("crm", null, url + "/openapi.yaml", null, Map.of(), null, null,
-                null, null, new RestApiSettings.OAuth(null, null, url + "/authorize", url + "/token", null, "cid",
+                null, null, new OAuthSettings(null, null, url + "/authorize", url + "/token", null, "cid",
                 null, List.of("r"), null, null, null, null, null));
         TokenStore store = new FileTokenStore(base.resolve("tokens"));
         ScriptedModel model = new ScriptedModel().enqueue(

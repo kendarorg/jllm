@@ -7,7 +7,6 @@ import org.kendar.llm.harness.HarnessPricing;
 import org.kendar.llm.harness.context.mnemonic.FileMnemonicStore;
 import org.kendar.llm.harness.context.mnemonic.MnemonicStore;
 import org.kendar.llm.harness.llm.ModelClient;
-import org.kendar.llm.harness.llm.ModelClientFactory;
 import org.kendar.llm.harness.sandbox.ChatDirSandboxExecutor;
 import org.kendar.llm.harness.session.ChatSessionStore;
 import org.kendar.llm.harness.session.FileChatSessionStore;
@@ -32,10 +31,31 @@ import java.nio.file.Path;
 @Configuration
 public class HarnessConfiguration {
 
-    @Bean
-    public ModelClient modelClient(JllmProperties p, ObjectMapper mapper) {
-        return ModelClientFactory.create(p.providerOrDefault(), p.apiKey(), p.baseUrl(), p.model(),
-                p.maxTokensOrDefault(), mapper);
+    /**
+     * The active provider of the application: the {@code jllm.provider} property (a provider of the settings list or a
+     * built-in); with {@code apiKey}, {@code baseUrl} or {@code model} set it becomes a session entry that keeps the
+     * type but never the per-user authentication of the provider (a credential is not sent to another URL).
+     * The harness builds the client through its provider catalog, so it gets the credential resolver.
+     *
+     * @return the session entry, or null when the properties override nothing
+     */
+    static org.kendar.llm.harness.llm.ProviderSettings sessionProvider(JllmProperties p,
+            org.kendar.llm.harness.settings.HarnessSettings settings) {
+        String name = p.providerOrDefault();
+        boolean overrides = JllmProperties.blankToNull(p.apiKey()) != null
+                || JllmProperties.blankToNull(p.baseUrl()) != null || JllmProperties.blankToNull(p.model()) != null;
+        if (!overrides) return null;
+        var from = settings.providers().stream().filter(x -> name.equals(x.name())).findFirst().orElse(null);
+        String type = from != null ? from.type() : name;
+        int maxTokens = from != null && from.maxTokens() != null ? from.maxTokens() : p.maxTokensOrDefault();
+        return new org.kendar.llm.harness.llm.ProviderSettings(name, type,
+                JllmProperties.blankToNull(p.baseUrl()) != null ? p.baseUrl() : from == null ? null : from.baseUrl(),
+                JllmProperties.blankToNull(p.apiKey()) != null ? p.apiKey() : from == null ? null : from.apiKey(),
+                JllmProperties.blankToNull(p.model()) != null ? p.model() : from == null ? null : from.model(),
+                maxTokens, from == null ? null : from.maxRetries(), from == null ? null : from.timeoutSeconds(),
+                from == null ? null : from.requireApiKey(), from == null ? null : from.useMaxCompletionTokens(),
+                from == null ? null : from.contextTokens(), from == null ? null : from.smallModel(),
+                from == null ? null : from.temperature(), null, from == null ? null : from.thinking());
     }
 
     @Bean
@@ -47,7 +67,7 @@ public class HarnessConfiguration {
     }
 
     @Bean
-    public AgentHarness agentHarness(JllmProperties p, ModelClient modelClient, HarnessPricing pricing,
+    public AgentHarness agentHarness(JllmProperties p, ObjectProvider<ModelClient> modelClient, HarnessPricing pricing,
                                      ObjectMapper mapper, HarnessIdentity identity,
                                      ObjectProvider<SettingsSource> settingsSource,
                                      ObjectProvider<ProjectMcpTrust> projectTrust,
@@ -112,10 +132,17 @@ public class HarnessConfiguration {
                 new org.kendar.llm.web.commons.plugins.FilePluginStorage(
                         projectDir.resolve(".jllm").resolve("plugin-data"), mapper)));
         AgentHarness.Builder builder = AgentHarness.builder().services(services);
+        ModelClient supplied = modelClient.getIfAvailable();
+        if (supplied != null) {
+            builder.modelClient(supplied); // an application that brings its own client
+        } else {
+            var session = sessionProvider(p, settings);
+            builder.activeProvider(session != null ? org.kendar.llm.harness.llm.ProviderCatalog.CUSTOM : p.providerOrDefault())
+                    .sessionProvider(session);
+        }
         if (JllmProperties.blankToNull(p.pluginDir()) != null) builder.pluginDir(Path.of(p.pluginDir()));
         else if (java.nio.file.Files.isDirectory(Path.of("plugins"))) builder.pluginDir(Path.of("plugins"));
         AgentHarness harness = builder
-                .modelClient(modelClient)
                 .config(config)
                 .systemPrompt(promptAppend)
                 .systemPromptReplace(promptReplace)

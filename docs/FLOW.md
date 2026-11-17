@@ -87,7 +87,7 @@ flowchart TD
     E --> F["HarnessToolRegistry (dup names rejected, sorted by group,name)"]
     F --> G["ExternalSources: discover MCP + REST tools, setSource()"]
     G --> H["ChatSessionService, ApprovalService"]
-    H --> I["fast model = fastModelClient or settings.fastModel"]
+    H --> I["fast model = fastModelClient or the provider marked fast"]
     I --> J["ContextManager, ToolSelector, RequestToolGroupTool, SubAgentTool(AgentCatalog)"]
     J --> K["system prompt = system-prompt.md + builder addendum + instruction files"]
     K --> L["AgentLoop(... hooks, ToolClassifier if fast model)"]

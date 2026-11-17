@@ -38,8 +38,14 @@ public final class AgentOneShotModel implements OneShotModel {
 
     /** @param fast the cheap model of the host; null = the main model */
     @Override
-    public String classify(String system, String user) {
-        return fast.simpleComplete(system, user, 16, 0.0, null);
+    public String classify(String principal, String system, String user) {
+        return asUser(principal, () -> fast.simpleComplete(system, user, 16, 0.0, null));
+    }
+
+    /** The call runs for {@code principal}: null is the single local user. */
+    private static <T> T asUser(String principal, Supplier<T> body) {
+        return org.kendar.llm.harness.auth.CallerScope.callAs(
+                principal == null ? null : org.kendar.llm.harness.auth.HarnessPrincipal.of(principal), body);
     }
 
     @Override
@@ -66,7 +72,8 @@ public final class AgentOneShotModel implements OneShotModel {
         String prompt = def == null || def.prompt() == null || def.prompt().isBlank() ? ""
                 : def.prompt() + (system == null || system.isBlank() ? "" : "\n\n");
         Double temperature = def == null ? null : def.temperature();
-        return client.simpleComplete(prompt + (system == null ? "" : system), user, MAX_TOKENS, temperature, null);
+        return asUser(call.principal(), () -> client.simpleComplete(prompt + (system == null ? "" : system), user,
+                MAX_TOKENS, temperature, null));
     }
 
     /**

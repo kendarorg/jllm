@@ -17,16 +17,34 @@ public final class ProviderCatalog {
     private volatile ProviderSettings custom;
     private final ObjectMapper mapper;
     private final int defaultMaxTokens;
+    private final org.kendar.llm.harness.auth.OAuthCredentialResolver credentials;
 
-    public ProviderCatalog(List<ProviderSettings> providers, ObjectMapper mapper, int defaultMaxTokens) {
+    /**
+     * @param credentials resolves the per-user credentials of the providers with {@code userAuth}; null for a catalog
+     *                    used only to look providers up (a client of a per-user provider cannot be built without it)
+     * @throws IllegalArgumentException for a duplicate name or more than one provider marked {@code fast}
+     */
+    public ProviderCatalog(List<ProviderSettings> providers, ObjectMapper mapper, int defaultMaxTokens,
+                           org.kendar.llm.harness.auth.OAuthCredentialResolver credentials) {
+        this.credentials = credentials;
         for (ProviderSettings p : providers) {
             if (p.name() == null || p.name().isBlank()) throw new IllegalArgumentException("A provider has no name");
             if (configured.putIfAbsent(p.name(), p) != null) {
                 throw new IllegalArgumentException("Duplicate provider '" + p.name() + "'");
             }
         }
+        List<String> fast = configured.values().stream().filter(ProviderSettings::isFast)
+                .map(ProviderSettings::name).toList();
+        if (fast.size() > 1) {
+            throw new IllegalArgumentException("Only one provider can be marked fast, found " + fast);
+        }
         this.mapper = mapper;
         this.defaultMaxTokens = defaultMaxTokens;
+    }
+
+    /** The provider marked {@code fast} (serves the helper calls); null when there is none. */
+    public ProviderSettings fast() {
+        return configured.values().stream().filter(ProviderSettings::isFast).findFirst().orElse(null);
     }
 
     /** Names offered in a menu: the configured providers, then the session entry if one exists. */
@@ -56,7 +74,8 @@ public final class ProviderCatalog {
                 settings.model(), settings.maxTokens() != null ? settings.maxTokens() : defaultMaxTokens,
                 settings.maxRetries(), settings.timeoutSeconds(), settings.requireApiKey(),
                 settings.useMaxCompletionTokens(), settings.contextTokens(), settings.smallModel(),
-                settings.temperature(), settings.order(), settings.thinking(), settings.stream());
+                settings.temperature(), settings.order(), settings.thinking(), settings.stream(), settings.userAuth(),
+                settings.oauth(), settings.allowGlobalFallback(), settings.headers(), null);
         return CUSTOM;
     }
 
@@ -89,6 +108,15 @@ public final class ProviderCatalog {
 
     private ModelClient single(ProviderSettings p) {
         ModelClient c = ModelClients.from(p.toLlmSettings(), mapper);
+        if (ProviderAuth.needed(p)) {
+            if (p.perUser() && (credentials == null || !credentials.handles(p.source()))) {
+                throw new IllegalStateException("Provider '" + p.name()
+                        + "' has per-user credentials but this catalog has no credential source");
+            }
+            ProviderAuth auth = new ProviderAuth(p, credentials);
+            if (c instanceof AnthropicModelClient a) a.authSource(auth);
+            else if (c instanceof OpenAiCompatModelClient o) o.authSource(auth);
+        }
         if (!p.streams()) {
             if (c instanceof AnthropicModelClient a) a.streaming(false);
             else if (c instanceof OpenAiCompatModelClient o) o.streaming(false);

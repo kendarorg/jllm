@@ -112,10 +112,8 @@ ignored.
   "instructionFiles": ["KENDAR.md", "~/KENDAR.md"],
   "agents":     [{"name": "scout", "description": "Looks around", "tools": ["read_file", "grep"],
                   "readOnly": true, "prompt": "Only report facts.", "inheritContext": false}],
-  "fastModel":  {"name": "ollama", "baseUrl": "http://localhost:11434/v1", "apiKey": "", "model": "qwen3:4b",
-                 "maxTokens": 4096, "maxRetries": 2, "timeoutSeconds": 600,
-                 "requireApiKey": false, "useMaxCompletionTokens": false},
-  "providers":  [{"name": "claude-sonnet", "type": "anthropic", "model": "claude-sonnet-5-5", "apiKey": "${ANTHROPIC_API_KEY}", "order": 1},
+  "providers":  [{"name": "fast", "type": "ollama", "model": "qwen3:4b", "fast": true},
+                 {"name": "claude-sonnet", "type": "anthropic", "model": "claude-sonnet-5-5", "apiKey": "${ANTHROPIC_API_KEY}", "order": 1},
                  {"name": "local-qwen", "type": "openai", "baseUrl": "http://localhost:8080/v1", "model": "local",
                   "requireApiKey": false, "contextTokens": 32000, "smallModel": true, "temperature": 0.2, "order": 2}],
   "defaultProvider": "claude-sonnet",
@@ -144,7 +142,7 @@ ignored.
 | `agents` | [EXTENDING §6](EXTENDING.md#6-sub-agent-types) |
 | `providers`, `defaultProvider` | named model providers, see [Providers](#providers-and-temperature) |
 | `permissions` | regex deny/ask/allow rules, see [Permission rules](#permission-rules) |
-| `fastModel` | small model for compaction summaries, tool-group selection and the `auto` classifier |
+| a provider with `"fast": true` | small model for compaction summaries, tool-group selection and the `auto` classifier (at most one). The old `fastModel` and the inline `model` of an agent are gone: they are a startup error, use a provider and the agent's `provider` |
 | `execution.maxParallel` | default `1`: one model call in flight, sub-agents run depth-first. `N`: at most N model calls and N chat runs at once (chat runs need `serializeRuns`); `N != 1` lets read-only sub-agents run in parallel. `-1`: unlimited |
 | `execution.useContextStack` | default `true`: a sub-agent continues the parent's request prefix (same system prompt and tool list, role text and task as a message), so a prefix-caching server reuses the parent's KV cache and the parent's cache is intact when the sub-agent returns. Tool restrictions of the agent type are enforced when a call is made (a refused call returns "Tool unavailable for agent"). `false`: the sub-agent builds its own system text and filtered tool list |
 | `chatRetentionLimit` | default unlimited: keep at most this many saved chats, deleting the oldest at startup (never the opened one) |
@@ -177,7 +175,8 @@ After the prompt come, as before, the small-model rules, instruction files and s
 
 ### Authentication
 
-Model clients and HTTP MCP servers can take an `AuthProvider` (package `org.kendar.llm.harness.auth`) instead of a
+Providers can authenticate with a global key, each user's own key, or each user's own OAuth login: see
+[OAUTHPROV](OAUTHPROV.md). Model clients and HTTP MCP servers can take an `AuthProvider` (package `org.kendar.llm.harness.auth`) instead of a
 static key: it returns the headers of each request and is told about a 401, after which the client retries once.
 `AuthProvider.staticKey(...)` and `dynamicKey(...)` cover plain and rotating keys. Generic OAuth pieces, with no
 provider-specific code: `OAuthTokenClient` (code, refresh, device and client credentials grants), `Pkce`,
@@ -186,8 +185,10 @@ principal and name, see [token storage](MCP.md#6-token-storage)), `RefreshingAut
 the store's lock, re-read first, rotated refresh token saved with a compare-and-set before use).
 A provider login is an `OAuthLogin` (name, `login(UserInteraction)`, optionally `login(ui, RedirectTarget)`,
 `authProvider(store, principalId)`), usually `AuthCodeLogin` or `DeviceCodeLogin` plus endpoints, registered as a
-`java.util.ServiceLoader` service. The clients take it with `AnthropicModelClient.authProvider(...)` /
-`OpenAiCompatModelClient.authProvider(...)`; it is not selectable from the settings file. No provider login is shipped.
+`java.util.ServiceLoader` service. A provider with `userAuth: oauth` gets a generic login built from its `oauth` block (`GenericOAuthLogin`, source
+`provider:<name>`). The model clients take an `AuthSource` (`AnthropicModelClient.authSource(...)` /
+`OpenAiCompatModelClient.authSource(...)`): bound once per call to the caller in `CallerScope`, it serves the headers
+of the call and its retries. No provider-specific login is shipped.
 
 OAuth of MCP servers and REST APIs (per user or shared, with login-required tool results) and the `tokenStore`
 section: see [MCP](MCP.md#oauth).

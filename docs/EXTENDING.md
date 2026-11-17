@@ -332,7 +332,7 @@ default.
 not a cancellation). `FallbackModelClient.onFallback(listener)` reports the provider about to be tried. Retry stays
 inside each client (`maxRetries`).
 
-`fastModelClient(...)` (or settings `fastModel`) adds a small model for tool-group selection, compaction summaries and
+`fastModelClient(...)` (or a settings provider with `"fast": true`) adds a small model for tool-group selection, compaction summaries and
 the `auto` classifier. Unless `maxParallel` is -1 both are wrapped in `LimitedModelClient(…, maxParallel)`.
 
 ## 6. Sub-agent types
@@ -345,9 +345,7 @@ built-ins.
   {"name": "reviewer", "description": "Reviews a diff for bugs",
    "tools": ["read_file", "grep", "glob", "bash"], "readOnly": false,
    "promptFile": "agents/reviewer.md", "inheritContext": true,
-   "model": {"name": "anthropic", "baseUrl": "https://api.anthropic.com", "apiKey": "${ANTHROPIC_API_KEY}",
-             "model": "claude-haiku-5-5", "maxTokens": 8192, "maxRetries": 3, "timeoutSeconds": 600,
-             "requireApiKey": true, "useMaxCompletionTokens": false}}
+   "provider": "claude-haiku"}
 ]
 ```
 

@@ -88,6 +88,11 @@ public final class OAuthCredentialResolver implements CredentialResolver {
         return perUser(source) && user != null ? user.id() : null;
     }
 
+    /** Whether the caller has a stored credential for the source (a token that may still need a refresh). */
+    public boolean connected(HarnessPrincipal user, String source) {
+        return handles(source) && store.get(keyOf(user, source), source).isPresent();
+    }
+
     @Override
     public Map<String, String> headers(HarnessPrincipal user, String source) {
         Source s = sources.get(source);

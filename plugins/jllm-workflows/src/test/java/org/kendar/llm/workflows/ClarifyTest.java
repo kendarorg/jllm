@@ -18,7 +18,7 @@ class ClarifyTest {
         return new Registry().model(c -> {
             prompts.add(c.user());
             return prompts.size() == 1 ? firstReply : "done";
-        }).classifier((s, u) -> {
+        }).classifier((p, s, u) -> {
             verdicts.add(u);
             return verdict;
         });
@@ -63,5 +63,33 @@ class ClarifyTest {
         var e = FlowEngine.simple(model(new ArrayList<>(), "Which database should I use?", "ask", new ArrayList<>()));
         var r = e.run(flow(",'unattended':true"), Json.parse("{}"), "ann");
         assertEquals(FlowEngine.Status.COMPLETED, r.status());
+    }
+
+    @Test
+    void theClassifierAsksForTheUserOfTheRun() {
+        var users = new ArrayList<String>();
+        var reg = new Registry().model(c -> "Which database should I use?").classifier((p, sys, u) -> {
+            users.add(p);
+            return "none";
+        });
+        FlowEngine.simple(reg).run(flow(""), Json.parse("{}"), "ann");
+        assertEquals(List.of("ann"), users);
+    }
+
+    @Test
+    void aMissingLoginIsNotSwallowedAsANoneVerdict() {
+        var reg = new Registry().model(c -> "Which database should I use?").classifier((p, sys, u) -> {
+            throw new org.kendar.llm.harness.auth.LoginRequiredException("provider:p");
+        });
+        Throwable failure = null;
+        FlowEngine.RunResult r = null;
+        try {
+            r = FlowEngine.simple(reg).run(flow(""), Json.parse("{}"), "ann");
+        } catch (RuntimeException e) {
+            failure = e;
+        }
+        String shown = failure != null ? String.valueOf(failure.getMessage()) + failure.getCause()
+                : r.status() + " " + r.error();
+        assertTrue(shown.contains("provider:p"), shown);
     }
 }

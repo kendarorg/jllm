@@ -1,5 +1,6 @@
 package org.kendar.llm.web;
 
+import org.kendar.llm.harness.settings.OAuthSettings;
 import org.kendar.llm.web.users.FileSkillRepository;
 import org.kendar.llm.web.users.FileUserRepository;
 import org.kendar.llm.web.users.FileRoleRepository;
@@ -132,7 +133,7 @@ class OAuthWebTest {
 
     private RestApiSettings api(String name, Path spec, boolean perUser) {
         return new RestApiSettings(name, null, null, spec.toString(), Map.of(), null, null, null, null,
-                new RestApiSettings.OAuth(null, null, base + "/authorize", base + "/token", null, "cid", null,
+                new OAuthSettings(null, null, base + "/authorize", base + "/token", null, "cid", null,
                         List.of("r"), null, perUser, null, null, null));
     }
 

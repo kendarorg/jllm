@@ -113,7 +113,7 @@ public class SubAgentTool implements HarnessTool {
         for (String prompt : prompts) {
             String runId = Uuids.v7String();
             runIds.add(runId);
-            futures.add(batchExecutor.submit(() -> {
+            futures.add(batchExecutor.submit(org.kendar.llm.harness.auth.CallerScope.wrapCallable(() -> {
                 // serial: a sub-agent runs to its end before any other in the same directory starts, even across
                 // `task` calls and chats; waiting stops on cancel or interrupt
                 if (dirLock != null) {
@@ -129,7 +129,7 @@ public class SubAgentTool implements HarnessTool {
                 } finally {
                     if (dirLock != null) dirLock.unlock();
                 }
-            }));
+            })));
         }
         ArrayNode results = mapper.createArrayNode();
         try {

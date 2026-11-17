@@ -43,7 +43,7 @@ public class ToolClassifier {
         String prompt = "Working directory: " + cwd + "\nUser request: " + clip(userIntent, 1000)
                 + "\nTool: " + tool + "\nInput: " + clip(String.valueOf(input), 4000);
         try {
-            String answer = CompletableFuture.supplyAsync(() -> model.simpleComplete(SYSTEM, prompt, 60))
+            String answer = CompletableFuture.supplyAsync(org.kendar.llm.harness.auth.CallerScope.wrapSupplier(() -> model.simpleComplete(SYSTEM, prompt, 60)))
                     .get(timeoutSeconds, TimeUnit.SECONDS);
             return parse(answer);
         } catch (InterruptedException e) {

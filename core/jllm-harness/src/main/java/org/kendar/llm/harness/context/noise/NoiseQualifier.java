@@ -85,7 +85,7 @@ public final class NoiseQualifier {
         for (int attempt = 0; attempt < 2; attempt++) { // one retry at most
             try {
                 String answer = CompletableFuture
-                        .supplyAsync(() -> model.simpleComplete(SYSTEM, user, 8, 0.0, usageSink))
+                        .supplyAsync(org.kendar.llm.harness.auth.CallerScope.wrapSupplier(() -> model.simpleComplete(SYSTEM, user, 8, 0.0, usageSink)))
                         .get(timeoutSeconds, TimeUnit.SECONDS);
                 Decision d = parse(answer);
                 if (d != null) return d;

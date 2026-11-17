@@ -81,7 +81,7 @@ class PermissionRulesTest {
     @Test
     void invalidRegexFailsAtStartupWithTheIndex() {
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
-                () -> new HarnessSettings(null, null, null, null, null, null, null, null, null, null, null,
+                () -> new HarnessSettings(null, null, null, null, null, null, null, null, null, null,
                         new HarnessSettings.Permissions(List.of("ok", "bash(["), null, null), null, null));
 
         assertTrue(e.getMessage().contains("permissions.deny[1]"), e.getMessage());

@@ -1,6 +1,5 @@
 package org.kendar.llm.harness.settings;
 
-import org.kendar.llm.harness.llm.LlmSettings;
 import org.kendar.llm.harness.llm.ThinkingLevel;
 
 import java.util.List;
@@ -12,30 +11,17 @@ import java.util.List;
  * @param prompt     instructions added to the system prompt of the sub-agent
  * @param promptFile file with the instructions, read at startup; used when {@code prompt} is empty
  * @param inheritContext start from a copy of the parent's messages (default false)
- * @param model      optional inline model for this agent type; default: the main model
- * @param provider   optional name of a provider from the settings list; wins over an inline {@code model}
+ * @param provider   optional name of a provider from the settings list; default: the main model
  * @param temperature optional sampling temperature (0 to 2); default: the provider's
  * @param thinking   optional reasoning effort (minimal | low | medium | high); default: the provider's
  * @param readOnly   only read-only tools, whatever the mode of the caller (default false)
  */
 public record AgentSettings(String name, String description, List<String> tools, String prompt, String promptFile,
-                            Boolean inheritContext, LlmSettings model, Boolean readOnly, String provider,
-                            Double temperature, ThinkingLevel thinking) {
-
-    public AgentSettings(String name, String description, List<String> tools, String prompt, String promptFile,
-                         Boolean inheritContext, LlmSettings model, Boolean readOnly, String provider,
-                         Double temperature) {
-        this(name, description, tools, prompt, promptFile, inheritContext, model, readOnly, provider, temperature,
-                null);
-    }
-
-    public AgentSettings(String name, String description, List<String> tools, String prompt, String promptFile,
-                         Boolean inheritContext, LlmSettings model, Boolean readOnly) {
-        this(name, description, tools, prompt, promptFile, inheritContext, model, readOnly, null, null, null);
-    }
+                            Boolean inheritContext, Boolean readOnly, String provider, Double temperature,
+                            ThinkingLevel thinking) {
 
     public AgentSettings(String name, String description, List<String> tools, String prompt, String promptFile) {
-        this(name, description, tools, prompt, promptFile, null, null, null, null, null, null);
+        this(name, description, tools, prompt, promptFile, null, null, null, null, null);
     }
 
     public AgentSettings {

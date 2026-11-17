@@ -98,7 +98,10 @@ public class AgentService {
         synchronized (run.events) {
             run.events.clear();
         }
-        executor.submit(() -> execute(chatId, run, userText));
+        executor.submit(() -> loop.inChatScope(chatId, () -> {
+            execute(chatId, run, userText);
+            return null;
+        }));
     }
 
     /**

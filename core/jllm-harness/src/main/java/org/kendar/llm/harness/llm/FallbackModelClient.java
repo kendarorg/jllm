@@ -6,7 +6,9 @@ import java.util.function.Supplier;
 
 /**
  * Tries the providers of a chain in order: when one fails (after its own retries) with a {@link ModelException}, the
- * next is tried. Cancellations and context overflows are never retried on another provider.
+ * next is tried. Cancellations and context overflows are never retried on another provider. A provider the user has
+ * no credential for ({@link org.kendar.llm.harness.auth.LoginRequiredException}) is skipped; if no provider of the chain
+ * can authenticate the user, the first login prompt is surfaced.
  */
 public final class FallbackModelClient implements ModelClient {
 
@@ -36,12 +38,17 @@ public final class FallbackModelClient implements ModelClient {
 
     private <T> T run(Call<T> call) {
         RuntimeException last = null;
+        RuntimeException login = null;
         for (int i = 0; i < chain.size(); i++) {
             try {
                 if (i > 0) onFallback.accept(chain.get(i).name());
                 return call.run(chain.get(i).client().get());
             } catch (ModelCancelledException | StreamingCall.AfterFirstDelta e) {
                 throw e;
+            } catch (org.kendar.llm.harness.auth.LoginRequiredException e) {
+                // the user has no credential here: the next provider is tried with its own rules for the same user;
+                // when none can authenticate the user, the first prompt is surfaced
+                if (login == null) login = e;
             } catch (ModelException e) {
                 if (ModelException.isContextOverflow(e)) throw e;
                 last = e;
@@ -50,7 +57,7 @@ public final class FallbackModelClient implements ModelClient {
                 last = e;
             }
         }
-        throw last;
+        throw last != null ? last : login;
     }
 
     @Override

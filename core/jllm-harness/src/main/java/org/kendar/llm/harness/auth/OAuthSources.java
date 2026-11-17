@@ -1,7 +1,9 @@
 package org.kendar.llm.harness.auth;
 
+import org.kendar.llm.harness.settings.OAuthSettings;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.kendar.llm.harness.settings.HarnessSettings;
+import org.kendar.llm.harness.llm.ProviderSettings;
 import org.kendar.llm.harness.settings.McpServerSettings;
 import org.kendar.llm.harness.settings.RestApiSettings;
 import org.slf4j.Logger;
@@ -26,13 +28,16 @@ public final class OAuthSources {
     private final Map<String, OAuthLogin> logins;
     private final Map<String, RestOAuthLogin> apis;
     private final Map<String, Boolean> mcpPerUser;
+    private final Map<String, ProviderSettings> providers;
 
     private OAuthSources(OAuthCredentialResolver resolver, Map<String, OAuthLogin> logins,
-                         Map<String, RestOAuthLogin> apis, Map<String, Boolean> mcpPerUser) {
+                         Map<String, RestOAuthLogin> apis, Map<String, Boolean> mcpPerUser,
+                         Map<String, ProviderSettings> providers) {
         this.resolver = resolver;
         this.logins = logins;
         this.apis = apis;
         this.mcpPerUser = mcpPerUser;
+        this.providers = providers;
     }
 
     /**
@@ -73,8 +78,26 @@ public final class OAuthSources {
             // per-user calls carry the caller's token; the shared login stays with the client (discovery)
             if (perUser) sources.add(new OAuthCredentialResolver.Source(m.source(), login, true, null, null));
         }
+        Map<String, ProviderSettings> providers = new LinkedHashMap<>();
+        for (ProviderSettings p : settings.providers()) {
+            if (!p.perUser()) continue;
+            providers.put(p.source(), p);
+            if (ProviderSettings.USER_OAUTH.equals(p.userAuth())) {
+                GenericOAuthLogin login = new GenericOAuthLogin(p.source(), "Provider '" + p.name() + "'", p.oauth(),
+                        http, mapper);
+                if (blank(p.oauth().tokenUrl()) && blank(p.oauth().issuer())) {
+                    throw new IllegalStateException("Provider '" + p.name()
+                            + "': oauth needs a tokenUrl or an issuer (there is no spec to read endpoints from)");
+                }
+                sources.add(new OAuthCredentialResolver.Source(p.source(), login, true, null, null));
+                logins.put(p.source(), login);
+            } else {
+                sources.add(new OAuthCredentialResolver.Source(p.source(),
+                        new ProviderTokenLogin(p.source(), p.effectiveType()), true, null, null));
+            }
+        }
         return new OAuthSources(new OAuthCredentialResolver(store, sources), Map.copyOf(logins), Map.copyOf(apis),
-                Map.copyOf(mcpPerUser));
+                Map.copyOf(mcpPerUser), Map.copyOf(providers));
     }
 
     public OAuthCredentialResolver resolver() {
@@ -88,15 +111,21 @@ public final class OAuthSources {
 
     /** Whether each user has their own token for the source (else one shared login, by an admin). */
     public boolean perUser(String source) {
+        if (providers.containsKey(source)) return true;
         if (apis.containsKey(source)) return apis.get(source).perUser() && !apis.get(source).clientCredentials();
         return Boolean.TRUE.equals(mcpPerUser.get(source));
     }
 
     /** True when a login of the source sends the browser back (authorization code), false for the device flow. */
     public boolean needsRedirect(String source) {
+        ProviderSettings p = providers.get(source);
+        if (p != null) {
+            return ProviderSettings.USER_OAUTH.equals(p.userAuth())
+                    && OAuthSettings.AUTHORIZATION_CODE.equals(p.oauth().effectiveFlow());
+        }
         RestOAuthLogin l = apis.get(source);
         if (l == null) return mcpPerUser.containsKey(source);
-        return RestApiSettings.OAuth.AUTHORIZATION_CODE.equals(l.api().oauth().effectiveFlow());
+        return OAuthSettings.AUTHORIZATION_CODE.equals(l.api().oauth().effectiveFlow());
     }
 
     /** True for a REST API that uses a service account (no login). */
@@ -105,10 +134,22 @@ public final class OAuthSources {
         return l != null && l.clientCredentials();
     }
 
-    /** All OAuth source names, sorted. */
+    /** The provider behind a {@code provider:<name>} source; null for other sources. */
+    public ProviderSettings provider(String source) {
+        return providers.get(source);
+    }
+
+    /** The sources of the providers with per-user credentials (token or oauth), sorted. */
+    public List<String> providerSources() {
+        return providers.keySet().stream().sorted().toList();
+    }
+
+    /** All OAuth source names, sorted: REST APIs, MCP servers and the providers that log in with OAuth. */
     public List<String> names() {
         List<String> out = new ArrayList<>(apis.keySet());
         out.addAll(mcpPerUser.keySet());
+        providers.values().stream().filter(p -> ProviderSettings.USER_OAUTH.equals(p.userAuth()))
+                .forEach(p -> out.add(p.source()));
         out.sort(String::compareTo);
         return out;
     }

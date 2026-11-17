@@ -364,6 +364,44 @@ public final class AgentHarness {
     }
 
     /**
+     * Stores a user's own API key for a provider with {@code userAuth: token}. The key is never returned, logged or
+     * echoed.
+     *
+     * @throws IllegalArgumentException when the source is not a provider that takes per-user tokens, or the key is blank
+     */
+    public void setProviderToken(String principalId, String source, String token) {
+        var p = oauth.provider(source);
+        if (p == null || !org.kendar.llm.harness.llm.ProviderSettings.USER_TOKEN.equals(p.userAuth())) {
+            throw new IllegalArgumentException(source + " does not take a per-user token");
+        }
+        if (principalId == null && multiUser) throw new IllegalArgumentException("A token belongs to a user");
+        if (token == null || token.isBlank()) throw new IllegalArgumentException("The token is empty");
+        saveLogin(principalId, source, new org.kendar.llm.harness.auth.OAuthToken(token.strip(), null, 0, java.util.Map.of()));
+    }
+
+    /**
+     * One tiny call to the provider with the credential of {@code principalId}, to tell them whether it works.
+     *
+     * @return null when the call worked, else a short reason; never a secret
+     */
+    public String testProvider(String principalId, String source) {
+        var p = oauth.provider(source);
+        if (p == null) return "Unknown provider source " + source;
+        org.kendar.llm.harness.auth.HarnessPrincipal who = principalId == null ? null
+                : org.kendar.llm.harness.auth.HarnessPrincipal.of(principalId);
+        try {
+            org.kendar.llm.harness.auth.CallerScope.callAs(who,
+                    () -> providers.client(p.name()).simpleComplete("Reply with: ok", "ping", 8));
+            return null;
+        } catch (org.kendar.llm.harness.auth.LoginRequiredException e) {
+            return "Not connected";
+        } catch (RuntimeException e) {
+            String m = String.valueOf(e.getMessage());
+            return m.length() > 200 ? m.substring(0, 200) : m;
+        }
+    }
+
+    /**
      * Removes a login: the token, what is cached for it, and the caller's MCP session on that server.
      *
      * @return false when there was no stored login
@@ -494,7 +532,7 @@ public final class AgentHarness {
         private Builder() {
         }
 
-        /** Small model for the auto-mode classifier, summaries and tool-group selection; default: settings' fastModel. */
+        /** Small model for the auto-mode classifier, summaries and tool-group selection; default: the provider marked {@code fast}. */
         public Builder fastModelClient(ModelClient client) {
             this.fastClient = client;
             return this;
@@ -842,12 +880,23 @@ public final class AgentHarness {
         public AgentHarness build() {
             installPlugins();
             config = settings.applyTo(config);
+            boolean multiUser = userPolicies != null;
+            org.kendar.llm.harness.auth.TokenStore tokenStore = this.tokenStore != null ? this.tokenStore
+                    : org.kendar.llm.harness.auth.TokenStores.create(settings.tokenStore(), multiUser, tokenStoreDir,
+                    System::getenv);
+            HttpClient http = HttpClient.newHttpClient();
+            org.kendar.llm.harness.auth.OAuthSources oauth = org.kendar.llm.harness.auth.OAuthSources.from(settings,
+                    tokenStore, http, mapper, multiUser);
             org.kendar.llm.harness.llm.ProviderCatalog providers = new org.kendar.llm.harness.llm.ProviderCatalog(
-                    settings.providers(), mapper, config.maxTokens());
+                    settings.providers(), mapper, config.maxTokens(), oauth.resolver());
             if (sessionProvider != null) providers.setCustom(sessionProvider);
-            if (modelClient == null && settings.defaultProvider() != null) {
-                modelClient = providers.client(settings.defaultProvider());
-                activeProvider = settings.defaultProvider();
+            if (modelClient == null) {
+                // the active client is built by the catalog, so it gets the credential resolver and the type defaults
+                String which = activeProvider != null ? activeProvider : settings.defaultProvider();
+                if (which != null) {
+                    modelClient = providers.client(which);
+                    activeProvider = which;
+                }
             }
             if (modelClient == null) throw new IllegalStateException("modelClient is required");
             org.kendar.llm.harness.llm.ProviderSettings active = providers.find(activeProvider);
@@ -881,13 +930,6 @@ public final class AgentHarness {
             PermissionRules permissionRules = settings.permissionRules();
             registry.hideIf(permissionRules::hides);
             ChatSessionService sessions = new ChatSessionService(sessionStore, config.agentId(), mapper);
-            boolean multiUser = userPolicies != null;
-            org.kendar.llm.harness.auth.TokenStore tokenStore = this.tokenStore != null ? this.tokenStore
-                    : org.kendar.llm.harness.auth.TokenStores.create(settings.tokenStore(), multiUser, tokenStoreDir,
-                    System::getenv);
-            HttpClient http = HttpClient.newHttpClient();
-            org.kendar.llm.harness.auth.OAuthSources oauth = org.kendar.llm.harness.auth.OAuthSources.from(settings,
-                    tokenStore, http, mapper, multiUser);
             // the OAuth header wins over the embedder's (settings headers < user file headers < OAuth)
             org.kendar.llm.harness.auth.CredentialResolver resolver = oauth.resolver().isEmpty() ? credentials
                     : org.kendar.llm.harness.auth.CredentialResolver.chain(credentials, oauth.resolver());
@@ -919,8 +961,10 @@ public final class AgentHarness {
                                    org.kendar.llm.harness.llm.ProviderCatalog providers,
                                    org.kendar.llm.harness.llm.ModelSwitch modelSwitch, int maxParallel) {
             ApprovalService approvals = new ApprovalService(config.approvalTimeoutSeconds(), stateStore);
+            // the helper calls (summaries, classifiers, tool selection) use the provider marked fast, built by the
+            // catalog like every provider: it has the credential resolver and the type defaults
             ModelClient fast = fastClient != null ? fastClient
-                    : settings.fastModel() != null ? ModelClients.from(settings.fastModel(), mapper) : null;
+                    : providers.fast() != null ? providers.client(providers.fast()) : null;
             ContextStrategy context = contextStrategy(new ContextStrategyFactory.Deps(config, modelClient,
                     fast != null ? fast : modelClient, approvals, mapper, metrics, subAgentRunLog), box, sessions);
             context.install(hooks);
@@ -1054,8 +1098,7 @@ public final class AgentHarness {
                         throw new UncheckedIOException("Cannot read prompt file of agent " + a.name(), e);
                     }
                 }
-                ModelClient own = a.provider() != null ? providers.client(a.provider())
-                        : a.model() == null ? null : ModelClients.from(a.model(), mapper);
+                ModelClient own = a.provider() != null ? providers.client(a.provider()) : null;
                 if (own != null && maxParallel > 0) own = new LimitedModelClient(own, maxParallel);
                 defs.add(new AgentDefinition(a.name(), a.description() == null ? "" : a.description(), a.tools(),
                         prompt, Boolean.TRUE.equals(a.inheritContext()), own, Boolean.TRUE.equals(a.readOnly()),

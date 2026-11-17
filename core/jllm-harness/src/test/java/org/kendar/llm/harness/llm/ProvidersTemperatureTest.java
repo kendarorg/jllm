@@ -24,14 +24,14 @@ class ProvidersTemperatureTest {
     }
 
     private AgentHarness harness(List<ProviderSettings> providers) {
-        HarnessSettings settings = new HarnessSettings(null, null, null, null, null, null, null, null, null, null,
+        HarnessSettings settings = new HarnessSettings(null, null, null, null, null, null, null, null, null,
                 null, null, providers, null);
         return AgentHarness.builder().modelClient(new ScriptedModel()).config(config(base)).settings(settings).build();
     }
 
     @Test
     void catalogResolvesConfiguredBuiltInAndSessionEntries() {
-        ProviderCatalog c = new ProviderCatalog(List.of(local("my-qwen", 32000, null)), MAPPER, 4096);
+        ProviderCatalog c = new ProviderCatalog(List.of(local("my-qwen", 32000, null)), MAPPER, 4096, null);
 
         assertEquals("my-qwen", c.find("my-qwen").name());
         assertEquals("anthropic", c.find("anthropic").effectiveType());

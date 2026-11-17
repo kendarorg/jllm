@@ -261,7 +261,7 @@ stored log) and sent to front ends as the `todos` event.
 
 ## Fast model and the auto-mode classifier
 
-`"fastModel": {"name": "ollama", "baseUrl": "...", "apiKey": "", "model": "...", ...}` in the settings file (or
+A provider with `"fast": true` in the settings file (or
 `AgentHarness.builder().fastModelClient(..)`) adds a small model used for compaction summaries, tool-group selection and
 the classifier. In `auto` mode, with a fast model configured, each tool call that is not read-only is classified as
 safe or unsafe from the tool name, its input, the working directory and the user's request only (never tool output).

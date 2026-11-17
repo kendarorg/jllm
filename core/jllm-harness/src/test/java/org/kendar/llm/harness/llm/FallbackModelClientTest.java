@@ -60,7 +60,7 @@ class FallbackModelClientTest {
                 null, null, null, null, null, null, 2);
         ProviderSettings c = new ProviderSettings("c", "llamacpp", "http://localhost:1/v1", null, "m", null, null,
                 null, null, null, null, null, null, null);
-        ProviderCatalog cat = new ProviderCatalog(List.of(a, b, c), new com.fasterxml.jackson.databind.ObjectMapper(), 100);
+        ProviderCatalog cat = new ProviderCatalog(List.of(a, b, c), new com.fasterxml.jackson.databind.ObjectMapper(), 100, null);
         assertInstanceOf(FallbackModelClient.class, cat.client("a"));
         assertInstanceOf(FallbackModelClient.class, cat.client("c"));
         assertFalse(cat.client("b") instanceof FallbackModelClient);

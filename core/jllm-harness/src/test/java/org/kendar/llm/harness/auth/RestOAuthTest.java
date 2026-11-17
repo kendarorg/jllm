@@ -1,5 +1,6 @@
 package org.kendar.llm.harness.auth;
 
+import org.kendar.llm.harness.settings.OAuthSettings;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -156,12 +157,12 @@ class RestOAuthTest {
 
     // ---- helpers
 
-    private RestApiSettings api(RestApiSettings.OAuth oauth) {
+    private RestApiSettings api(OAuthSettings oauth) {
         return new RestApiSettings("crm", null, base + "/openapi.yaml", null, Map.of(), null, null, null, null, oauth);
     }
 
-    private static RestApiSettings.OAuth oauth(String flow, String issuer, String tokenUrl, Boolean perUser) {
-        return new RestApiSettings.OAuth(flow, issuer, null, tokenUrl, null, "cid", null, null, null, perUser, null,
+    private static OAuthSettings oauth(String flow, String issuer, String tokenUrl, Boolean perUser) {
+        return new OAuthSettings(flow, issuer, null, tokenUrl, null, "cid", null, null, null, perUser, null,
                 null, null);
     }
 

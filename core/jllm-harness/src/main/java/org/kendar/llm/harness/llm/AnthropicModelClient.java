@@ -33,7 +33,7 @@ public class AnthropicModelClient implements ModelClient {
     static final String RAG_TOOL = "search_local_knowledge";
 
     private final long backoffBaseMs;
-    private volatile org.kendar.llm.harness.auth.AuthProvider auth;
+    private volatile org.kendar.llm.harness.auth.AuthSource authSource;
     private volatile boolean streaming = true;
 
     /** false: {@link #stream} makes a plain call (for proxies whose streaming misbehaves). Default true. */
@@ -42,9 +42,12 @@ public class AnthropicModelClient implements ModelClient {
         return this;
     }
 
-    /** Headers come from the provider (OAuth, rotating keys) instead of the static {@code apiKey}. */
-    public AnthropicModelClient authProvider(org.kendar.llm.harness.auth.AuthProvider provider) {
-        this.auth = provider;
+    /**
+     * Headers come from the source (per-user keys, OAuth) instead of the static {@code apiKey}: bound once per call
+     * to the caller of the current {@link org.kendar.llm.harness.auth.CallerScope}.
+     */
+    public AnthropicModelClient authSource(org.kendar.llm.harness.auth.AuthSource source) {
+        this.authSource = source;
         return this;
     }
 
@@ -66,14 +69,16 @@ public class AnthropicModelClient implements ModelClient {
 
     @Override
     public ModelResponse complete(ModelRequest req, CancelToken cancel) {
-        checkKey();
-        return toResponse(send(buildBody(req), cancel));
+        org.kendar.llm.harness.auth.AuthProvider auth = bindAuth();
+        checkKey(auth);
+        return toResponse(send(buildBody(req), cancel, auth));
     }
 
     @Override
     public ModelResponse stream(ModelRequest req, CancelToken cancel, StreamListener listener) {
         if (!streaming || listener == null) return complete(req, cancel);
-        checkKey();
+        org.kendar.llm.harness.auth.AuthProvider auth = bindAuth();
+        checkKey(auth);
         ObjectNode body = buildBody(req);
         body.put("stream", true);
         String payload;
@@ -82,13 +87,19 @@ public class AnthropicModelClient implements ModelClient {
         } catch (IOException e) {
             throw new ModelException("Cannot serialize request", e);
         }
-        JsonNode json = StreamingCall.run(http, () -> request(payload), auth, cancel, listener, props.maxRetries(),
+        JsonNode json = StreamingCall.run(http, () -> request(payload, auth), auth, cancel, listener, props.maxRetries(),
                 backoffBaseMs, s -> s == 429 || s == 529 || s >= 500, s -> "Anthropic API error " + s,
                 "Anthropic API call failed: ", () -> this::assemble);
         return toResponse(json);
     }
 
-    private void checkKey() {
+    /** The caller's auth, bound once at the entry of a call; null: the static key. */
+    private org.kendar.llm.harness.auth.AuthProvider bindAuth() {
+        org.kendar.llm.harness.auth.AuthSource src = authSource;
+        return src == null ? null : src.bind(org.kendar.llm.harness.auth.CallerScope.current());
+    }
+
+    private void checkKey(org.kendar.llm.harness.auth.AuthProvider auth) {
         if (auth == null && (props.apiKey() == null || props.apiKey().isBlank())) {
             throw new ModelException("Anthropic API key (ANTHROPIC_API_KEY) is not configured");
         }
@@ -430,7 +441,7 @@ public class AnthropicModelClient implements ModelClient {
         if ("1h".equals(props.cacheTtl())) cc.put("ttl", "1h");
     }
 
-    private HttpRequest request(String payload) {
+    private HttpRequest request(String payload, org.kendar.llm.harness.auth.AuthProvider auth) {
         HttpRequest.Builder rb = HttpRequest.newBuilder(URI.create(props.baseUrl().replaceAll("/+$", "") + "/v1/messages"))
                 .timeout(Duration.ofSeconds(Math.max(1, props.timeoutSeconds())))
                 .header("content-type", "application/json")
@@ -438,6 +449,8 @@ public class AnthropicModelClient implements ModelClient {
         if (auth != null) {
             try {
                 auth.headers().forEach(rb::header);
+            } catch (org.kendar.llm.harness.auth.LoginRequiredException e) {
+                throw e;
             } catch (RuntimeException e) {
                 throw new ModelException("Authentication failed: " + e.getMessage(), e);
             }
@@ -447,14 +460,14 @@ public class AnthropicModelClient implements ModelClient {
         return rb.POST(HttpRequest.BodyPublishers.ofString(payload)).build();
     }
 
-    private JsonNode send(ObjectNode body, CancelToken cancel) {
+    private JsonNode send(ObjectNode body, CancelToken cancel, org.kendar.llm.harness.auth.AuthProvider auth) {
         String payload;
         try {
             payload = mapper.writeValueAsString(body);
         } catch (IOException e) {
             throw new ModelException("Cannot serialize request", e);
         }
-        java.util.function.Supplier<HttpRequest> build = () -> request(payload);
+        java.util.function.Supplier<HttpRequest> build = () -> request(payload, auth);
         HttpRequest request = build.get();
         boolean authRetried = false;
 

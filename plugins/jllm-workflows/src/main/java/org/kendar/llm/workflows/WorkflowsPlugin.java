@@ -47,8 +47,8 @@ public final class WorkflowsPlugin implements HarnessPlugin {
                 throw new Registry.ApprovalNeededException(e.getMessage(), e.tools());
             }
         });
-        registry.classifier((sys, question) -> services.lookup(OneShotModel.class)
-                .orElseThrow(() -> new IllegalStateException("The host offers no model for flows")).classify(sys, question));
+        registry.classifier((principal, sys, question) -> services.lookup(OneShotModel.class)
+                .orElseThrow(() -> new IllegalStateException("The host offers no model for flows")).classify(principal, sys, question));
         // the web application publishes its plugin storage; without it flows live in files
         var storage = services.lookup(PluginStorages.class).map(s -> s.forPlugin(ID));
         RunStore runs = storage.<RunStore>map(PluginStores.Runs::new).orElseGet(() -> new RunStore.Files(dir.resolve("runs")));

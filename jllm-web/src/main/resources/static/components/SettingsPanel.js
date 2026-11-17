@@ -47,7 +47,7 @@ export default {
       } catch (e) { toast(e.message, 'error'); }
     }
 
-    // connections: OAuth logins of REST APIs and MCP servers (never a token here)
+    // connections: logins of providers, REST APIs and MCP servers; provider keys are write-only (never shown)
     const connections = ref(null);
     async function loadConnections() {
       try { connections.value = await api('/api/oauth'); } catch (e) { toast(e.message, 'error'); }
@@ -61,6 +61,26 @@ export default {
         await del('/api/oauth/' + encodeURIComponent(c.source) + (shared ? '?shared=true' : ''));
         await loadConnections();
       } catch (e) { toast(e.message, 'error'); }
+    }
+    // per-user API keys of LLM providers: typed here, sent once, never shown again
+    const keys = reactive({});
+    const testing = reactive({});
+    async function saveKey(c) {
+      const token = (keys[c.source] || '').trim();
+      if (!token) return;
+      try {
+        await put('/api/oauth/' + encodeURIComponent(c.source) + '/token', {token});
+        keys[c.source] = '';
+        toast('Key saved', 'success');
+        await loadConnections();
+      } catch (e) { toast(e.message, 'error'); }
+    }
+    async function testKey(c) {
+      testing[c.source] = true;
+      try {
+        const r = await post('/api/oauth/' + encodeURIComponent(c.source) + '/test');
+        toast(r.ok ? c.source + ' works' : c.source + ': ' + r.message, r.ok ? 'success' : 'error');
+      } catch (e) { toast(e.message, 'error'); } finally { testing[c.source] = false; }
     }
     const expires = s => s ? new Date(s * 1000).toLocaleString() : '';
 
@@ -79,7 +99,7 @@ export default {
     onMounted(() => { if (props.me.defaultPassword) tab.value = 'password'; });
 
     return {TABS, tab, select, onKey, pw, changePassword, catalog, disabled, toolsDirty, onTools, saveTools,
-      connections, loadConnections, connect, disconnect, expires, me: props.me};
+      connections, loadConnections, connect, disconnect, expires, keys, testing, saveKey, testKey, me: props.me};
   },
   template: `
   <section class="panel" aria-label="Settings">
@@ -119,7 +139,7 @@ export default {
       </div>
 
       <div v-if="tab === 'connections'" role="tabpanel">
-        <p>Your logins to the REST APIs and MCP servers that need one. Each call of your chats uses your own login.
+        <p>Your logins to the LLM providers, REST APIs and MCP servers that need one. Each call of your chats uses your own login.
           After connecting, resend your message or steer the chat with "retry".</p>
         <template v-if="connections">
           <table class="grid">
@@ -131,13 +151,21 @@ export default {
                   <span v-if="c.serviceAccount" class="muted">service account (no login)</span>
                   <template v-else>
                     <span v-if="c.connected">connected<span v-if="c.expiresAt" class="muted"> (expires {{ expires(c.expiresAt) }})</span></span>
+                    <span v-else-if="c.usesSharedKey" class="muted">using the shared key</span>
                     <span v-else class="muted">not connected</span>
                     <span v-if="!c.perUser" class="badge">shared</span>
                     <span v-if="c.perUser && me.role === 'admin'" class="muted"> · shared login: {{ c.sharedConnected ? 'connected' : 'none' }}</span>
                   </template>
                 </td>
                 <td class="row-actions">
-                  <template v-if="!c.serviceAccount">
+                  <template v-if="c.kind === 'token'">
+                    <input type="password" v-model="keys[c.source]" autocomplete="off" spellcheck="false"
+                           :aria-label="'API key for ' + c.source" placeholder="API key" />
+                    <button class="btn-sm btn-primary" :disabled="!(keys[c.source] || '').trim()" @click="saveKey(c)">{{ c.connected ? 'Replace' : 'Save' }}</button>
+                    <button v-if="c.connected || c.usesSharedKey" class="btn-sm" :disabled="testing[c.source]" @click="testKey(c)">Test</button>
+                    <button v-if="c.connected" class="btn-danger" @click="disconnect(c)">Remove</button>
+                  </template>
+                  <template v-else-if="!c.serviceAccount">
                     <button class="btn-sm btn-primary" @click="connect(c, !c.perUser)">{{ c.connected ? 'Reconnect' : 'Connect' }}</button>
                     <button v-if="c.connected" class="btn-danger" @click="disconnect(c, !c.perUser)">Disconnect</button>
                   </template>

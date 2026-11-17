@@ -56,7 +56,7 @@ class OAuthSettingsTest {
     @Test
     void oauthBlockIsReadWithItsDefaults() throws Exception {
         write(home.resolve(".jllm/settings.json"), API.formatted("${CRM_SECRET}"));
-        RestApiSettings.OAuth o = load(ProjectMcpTrust.Prompt.NONE).restApis().get(0).oauth();
+        OAuthSettings o = load(ProjectMcpTrust.Prompt.NONE).restApis().get(0).oauth();
         assertEquals("authorization_code", o.effectiveFlow());
         assertEquals("s3", o.clientSecret());
         assertTrue(o.effectivePerUser());
@@ -122,5 +122,55 @@ class OAuthSettingsTest {
                 true, null, null, null);
         assertTrue(http.perUserOAuth(true));
         assertFalse(http.perUserOAuth(false)); // a single user keeps one shared login, as before
+    }
+
+    private static final String PROVIDER = """
+            {"providers":[{"name":"work","type":"anthropic","baseUrl":"https://llm.example.com","userAuth":"oauth",
+              "oauth":{"issuer":"https://login.example.com","clientId":"jllm"}}]}""";
+
+    @Test
+    void projectProviderWithUserAuthIsDroppedUnlessTrusted() throws Exception {
+        write(project.resolve(".jllm/settings.json"), PROVIDER);
+        assertTrue(load(ProjectMcpTrust.Prompt.NONE).providers().isEmpty());
+        assertTrue(warnings.stream().anyMatch(w -> w.contains("Provider 'work'")), warnings.toString());
+        List<String> shown = new ArrayList<>();
+        HarnessSettings s = load((d, n, l) -> {
+            shown.add(l);
+            return true;
+        });
+        assertEquals(1, s.providers().size());
+        assertTrue(shown.get(0).contains("https://llm.example.com") && shown.get(0).contains("login.example.com"),
+                shown.toString());
+    }
+
+    @Test
+    void projectProviderFallbackToTheSharedKeyNeedsTrust() throws Exception {
+        write(project.resolve(".jllm/settings.json"),
+                "{\"providers\":[{\"name\":\"q\",\"type\":\"zzz\",\"apiKey\":\"k\",\"userAuth\":\"token\","
+                        + "\"allowGlobalFallback\":true}]}");
+        assertTrue(load(ProjectMcpTrust.Prompt.NONE).providers().isEmpty());
+    }
+
+    @Test
+    void plainProjectProviderNeedsNoTrust() throws Exception {
+        write(project.resolve(".jllm/settings.json"),
+                "{\"providers\":[{\"name\":\"q\",\"type\":\"zzz\",\"apiKey\":\"k\"}]}");
+        assertEquals(1, load(ProjectMcpTrust.Prompt.NONE).providers().size());
+    }
+
+    @Test
+    void sameProviderInTheUserSettingsNeedsNoTrust() throws Exception {
+        write(home.resolve(".jllm/settings.json"), PROVIDER);
+        write(project.resolve(".jllm/settings.json"), PROVIDER);
+        assertEquals(1, load(ProjectMcpTrust.Prompt.NONE).providers().size());
+    }
+
+    @Test
+    void literalProviderSecretInTheProjectIsRefused() throws Exception {
+        write(project.resolve(".jllm/settings.json"), PROVIDER.replace("\"clientId\":\"jllm\"",
+                "\"clientId\":\"jllm\",\"clientSecret\":\"literal-secret\""));
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> load((d, n, l) -> true));
+        assertTrue(e.getMessage().contains("work") && e.getMessage().contains("clientSecret"), e.getMessage());
+        assertFalse(e.getMessage().contains("literal-secret"));
     }
 }

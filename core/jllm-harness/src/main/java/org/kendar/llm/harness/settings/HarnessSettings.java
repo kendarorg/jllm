@@ -9,7 +9,6 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.kendar.llm.harness.HarnessConfig;
 import org.kendar.llm.harness.context.ContextStrategyKind;
 import org.kendar.llm.harness.context.scope.ScopeStrategy;
-import org.kendar.llm.harness.llm.LlmSettings;
 import org.kendar.llm.harness.llm.ProviderSettings;
 import org.kendar.llm.harness.permission.PermissionRules;
 
@@ -31,7 +30,6 @@ import java.util.regex.Pattern;
  * @param execution        optional concurrency settings
  * @param sandbox          optional scratch directory and shell timeout
  * @param context          optional context window and compaction settings
- * @param fastModel        optional small model for the auto-mode classifier, summaries and tool-group selection
  * @param smallModel       the main model is small: the system prompt gets the stricter small-model rules
  *                         (default false)
  * @param plugins          raw {@code plugins} section: {@code <id>: {enabled, settings}}; only listed and enabled
@@ -46,7 +44,7 @@ import java.util.regex.Pattern;
 public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSettings> restApis,
                               List<SkillSettings> skills, List<String> instructionFiles,
                               List<AgentSettings> agents, Execution execution, Sandbox sandbox, Context context,
-                              LlmSettings fastModel, Output output, Boolean smallModel, Permissions permissions,
+                              Output output, Boolean smallModel, Permissions permissions,
                               List<ProviderSettings> providers, String defaultProvider,
                               Integer chatRetentionLimit, JsonNode plugins, Storage storage,
                               List<String> whitelistedEnvVars, List<String> toolsWhitelistedEnvVars,
@@ -73,12 +71,12 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
     public HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSettings> restApis,
                            List<SkillSettings> skills, List<String> instructionFiles,
                            List<AgentSettings> agents, Execution execution, Sandbox sandbox, Context context,
-                           LlmSettings fastModel, Output output, Boolean smallModel, Permissions permissions,
+                           Output output, Boolean smallModel, Permissions permissions,
                            List<ProviderSettings> providers, String defaultProvider,
                            Integer chatRetentionLimit, JsonNode plugins, Storage storage,
                            List<String> whitelistedEnvVars, List<String> toolsWhitelistedEnvVars,
                            FileLimits files, WebLimits web) {
-        this(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context, fastModel, output,
+        this(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context, output,
                 smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage,
                 whitelistedEnvVars, toolsWhitelistedEnvVars, files, web, null, null, null);
     }
@@ -159,11 +157,11 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
     public HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSettings> restApis,
                            List<SkillSettings> skills, List<String> instructionFiles,
                            List<AgentSettings> agents, Execution execution, Sandbox sandbox, Context context,
-                           LlmSettings fastModel, Output output, Boolean smallModel, Permissions permissions,
+                           Output output, Boolean smallModel, Permissions permissions,
                            List<ProviderSettings> providers, String defaultProvider,
                            Integer chatRetentionLimit, JsonNode plugins, Storage storage,
                            List<String> whitelistedEnvVars, List<String> toolsWhitelistedEnvVars) {
-        this(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context, fastModel, output,
+        this(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context, output,
                 smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage,
                 whitelistedEnvVars, toolsWhitelistedEnvVars, null, null);
     }
@@ -207,10 +205,10 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
     public HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSettings> restApis,
                            List<SkillSettings> skills, List<String> instructionFiles,
                            List<AgentSettings> agents, Execution execution, Sandbox sandbox, Context context,
-                           LlmSettings fastModel, Output output, Boolean smallModel, Permissions permissions,
+                           Output output, Boolean smallModel, Permissions permissions,
                            List<ProviderSettings> providers, String defaultProvider,
                            Integer chatRetentionLimit, JsonNode plugins, Storage storage) {
-        this(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context, fastModel, output,
+        this(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context, output,
                 smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, null, null);
     }
 
@@ -218,10 +216,10 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
     public HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSettings> restApis,
                            List<SkillSettings> skills, List<String> instructionFiles,
                            List<AgentSettings> agents, Execution execution, Sandbox sandbox, Context context,
-                           LlmSettings fastModel, Output output, Boolean smallModel, Permissions permissions,
+                           Output output, Boolean smallModel, Permissions permissions,
                            List<ProviderSettings> providers, String defaultProvider,
                            Integer chatRetentionLimit, JsonNode plugins) {
-        this(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context, fastModel, output,
+        this(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context, output,
                 smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, null, null, null);
     }
 
@@ -246,10 +244,10 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
     public HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSettings> restApis,
                            List<SkillSettings> skills, List<String> instructionFiles,
                            List<AgentSettings> agents, Execution execution, Sandbox sandbox, Context context,
-                           LlmSettings fastModel, Output output, Boolean smallModel, Permissions permissions,
+                           Output output, Boolean smallModel, Permissions permissions,
                            List<ProviderSettings> providers, String defaultProvider,
                            Integer chatRetentionLimit) {
-        this(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context, fastModel, output,
+        this(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context, output,
                 smallModel, permissions, providers, defaultProvider, chatRetentionLimit, null);
     }
 
@@ -266,8 +264,8 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
     public HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSettings> restApis,
                            List<SkillSettings> skills, List<String> instructionFiles,
                            List<AgentSettings> agents, Execution execution, Sandbox sandbox, Context context,
-                           LlmSettings fastModel, Output output, Boolean smallModel) {
-        this(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context, fastModel, output,
+                           Output output, Boolean smallModel) {
+        this(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context, output,
                 smallModel, null, null, null, null);
     }
 
@@ -275,9 +273,9 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
     public HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSettings> restApis,
                            List<SkillSettings> skills, List<String> instructionFiles,
                            List<AgentSettings> agents, Execution execution, Sandbox sandbox, Context context,
-                           LlmSettings fastModel, Output output, Boolean smallModel, Permissions permissions,
+                           Output output, Boolean smallModel, Permissions permissions,
                            List<ProviderSettings> providers, String defaultProvider) {
-        this(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context, fastModel, output,
+        this(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context, output,
                 smallModel, permissions, providers, defaultProvider, null);
     }
 
@@ -299,7 +297,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
         if (pluginSettings != null) e.set("settings", merge(e.has("settings") ? e.get("settings") : pluginSettings,
                 pluginSettings));
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context,
-                fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, copy, storage,
+                output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, copy, storage,
                 whitelistedEnvVars, toolsWhitelistedEnvVars, files, web, loop, hooks, tokenStore);
     }
 
@@ -406,7 +404,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
         Sandbox s = sandbox == null ? new Sandbox(null, null) : sandbox;
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution,
                 new Sandbox(s.tempDir(), s.timeoutSeconds(), backend.toLowerCase(), s.localFallback(), s.docker(), s.outputLogMaxBytes()),
-                context, fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
+                context, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
                 toolsWhitelistedEnvVars, files, web, loop, hooks, tokenStore);
     }
 
@@ -418,7 +416,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
                 new Sandbox(s.tempDir(), s.timeoutSeconds(), s.backend(), s.localFallback(),
                         new Docker(d.binary(), image, d.memory(), d.cpus(), d.pidsLimit(), d.user(), d.network(),
                                 d.mode(), d.remote(), d.remoteHost()), s.outputLogMaxBytes()),
-                context, fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
+                context, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
                 toolsWhitelistedEnvVars, files, web, loop, hooks, tokenStore);
     }
 
@@ -433,7 +431,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
                 new Sandbox(s.tempDir(), s.timeoutSeconds(), s.backend(), s.localFallback(),
                         new Docker(d.binary(), d.image(), d.memory(), d.cpus(), d.pidsLimit(), d.user(), d.network(),
                                 mode.toLowerCase(), d.remote(), d.remoteHost()), s.outputLogMaxBytes()),
-                context, fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
+                context, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
                 toolsWhitelistedEnvVars, files, web, loop, hooks, tokenStore);
     }
 
@@ -446,7 +444,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
                         new Docker(d.binary(), d.image(), d.memory(), d.cpus(), d.pidsLimit(), d.user(), d.network(),
                                 d.mode(), remote != null ? remote : d.remote(),
                                 remoteHost != null ? remoteHost : d.remoteHost()), s.outputLogMaxBytes()),
-                context, fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
+                context, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
                 toolsWhitelistedEnvVars, files, web, loop, hooks, tokenStore);
     }
 
@@ -595,7 +593,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
         Context c = context == null ? new Context(null, null, null, null, null) : context;
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox,
                 new Context(maxTokens, c.keepRecentTurns(), c.auto(), c.keepTokens(), c.buffer(), c.strategy(),
-                        c.mnemonic(), c.scope(), c.noiseCommands(), c.deferCompactionOnThinkingOverflow()), fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
+                        c.mnemonic(), c.scope(), c.noiseCommands(), c.deferCompactionOnThinkingOverflow()), output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
                 toolsWhitelistedEnvVars, files, web, loop, hooks, tokenStore);
     }
 
@@ -605,7 +603,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
         Context c = context == null ? new Context(null, null, null, null, null) : context;
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox,
                 new Context(c.maxTokens(), c.keepRecentTurns(), c.auto(), c.keepTokens(), c.buffer(), strategy,
-                        c.mnemonic(), c.scope(), c.noiseCommands(), c.deferCompactionOnThinkingOverflow()), fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
+                        c.mnemonic(), c.scope(), c.noiseCommands(), c.deferCompactionOnThinkingOverflow()), output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
                 toolsWhitelistedEnvVars, files, web, loop, hooks, tokenStore);
     }
 
@@ -617,14 +615,14 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
     /** Same settings with {@code smallModel} replaced (e.g. by a command line flag). */
     public HarnessSettings withSmallModel(boolean small) {
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context,
-                fastModel, output, small, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
+                output, small, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
                 toolsWhitelistedEnvVars, files, web, loop, hooks, tokenStore);
     }
 
     /** Same settings with {@code chatRetentionLimit} replaced. */
     public HarnessSettings withChatRetentionLimit(Integer limit) {
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context,
-                fastModel, output, smallModel, permissions, providers, defaultProvider, limit, plugins, storage, whitelistedEnvVars,
+                output, smallModel, permissions, providers, defaultProvider, limit, plugins, storage, whitelistedEnvVars,
                 toolsWhitelistedEnvVars, files, web, loop, hooks, tokenStore);
     }
 
@@ -646,15 +644,8 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
 
     public HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSettings> restApis,
                            List<SkillSettings> skills, List<String> instructionFiles, List<AgentSettings> agents,
-                           Execution execution, Sandbox sandbox, Context context, LlmSettings fastModel) {
-        this(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context, fastModel, null);
-    }
-
-    public HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSettings> restApis,
-                           List<SkillSettings> skills, List<String> instructionFiles, List<AgentSettings> agents,
-                           Execution execution, Sandbox sandbox, Context context, LlmSettings fastModel,
-                           Output output) {
-        this(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context, fastModel, output,
+                           Execution execution, Sandbox sandbox, Context context, Output output) {
+        this(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context, output,
                 null);
     }
 
@@ -727,6 +718,16 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
                 } catch (RuntimeException e) {
                     at = "?";
                 }
+                // removed settings are errors, not warnings: ignoring them would silently turn the helper model (or an
+                // agent's own model) into the main model
+                if (propertyName.equals("fastModel") && at.matches("/fastModel(/fastModel)?")) {
+                    throw new IllegalArgumentException("Setting 'fastModel' was removed: add a provider to 'providers'"
+                            + " with \"fast\": true instead");
+                }
+                if (propertyName.equals("model") && at.matches("/agents/[0-9]+/model(/model)?")) {
+                    throw new IllegalArgumentException("Setting 'model' of an agent was removed: add a "
+                            + "provider to 'providers' and set the agent's 'provider' instead");
+                }
                 warn.accept("Unknown setting '" + propertyName + "' at " + (at.isEmpty() ? "/" : at) + " (ignored)");
                 p.skipChildren();
                 return true;
@@ -788,6 +789,8 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
                 refuseLiteralSecrets(projectTree);
                 projectTokenStore((ObjectNode) merged, projectTree, otherTrees, warn);
                 dropUntrustedProjectOAuth((ObjectNode) merged, projectTree, otherTrees, projectDir, ask, trust, warn);
+                dropUntrustedProjectProviderAuth((ObjectNode) merged, projectTree, otherTrees, projectDir, ask, trust,
+                        warn);
             }
             return mapper.treeToValue(expand(merged, env), HarnessSettings.class);
         } catch (IOException e) {
@@ -873,6 +876,13 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
 
     /** A project file may name a client secret only through {@code ${ENV}}: the file is shared, the secret is not. */
     private static void refuseLiteralSecrets(JsonNode projectTree) {
+        for (JsonNode p : projectTree.path("providers")) {
+            JsonNode secret = p.path("oauth").get("clientSecret");
+            if (secret != null && !secret.isNull() && !ENV_ONLY.matcher(secret.asText()).matches()) {
+                throw new IllegalArgumentException("Provider '" + p.path("name").asText("?")
+                        + "': oauth.clientSecret in the project settings must be an ${ENV_VAR} reference, not a literal");
+            }
+        }
         for (JsonNode api : projectTree.path("restApis")) {
             JsonNode secret = api.path("oauth").get("clientSecret");
             if (secret != null && !secret.isNull() && !ENV_ONLY.matcher(secret.asText()).matches()) {
@@ -934,6 +944,54 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
             }
             if (!Boolean.TRUE.equals(ok)) {
                 warn.accept("REST API '" + api + "' from the project settings skipped: its oauth block "
+                        + (ok == null ? "was never trusted (no prompt available here)" : "is not trusted"));
+                it.remove();
+            }
+        }
+    }
+
+    /**
+     * Removes the providers that only the project file defines with per-user authentication ({@code userAuth},
+     * {@code oauth}) or {@code allowGlobalFallback} and that the user did not trust: these decide where a user's token
+     * goes and whether the shared key is used, so they count from the user and admin layers, or after one question per
+     * project and definition ({@link #OAUTH_TRUST_PREFIX} + {@code provider:<name>}).
+     */
+    private static void dropUntrustedProjectProviderAuth(ObjectNode merged, JsonNode projectTree, List<JsonNode> others,
+                                                         Path projectDir, ProjectMcpTrust.Prompt prompt,
+                                                         ProjectMcpTrust trust,
+                                                         java.util.function.Consumer<String> warn) {
+        if (!(merged.get("providers") instanceof ArrayNode providers)) return;
+        List<JsonNode> fromProject = new ArrayList<>();
+        projectTree.path("providers").forEach(fromProject::add);
+        if (fromProject.isEmpty()) return;
+        for (Iterator<JsonNode> it = providers.iterator(); it.hasNext(); ) {
+            JsonNode p = it.next();
+            boolean sensitive = (p.hasNonNull("userAuth") || p.hasNonNull("oauth")
+                    || p.path("allowGlobalFallback").asBoolean(false)) && fromProject.contains(p);
+            if (!sensitive) continue;
+            boolean elsewhere = false;
+            for (JsonNode t : others) {
+                for (JsonNode o : t.path("providers")) elsewhere |= o.equals(p);
+            }
+            if (elsewhere) continue;
+            String name = p.path("name").asText("?");
+            String key = OAUTH_TRUST_PREFIX + "provider:" + name;
+            Boolean ok = trust.lookup(projectDir, key, p);
+            if (ok == null) {
+                StringBuilder where = new StringBuilder("Provider '" + name + "' with " + p.path("userAuth").asText("global")
+                        + " authentication sending your credential to " + p.path("baseUrl").asText("the default URL of its type"));
+                if (p.path("allowGlobalFallback").asBoolean(false)) where.append(", falling back to the shared key");
+                JsonNode o = p.get("oauth");
+                if (o != null) {
+                    for (String k : List.of("issuer", "authorizationUrl", "tokenUrl")) {
+                        if (o.hasNonNull(k)) where.append(", ").append(k).append(' ').append(o.get(k).asText());
+                    }
+                }
+                ok = prompt.ask(projectDir, key, where.toString());
+                if (ok != null) trust.remember(projectDir, key, p, ok);
+            }
+            if (!Boolean.TRUE.equals(ok)) {
+                warn.accept("Provider '" + name + "' from the project settings skipped: its authentication "
                         + (ok == null ? "was never trusted (no prompt available here)" : "is not trusted"));
                 it.remove();
             }

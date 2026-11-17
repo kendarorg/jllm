@@ -61,7 +61,8 @@ public final class Registry {
     /** A short answer to a closed question from a cheap model. */
     @FunctionalInterface
     public interface Classifier {
-        String classify(String system, String user) throws Exception;
+        /** @param principal the user of the flow run: their credential pays the call */
+        String classify(String principal, String system, String user) throws Exception;
     }
 
     /**

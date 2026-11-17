@@ -76,7 +76,9 @@ public class OAuthController {
             harness.commands().webLogin(this::startFromChat);
             return;
         }
-        for (String source : harness.oauth().names()) {
+        List<String> perUserSources = new ArrayList<>(harness.oauth().names());
+        for (String p : harness.oauth().providerSources()) if (!perUserSources.contains(p)) perUserSources.add(p);
+        for (String source : perUserSources) {
             if (!harness.oauth().perUser(source)) continue;
             if (harness.tokenStore() instanceof FileTokenStore f && !f.encrypted()) {
                 throw new IllegalStateException(source + " keeps a token per user: set JLLM_TOKEN_KEY (32 bytes, "
@@ -323,7 +325,51 @@ public class OAuthController {
             }
             out.add(m);
         }
+        for (String source : harness.oauth().providerSources()) {
+            var p = harness.oauth().provider(source);
+            if (!org.kendar.llm.harness.llm.ProviderSettings.USER_TOKEN.equals(p.userAuth())) continue;
+            boolean connected = harness.tokenStore().get(user.id(), source).isPresent();
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("source", source);
+            m.put("kind", "token");
+            m.put("perUser", true);
+            m.put("serviceAccount", false);
+            m.put("connected", connected);
+            // which credential a call would use, never the secret
+            m.put("usesSharedKey", !connected && p.fallsBackToGlobal());
+            out.add(m);
+        }
         return ResponseEntity.ok(Map.of("sources", out, "store", harness.tokenStore().describe()));
+    }
+
+    /** Sets or replaces the user's own API key of a provider. The key is never echoed or logged. */
+    @PutMapping("/api/oauth/{source}/token")
+    public ResponseEntity<Object> setToken(@PathVariable String source,
+                                           @RequestBody(required = false) Map<String, Object> body,
+                                           @RequestAttribute(value = WebPrincipal.ATTR, required = false)
+                                           WebPrincipal user) {
+        if (user == null) return error(HttpStatus.UNAUTHORIZED, "Sign in first");
+        Object token = body == null ? null : body.get("token");
+        try {
+            harness.setProviderToken(user.id(), source, token instanceof String t ? t : null);
+        } catch (IllegalArgumentException e) {
+            return error(HttpStatus.BAD_REQUEST, e.getMessage());
+        }
+        return ResponseEntity.noContent().build();
+    }
+
+    /** One tiny call to the provider with the user's own credential: {@code {ok, message?}}. */
+    @PostMapping("/api/oauth/{source}/test")
+    public ResponseEntity<Object> test(@PathVariable String source,
+                                       @RequestAttribute(value = WebPrincipal.ATTR, required = false)
+                                       WebPrincipal user) {
+        if (user == null) return error(HttpStatus.UNAUTHORIZED, "Sign in first");
+        if (harness.oauth().provider(source) == null) return error(HttpStatus.NOT_FOUND, "Unknown provider " + source);
+        String failure = harness.testProvider(user.id(), source);
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("ok", failure == null);
+        if (failure != null) out.put("message", failure);
+        return ResponseEntity.ok(out);
     }
 
     @DeleteMapping("/api/oauth/{source}")

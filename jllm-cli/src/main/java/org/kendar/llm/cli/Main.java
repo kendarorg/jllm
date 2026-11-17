@@ -168,7 +168,6 @@ public final class Main {
         if (a.containsKey("plugin-dir")) builder.pluginDir(Path.of(a.get("plugin-dir")));
         else if (java.nio.file.Files.isDirectory(Path.of("plugins"))) builder.pluginDir(Path.of("plugins"));
         AgentHarness harness = builder
-                .modelClient(choice.client())
                 .activeProvider(choice.name())
                 .sessionProvider(choice.session())
                 .config(config)
@@ -642,8 +641,8 @@ public final class Main {
         }
     }
 
-    /** The model client for the command line, the name it is known by and the session-only entry, if any. */
-    private record ProviderChoice(ModelClient client, String name, ProviderSettings session) {
+    /** The provider of the command line (the harness builds its client) and the session-only entry, if any. */
+    private record ProviderChoice(String name, ProviderSettings session) {
     }
 
     /**
@@ -653,12 +652,12 @@ public final class Main {
      */
     private static ProviderChoice chooseProvider(Map<String, String> a, HarnessSettings settings, ObjectMapper mapper,
                                                  int maxTokens) {
-        ProviderCatalog catalog = new ProviderCatalog(settings.providers(), mapper, maxTokens);
+        ProviderCatalog catalog = new ProviderCatalog(settings.providers(), mapper, maxTokens, null); // lookups only: the harness builds clients
         String name = a.containsKey("provider") ? a.get("provider")
                 : settings.defaultProvider() != null ? settings.defaultProvider() : "anthropic";
         ProviderSettings base = catalog.find(name);
         boolean overrides = a.containsKey("model") || a.containsKey("base-url") || a.containsKey("api-key");
-        if (base != null && !overrides) return new ProviderChoice(catalog.client(base), base.name(), null);
+        if (base != null && !overrides) return new ProviderChoice(base.name(), null);
         if (base == null && !a.containsKey("base-url") && !a.containsKey("model")) {
             throw new IllegalArgumentException("Unknown provider '" + name + "' (known: "
                     + String.join(", ", catalog.names()) + "); give --base-url and --model to define a session entry");
@@ -671,8 +670,7 @@ public final class Main {
                 from.maxRetries(), from.timeoutSeconds(), from.requireApiKey(), from.useMaxCompletionTokens(),
                 from.contextTokens(), from.smallModel(), from.temperature(), null, from.thinking());
         catalog.setCustom(merged);
-        return new ProviderChoice(catalog.client(ProviderCatalog.CUSTOM), ProviderCatalog.CUSTOM,
-                catalog.find(ProviderCatalog.CUSTOM));
+        return new ProviderChoice(ProviderCatalog.CUSTOM, catalog.find(ProviderCatalog.CUSTOM));
     }
 
     /** {@code --sandbox-clean[-all]}: removes the docker daemon-mode container(s), prints what went, and exits. */

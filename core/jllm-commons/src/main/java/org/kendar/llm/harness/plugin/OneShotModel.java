@@ -7,8 +7,12 @@ import java.util.Set;
 public interface OneShotModel {
     String complete(Call call) throws Exception;
 
-    /** One short plain answer to a closed question, from the host's cheap model (the main model when there is none). */
-    String classify(String system, String user) throws Exception;
+    /**
+     * One short plain answer to a closed question, from the host's cheap model (the main model when there is none).
+     *
+     * @param principal the user the question is asked for: their credential pays the call
+     */
+    String classify(String principal, String system, String user) throws Exception;
 
     /**
      * @param principal the user the work is done for; the task chat belongs to them and shows in their chat list
