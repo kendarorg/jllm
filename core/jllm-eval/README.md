@@ -1,6 +1,6 @@
 # jllm-eval
 
-Test-only module that evaluates the harness with real language models. This step is infrastructure only: no cases,
+Test-only module that evaluates the harness with real language models. It currently provides infrastructure only: no cases,
 graders or reports yet. It is **not** part of the default build; it exists only under the `eval` profile.
 
 ## Running
@@ -109,7 +109,7 @@ No Testcontainers and no container reaper are used.
 | `EvalRun` | Per-run singleton: config, connection check, metadata |
 | `EvalModels` | `target()`, `judge()`, `fast()`: harness `ModelClient`s built by `ProviderCatalog` |
 
-## Not verified in this step
+## Not yet verified
 
 Live-model acceptance (smoke test with each target, the compose-run local servers) was not run: no model was connected
 when this module was written. The model-free checks (`-Dgroups=unit`) pass.
