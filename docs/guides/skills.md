@@ -67,7 +67,7 @@ sequenceDiagram
 ### Per-user skills
 
 A multi-user embedder can give each user skills of their own and hide settings skills from them through the
-`UserPolicy` its `UserPolicyResolver` returns (see [USAGE](USAGE.md)):
+`UserPolicy` its `UserPolicyResolver` returns (see [USAGE](../reference/usage.md)):
 
 ```java
 new UserPolicy(toolFilter, approval,
@@ -103,9 +103,9 @@ flowchart LR
     P --> N["+ per-turn note: date, OS/shell,<br/>directories, mode"]
 ```
 
-The per-turn note follows the cached text in the same block; see [CACHES §1](CACHES.md#1-prompt-cache-layout).
+The per-turn note follows the cached text in the same block; see [CACHES §1](../reference/caches.md#1-prompt-cache-layout).
 
 ## 3. Agent prompts
 
 Sub-agent types (settings `agents`) also carry text: `prompt` inline or `promptFile` (read at startup). It is added to
-that sub-agent's system text only. See [EXTENDING §6](EXTENDING.md#6-sub-agent-types).
+that sub-agent's system text only. See [EXTENDING §6](extending.md#6-sub-agent-types).

@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.kendar.llm</groupId>
+        <artifactId>jllm</artifactId>
+        <version>${revision}</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>jllm-jacoco</artifactId>
+    <packaging>pom</packaging>
+    <name>jllm-jacoco</name>
+    <description>Aggregated JaCoCo coverage of all jllm modules: HTML/XML in docs/coverage/html (not committed), Markdown index in docs/coverage/README.md (committed).</description>
+
+    <properties>
+        <maven.deploy.skip>true</maven.deploy.skip>
+        <central-publish.skip>true</central-publish.skip>
+        <coverage.dir>${maven.multiModuleProjectDirectory}/docs/coverage</coverage.dir>
+        <coverage.html.dir>${coverage.dir}/html</coverage.html.dir>
+    </properties>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <version>3.1.0</version>
+                <executions>
+                    <execution>
+                        <id>coverage-report</id>
+                        <phase>test</phase>
+                        <goals><goal>run</goal></goals>
+                        <configuration>
+                            <target name="report">
+                                <echo message="Generating JaCoCo report in ${coverage.html.dir}"/>
+                                <mkdir dir="${coverage.html.dir}"/>
+                                <taskdef name="report" classname="org.jacoco.ant.ReportTask"/>
+                                <report>
+                                    <executiondata>
+                                        <fileset dir="${basedir}/..">
+                                            <include name="**/target/jacoco.exec"/>
+                                        </fileset>
+                                    </executiondata>
+                                    <structure name="jllm coverage">
+                                        <sourcefiles encoding="UTF-8">
+                                            <dirset dir="${basedir}/..">
+                                                <include name="**/src/main/java"/>
+                                            </dirset>
+                                        </sourcefiles>
+                                        <classfiles>
+                                            <fileset dir="${basedir}/..">
+                                                <include name="**/target/classes/org/kendar/**/*.class"/>
+                                            </fileset>
+                                        </classfiles>
+                                    </structure>
+                                    <html destdir="${coverage.html.dir}"/>
+                                    <xml destfile="${coverage.html.dir}/jacoco.xml"/>
+                                </report>
+                                <!-- Markdown index: the DOCTYPE of jacoco.xml points to a DTD that is not available -->
+                                <copy file="${coverage.html.dir}/jacoco.xml" tofile="${coverage.html.dir}/jacoco-nodtd.xml">
+                                    <filterchain>
+                                        <tokenfilter><filetokenizer/><replaceregex pattern="&lt;!DOCTYPE[^&gt;]*&gt;" replace=""/></tokenfilter>
+                                    </filterchain>
+                                </copy>
+                                <xslt in="${coverage.html.dir}/jacoco-nodtd.xml" out="${coverage.dir}/README.md"
+                                      style="${basedir}/coverage-md.xsl" force="true"/>
+                                <delete file="${coverage.html.dir}/jacoco-nodtd.xml"/>
+                            </target>
+                        </configuration>
+                    </execution>
+                </executions>
+                <dependencies>
+                    <dependency>
+                        <groupId>org.jacoco</groupId>
+                        <artifactId>org.jacoco.ant</artifactId>
+                        <version>0.8.14</version>
+                    </dependency>
+                </dependencies>
+            </plugin>
+        </plugins>
+    </build>
+</project>

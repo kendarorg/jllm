@@ -7,13 +7,23 @@
     <parent>
         <groupId>org.kendar.llm</groupId>
         <artifactId>jllm</artifactId>
-        <version>1.1.0-jllm</version>
+        <version>${revision}</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
 
     <artifactId>jllm-plugins</artifactId>
     <packaging>pom</packaging>
     <name>jllm-plugins</name>
+    <description>Plugins for jllm-harness: PDF, docx, JavaScript sandbox and workflows.</description>
+
+    <url>https://github.com/kendarorg/jllm</url>
+
+    <scm>
+        <connection>scm:git:git://github.com/kendarorg/jllm.git</connection>
+        <developerConnection>scm:git:git://github.com/kendarorg/jllm.git</developerConnection>
+        <url>https://www.github.com/kendarorg/jllm</url>
+        <tag>HEAD</tag>
+    </scm>
 
     <modules>
         <module>jllm-pdf</module>

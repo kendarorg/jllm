@@ -1,10 +1,10 @@
 # Usage
 
 Harness reference: build, permission modes, settings file, embedding and the event contract. Front-end specifics are in
-[jllm-cli](../jllm-cli/README.md) and [jllm-web](../jllm-web/README.md).
+[jllm-cli](../../jllm-cli/README.md) and [jllm-web](../../jllm-web/README.md).
 
-See also: [TOOLS](TOOLS.md), [MCP and REST APIs](MCP.md), [SKILLS](SKILLS.md), [EXTENDING](EXTENDING.md),
-[CACHES](CACHES.md), [INTERNALS](INTERNALS.md).
+See also: [TOOLS](../guides/tools.md), [MCP and REST APIs](../guides/mcp.md), [SKILLS](../guides/skills.md), [EXTENDING](../guides/extending.md),
+[CACHES](caches.md), [INTERNALS](internals.md).
 
 ## 1. Build
 
@@ -19,21 +19,21 @@ This jar is the library only. The front ends are separate modules:
 
 | Module | What | Doc |
 |---|---|---|
-| `jllm-cli` | terminal chat, shaded runnable jar | [jllm-cli/README.md](../jllm-cli/README.md) |
-| `jllm-web` | Spring Boot REST + SSE API and Vue chat UI | [jllm-web/README.md](../jllm-web/README.md) |
+| `jllm-cli` | terminal chat, shaded runnable jar | [jllm-cli/README.md](../../jllm-cli/README.md) |
+| `jllm-web` | Spring Boot REST + SSE API and Vue chat UI | [jllm-web/README.md](../../jllm-web/README.md) |
 
 ## 2. Command line and web front ends
 
 Flags, startup directories, the interactive session and the approval prompt are in the
-[CLI README](../jllm-cli/README.md); `jllm.*` properties and the REST/SSE API are in the
-[web README](../jllm-web/README.md). Both build the same `AgentHarness`, with `CwdSandboxExecutor` and the
+[CLI README](../../jllm-cli/README.md); `jllm.*` properties and the REST/SSE API are in the
+[web README](../../jllm-web/README.md). Both build the same `AgentHarness`, with `CwdSandboxExecutor` and the
 `FileChatSessionStore` and `FileHistory*` stores, and have **no isolation**: shell commands run as the current user.
 
 ## 3. Slash commands
 
 Handled by `SlashCommands` without calling the model (except `/compact`). Shared by every front end; the CLI and the
 web `POST /api/chat/{id}/messages` endpoint both route through it. The full table is in the
-[CLI README](../jllm-cli/README.md#slash-commands). Menu toggles (`/tools`, `/mcp`, `/apis`, `/skills`) live in memory
+[CLI README](../../jllm-cli/README.md#slash-commands). Menu toggles (`/tools`, `/mcp`, `/apis`, `/skills`) live in memory
 only; the settings file is the startup default.
 
 ### Saved chats and restarting
@@ -85,7 +85,7 @@ flowchart LR
 ```
 
 After a plan-mode answer a `plan_ready` event suggests `/edit`. The mode is the last text of the system prompt, so a
-switch leaves the cached tool block and the text before it intact (see [CACHES §1](CACHES.md#1-prompt-cache-layout)).
+switch leaves the cached tool block and the text before it intact (see [CACHES §1](caches.md#1-prompt-cache-layout)).
 
 ## 5. Settings file
 
@@ -139,9 +139,9 @@ ignored.
 
 | Key | Doc |
 |---|---|
-| `mcpServers`, `restApis` | [MCP](MCP.md) |
-| `skills`, `instructionFiles` | [SKILLS](SKILLS.md) |
-| `agents` | [EXTENDING §6](EXTENDING.md#6-sub-agent-types) |
+| `mcpServers`, `restApis` | [MCP](../guides/mcp.md) |
+| `skills`, `instructionFiles` | [SKILLS](../guides/skills.md) |
+| `agents` | [EXTENDING §6](../guides/extending.md#6-sub-agent-types) |
 | `providers`, `defaultProvider` | named model providers, see [Providers](#providers-and-temperature) |
 | `permissions` | regex deny/ask/allow rules, see [Permission rules](#permission-rules) |
 | `fastModel` | small model for compaction summaries, tool-group selection and the `auto` classifier |
@@ -152,16 +152,16 @@ ignored.
 | `toolsWhitelistedEnvVars` | default `["*"]`: the same for the processes of tools, i.e. MCP stdio servers; the `env` of a server in the settings is always added on top. The model keys (`<PROVIDER>_API_KEY`), `BRAVE_API_KEY` and the `${ENV_VAR}` of the settings file are read by the harness itself and are not affected |
 | `smallModel` | default `false`: append the small-model rules (`prompts/small-model.md`) to the system prompt; `--small-model` sets it |
 | `sandbox.tempDir`, `sandbox.timeoutSeconds` | scratch root; default shell timeout (the tool caps it at 600 s) |
-| `sandbox.backend`, `sandbox.localFallback`, `sandbox.docker.*` | `local` (default) or `docker`; fall back to local when docker is missing (default `true`); `binary`, `image`, `memory`, `cpus`, `pidsLimit`, `user`, `network`, `mode` (`oneshot` or `daemon`, a long-running container), `remote`, `remoteHost` (docker on another machine). See [SANDBOX](SANDBOX.md). CLI and web: `--sandbox`, `--docker-image`, `--docker-mode`, `--docker-remote`, `--docker-remote-host` |
+| `sandbox.backend`, `sandbox.localFallback`, `sandbox.docker.*` | `local` (default) or `docker`; fall back to local when docker is missing (default `true`); `binary`, `image`, `memory`, `cpus`, `pidsLimit`, `user`, `network`, `mode` (`oneshot` or `daemon`, a long-running container), `remote`, `remoteHost` (docker on another machine). See [SANDBOX](../guides/sandbox.md). CLI and web: `--sandbox`, `--docker-image`, `--docker-mode`, `--docker-remote`, `--docker-remote-host` |
 | `sandbox.outputLogMaxBytes` | default `51200`: cap of the spill log written when a `bash` output exceeds the kept 50 KB tail; `0` = unlimited. A capped log ends with `[log truncated at N bytes]` and the tool result says `log (itself truncated)` |
 | `files.maxReadBytes` | default `1000000`: the most text one `read_file` returns and the largest file `edit_file` changes (`grep` skips larger files); `<= 0` = default |
 | `web.fetchMaxBytes` | default `5242880` (5 MB): largest response body `web_fetch` reads; `<= 0` = default |
-| `context.noiseCommands` | default `true`: after a run, shell commands that add no information (`mkdir`, `rm`, `cd`, ...) are replaced in the context by a stub, see [INTERNALS §9](INTERNALS.md#noise-commands). `false` turns it off |
+| `context.noiseCommands` | default `true`: after a run, shell commands that add no information (`mkdir`, `rm`, `cd`, ...) are replaced in the context by a stub, see [INTERNALS §9](internals.md#noise-commands). `false` turns it off |
 | `context.deferCompactionOnThinkingOverflow` | Anthropic extended thinking, default `false`. Compaction rewrites history, which voids the signed thinking blocks (API 400 "Invalid `signature` in `thinking` block"). `false`: finished turns lose their thinking blocks; if compaction fires in the middle of a tool loop, thinking is switched off for the rest of that turn. `true`: compaction is skipped while the turn in progress holds thinking blocks, so thinking stays on but the prompt can exceed the budget until the turn ends. **This can incur increased charges** (larger prompts, and a rewrite after the turn invalidates the prompt cache) |
-| `context.*` | [CACHES](CACHES.md); `context.strategy` is `compaction`, `mnemonic` or `scope`; `context.scope.*` are the thresholds of `scope` ([CACHES §5](CACHES.md#5-scope-strategy)) |
+| `context.*` | [CACHES](caches.md); `context.strategy` is `compaction`, `mnemonic` or `scope`; `context.scope.*` are the thresholds of `scope` ([CACHES §5](caches.md#5-scope-strategy)) |
 | `output.toolMaxChars` | tool output kept in the context; the rest is cut with `[truncated N chars]` (the head is kept, the tail for `bash`) |
 | `output.eventMaxChars` | tool output carried by the `tool_result` event to the front end |
-| `output.validation` | check of tool-call arguments against the tool schema: `off`, `lenient` (default, repairs `"5"` for 5 and `null` for optional fields) or `strict`; `/validation` overrides it per chat, see [TOOLS §5](TOOLS.md#5-one-tool-call) |
+| `output.validation` | check of tool-call arguments against the tool schema: `off`, `lenient` (default, repairs `"5"` for 5 and `null` for optional fields) or `strict`; `/validation` overrides it per chat, see [TOOLS §5](../guides/tools.md#5-one-tool-call) |
 | `loop.stuck.*` | stuck detection, see [Stuck detection](#stuck-detection). `enabled` (default `true`), `repeat` (3: the same calls with the same results, or the same failing call, in a row), `alternationCycles` (3: A-B-A-B), `malformed` (3: responses whose calls cannot run: unknown tool, invalid arguments, cut off) |
 | `loop.verify.maxReentries` | default `3`: how many times a `STOP` hook may send the agent back to work before the run ends `unverified` |
 | `hooks.stop` | command hooks run when an agent is about to finish, see [Verify on stop](#verify-on-stop). Only from the user settings or `--settings`; one from the project file runs only once trusted, like a project stdio MCP server |
@@ -182,7 +182,7 @@ static key: it returns the headers of each request and is told about a 401, afte
 `AuthProvider.staticKey(...)` and `dynamicKey(...)` cover plain and rotating keys. Generic OAuth pieces, with no
 provider-specific code: `OAuthTokenClient` (code, refresh, device and client credentials grants), `Pkce`,
 `RedirectTarget` (loopback listener or a web callback), `DeviceCodeFlow`, `BrowserLauncher`, `TokenStore` (tokens by
-principal and name, see [token storage](MCP.md#6-token-storage)), `RefreshingAuthProvider` (refresh 60 s ahead under
+principal and name, see [token storage](../guides/mcp.md#6-token-storage)), `RefreshingAuthProvider` (refresh 60 s ahead under
 the store's lock, re-read first, rotated refresh token saved with a compare-and-set before use).
 A provider login is an `OAuthLogin` (name, `login(UserInteraction)`, optionally `login(ui, RedirectTarget)`,
 `authProvider(store, principalId)`), usually `AuthCodeLogin` or `DeviceCodeLogin` plus endpoints, registered as a
@@ -190,7 +190,7 @@ A provider login is an `OAuthLogin` (name, `login(UserInteraction)`, optionally 
 `OpenAiCompatModelClient.authProvider(...)`; it is not selectable from the settings file. No provider login is shipped.
 
 OAuth of MCP servers and REST APIs (per user or shared, with login-required tool results) and the `tokenStore`
-section: see [MCP](MCP.md#oauth).
+section: see [MCP](../guides/mcp.md#oauth).
 
 `/login` and `/logout`:
 
@@ -384,13 +384,13 @@ String owner = h.sessions().principal(chat);                      // "alice"; re
   (`Builder.tokenStore(...)`, or `tokenStoreDir(...)` for the file store; encrypt it with `JLLM_TOKEN_KEY`). The
   harness adds its OAuth resolver after yours, so its header wins. Logins: `harness.logins()`, `harness.saveLogin`,
   `harness.logout`; a deleted user: `harness.forgetUser(id)`. A web front end starts logins with
-  `OAuthLogin.login(ui, redirectTarget)` and its own callback ([jllm-web](../jllm-web/README.md#oauth-logins) does);
+  `OAuthLogin.login(ui, redirectTarget)` and its own callback ([jllm-web](../../jllm-web/README.md#oauth-logins) does);
   `harness.commands().webLogin(...)` routes `/login` typed in a chat through it.
 
 - A `UserPolicy` can also carry the user's own skills and a filter over the settings skills
-  ([SKILLS](SKILLS.md#per-user-skills)).
+  ([SKILLS](../guides/skills.md#per-user-skills)).
 
-The `jllm-web` module is a reference implementation of the wiring: password or OpenID Connect sign-in ([setup](../jllm-web/README.md#sign-in-with-openid-connect)), roles, per-user tool and skill
+The `jllm-web` module is a reference implementation of the wiring: password or OpenID Connect sign-in ([setup](../../jllm-web/README.md#sign-in-with-openid-connect)), roles, per-user tool and skill
 settings and an administration page; see its README.
 
 ### Front-end contract

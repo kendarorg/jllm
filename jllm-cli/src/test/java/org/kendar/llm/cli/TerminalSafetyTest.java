@@ -45,12 +45,12 @@ class TerminalSafetyTest {
 
     @Test
     void steerAndFollowupTextIsTakenOnlyWithText() {
-        assertEquals("fix it", Main.idleQueuedText("/steer fix it"));
-        assertEquals("then test", Main.idleQueuedText("  /followup   then test "));
-        assertNull(Main.idleQueuedText("/steer"));
-        assertNull(Main.idleQueuedText("/followup   "));
-        assertNull(Main.idleQueuedText("/steering x"));
-        assertNull(Main.idleQueuedText("/help"));
-        assertNull(Main.idleQueuedText("plain prompt"));
+        assertEquals("fix it", LineCommands.idleQueuedText("/steer fix it"));
+        assertEquals("then test", LineCommands.idleQueuedText("  /followup   then test "));
+        assertNull(LineCommands.idleQueuedText("/steer"));
+        assertNull(LineCommands.idleQueuedText("/followup   "));
+        assertNull(LineCommands.idleQueuedText("/steering x"));
+        assertNull(LineCommands.idleQueuedText("/help"));
+        assertNull(LineCommands.idleQueuedText("plain prompt"));
     }
 }

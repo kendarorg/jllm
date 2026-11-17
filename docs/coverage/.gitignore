@@ -1,0 +1,4 @@
+# Only the Markdown recap of the coverage is committed; the generated HTML/XML never is
+*
+!.gitignore
+!README.md

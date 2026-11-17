@@ -73,7 +73,7 @@ the window. A text response cut off there is continued automatically (up to 3 ti
 middle of a tool call is answered with an error asking for smaller output and retried once; a second cut in a row
 ends the run. A cut `write_file` keeps the lines that arrived in the scratch dir so the model can finish them with
 `append: true`. A stop well below the limit is reported as a full context window on the server. Details in
-[INTERNALS](../../docs/INTERNALS.md#stop-reasons-and-errors).
+[INTERNALS](../../docs/reference/internals.md#stop-reasons-and-errors).
 
 ## Settings file, hooks and plugins
 
@@ -113,11 +113,11 @@ AgentHarness h = AgentHarness.builder()
 ```
 
 - `providers`, `defaultProvider`, `permissions` (regex deny/ask/allow rules), temperature, `/model`, `/undo`, steering
-  (`steer` / `followUp`), checkpoints and the pdf/docx document readers are described in [USAGE](../../docs/USAGE.md#providers-and-temperature)
-  and [TOOLS](../../docs/TOOLS.md#document-readers). `builder.discoverPlugins()` loads the `HarnessPlugin`s found by
+  (`steer` / `followUp`), checkpoints and the pdf/docx document readers are described in [USAGE](../../docs/reference/usage.md#providers-and-temperature)
+  and [TOOLS](../../docs/guides/tools.md#document-readers). `builder.discoverPlugins()` loads the `HarnessPlugin`s found by
   `ServiceLoader` (classpath and `builder.pluginDir(...)`) that are listed and enabled under `plugins` in the settings
-  (ids `pdf`, `docs`; see [EXTENDING](../../docs/EXTENDING.md#3-plugins-and-slash-commands)); `builder.documentReader(...)` adds a reader directly.
-- `${ENV_VAR}` is expanded in every string; a missing variable fails the load. MCP servers support OAuth (`oauth: true`, see [MCP](../../docs/MCP.md#oauth)); REST uses static headers only.
+  (ids `pdf`, `docs`; see [EXTENDING](../../docs/guides/extending.md#3-plugins-and-slash-commands)); `builder.documentReader(...)` adds a reader directly.
+- `${ENV_VAR}` is expanded in every string; a missing variable fails the load. MCP servers support OAuth (`oauth: true`, see [MCP](../../docs/guides/mcp.md#oauth)); REST uses static headers only.
 - A REST operation becomes a tool only if it passes `allowedPaths` and `denyPaths` (`METHOD /path`, method optional, `*` wildcard).
   MCP tools follow `allowList` and `denyList` (tool names, `*` wildcard). Absent allow = all, `[]` = none, `["*"]` = all;
   deny hides matches. Hidden tools are never sent to the model.
@@ -177,7 +177,7 @@ AgentHarness h = AgentHarness.builder()
 - `/mode` opens a numbered menu (plan, edit, auto); `/mode plan`, `/default`, `/plan`, `/edit`, `/auto` set it directly.
   `/where` prints the working directory and the scratch directory of the chat.
   The mode is the last text of the system prompt, so switching it keeps the cached tool block and the text before it
-  (see [CACHES](../../docs/CACHES.md)). After a
+  (see [CACHES](../../docs/reference/caches.md)). After a
   plan-mode answer a `plan_ready` event suggests `/edit`.
 - Scratch dir: `<sandbox.tempDir>/<chatId>/<agentId>` (default `${java.io.tmpdir}/agent-harness`); the main agent and
   each sub-agent get their own. Sub-agents inherit the caller's mode; types marked `readOnly` (explore, plan) stay read-only.
@@ -247,7 +247,7 @@ prompt and tool schemas. While it is over budget, in this order: tool results lo
 to `<scratch>/offload/<tool_use_id>.txt` and replaced by the path plus `previewChars` of head and tail (the agent reads
 the file with `read_file`); old tool results are cleared; older turns are summarized. A request the provider still
 refuses gets one forced pass (`overflowOffloadChars`, one turn kept). The first user message and the todo list are
-never compacted; see [CACHES §5](../../docs/CACHES.md#5-scope-strategy).
+never compacted; see [CACHES §5](../../docs/reference/caches.md#5-scope-strategy).
 
 The strategy offers `todo_write` (the complete list, at most one `in_progress`) and `todo_read`; both are `READ_ONLY`.
 The list is kept per chat and agent in the `StateStore`, added to the last user message of every request (never to the

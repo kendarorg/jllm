@@ -1,5 +1,5 @@
 /**
- * Pure helpers over a flow document (the JSON of docs/WORKFLOW.md). No Vue, no DOM: the designer edits the document in
+ * Pure helpers over a flow document (the JSON of docs/guides/workflow.md). No Vue, no DOM: the designer edits the document in
  * place, these functions only know where its references are. A "part" is the object holding `start` and `steps`: the
  * document itself for the main flow, `doc.onError` for the error handler.
  */

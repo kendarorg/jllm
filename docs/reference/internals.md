@@ -1,7 +1,7 @@
 # Internals
 
 How the harness is put together and how a turn runs. Context management (compaction, mnemonic, prompt-cache layout)
-is not covered here: see [CACHES](CACHES.md). Step-by-step diagrams of every pipeline are in [FLOW](FLOW.md).
+is not covered here: see [CACHES](caches.md). Step-by-step diagrams of every pipeline are in [FLOW](flow.md).
 
 Source root: `src/main/java/org/kendar/llm/harness`.
 
@@ -21,7 +21,7 @@ Source root: `src/main/java/org/kendar/llm/harness`.
 | `skills`, `instructions` | `SkillCatalog`, `SkillTool`, `InstructionLoader` |
 | `settings` | `HarnessSettings` and its records (JSON file) |
 | `commands`, `plugin` | `SlashCommands`, `MenuController`, `CustomCommand`, `HarnessPlugin` |
-| `context` | strategies, see [CACHES](CACHES.md) |
+| `context` | strategies, see [CACHES](caches.md) |
 
 ## 2. Object graph
 
@@ -176,7 +176,7 @@ sub-agents.
 
 ## 6. Permissions and approvals
 
-The order of checks for one tool call is in [TOOLS §5](TOOLS.md#5-one-tool-call). The pieces:
+The order of checks for one tool call is in [TOOLS §5](../guides/tools.md#5-one-tool-call). The pieces:
 
 | Component | Decides | State |
 |---|---|---|
@@ -302,7 +302,7 @@ and under 200 characters, and the turn that issued it has ended. A failing comma
   unparsable answer or a rate limit is `keep`; the loop is never blocked for long. Its tokens go to
   `qualifierInputTokens` / `qualifierOutputTokens` of the chat row and show as a separate line of `/cost`.
 
-A `drop` is applied in a batch (see [CACHES](CACHES.md#noise-commands-any-strategy)). The call and its result become a
+A `drop` is applied in a batch (see [CACHES](caches.md#noise-commands-any-strategy)). The call and its result become a
 stub (`tool_use.input.command` cut to 80 characters, result `ok (exit 0)`), so the pairing stays valid for every
 provider. The originals follow the stub in `messages.jsonl` as a reference line:
 

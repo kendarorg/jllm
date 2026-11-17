@@ -7,7 +7,7 @@ decides order, branching, waiting and termination.
 "Deterministic" means deterministic orchestration: the same flow, with the same inputs and the same decisions, walks the
 same path. The model's answers are not deterministic.
 
-The design rationale and the build phases are in [deterministic.md](deterministic.md). This page is the practical guide.
+This page is the practical guide.
 Class names below are real; re-check against `plugins/jllm-workflows` when changing behavior.
 
 ## 1. Modules and installation

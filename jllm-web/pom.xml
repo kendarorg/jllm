@@ -7,13 +7,27 @@
     <parent>
         <groupId>org.kendar.llm</groupId>
         <artifactId>jllm</artifactId>
-        <version>1.1.0-jllm</version>
+        <version>${revision}</version>
     </parent>
 
     <artifactId>jllm-web</artifactId>
     <packaging>jar</packaging>
     <name>jllm-web</name>
     <description>Web front end (chat UI over REST + SSE) for jllm-harness.</description>
+
+    <url>https://github.com/kendarorg/jllm</url>
+
+    <scm>
+        <connection>scm:git:git://github.com/kendarorg/jllm.git</connection>
+        <developerConnection>scm:git:git://github.com/kendarorg/jllm.git</developerConnection>
+        <url>https://www.github.com/kendarorg/jllm</url>
+        <tag>HEAD</tag>
+    </scm>
+
+    <properties>
+        <maven.deploy.skip>true</maven.deploy.skip>
+        <central-publish.skip>true</central-publish.skip>
+    </properties>
 
     <dependencies>
         <dependency>

@@ -224,7 +224,7 @@ flowchart TD
 ```
 
 Notes:
-- Order matters: hook, then gate, then classifier, then settings `ask` rule, then chat grant, then `allow` rule, then non-interactive deny, then hook-deny check; a settings `deny` rule wins over all of them (see [USAGE](USAGE.md#permission-rules)). A "remember" approval (`a`) adds a grant for the tool name for the whole chat, sub-agents included. A grant only replaces the question; deny rules, hooks and plan confinement still apply.
+- Order matters: hook, then gate, then classifier, then settings `ask` rule, then chat grant, then `allow` rule, then non-interactive deny, then hook-deny check; a settings `deny` rule wins over all of them (see [USAGE](usage.md#permission-rules)). A "remember" approval (`a`) adds a grant for the tool name for the whole chat, sub-agents included. A grant only replaces the question; deny rules, hooks and plan confinement still apply.
 - `ApprovalService.await` serializes dialogs per chat (fair lock), timeout (default 600 s) starts when shown.
 - `Decision` is computed by `PermissionGate`, pure policy:
 
@@ -248,7 +248,7 @@ flowchart LR
 | EDIT | writable | writable | shell and other non-FILE_EDIT tools |
 | AUTO | writable | writable | nothing, unless the classifier says not SAFE |
 
-The mode note is the last text of `extraSystem`, so switching modes keeps the cached tool block and the text before the note (see CACHES.md §1).
+The mode note is the last text of `extraSystem`, so switching modes keeps the cached tool block and the text before the note (see caches.md §1).
 
 ## 5. Tool set per chat
 

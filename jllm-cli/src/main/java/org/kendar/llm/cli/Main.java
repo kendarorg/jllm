@@ -8,9 +8,6 @@ import org.kendar.llm.harness.HarnessConfig;
 import org.kendar.llm.harness.agent.AgentEvent;
 import org.kendar.llm.harness.commands.SlashCommands;
 import org.kendar.llm.harness.context.mnemonic.FileMnemonicStore;
-import org.kendar.llm.harness.llm.ModelClient;
-import org.kendar.llm.harness.llm.ProviderCatalog;
-import org.kendar.llm.harness.llm.ProviderSettings;
 import org.kendar.llm.harness.permission.PermissionMode;
 import org.kendar.llm.harness.sandbox.CwdSandboxExecutor;
 import org.kendar.llm.harness.session.FileChatSessionStore;
@@ -24,7 +21,6 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
@@ -56,7 +52,7 @@ public final class Main {
     /** {@code --api-key} value that makes the CLI ask for the key instead of taking it from the command line. */
     static final String ASK_TOKEN = "ASK_TOKEN";
     /** Default output limit of one response, all providers. */
-    static final int DEFAULT_MAX_TOKENS = 32_000;
+    
 
     /** The JLine terminal, null when stdin/stdout is not a terminal (plain output and input). */
     private static Term term;
@@ -84,16 +80,9 @@ public final class Main {
     }
 
     public static void main(String[] argv) throws Exception {
-        Map<String, String> a = parse(argv);
+        Map<String, String> a = CliArgs.parse(argv);
         if (a.containsKey("help")) {
-            System.out.println("Usage: Main [--provider anthropic|openai|gemini|grok|qwen|llamacpp|ollama] [--model M] [--base-url U] "
-                    + "[--api-key K] [--mode plan|edit|auto] [--workdir DIR] [--prompt TEXT] "
-                    + "[--system-prompt TEXT] [--max-turns N] [--context-tokens TOKENS] [--search-api-key BRAVE_KEY] "
-                    + "[--settings FILE] [--context-strategy compaction|mnemonic|scope] [--max-tokens TOKENS] [--small-model] "
-                    + "[--resume prompt|no|CHAT_ID] "
-                    + "[--sandbox local|docker] [--docker-image IMAGE] [--docker-mode oneshot|daemon] "
-                    + "[--docker-remote] [--docker-remote-host ADDRESS] [--sandbox-clean] [--sandbox-clean-all] "
-                    + "[--pricing.input-per-million=USD] [--pricing.output-per-million=USD] [--pricing.cache-read-per-million=USD] [--pricing.cache-write-per-million=USD] [--plugin-dir DIR] [--plugins.ID.enabled=true|false] [--plugins.ID.settings.KEY=VALUE]");
+            System.out.println(CliArgs.USAGE);
             return;
         }
         if (ASK_TOKEN.equals(a.get("api-key"))) {
@@ -127,28 +116,10 @@ public final class Main {
                                 : null),
                 a.get("system-prompt"));
         // the flag wins over the settings file
-        if (a.containsKey("context-tokens") && Integer.parseInt(a.get("context-tokens")) > 0) {
-            settings = settings.withMaxTokens(Integer.parseInt(a.get("context-tokens"))); // <= 0: default, as the web app
-        }
-        if (a.containsKey("context-strategy")) settings = settings.withContextStrategy(a.get("context-strategy"));
-        if (flag(a, "small-model")) settings = settings.withSmallModel(true);
-        if (a.containsKey("sandbox")) settings = settings.withSandboxBackend(a.get("sandbox"));
-        if (a.containsKey("docker-image")) settings = settings.withDockerImage(a.get("docker-image"));
-        if (a.containsKey("docker-mode")) settings = settings.withDockerMode(a.get("docker-mode"));
-        if (flag(a, "docker-remote") || a.containsKey("docker-remote-host")) {
-            settings = settings.withDockerRemote(flag(a, "docker-remote") ? Boolean.TRUE : null,
-                    a.get("docker-remote-host"));
-        }
-        for (var e : a.entrySet()) { // --plugins.<id>.enabled=true: this run only, as jllm.plugins.* in the web app
-            if (e.getKey().startsWith("plugins.")) settings = settings.withPluginOption(e.getKey().substring(8), e.getValue());
-        }
-        HarnessConfig config = settings.applyTo(HarnessConfig.defaults());
+        settings = SettingsOverrides.applyToSettings(a, settings);
         // the agent works in the project directory; scratch directories go under the settings' sandbox.tempDir
-        String searchKey = a.getOrDefault("search-api-key", System.getenv("BRAVE_API_KEY"));
-        if (searchKey != null) config = config.withSearchApiKey(searchKey);
-        if (a.containsKey("max-turns") && Integer.parseInt(a.get("max-turns")) > 0) config = config.withMaxTurns(Integer.parseInt(a.get("max-turns")));
-        config = config.withMaxTokens(a.containsKey("max-tokens") ? Integer.parseInt(a.get("max-tokens"))
-                : DEFAULT_MAX_TOKENS);
+        HarnessConfig config = SettingsOverrides.applyToConfig(a, settings.applyTo(HarnessConfig.defaults()),
+                System.getenv("BRAVE_API_KEY"));
 
         if (a.containsKey("sandbox-clean") || a.containsKey("sandbox-clean-all")) {
             cleanSandbox(config, projectDir, a.containsKey("sandbox-clean-all"));
@@ -163,7 +134,7 @@ public final class Main {
                 org.kendar.llm.harness.sandbox.RemoteExecSandboxExecutor.Kind.CLI, projectDir)
                 .onWarning(w -> System.err.println("warning: " + w))
                 : new org.kendar.llm.harness.sandbox.DockerSandboxExecutor(config, dockerRunner, cwdSandbox);
-        ProviderChoice choice = chooseProvider(a, settings, mapper, config.maxTokens());
+        ProviderChooser.ProviderChoice choice = ProviderChooser.choose(a, settings, mapper, config.maxTokens());
         AgentHarness.Builder builder = AgentHarness.builder();
         if (a.containsKey("plugin-dir")) builder.pluginDir(Path.of(a.get("plugin-dir")));
         else if (java.nio.file.Files.isDirectory(Path.of("plugins"))) builder.pluginDir(Path.of("plugins"));
@@ -180,9 +151,9 @@ public final class Main {
                 .mnemonicStore(new FileMnemonicStore(cwdSandbox.historyRoot()))
                 .stateStore(new org.kendar.llm.harness.state.FileStateStore(cwdSandbox.historyRoot()))
                 .settings(settings)
-                .pricing(new org.kendar.llm.harness.HarnessPricing(num(a, "pricing.input-per-million"),
-                        num(a, "pricing.output-per-million"), num(a, "pricing.cache-read-per-million"),
-                        num(a, "pricing.cache-write-per-million")))
+                .pricing(new org.kendar.llm.harness.HarnessPricing(CliArgs.num(a, "pricing.input-per-million"),
+                        CliArgs.num(a, "pricing.output-per-million"), CliArgs.num(a, "pricing.cache-read-per-million"),
+                        CliArgs.num(a, "pricing.cache-write-per-million")))
                 .objectMapper(mapper)
                 .discoverPlugins()
                 .build();
@@ -207,7 +178,7 @@ public final class Main {
             if (term != null) return term.readLine(tail.get(), () -> { });
             try {
                 String l = in.take();
-                return l.equals(EOF) ? null : l;
+                return l.equals(LineCommands.EOF) ? null : l;
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 return null;
@@ -240,12 +211,12 @@ public final class Main {
                 System.out.flush();
             }
             String line = in.take();
-            if (line.equals(EOF)) break;
-            if (line.equals(INTERRUPTED)) continue;
-            if (isExitCommand(line)) {
+            if (line.equals(LineCommands.EOF)) break;
+            if (line.equals(LineCommands.INTERRUPTED)) continue;
+            if (LineCommands.isExitCommand(line)) {
                 ask("Stop the whole process and exit? [y/N] ");
                 String answer = in.take();
-                if (answer.equals(EOF) || answer.strip().toLowerCase().startsWith("y")) break;
+                if (answer.equals(LineCommands.EOF) || LineCommands.startsWithYes(answer)) break;
                 continue;
             }
             if (harness.commands().menuActive(chat.id)) {
@@ -253,12 +224,12 @@ public final class Main {
                 continue;
             }
             if (line.isBlank()) continue;
-            if (line.strip().equals("/expand") || line.strip().startsWith("/expand ")) {
-                renderer.expand(line.strip().substring("/expand".length()));
+            if (LineCommands.isExpandCommand(line)) {
+                renderer.expand(LineCommands.expandArg(line));
                 continue;
             }
             // nothing to steer or follow up while idle: the text is a normal prompt, and the run is followed here
-            String queued = idleQueuedText(line);
+            String queued = LineCommands.idleQueuedText(line);
             if (queued != null) {
                 runTurn(harness, chat.id, queued, events, in);
                 continue;
@@ -272,27 +243,8 @@ public final class Main {
         System.exit(0);
     }
 
-    /** The text of {@code /steer <text>} or {@code /followup <text>}; null for any other line or an empty text. */
-    static String idleQueuedText(String line) {
-        String s = line.strip();
-        for (String c : new String[]{"/steer", "/followup"}) {
-            if (s.equals(c) || !s.startsWith(c + " ")) continue;
-            String text = s.substring(c.length()).strip();
-            return text.isEmpty() ? null : text;
-        }
-        return null;
-    }
-
-    private static final String EOF = "<eof>";
-    /** Put in the input queue by ctrl+c during an approval question: the question was answered "no". */
-    private static final String INTERRUPTED = "<interrupted>";
     /** Chat and id of the approval the CLI is asking about now, or null. */
     private static volatile String[] pendingApproval;
-
-    private static boolean isExitCommand(String line) {
-        String s = line.strip();
-        return s.equals("/exit") || s.equals("/quit");
-    }
 
     /** Set while a /exit typed during a run waits for its y/N answer (the next typed line). */
     private static boolean exitPending;
@@ -337,7 +289,7 @@ public final class Main {
                     else say(Renderer.DIM + "(press ctrl+c again to exit)" + Renderer.RESET);
                     lastInterrupt = now;
                 });
-                in.add(l == null ? EOF : l);
+                in.add(l == null ? LineCommands.EOF : l);
                 if (l == null) return;
             }
         }, "terminal-input");
@@ -374,9 +326,8 @@ public final class Main {
         }
         System.out.print("API key: ");
         System.out.flush();
-        java.io.ByteArrayOutputStream line = new java.io.ByteArrayOutputStream();
-        for (int b = System.in.read(); b != -1 && b != '\n'; b = System.in.read()) line.write(b);
-        return line.toString(StandardCharsets.UTF_8).strip();
+        String line = LineCommands.readPlainLine(System.in);
+        return line == null ? "" : line.strip();
     }
 
     /**
@@ -386,22 +337,9 @@ public final class Main {
     static Boolean askYesNo(String question) {
         try {
             java.io.Console console = System.console();
-            String answer;
-            if (console != null) {
-                answer = console.readLine("%s [y/N] ", question);
-            } else {
-                System.out.print(question + " [y/N] ");
-                System.out.flush();
-                java.io.ByteArrayOutputStream line = new java.io.ByteArrayOutputStream();
-                int b = System.in.read();
-                if (b == -1) return null;
-                for (; b != -1 && b != '\n'; b = System.in.read()) line.write(b);
-                answer = line.toString(StandardCharsets.UTF_8);
-            }
-            if (answer == null) return null;
-            String t = answer.strip().toLowerCase(java.util.Locale.ROOT);
-            return t.equals("y") || t.equals("yes");
-        } catch (IOException e) {
+            if (console != null) return LineCommands.parseYesNo(console.readLine("%s [y/N] ", question));
+            return LineCommands.askYesNo(question, System.out, System.in);
+        } catch (RuntimeException e) {
             return null;
         }
     }
@@ -413,7 +351,7 @@ public final class Main {
                 for (String l = r.readLine(); l != null; l = r.readLine()) lines.add(l);
             } catch (IOException ignored) {
             }
-            lines.add(EOF);
+            lines.add(LineCommands.EOF);
         }, "stdin");
         t.setDaemon(true);
         t.start();
@@ -474,7 +412,7 @@ public final class Main {
         while (true) {
             // Input typed during the run: a command (/cancel, /followup <text>) runs, any other line steers the agent
             for (String typed = in.poll(); typed != null; typed = in.poll()) {
-                if (typed.equals(EOF) || typed.equals(INTERRUPTED) || typed.isBlank()) continue;
+                if (typed.equals(LineCommands.EOF) || typed.equals(LineCommands.INTERRUPTED) || typed.isBlank()) continue;
                 if (stopPending) {
                     stopPending = false;
                     harness.cancel(chatId, typed.strip().toLowerCase().startsWith("k"));
@@ -489,13 +427,13 @@ public final class Main {
                     say("Continuing.");
                     continue;
                 }
-                if (isExitCommand(typed)) {
+                if (LineCommands.isExitCommand(typed)) {
                     ask("The agent is running. Stop it and exit the whole process? [y/N] ");
                     exitPending = true;
                     continue;
                 }
                 if (typed.strip().equals("/cancel")) requestStop(harness, chatId);
-                else if (typed.strip().startsWith("/expand")) renderer.expand(typed.strip().substring(7));
+                else if (typed.strip().startsWith("/expand")) renderer.expand(LineCommands.expandArg(typed));
                 else if (harness.commands().handles(typed.strip())) menu(harness.commands().execute(chatId, typed.strip()));
                 else harness.steer(chatId, typed.strip());
             }
@@ -543,7 +481,8 @@ public final class Main {
         String id = d.path("id").asText();
         pendingApproval = new String[]{chatId, id};
         try {
-            askApproval(harness, chatId, id, d, in);
+            new ApprovalPrompter(harness::resolveApproval, Main::say, Main::ask, in::take,
+                    Path.of("").toAbsolutePath()).prompt(chatId, d);
         } finally {
             pendingApproval = null;
         }
@@ -560,76 +499,9 @@ public final class Main {
         pendingApproval = null;
         harness.resolveApproval(p[0], p[1], false, null, false, false);
         in.clear();
-        in.add(INTERRUPTED);
+        in.add(LineCommands.INTERRUPTED);
         say(Renderer.YELLOW + "[approval] rejected (ctrl+c again stops the run)" + Renderer.RESET);
         return true;
-    }
-
-    /** The next typed answer; null when the question was interrupted (already rejected). */
-    private static String answer(BlockingQueue<String> in) throws InterruptedException {
-        String a = in.take();
-        return a.equals(INTERRUPTED) ? null : a;
-    }
-
-    private static void askApproval(AgentHarness harness, String chatId, String id, JsonNode d,
-                                    BlockingQueue<String> in) throws InterruptedException {
-        // title and preview carry model and tool text: no terminal control sequences from them
-        say(Renderer.YELLOW + "[approval] " + Renderer.clean(d.path("type").asText()) + " "
-                + Renderer.clean(d.path("title").asText()) + Renderer.RESET + "\n"
-                + Renderer.clean(d.path("preview").asText()));
-        if ("continue".equals(d.path("type").asText())) {
-            ask("Turns to allow [" + Renderer.clean(d.path("proposed").asText()) + ", n = stop] ");
-            String t = answer(in);
-            if (t == null) return;
-            String v = t.equals(EOF) ? "n" : t.strip();
-            boolean stop = v.toLowerCase().startsWith("n");
-            harness.resolveApproval(chatId, id, !stop, v.isEmpty() ? null : v, false, false);
-            return;
-        }
-        String writeDir = Renderer.clean(d.path("writeDir").asText(""));
-        String host = Renderer.clean(d.path("host").asText());
-        if ("stuck".equals(d.path("type").asText())) {
-            ask("Let the agent continue? [y/N] ");
-            String c = answer(in);
-            if (c == null) return;
-            harness.resolveApproval(chatId, id, !c.equals(EOF) && c.strip().toLowerCase().startsWith("y"), null,
-                    false, false);
-            return;
-        }
-        if ("insecure_cert".equals(d.path("type").asText())) {
-            ask("Continue without checking the certificate of " + host + " (this call only)? [y/N] ");
-            String c = answer(in);
-            if (c == null) return;
-            harness.resolveApproval(chatId, id, !c.equals(EOF) && c.strip().toLowerCase().startsWith("y"), null,
-                    false, false);
-            return;
-        }
-        if ("host".equals(d.path("type").asText())) {
-            ask("Allow " + host + "? [y=once/N/a=this host and its subdomains for this chat] ");
-            String h = answer(in);
-            if (h == null) return;
-            String ha = h.equals(EOF) ? "" : h.strip().toLowerCase();
-            boolean always = ha.startsWith("a");
-            harness.resolveApproval(chatId, id, always || ha.startsWith("y"), null, always, false);
-            return;
-        }
-        ask("Allow? [y/N/a=allow for this chat"
-                + (writeDir.isEmpty() ? "" : "/d=allow writes in " + writeDir + "/ and subfolders"
-                + ", or 'd <path>' for another folder of the project") + "] ");
-        String answer = answer(in);
-        if (answer == null) return;
-        String raw = answer.equals(EOF) ? "" : answer.strip();
-        String a = raw.toLowerCase();
-        boolean remember = a.startsWith("a");
-        boolean rememberDir = !writeDir.isEmpty() && a.startsWith("d");
-        String typedDir = rememberDir && raw.length() > 1 ? raw.substring(1).strip() : null;
-        if (typedDir != null && typedDir.isEmpty()) typedDir = null;
-        if (typedDir != null && org.kendar.llm.harness.permission.ApprovalService
-                .grantDirOf(java.nio.file.Path.of("").toAbsolutePath(), typedDir) == null) {
-            say("[warning] Path not allowed (absolute, '..' or .git): no folder granted");
-        }
-        boolean ok = remember || rememberDir || a.startsWith("y");
-        harness.resolveApproval(chatId, id, ok, typedDir, remember, rememberDir);
     }
 
     /** A question: above the prompt on a terminal (the answer comes from the input line), inline otherwise. */
@@ -642,39 +514,6 @@ public final class Main {
         }
     }
 
-    /** The model client for the command line, the name it is known by and the session-only entry, if any. */
-    private record ProviderChoice(ModelClient client, String name, ProviderSettings session) {
-    }
-
-    /**
-     * {@code --provider} picks a provider of the settings list (or a built-in). {@code --model}, {@code --base-url}
-     * and {@code --api-key} override it for this session only; with an unknown provider name, or {@code --model}
-     * alone, they define a {@code custom} entry that is never written to the settings file.
-     */
-    private static ProviderChoice chooseProvider(Map<String, String> a, HarnessSettings settings, ObjectMapper mapper,
-                                                 int maxTokens) {
-        ProviderCatalog catalog = new ProviderCatalog(settings.providers(), mapper, maxTokens);
-        String name = a.containsKey("provider") ? a.get("provider")
-                : settings.defaultProvider() != null ? settings.defaultProvider() : "anthropic";
-        ProviderSettings base = catalog.find(name);
-        boolean overrides = a.containsKey("model") || a.containsKey("base-url") || a.containsKey("api-key");
-        if (base != null && !overrides) return new ProviderChoice(catalog.client(base), base.name(), null);
-        if (base == null && !a.containsKey("base-url") && !a.containsKey("model")) {
-            throw new IllegalArgumentException("Unknown provider '" + name + "' (known: "
-                    + String.join(", ", catalog.names()) + "); give --base-url and --model to define a session entry");
-        }
-        ProviderSettings from = base != null ? base : new ProviderSettings(name, "openai", null, null, null,
-                maxTokens, null, null, null, null, null, null, null);
-        ProviderSettings merged = new ProviderSettings(from.name(), from.type(),
-                a.getOrDefault("base-url", from.baseUrl()), a.getOrDefault("api-key", from.apiKey()),
-                a.getOrDefault("model", from.model()), from.maxTokens() != null ? from.maxTokens() : maxTokens,
-                from.maxRetries(), from.timeoutSeconds(), from.requireApiKey(), from.useMaxCompletionTokens(),
-                from.contextTokens(), from.smallModel(), from.temperature(), null, from.thinking());
-        catalog.setCustom(merged);
-        return new ProviderChoice(catalog.client(ProviderCatalog.CUSTOM), ProviderCatalog.CUSTOM,
-                catalog.find(ProviderCatalog.CUSTOM));
-    }
-
     /** {@code --sandbox-clean[-all]}: removes the docker daemon-mode container(s), prints what went, and exits. */
     private static void cleanSandbox(HarnessConfig config, Path projectDir, boolean all) throws IOException {
         var runner = new org.kendar.llm.harness.sandbox.ProcessDockerCommandRunner();
@@ -684,37 +523,5 @@ public final class Main {
         if (removed.isEmpty()) System.out.println("No sandbox container to remove" + (all ? "." : " for " + projectDir));
         else removed.forEach(n -> System.out.println("removed " + n));
         System.out.println("Project files and .jllm are untouched.");
-    }
-
-    /** A boolean flag: bare ({@code --small-model}) or with a value ({@code --small-model=false}). */
-    private static boolean flag(Map<String, String> a, String name) {
-        return a.containsKey(name) && !"false".equalsIgnoreCase(a.get(name));
-    }
-
-    private static double num(Map<String, String> a, String name) {
-        return a.containsKey(name) ? Double.parseDouble(a.get(name)) : 0;
-    }
-
-    private static Map<String, String> parse(String[] argv) {
-        Map<String, String> m = new HashMap<>();
-        for (int i = 0; i < argv.length; i++) {
-            String k = argv[i];
-            int eq = k.indexOf('=');
-            if (k.startsWith("--") && eq > 2) { // --key=value, as the web application takes it
-                m.put(k.substring(2, eq), k.substring(eq + 1));
-                continue;
-            }
-            if (k.equals("-h") || k.equals("--help")) {
-                m.put("help", "");
-            } else if (k.equals("--small-model") || k.equals("--sandbox-clean") || k.equals("--sandbox-clean-all")
-                    || k.equals("--docker-remote")) {
-                m.put(k.substring(2), "");
-            } else if (k.startsWith("--") && i + 1 < argv.length) {
-                m.put(k.substring(2), argv[++i]);
-            } else {
-                throw new IllegalArgumentException("Unexpected argument " + k + " (use --help)");
-            }
-        }
-        return m;
     }
 }

@@ -44,7 +44,7 @@ sequenceDiagram
   counts as reachable).
 - A chat whose tool set is "every tool" sees an enabled/disabled source from its next model call. A chat with a fixed
   group list sees new tools only if their group is in the list (or after `request_tool_group`). Either change alters
-  the tool block of the request, so the next call writes a new prompt cache (see [CACHES](CACHES.md)).
+  the tool block of the request, so the next call writes a new prompt cache (see [CACHES](../reference/caches.md)).
 
 ## 2. MCP servers
 
@@ -256,7 +256,7 @@ headers(principal, "api:crm"):
 
 Logging in: `/login api:crm` (loopback redirect on the command line, the device code with `device_code`). In jllm-web,
 `/login api:crm` and the **Connect** buttons open the authorization page in a new tab; the redirect goes to
-`<jllm.web.public-url>/oauth/callback` (see the [jllm-web README](../jllm-web/README.md#oauth-logins)).
+`<jllm.web.public-url>/oauth/callback` (see the [jllm-web README](../../jllm-web/README.md#oauth-logins)).
 `/logout api:crm` removes the token.
 
 A project's own `.jllm/settings.json` can send a user's token to any host with an `oauth` block: such an API is asked
@@ -291,7 +291,7 @@ From code: `harness.sources().list(Kind.MCP)`, `enable`, `disable`, `check`.
 
 Unless `readOnly` (MCP) or GET/HEAD (REST), external tools are `OTHER`: they ask in `default`, `plan` and `edit`, and
 in `auto` go through the classifier when a fast model is configured. A custom `ToolApprovalPolicy` can decide per
-tool name (see [EXTENDING §4](EXTENDING.md#4-approval-policy)).
+tool name (see [EXTENDING §4](extending.md#4-approval-policy)).
 
 ## 6. Token storage
 
@@ -336,5 +336,5 @@ refreshing the same token at the same instant can still race (rare for one deskt
 **Refresh races**: providers that rotate refresh tokens invalidate the old one at each refresh. A refresh runs under the
 store's lock for that entry, re-reads it first (another refresher may have stored a fresh token), stores the result
 with a compare-and-set before using it, and uses the stored token when the compare fails. A store only keeps tokens: it
-must never refresh them on its own. Own implementations: [EXTENDING](EXTENDING.md#token-stores).
+must never refresh them on its own. Own implementations: [EXTENDING](extending.md#token-stores).
 

@@ -376,7 +376,7 @@ After a main-agent run, `NoiseCommandPruner` removes shell calls that add no inf
 prompt changes from that message on: a cache miss for the rest of the prompt, the same as a mnemonic frontier move.
 That is why drops are batched: the calls are collected after each turn and rewritten together once they save at least
 1000 tokens (estimated). The stub is stored in the log, so after a restart the prompt is byte-identical and nothing is
-qualified twice. See [INTERNALS §9](INTERNALS.md#9-sessions-and-persistence). `context.noiseCommands: false` turns it
+qualified twice. See [INTERNALS §9](internals.md#9-sessions-and-persistence). `context.noiseCommands: false` turns it
 off.
 
 ## 5. Scope strategy
@@ -449,5 +449,5 @@ Unset values keep these defaults. Code: `builder.scopeOptions(new ScopeStrategy.
 | `/compact` | yes | no-op | yes |
 
 Select with `context.strategy`, `--context-strategy`, `HarnessConfig.withContextStrategy(...)`, or a custom
-implementation through `builder.contextStrategy(factory)` ([EXTENDING §7](EXTENDING.md#7-context-strategy)).
+implementation through `builder.contextStrategy(factory)` ([EXTENDING §7](../guides/extending.md#7-context-strategy)).
 `/status` shows the active one.
