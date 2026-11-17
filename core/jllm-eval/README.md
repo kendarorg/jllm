@@ -85,7 +85,7 @@ object descriptions, exception messages, connection-check output and `run.json`.
 | `eval.timeout.connect` | Seconds allowed for a reachability probe. |
 | `eval.timeout.warmup` | Seconds allowed for the warm-up call. |
 | `eval.trials` | Default number of trials. |
-| `eval.outputDir` | Output folder. Each run writes `run-<timestamp>/run.json` there. |
+| `eval.outputDir` | Results folder (git-ignored, survives `mvn clean`). Layout: `<model>/run-<timestamp>/` with `run.json`, `<feature>/<case>/<strategy>/result.json` and traces, plus `report.md` and `summary.json` written when the run ends; `<model>/baselines/`; `summary/merged.md` compares the latest run of every model; `history/` keeps one compact recap per run, `<date>_<model>.md` and `.json`, plus `INDEX.md` (not git-ignored: commit it to keep the eval history). |
 
 ## Embedding model
 

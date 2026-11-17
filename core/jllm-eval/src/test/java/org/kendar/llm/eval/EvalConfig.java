@@ -174,7 +174,7 @@ public final class EvalConfig {
         warmupTimeoutSeconds = integer("eval.timeout.warmup", 1);
         trials = integer("eval.trials", 1);
         String out = str("eval.outputDir", true);
-        outputDir = Path.of(out == null ? "target/eval-output" : out);
+        outputDir = Path.of(out == null ? "eval-results" : out);
 
         resolveEmbedding();
         resolveTarget();
