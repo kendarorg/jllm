@@ -84,7 +84,7 @@ All modules are available on Maven Central under the group `org.kendar.llm`.
 ## Tests and coverage
 
 `mvn test` (or any later phase) runs the tests with JaCoCo and writes the aggregated report to
-[docs/coverage](docs/coverage/index.html).
+[docs/coverage](docs/coverage/README.md) (Markdown index, committed); the HTML report goes to `docs/coverage/html/` and is git-ignored.
 
 ## Documentation
 
