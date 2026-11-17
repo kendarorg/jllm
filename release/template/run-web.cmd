@@ -1,0 +1,5 @@
+@echo off
+cd /d "%~dp0"
+java -version 2>&1 | findstr /r /c:"version \"2[1-9]" /c:"version \"[3-9][0-9]" >nul || (echo Java 21 or newer is required & exit /b 1)
+echo Open http://localhost:8080  (admin/admin, poweru/poweru, guest/guest)
+java -jar jllm-web.jar --jllm.plugin-dir=.\plugins --jllm.settings=.\settings\settings.json --jllm.webauth-dir=.\webauth %*

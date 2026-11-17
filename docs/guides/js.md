@@ -10,7 +10,28 @@ and web operations go through the standard Files and Web tools.
 
 ## Enabling
 
-Put the jar (`jllm-js-*-jar-with-dependencies.jar`, copied to the plugin directory by `mvn install`) in the plugin
+**The plugin jar does not contain GraalJS.** The host must carry the Graal libraries on its classpath; without them the
+plugin fails at startup with `Plugin 'js' needs GraalVM on the host classpath`. `jllm-cli` and `jllm-web` already
+include them. An application embedding the harness adds:
+
+```xml
+<dependency>
+    <groupId>org.graalvm.polyglot</groupId>
+    <artifactId>polyglot</artifactId>
+    <version>25.5.5.0.3</version>
+</dependency>
+<dependency>
+    <groupId>org.graalvm.polyglot</groupId>
+    <artifactId>js</artifactId>
+    <version>25.5.5.0.3</version>
+    <type>pom</type>
+</dependency>
+```
+
+If the host is a fat jar, keep `META-INF/services` entries merged (shade `ServicesResourceTransformer`) and the
+`Multi-Release: true` manifest attribute: Truffle will not start without them.
+
+Put the jar (`jllm-js-*.jar`, a thin jar copied to the plugin directory by `mvn install`) in the plugin
 directory and enable it in the settings file:
 
 ```json

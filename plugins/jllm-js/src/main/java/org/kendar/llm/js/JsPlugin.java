@@ -18,8 +18,19 @@ public final class JsPlugin implements HarnessPlugin {
 
     @Override
     public void install(PluginRegistrar registrar, JsonNode settings) {
+        requireGraal();
         JsSettings s = JsSettings.from(settings);
         registrar.toolNameCheck(ToolLibrary::checkNames);
         registrar.tool(RunJsTool.create(new JsSandbox(s), registrar.catalog(), new ToolLibrary()));
+    }
+
+    /** The plugin does not bundle GraalJS: the host (jllm-cli, jllm-web, or your own app) must carry it. */
+    private static void requireGraal() {
+        try {
+            Class.forName("org.graalvm.polyglot.Context", false, JsPlugin.class.getClassLoader());
+        } catch (ClassNotFoundException e) {
+            throw new IllegalStateException("Plugin 'js' needs GraalVM on the host classpath: add "
+                    + "org.graalvm.polyglot:polyglot and org.graalvm.polyglot:js (type pom) to the application", e);
+        }
     }
 }
