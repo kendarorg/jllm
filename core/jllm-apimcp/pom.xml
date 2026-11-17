@@ -16,6 +16,15 @@
     <name>jllm-apimcp</name>
     <description>REST API and MCP tool providers for jllm-harness.</description>
 
+    <url>https://github.com/kendarorg/jllm</url>
+
+    <scm>
+        <connection>scm:git:git://github.com/kendarorg/jllm.git</connection>
+        <developerConnection>scm:git:git://github.com/kendarorg/jllm.git</developerConnection>
+        <url>https://www.github.com/kendarorg/jllm</url>
+        <tag>HEAD</tag>
+    </scm>
+
     <dependencies>
         <dependency>
             <groupId>org.kendar.llm</groupId>

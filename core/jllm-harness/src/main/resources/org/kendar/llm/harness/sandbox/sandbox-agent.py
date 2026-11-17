@@ -10,7 +10,7 @@ Standard library only. Configuration (environment):
   JLLM_LOG_MAX_BYTES  cap of a command's spill log when the request gives none (default 51200; 0: unlimited)
   JLLM_ALIAS      tests only: absolute paths under this prefix (e.g. /workspace) are mapped onto the workspace
 
-Endpoints: see docs/SANDBOX.md. A request with a missing or wrong token gets an empty 401 and nothing is executed.
+Endpoints: see docs/guides/sandbox.md. A request with a missing or wrong token gets an empty 401 and nothing is executed.
 """
 import hmac
 import json

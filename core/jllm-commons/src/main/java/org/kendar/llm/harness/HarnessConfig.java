@@ -23,7 +23,7 @@ public record HarnessConfig(String agentId, int maxTurns, int maxTokens, boolean
      * @param network {@code oneshot} mode only: docker network of the throwaway container ({@code none} = no network);
      *                daemon mode uses docker's default network
      * @param mode    {@code oneshot} (default: one {@code docker run --rm} per command) or {@code daemon} (a
-     *                long-running container with an HTTP exec daemon, see docs/SANDBOX.md)
+     *                long-running container with an HTTP exec daemon, see docs/guides/sandbox.md)
      * @param remote  daemon mode only: the docker daemon is not on this machine. Nothing can be bind-mounted, so the
      *                workspace is uploaded to the container when it is created and downloaded back as a backup
      * @param remoteHost address at which this machine reaches the ports published by the remote docker host; blank:

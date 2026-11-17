@@ -16,6 +16,15 @@
     <name>jllm-commons</name>
     <description>Shared interfaces and records of jllm-harness, used by the harness and its plugins.</description>
 
+    <url>https://github.com/kendarorg/jllm</url>
+
+    <scm>
+        <connection>scm:git:git://github.com/kendarorg/jllm.git</connection>
+        <developerConnection>scm:git:git://github.com/kendarorg/jllm.git</developerConnection>
+        <url>https://www.github.com/kendarorg/jllm</url>
+        <tag>HEAD</tag>
+    </scm>
+
     <dependencies>
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>

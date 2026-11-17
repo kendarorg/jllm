@@ -33,7 +33,7 @@ flowchart LR
 | [12](#12-testing) | testing |
 | [13](#13-web-storage) | web storage (users, roles, skills, sign-in sessions, settings, tokens) |
 
-External tools without code: [MCP and REST APIs](MCP.md). Instructions without code: [SKILLS](SKILLS.md).
+External tools without code: [MCP and REST APIs](mcp.md). Instructions without code: [SKILLS](skills.md).
 
 ## Jars to import
 
@@ -133,7 +133,7 @@ Rules the loop applies around it:
 - The tool must be in a group the chat has. With more than `toolBatchThreshold` (12) tools the selector picks groups
   on the first message; `coreGroups` (`Files`, `Shell`) are always included. Add your group with
   `config.withCoreGroups(Set.of("Files", "Shell", "Db"))` if it must always be there.
-- The input is checked against `inputSchema()` before `execute` runs (see [TOOLS §5](TOOLS.md#5-one-tool-call)), so
+- The input is checked against `inputSchema()` before `execute` runs (see [TOOLS §5](tools.md#5-one-tool-call)), so
   declare `required` and types accurately. Add a rule of your own (a path allow-list, a value range) with
   `builder.addToolInputValidator((tool, input, mode) -> ...)`, or swap the whole check with `toolInputValidator(...)`.
   The validator returns the input to use and a list of problems; it must not modify the input it receives.
@@ -187,7 +187,7 @@ appends "The stop check failed. Fix the problem and finish again." and the messa
 `verify_failed`, and calls the model again. After `loop.verify.maxReentries` (default 3) re-entries, or the same
 message twice in a row, the run ends `UNVERIFIED` (a sub-agent reports status `unverified`). Existing `STOP` hooks
 that assumed the main agent should check `ctx.agent()`. A test run needs no code: `hooks.stop` in the settings
-([USAGE](USAGE.md#verify-on-stop)) registers a `CommandStopHook`. An LLM judge is a plugin `STOP` hook that asks the
+([USAGE](../reference/usage.md#verify-on-stop)) registers a `CommandStopHook`. An LLM judge is a plugin `STOP` hook that asks the
 fast model and returns `continueWith` with its objection. `AgentLoop.changedInRun(chatId, agent)` tells a hook
 whether a tool that changes things ran in the run. A `PRE_TOOL` denial is reported to the model as `Denied by a hook: <reason>`.
 
@@ -213,7 +213,8 @@ public final class OtelPlugin implements HarnessPlugin {
         Tracer tracer = GlobalOpenTelemetry.getTracer("jllm");
         r.hook(HookEvent.POST_LLM, c -> {
             Span s = tracer.spanBuilder("llm").setStartTimestamp(Instant.now().minusMillis(c.durationMs())).startSpan();
-            if (c.usage() != null) s.setAttribute("tokens.input", c.usage().contextTokens());
+            if (c.usage() != null) s.setAttribute("tokens.input", c.usage().inputTokens());
+            if (c.usage() != null) s.setAttribute("tokens.output", c.usage().outputTokens());
             if (c.isError()) s.setStatus(StatusCode.ERROR);
             s.end();
             return HookResult.allow();
@@ -250,7 +251,7 @@ AgentHarness h = AgentHarness.builder().modelClient(client).plugin(new DeployPlu
 ```
 
 A plugin can also register a `DocumentReader` for `read_file` (`r.documentReader(reader)`; see
-[TOOLS](TOOLS.md#document-readers)). Plugins listed in `META-INF/services/org.kendar.llm.harness.plugin.HarnessPlugin`
+[TOOLS](tools.md#document-readers)). Plugins listed in `META-INF/services/org.kendar.llm.harness.plugin.HarnessPlugin`
 are found by `builder.discoverPlugins()`.
 
 Every plugin has an id, returned by `id()` (pattern `[a-z][a-z0-9-]{1,31}`, unique); a plugin without one fails startup.
@@ -315,7 +316,7 @@ A new provider must:
 - read `request.messages()` in **Anthropic shape** (`role`, `content` blocks `text`, `tool_use`, `tool_result`,
   `thinking`) and translate them;
 - send `pinnedSystem` then `extraSystem` as system text, tools in the given order (cache prefix, see
-  [CACHES](CACHES.md));
+  [CACHES](../reference/caches.md));
 - return `ModelResponse(content, stopReason, usage)` with content in Anthropic shape (`text`, `tool_use` with `id`,
   `name`, `input`) and stop reasons `end_turn`, `tool_use`, `max_tokens`, `stop_sequence`, `pause_turn`, `refusal`;
 - report `Usage(input, output, cacheRead, cacheCreation)` (input **excluding** cached tokens);
@@ -323,7 +324,7 @@ A new provider must:
   length", "413", …) triggers the strategy's overflow handling;
 - honor `CancelToken` (`cancel.send(http, request)`, `cancel.sleep(ms)`) and throw `ModelCancelledException`.
 
-Named providers, `/model` switching and temperature are described in [USAGE](USAGE.md#providers-and-temperature). A
+Named providers, `/model` switching and temperature are described in [USAGE](../reference/usage.md#providers-and-temperature). A
 `ModelRequest.temperature()` of `null` means "do not send"; wrap a client in `TemperatureModelClient` to give it a
 default.
 
@@ -447,7 +448,7 @@ cheap or write behind. The `FileHistory*` stores are decorators: they wrap anoth
 OAuth tokens (REST APIs, MCP servers, provider logins) go through `org.kendar.llm.harness.auth.TokenStore`. Shipped:
 `FileTokenStore` (one file per principal, optional `TokenCipher` encryption, cross-process file lock) and
 `NativeTokenStore` (macOS Keychain, Windows DPAPI, Linux Secret Service; single user). `AgentHarness.Builder.tokenStore(store)`
-takes any implementation and wins over the `tokenStore` settings ([MCP](MCP.md#6-token-storage)).
+takes any implementation and wins over the `tokenStore` settings ([MCP](mcp.md#6-token-storage)).
 
 ```java
 public interface TokenStore {
@@ -547,7 +548,7 @@ Docker settings come from `HarnessConfig.Docker` (`binary`, `image` default `pyt
 `pidsLimit`, `user`, `network`, `mode`), set in the settings file under `sandbox.docker`. The file tools run in the JVM
 against `workDir`, and only `bash` goes through the executor, unless `files(chatId, agentId)` returns a `FileBackend`
 (daemon mode): then all file tools go through it and no host paths are used. To plug in another remote sandbox,
-implement `FileBackend` (read, write, stat, glob, grep and the browse calls) and return it from `files`. Full description of each backend: [SANDBOX](SANDBOX.md).
+implement `FileBackend` (read, write, stat, glob, grep and the browse calls) and return it from `files`. Full description of each backend: [SANDBOX](sandbox.md).
 
 ## 10. Metrics and pricing
 
@@ -721,4 +722,4 @@ optional beans read by `HarnessConfiguration`; without them it uses `FileChatSes
 `FileHistorySubAgentRunLog`, `FileMnemonicStore` and `FileStateStore` under each chat's history root
 (`<base>/<chatId>/.jllm/history`). Chat retention (`chatRetentionLimit`) picks the chats to delete from `ChatSessionStore.list()`.
 
-A sketch of a MySQL store (tables, mapping of errors, token table) is in [jllm-web/README.md](../jllm-web/README.md#a-possible-extension-a-mysql-store).
+A sketch of a MySQL store (tables, mapping of errors, token table) is in [jllm-web/README.md](../../jllm-web/README.md#a-possible-extension-a-mysql-store).

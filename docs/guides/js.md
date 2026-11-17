@@ -76,7 +76,7 @@ with a note when cut), `error` (`<message> at line N`) and `fileRoot`.
   `deny` rules, `PRE_TOOL` hook denials and plan-mode confinement still apply.
 - Every other call goes through the standard gating, exactly as a call from the model: mode, permission rules,
   grants, taint, the AUTO classifier, a refusal when nobody can answer. The prompt names `run_js` as the parent.
-- `web_fetch` and `web_download` also ask once per host, see [per-host approval](TOOLS.md#per-host-web-approval).
+- `web_fetch` and `web_download` also ask once per host, see [per-host approval](tools.md#per-host-web-approval).
 - Hooks and events see each inner call: `HookContext.parent()` is `null` for a call from the model and
   `run_js:<toolUseId>` for an inner call, and `tool_call` / `tool_result` events carry `parent`, so front ends can
   show them under the `run_js` call.
@@ -93,7 +93,7 @@ With the docker daemon or remote backend the same jail applies through the file 
 
 `fileRoot` in the result tells the model where that is, as a path its own file tools accept. With `false`, scripts get
 the same root as the file tools of the model (in the CLI the whole project directory). `storage.maxBytes` caps the
-chat storage, see [TOOLS §6](TOOLS.md#6-output-limits).
+chat storage, see [TOOLS §6](tools.md#6-output-limits).
 
 ## Limits
 

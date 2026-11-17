@@ -1,7 +1,7 @@
 # Tools
 
 What the model can call, how tools are grouped, selected per chat and gated. To write your own tool see
-[EXTENDING §1](EXTENDING.md#1-tools).
+[EXTENDING §1](extending.md#1-tools).
 
 ## 1. Built-in tools
 
@@ -18,15 +18,15 @@ What the model can call, how tools are grouped, selected per chat and gated. To 
 | `wikipedia_search` | Web | READ_ONLY | `query`, `lang?`, `count?` | titles, URLs, snippets |
 | `web_fetch` | Web | READ_ONLY | `url` | http/https only; HTML reduced to text; cut at `fetchMaxChars` (40000); asks once per host (see [per-host approval](#per-host-web-approval)) |
 | `web_download` | Web | READ_ONLY | `url`, `path` | writes the bytes unchanged to `path` in the chat work dir, returns path, size and content type; refused above `web.downloadMaxBytes` (100 MB, no file left); counts against `storage.maxBytes`; asks per host like `web_fetch` |
-| `run_js` | Js | OTHER | `code`, `timeoutSeconds?` | only with the `jllm-js` plugin, see [JS](JS.md) |
-| `skill` | Skills | READ_ONLY | `name` | only when skills are configured ([SKILLS](SKILLS.md)) |
+| `run_js` | Js | OTHER | `code`, `timeoutSeconds?` | only with the `jllm-js` plugin, see [JS](js.md) |
+| `skill` | Skills | READ_ONLY | `name` | only when skills are configured ([SKILLS](skills.md)) |
 | `task` | Agents | READ_ONLY | `prompts[≤8]`, `subagent_type?` | sub-agent fan-out; main agent only |
 | `request_tool_group` | Agents | READ_ONLY | `groups[]` | only while groups are missing; main agent only |
-| `history_recall` | Memory | READ_ONLY | `id?`, `query?`, `file?`, `scope?`, `offset?` | mnemonic strategy only ([CACHES §4](CACHES.md#4-mnemonic-strategy)) |
-| `todo_write` | Todo | READ_ONLY | `todos[]` (`id?`, `content`, `status`) | scope strategy only: replaces the whole list, at most one `in_progress`; emits the `todos` event ([CACHES §5](CACHES.md#5-scope-strategy)) |
+| `history_recall` | Memory | READ_ONLY | `id?`, `query?`, `file?`, `scope?`, `offset?` | mnemonic strategy only ([CACHES §4](../reference/caches.md#4-mnemonic-strategy)) |
+| `todo_write` | Todo | READ_ONLY | `todos[]` (`id?`, `content`, `status`) | scope strategy only: replaces the whole list, at most one `in_progress`; emits the `todos` event ([CACHES §5](../reference/caches.md#5-scope-strategy)) |
 | `todo_read` | Todo | READ_ONLY | none | scope strategy only: the current list |
-| `mcp__<server>__<tool>` | `Mcp/<server>` | READ_ONLY if `readOnly`, else OTHER | server schema | [MCP](MCP.md) |
-| `<api>__<operationId>` | `Rest/<api>` | READ_ONLY for GET/HEAD, else OTHER | built from the spec | [MCP §3](MCP.md#3-rest-apis-openapi) |
+| `mcp__<server>__<tool>` | `Mcp/<server>` | READ_ONLY if `readOnly`, else OTHER | server schema | [MCP](mcp.md) |
+| `<api>__<operationId>` | `Rest/<api>` | READ_ONLY for GET/HEAD, else OTHER | built from the spec | [MCP §3](mcp.md#3-rest-apis-openapi) |
 
 `builder.withoutStandardTools()` drops Files, Shell and Web; `builder.withoutTools(names)` drops only the named standard tools (absent, not hidden), and a plugin can call `registrar.replaces(name)` to do the same and keep the tool from coming back through `HarnessToolRegistry.setSource`. `task`, `request_tool_group`, `history_recall` and the
 todo tools are not in the registry: the loop adds them to the tool list of each request.
@@ -68,7 +68,7 @@ directory; only `DockerSandboxExecutor` mounts the working directory read-only.
 server, each REST API). Every change publishes a new immutable snapshot sorted by `(group, name)`.
 
 - The order does not depend on the injection order, so the tool block of the request is byte-stable (prompt cache,
-  see [CACHES §1](CACHES.md#1-prompt-cache-layout)).
+  see [CACHES §1](../reference/caches.md#1-prompt-cache-layout)).
 - Duplicate names are rejected at `build()`, and when a source is enabled later (nothing changes then).
 - Names must match `[a-zA-Z0-9_-]{1,64}`; MCP and REST names are sanitized and cut to 64 characters.
 - `/tools disable <name|group>` hides tools from the next request; the snapshot is kept.

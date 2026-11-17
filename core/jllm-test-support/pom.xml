@@ -16,6 +16,15 @@
     <name>jllm-test-support</name>
     <description>Test helpers for plugins built on jllm-harness: scripted model, text/tool builders, test config.</description>
 
+    <url>https://github.com/kendarorg/jllm</url>
+
+    <scm>
+        <connection>scm:git:git://github.com/kendarorg/jllm.git</connection>
+        <developerConnection>scm:git:git://github.com/kendarorg/jllm.git</developerConnection>
+        <url>https://www.github.com/kendarorg/jllm</url>
+        <tag>HEAD</tag>
+    </scm>
+
     <dependencies>
         <dependency>
             <groupId>org.kendar.llm</groupId>
