@@ -1,0 +1,61 @@
+package org.kendar.llm.eval;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.kendar.llm.eval.TestSupport.*;
+
+/** A configured secret is masked everywhere it could be printed. */
+@Tag("unit")
+class SecretMaskingTest {
+
+    private static final String SECRET = "sk-ant-SUPER-SECRET-123456";
+
+    @AfterEach
+    void reset() {
+        Secrets.clear();
+    }
+
+    @Test
+    void secretNeverAppearsInAnyPrintableForm(@TempDir Path dir) throws Exception {
+        EvalConfig c = load(map("eval.anthropic.apiKey", SECRET, "eval.target", "remote.mac",
+                "eval.remote.mac.apiKey", SECRET, "eval.remote.mac.baseUrl", "http://127.0.0.1:1/v1",
+                "eval.timeout.connect", "2"), map());
+
+        // records and objects
+        assertFalse(c.target().toString().contains(SECRET));
+        assertFalse(c.judge().toString().contains(SECRET));
+        assertFalse(c.fast().toString().contains(SECRET));
+
+        // exception messages, even when the secret sits inside the text
+        assertFalse(new EvalConfigException(List.of("bad value " + SECRET)).getMessage().contains(SECRET));
+        assertFalse(Secrets.mask("Authorization: Bearer " + SECRET).contains(SECRET));
+
+        // run metadata file
+        RunMetadata meta = RunMetadata.of(c, new ConnectionCheck.Result(Map.of()), Instant.now());
+        String json = Files.readString(meta.write(dir));
+        assertFalse(json.contains(SECRET), json);
+        assertFalse(new ObjectMapper().writeValueAsString(meta).contains(SECRET));
+
+        // connection failure messages
+        IllegalStateException e = assertThrows(IllegalStateException.class, () -> ConnectionCheck.run(c, ep -> null));
+        assertFalse(e.getMessage().contains(SECRET), e.getMessage());
+    }
+
+    @Test
+    void maskReplacesEveryOccurrenceAndHandlesNulls() {
+        Secrets.register(SECRET);
+        assertEquals("a *** b ***", Secrets.mask("a " + SECRET + " b " + SECRET));
+        assertNull(Secrets.mask(null));
+    }
+}

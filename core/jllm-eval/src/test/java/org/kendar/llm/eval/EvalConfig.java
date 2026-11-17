@@ -1,0 +1,308 @@
+package org.kendar.llm.eval;
+
+import org.kendar.llm.eval.ModelEndpoint.Role;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.URI;
+import java.nio.file.Path;
+import java.util.*;
+
+/**
+ * All jllm-eval settings. Resolution per key: system property (-D), environment variable, properties file; secret
+ * keys ({@code *.apiKey}) never come from the file. {@link #load} reports every invalid key at once.
+ */
+public final class EvalConfig {
+
+    public enum TargetKind {ANTHROPIC, REMOTE, LOCAL}
+
+    private final Map<String, String> sys;
+    private final Map<String, String> env;
+    private final Properties file;
+    private final List<String> errors = new ArrayList<>();
+
+    private TargetKind targetKind;
+    private String targetName;
+    private ModelEndpoint target;
+    private ModelEndpoint judge;
+    private ModelEndpoint fast;
+    private String judgeKind;
+    private String fastKind;
+    private LocalSettings local;
+    private int connectTimeoutSeconds;
+    private int warmupTimeoutSeconds;
+    private int trials;
+    private Path outputDir;
+
+    private EvalConfig(Map<String, String> sys, Map<String, String> env, Properties file) {
+        this.sys = sys;
+        this.env = env;
+        this.file = file;
+    }
+
+    public static EvalConfig load() {
+        Properties p = new Properties();
+        try (InputStream in = EvalConfig.class.getResourceAsStream("/eval.properties")) {
+            if (in != null) p.load(in);
+        } catch (IOException e) {
+            throw new EvalConfigException(List.of("cannot read eval.properties: " + e.getMessage()));
+        }
+        Map<String, String> sys = new HashMap<>();
+        System.getProperties().forEach((k, v) -> sys.put(String.valueOf(k), String.valueOf(v)));
+        return load(p, sys, System.getenv());
+    }
+
+    public static EvalConfig load(Properties file, Map<String, String> sys, Map<String, String> env) {
+        EvalConfig c = new EvalConfig(sys, env, file);
+        c.resolve();
+        if (!c.errors.isEmpty()) throw new EvalConfigException(c.errors);
+        return c;
+    }
+
+    // ---- accessors
+    public TargetKind targetKind() { return targetKind; }
+    public String targetName() { return targetName; }
+    public ModelEndpoint target() { return target; }
+    public ModelEndpoint judge() { return judge; }
+    public ModelEndpoint fast() { return fast; }
+    public String judgeKind() { return judgeKind; }
+    public String fastKind() { return fastKind; }
+    public LocalSettings local() { return local; }
+    public int connectTimeoutSeconds() { return connectTimeoutSeconds; }
+    public int warmupTimeoutSeconds() { return warmupTimeoutSeconds; }
+    public int trials() { return trials; }
+    public Path outputDir() { return outputDir; }
+
+    /** True when judge and target are the same model on the same server. */
+    public boolean selfGraded() {
+        return judge.sameModelAs(target);
+    }
+
+    /** True when the fast model is a different endpoint than the target. */
+    public boolean fastSeparate() {
+        return !fast.sameModelAs(target);
+    }
+
+    // ---- raw lookup
+    static String envName(String key) {
+        return key.toUpperCase(Locale.ROOT).replaceAll("[^A-Z0-9]", "_");
+    }
+
+    private static boolean isSecret(String key) {
+        return key.endsWith(".apiKey");
+    }
+
+    private String raw(String key) {
+        String v = sys.get(key);
+        if (v == null || v.isBlank()) v = env.get(envName(key));
+        if ((v == null || v.isBlank()) && !isSecret(key)) v = file.getProperty(key);
+        return v == null || v.isBlank() ? null : v.trim();
+    }
+
+    /** First non-blank of the key and the fallbacks (each a property key or a plain environment variable name). */
+    private String secret(String key, String... fallbacks) {
+        String v = raw(key);
+        for (String f : fallbacks) {
+            if (v != null) break;
+            v = f.contains(".") ? raw(f) : env.get(f);
+            if (v != null && v.isBlank()) v = null;
+        }
+        if (v != null) Secrets.register(v);
+        return v;
+    }
+
+    private String str(String key, boolean required) {
+        String v = raw(key);
+        if (v == null && required) errors.add(key + ": missing");
+        return v;
+    }
+
+    private int integer(String key, int min) {
+        String v = str(key, true);
+        if (v == null) return min;
+        try {
+            int n = Integer.parseInt(v);
+            if (n < min) errors.add(key + ": must be >= " + min + " (got " + n + ")");
+            return n;
+        } catch (NumberFormatException e) {
+            errors.add(key + ": not an integer ('" + v + "')");
+            return min;
+        }
+    }
+
+    private boolean bool(String key, boolean def) {
+        String v = raw(key);
+        if (v == null) return def;
+        if (v.equalsIgnoreCase("true")) return true;
+        if (v.equalsIgnoreCase("false")) return false;
+        errors.add(key + ": must be true or false (got '" + v + "')");
+        return def;
+    }
+
+    private String url(String key) {
+        String v = str(key, true);
+        if (v == null) return "";
+        try {
+            URI u = URI.create(v);
+            if (u.getHost() == null || !("http".equals(u.getScheme()) || "https".equals(u.getScheme()))) {
+                errors.add(key + ": not an http(s) address ('" + v + "')");
+            }
+        } catch (IllegalArgumentException e) {
+            errors.add(key + ": not a valid address ('" + v + "')");
+        }
+        return v;
+    }
+
+    private void rejectSecretsInFile() {
+        for (String k : file.stringPropertyNames()) {
+            if (isSecret(k) && !file.getProperty(k).isBlank()) {
+                errors.add(k + ": secrets must not be in eval.properties; use the environment or -D");
+            }
+        }
+    }
+
+    // ---- resolution
+    private void resolve() {
+        rejectSecretsInFile();
+        connectTimeoutSeconds = integer("eval.timeout.connect", 1);
+        warmupTimeoutSeconds = integer("eval.timeout.warmup", 1);
+        trials = integer("eval.trials", 1);
+        String out = str("eval.outputDir", true);
+        outputDir = Path.of(out == null ? "target/eval-output" : out);
+
+        resolveTarget();
+        resolveJudge();
+        resolveFast();
+    }
+
+    private void resolveTarget() {
+        String t = str("eval.target", true);
+        if (t == null) return;
+        if (t.equals("anthropic")) {
+            targetKind = TargetKind.ANTHROPIC;
+            targetName = "anthropic";
+            target = anthropic(Role.TARGET, "eval.anthropic", "eval.anthropic.model");
+        } else if (t.startsWith("remote.") && t.length() > 7) {
+            targetKind = TargetKind.REMOTE;
+            targetName = t.substring(7);
+            target = remote(Role.TARGET, targetName);
+        } else if (t.startsWith("local.") && t.length() > 6) {
+            targetKind = TargetKind.LOCAL;
+            targetName = t.substring(6);
+            local = local(targetName);
+            if (local != null) {
+                LocalSettings.Model m = local.model();
+                target = new ModelEndpoint(Role.TARGET, "local-" + m.key(), ModelEndpoint.OPENAI, local.baseUrl(),
+                        m.alias(), m.contextTokens(), m.smallModel(), 1800, null);
+            }
+        } else {
+            errors.add("eval.target: must be 'anthropic', 'remote.<name>' or 'local.<strong|alt|small>' (got '" + t + "')");
+        }
+    }
+
+    private ModelEndpoint anthropic(Role role, String prefix, String modelKey) {
+        String model = str(modelKey, true);
+        String base = url("eval.anthropic.baseUrl");
+        int ctx = integer("eval.anthropic.contextTokens", 1024);
+        int timeout = integer("eval.anthropic.timeoutSeconds", 1);
+        String key = secret(prefix + ".apiKey", "eval.anthropic.apiKey", "ANTHROPIC_API_KEY");
+        if (key == null) {
+            errors.add(prefix + ".apiKey: missing (set EVAL_ANTHROPIC_APIKEY or ANTHROPIC_API_KEY, or pass -Deval.anthropic.apiKey)");
+        }
+        return new ModelEndpoint(role, "anthropic", ModelEndpoint.ANTHROPIC, base, model == null ? "" : model, ctx,
+                false, timeout, key);
+    }
+
+    private ModelEndpoint remote(Role role, String name) {
+        String p = "eval.remote." + name;
+        boolean exists = file.stringPropertyNames().stream().anyMatch(k -> k.startsWith(p + "."))
+                || sys.keySet().stream().anyMatch(k -> k.startsWith(p + "."));
+        if (!exists) {
+            errors.add(p + ".*: no such remote entry '" + name + "'");
+            return null;
+        }
+        String proto = str(p + ".protocol", true);
+        if (proto != null && !proto.equals("openai") && !proto.equals("anthropic")) {
+            errors.add(p + ".protocol: must be 'openai' or 'anthropic' (got '" + proto + "')");
+        }
+        String base = url(p + ".baseUrl");
+        String model = str(p + ".model", true);
+        int ctx = integer(p + ".contextTokens", 1024);
+        boolean small = bool(p + ".smallModel", false);
+        int timeout = integer(p + ".timeoutSeconds", 1);
+        String key = secret(p + ".apiKey");
+        return new ModelEndpoint(role, name, proto == null ? "openai" : proto, base, model == null ? "" : model, ctx,
+                small, timeout, key);
+    }
+
+    private LocalSettings local(String modelKey) {
+        if (!List.of("strong", "alt", "small").contains(modelKey)) {
+            errors.add("eval.target: unknown local model '" + modelKey + "' (strong | alt | small)");
+            return null;
+        }
+        String image = str("eval.local.image", true);
+        if (image != null && (!image.contains(":") || image.endsWith(":latest"))) {
+            errors.add("eval.local.image: must be pinned to a version tag (got '" + image + "')");
+        }
+        boolean gpu = bool("eval.local.gpu", true);
+        String models = str("eval.local.modelsDir", true);
+        String cache = str("eval.local.cacheDir", true);
+        int port = integer("eval.local.port", 1);
+        boolean keep = bool("eval.local.keepRunning", true);
+        int startup = integer("eval.local.startupTimeoutSeconds", 1);
+        String p = "eval.local.model." + modelKey;
+        String f = str(p + ".file", true);
+        String alias = str(p + ".alias", true);
+        int ctx = integer(p + ".contextTokens", 1024);
+        String maxCtx = raw(p + ".maxContextTokens");
+        if (maxCtx != null) {
+            try {
+                if (ctx > Integer.parseInt(maxCtx)) {
+                    errors.add(p + ".contextTokens: exceeds " + p + ".maxContextTokens (" + maxCtx + ")");
+                }
+            } catch (NumberFormatException e) {
+                errors.add(p + ".maxContextTokens: not an integer ('" + maxCtx + "')");
+            }
+        }
+        boolean small = bool(p + ".smallModel", false);
+        String extra = raw(p + ".extraArgs");
+        if (alias != null && alias.matches("(?i).*[-_.](i?q\\d(_[a-z0-9]+)*|mxfp4|f16|bf16)$")) {
+            errors.add(p + ".alias: must not carry the quantization (got '" + alias + "')");
+        }
+        return new LocalSettings(image == null ? "" : image, gpu, models == null ? "" : models,
+                cache == null ? "" : cache, port, keep, startup,
+                new LocalSettings.Model(modelKey, f == null ? "" : f, alias == null ? "" : alias, ctx, small, extra));
+    }
+
+    private void resolveJudge() {
+        judgeKind = str("eval.judge", true);
+        if (judgeKind == null) return;
+        switch (judgeKind) {
+            case "anthropic" -> judge = anthropic(Role.JUDGE, "eval.judge.anthropic", "eval.judge.anthropic.model");
+            case "openai" -> {
+                String p = "eval.judge.openai";
+                String base = url(p + ".baseUrl");
+                String model = str(p + ".model", true);
+                int ctx = integer(p + ".contextTokens", 1024);
+                int timeout = integer(p + ".timeoutSeconds", 1);
+                judge = new ModelEndpoint(Role.JUDGE, "judge", ModelEndpoint.OPENAI, base, model == null ? "" : model,
+                        ctx, false, timeout, secret(p + ".apiKey"));
+            }
+            default -> errors.add("eval.judge: must be 'anthropic' or 'openai' (got '" + judgeKind + "')");
+        }
+    }
+
+    private void resolveFast() {
+        fastKind = str("eval.fast", true);
+        if (fastKind == null) return;
+        if (fastKind.equals("target")) {
+            fast = target == null ? null : target.withRole(Role.FAST);
+        } else if (fastKind.equals("anthropic")) {
+            fast = anthropic(Role.FAST, "eval.fast.anthropic", "eval.fast.anthropic.model");
+        } else if (fastKind.startsWith("remote.") && fastKind.length() > 7) {
+            fast = remote(Role.FAST, fastKind.substring(7));
+        } else {
+            errors.add("eval.fast: must be 'target', 'anthropic' or 'remote.<name>' (got '" + fastKind + "')");
+        }
+    }
+}
