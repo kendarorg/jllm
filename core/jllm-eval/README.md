@@ -8,9 +8,11 @@ a connection check and run metadata.
 
 ## Quick start
 
-1. Choose a target (see [Targets](#targets)) and, for a local model, start its server (see
-   [Local models](#local-models)).
-2. Run the tests from the repository root with JDK 21:
+1. Choose a target (see [Targets](#targets)). For a model served by llama.cpp in docker on a remote GPU machine,
+   deploy it with `./docker/llm.sh up strong --host <address>` (bash) or `.\docker\llm.ps1 up strong -DockerHost
+   <address>` (PowerShell): the script checks the remote docker host and GPU, loads the model, waits for it and prints
+   the settings to use (see [Guided server setup](#guided-server-setup)).
+2. Run the tests from this folder (`core/jllm-eval`) with JDK 21:
 
 ```
 mvn -f ../../pom.xml -Peval -pl core/jllm-eval -am test -Dgroups=smoke -Deval.target=anthropic
@@ -30,7 +32,7 @@ Each run evaluates exactly one target, chosen with `eval.target`.
 | Target | Description |
 |---|---|
 | `anthropic` | Claude Haiku 5.5 (`claude-haiku-5-5`) through the Anthropic API. |
-| `remote.<name>` | An OpenAI-compatible server you run yourself, defined by a named entry in the properties file (for example Qwen3.6-27B served natively on a Mac). The eval only calls it: it never starts, stops or reloads it. |
+| `remote.<name>` | An OpenAI-compatible server you run yourself, defined by a named entry in the properties file (for example Qwen3.6-27B served natively on a Mac, or in docker on a GPU machine such as `remote.gpu`; `docker/llm.sh` and `docker/llm.ps1` set up the latter). The eval only calls it: it never starts, stops or reloads it. |
 | `local.<strong\|alt\|small>` | A llama.cpp server running in Docker on an NVIDIA GPU, started by you with docker compose. Three models are defined: `strong` (Qwen3.6-27B, 4-bit), `alt` (gpt-oss-20b) and `small` (an 8-12B model, 4-bit, run with the small-model prompt). |
 
 ## Configuration
@@ -121,6 +123,36 @@ the server must be reachable and must serve the configured model. Each then rece
 times are stored in `run.json`, apart from test timings. If anything fails, the run stops with a message naming the
 entry and its address.
 
+## Guided server setup
+
+`docker/llm.sh` (bash) and `docker/llm.ps1` (PowerShell) deploy the llama.cpp server of `docker/docker-compose.yml`
+step by step. They assume the docker host is a **remote machine** with the GPU: they run on your machine, from this
+folder, and drive the remote docker daemon. Nothing is checked locally except the docker CLI.
+
+```
+./docker/llm.sh up strong --host 192.168.1.96          .\docker\llm.ps1 up strong -DockerHost 192.168.1.96
+./docker/llm.sh status --host 192.168.1.96             .\docker\llm.ps1 status -DockerHost 192.168.1.96
+./docker/llm.sh down --host 192.168.1.96               .\docker\llm.ps1 down -DockerHost 192.168.1.96
+```
+
+- **Host:** `192.168.1.96`, `user@192.168.1.96` or `ssh://user@host` reach the daemon over ssh (key-based login, and the
+  docker CLI plus `docker compose` installed here). `tcp://host:2376` works too. The script always asks for the host;
+  `--host`/`-DockerHost`, `LLM_DOCKER_HOST` or `DOCKER_HOST` only provide the default, which Enter accepts. Without a
+  terminal the default is used as is.
+- **Model** is `strong`, `alt` or `small` (default asks).
+- **GPU:** checked through docker, by running `nvidia-smi` in a container on the remote host, not on this machine.
+- **Model file:** checked through docker too. `MODELS_DIR` and `CACHE_DIR` in `docker/<k>.env` are paths **on the
+  docker host**, and the `.gguf` must already be there. The env files carry example paths: set `MODELS_DIR` in the
+  environment to override one, or the script asks. If the file is missing it prints a Hugging Face download hint to run
+  on the docker host.
+- **Deploy:** pulls the image (it is not built) and starts the container with one request slot, then waits for the
+  model to load, polling the docker host's address, not `localhost`.
+- **Result:** prints the model id, `n_ctx`, slot count and the `eval.remote.gpu.*` values and Maven command for the eval
+  machine. Open the port (8080 by default) in the docker host's firewall if the eval machine cannot reach it.
+
+For a server on the machine that runs the eval, use the compose commands in [Local models](#local-models) and
+`-Deval.target=local.<k>` instead.
+
 ## Remote llama.cpp server (example: docker host 192.168.1.96)
 
 Use this when the model runs in docker on another machine, such as a GPU box on the LAN. The eval never starts or
@@ -129,18 +161,9 @@ stops it; you manage the stack there. The target is a named `remote.<name>` entr
 
 All commands below are run from the `core/jllm-eval` folder.
 
-**Guided setup of the server.** On the GPU machine, `docker/llm.sh` (Linux) or `docker/llm.ps1` (Windows) walks
-through the deployment: it checks docker and the GPU, asks which model (`strong`, `alt`, `small`), checks that the
-`.gguf` file is there (and tells you how to download it if not), starts the container with one request slot, waits
-until the model has loaded, and prints the exact `eval.remote.gpu.*` values and Maven command to use on the eval
-machine. `up`, `status` and `down` are the commands; the image is pulled, not built.
-
-```
-./docker/llm.sh up strong          # Linux
-.\docker\llm.ps1 up strong         # Windows
-```
-
-If your GPU machine runs a different compose stack (presets chosen with `LLM_ENV`), follow the manual points instead:
+If the GPU machine runs this repo's `docker/` stack, deploy it from here with `docker/llm.sh` or `docker/llm.ps1` and
+`--host` (see [Guided server setup](#guided-server-setup)) and continue at step 4. If it runs a different compose stack (presets
+chosen with `LLM_ENV`), follow all the points:
 
 **On the GPU machine** (docker compose stack with `LLM_ENV` set to the Qwen3.6-27B preset):
 
@@ -187,10 +210,11 @@ The local target is a llama.cpp server that you start yourself with docker compo
 server: it never starts, stops or restarts it, and the connection check fails with a clear message if the server is
 down or serves a different model name.
 
-The compose file and one environment file per model are in `docker/`:
+The easiest way is the guided script described in [Guided server setup](#guided-server-setup). The compose file and
+one environment file per model are in `docker/`, to run by hand:
 
 ```
-cd core/jllm-eval/docker
+cd docker
 docker compose --env-file strong.env up -d                  # start a model
 docker compose --env-file alt.env up -d --force-recreate    # switch to another model
 docker compose down                                         # stop
