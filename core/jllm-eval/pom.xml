@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.kendar.llm</groupId>
+        <artifactId>jllm</artifactId>
+        <version>${revision}</version>
+        <relativePath>../../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>jllm-eval</artifactId>
+    <packaging>jar</packaging>
+    <name>jllm-eval</name>
+    <description>Test-only module: evaluates the harness with real language models. Built only with -Peval.</description>
+
+    <properties>
+        <!-- test groups to run: smoke, full, strategy, unit (no model needed) -->
+        <groups>smoke,unit</groups>
+        <maven.deploy.skip>true</maven.deploy.skip>
+        <central-publish.skip>true</central-publish.skip>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.kendar.llm</groupId>
+            <artifactId>jllm-harness</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <parameters>true</parameters>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.5.2</version>
+                <configuration>
+                    <groups>${groups}</groups>
+                    <!-- strictly sequential: one fork, no parallel classes/methods -->
+                    <forkCount>1</forkCount>
+                    <reuseForks>true</reuseForks>
+                    <parallel>none</parallel>
+                    <threadCount>1</threadCount>
+                    <trimStackTrace>true</trimStackTrace>
+                    <failIfNoSpecifiedTests>false</failIfNoSpecifiedTests>
+                    <properties>
+                        <configurationParameters>
+                            junit.jupiter.execution.parallel.enabled=false
+                            junit.jupiter.execution.parallel.mode.default=same_thread
+                            junit.jupiter.execution.parallel.mode.classes.default=same_thread
+                        </configurationParameters>
+                    </properties>
+                    <environmentVariables>
+                        <!-- Ryuk would remove the llama.cpp container at JVM exit; reuse needs it kept -->
+                        <TESTCONTAINERS_RYUK_DISABLED>true</TESTCONTAINERS_RYUK_DISABLED>
+                    </environmentVariables>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

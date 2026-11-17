@@ -102,6 +102,13 @@
     </build>
 
     <profiles>
+        <!-- jllm-eval: real-model evaluation, never part of the default build. Use: mvn -Peval -pl core/jllm-eval -am test -->
+        <profile>
+            <id>eval</id>
+            <modules>
+                <module>core/jllm-eval</module>
+            </modules>
+        </profile>
         <profile>
             <id>deploy</id>
             <build>
