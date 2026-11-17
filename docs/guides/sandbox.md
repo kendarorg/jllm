@@ -65,7 +65,7 @@ the chat's directory as current directory. No network, memory, CPU or process li
 `CwdSandboxExecutor` and `ChatDirSandboxExecutor` extend it and change only the directory layout.
 
 The command inherits the whole environment of the harness process (API keys included) unless the settings key
-`whitelistedEnvVars` narrows it, see [USAGE](USAGE.md#5-settings-file).
+`whitelistedEnvVars` narrows it, see [USAGE](../reference/usage.md#5-settings-file).
 
 ## `DockerSandboxExecutor`: container isolation
 
@@ -354,4 +354,4 @@ files are not on the host.
 Permission rules (`deny`, `ask`, `allow` on `bash(...)`) are a guard rail, not a boundary: quoting, variables or
 `python -c` bypass a regex. Only a container limits what a command can do.
 
-See [EXTENDING §9](EXTENDING.md#9-sandbox) for the interface and how to write a custom executor.
+See [EXTENDING §9](extending.md#9-sandbox) for the interface and how to write a custom executor.

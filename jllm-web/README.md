@@ -30,17 +30,17 @@ flags as the CLI, without the prefix: `--provider openai`, `--sandbox docker`, `
 | `jllm.context-tokens` | harness default (100000) | context window; wins over the settings file |
 | `jllm.max-turns` | harness default (40) | model calls per user turn |
 | `jllm.workdir` | current directory | project directory the agent works in |
-| `jllm.settings` (flag `--settings`) | none | merged over `~/.jllm/settings.json` and `<workdir>/.jllm/settings.json`; harness [settings file](../docs/USAGE.md#5-settings-file) (MCP, REST, skills, agents) |
+| `jllm.settings` (flag `--settings`) | none | merged over `~/.jllm/settings.json` and `<workdir>/.jllm/settings.json`; harness [settings file](../docs/reference/usage.md#5-settings-file) (MCP, REST, skills, agents) |
 | `jllm.context-strategy` | `compaction` | `compaction`, `mnemonic` or `scope`; wins over the settings file |
 | `jllm.small-model` | `false` | append the small-model rules to the system prompt |
-| `jllm.sandbox` | `local` | `local` or `docker` (`bash` in a container, chat directory mounted; see [SANDBOX](../docs/SANDBOX.md)); wins over the settings file |
+| `jllm.sandbox` | `local` | `local` or `docker` (`bash` in a container, chat directory mounted; see [SANDBOX](../docs/guides/sandbox.md)); wins over the settings file |
 | `jllm.docker-image` | `python:3.12-slim` | image of the docker sandbox; wins over the settings file |
-| `jllm.docker-mode` | `oneshot` | `oneshot` or `daemon`: one long-running container per chat for `bash` and the file tools, removed with the chat (see [SANDBOX](../docs/SANDBOX.md)); wins over the settings file |
-| `jllm.docker-remote` | `false` | flag `--docker-remote`: docker on another machine; each chat's workspace is uploaded to its container and backed up under `<X>/<chatId>/.jllm/` ([SANDBOX](../docs/SANDBOX.md#remote-docker)) |
+| `jllm.docker-mode` | `oneshot` | `oneshot` or `daemon`: one long-running container per chat for `bash` and the file tools, removed with the chat (see [SANDBOX](../docs/guides/sandbox.md)); wins over the settings file |
+| `jllm.docker-remote` | `false` | flag `--docker-remote`: docker on another machine; each chat's workspace is uploaded to its container and backed up under `<X>/<chatId>/.jllm/` ([SANDBOX](../docs/guides/sandbox.md#remote-docker)) |
 | `jllm.docker-remote-host` | from `DOCKER_HOST` | address where the remote host's published ports are reached |
 | `jllm.system-prompt-file` (flag `--system-prompt-file`) | none | file appended to the system prompt |
 | `jllm.system-prompt-replace` (flag `--system-prompt-replace`) | none | file that replaces the built-in system prompt |
-| `jllm.system-prompt` | none | text appended to the built-in system prompt; `SYSTEM.md` (replace) and `APPEND_SYSTEM.md` in `~/.jllm/` and `<workdir>/.jllm/` are also read, see [USAGE](../docs/USAGE.md#system-prompt-files) |
+| `jllm.system-prompt` | none | text appended to the built-in system prompt; `SYSTEM.md` (replace) and `APPEND_SYSTEM.md` in `~/.jllm/` and `<workdir>/.jllm/` are also read, see [USAGE](../docs/reference/usage.md#system-prompt-files) |
 | `jllm.search-api-key` | `BRAVE_API_KEY` env var | Brave key for `web_search` |
 | `jllm.pricing.input-per-million`, `output-per-million`, `cache-read-per-million`, `cache-write-per-million` | 0 | USD per million tokens, for the cost estimate |
 | `jllm.web.public-url` | none | the externally visible base URL (`https://jllm.example.com`); OAuth logins redirect to `<public-url>/oauth/callback`. Required when a per-user OAuth source uses the authorization code flow |
@@ -150,7 +150,7 @@ MCP server and REST API the harness knows, also disabled or failing sources). Gl
 
 ### OAuth logins
 
-REST APIs with `oauth` and MCP servers with `oauth` (see [MCP](../docs/MCP.md#oauth)) are per user by default here: each
+REST APIs with `oauth` and MCP servers with `oauth` (see [MCP](../docs/guides/mcp.md#oauth)) are per user by default here: each
 user connects their own account, and every call of their chats carries their own token.
 
 - **Encryption is required**: set `JLLM_TOKEN_KEY` (32 random bytes in base64: `openssl rand -base64 32`). The tokens
@@ -230,7 +230,7 @@ ones. Each SSE message has `id` = `seq`, `event` = the event type and the event 
 passes the last `seq` it saw and gets no gap and no duplicate; `GET /api/chat/{id}` returns `lastSeq` for the first
 subscription. The event types and their data are the harness ones (`run_started`, `text_delta`, `text_reset`, `text`,
 `tool_call`, `tool_result`, `approval_request`, `usage`, `compaction`, `stuck`, `verify_failed`, `warning`, `error`,
-`cancelled`, `plan_ready`, `login_required`, `login`, `run_finished`): see the [front-end contract](../docs/USAGE.md#front-end-contract).
+`cancelled`, `plan_ready`, `login_required`, `login`, `run_finished`): see the [front-end contract](../docs/reference/usage.md#front-end-contract).
 
 Streaming: `text_delta` (and `thinking_delta`, `text_reset`) are sent without an SSE `id` and with `seq` 0: they are
 live only and never replayed, so they must not move the client's last `seq`. The UI appends them to an open

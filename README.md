@@ -1,47 +1,13 @@
-# JLLM — An Embeddable Java Agent Harness
+# JLLM: a governed agent runtime for Java
 
-**A frameworkless agent runtime you embed directly in your Java application.**
+**Embed a tool-using AI agent in your Java application. Your code, your MCP servers and your REST APIs become its
+tools, under permissions, approvals and isolation that you control.**
 
-Add one library, give it a model, and your application gets a tool-using AI agent that can call **your own Java code**, **MCP servers**, and **REST APIs**, all under a permission system you control.
+One library, Java 21, no application framework in the core. The agent loop runs inside your process; your application
+decides what the agent may touch and what needs a human.
 
-Includes a **JavaScript sandbox** (`jllm-js`): the agent can run scripts with no host access, reaching your tools only through the secured tools.
-
-Includes optional **deterministic flows** (`jllm-workflows`): business processes written as JSON maps of steps, where your application decides the path and the model only does bounded fuzzy work inside a step.
-
-Built for Java 21, with a Maven multi-module architecture.
-
-JLLM includes two ready-made front ends built on the same library:
-
-- **jllm-cli** — terminal-based agent chat.
-- **jllm-web** — browser-based agent chat.
-
-They're not separate products or mandatory dependencies. They're working examples of what you can build by embedding the JLLM runtime in your own application.
-
-**Bring the model. Bring your Java code. JLLM connects them.**
-
-| Module | What | Doc |
-|---|---|---|
-| [jllm-harness](core/jllm-harness) | the library: framework-free (no Spring, JPA or Micrometer), Jackson, JDK `HttpClient`, jsoup | [README](core/jllm-harness/README.md) |
-| [jllm-cli](jllm-cli) | terminal front end, one shaded runnable jar | [README](jllm-cli/README.md) |
-| [jllm-web-commons](jllm-web-commons) | REST + SSE chat and file API over the harness, independent of sign-in | [README](jllm-web-commons/README.md) |
-| [jllm-web](jllm-web) | Spring Boot application: startup, sample sign-in and permissions, no-build Vue 3 chat UI, flow editor and runs screens | [README](jllm-web/README.md) |
-| [jllm-workflows](plugins/jllm-workflows) / [jllm-workflow-web](plugins/jllm-workflow-web) | optional plugins: the flow engine with chat commands and command line, and its web endpoints | [WORKFLOW](docs/WORKFLOW.md) |
-
-Also: [HISTORY](docs/HISTORY.md) (how the harness evolved) and [HARNESSES-COMPARE](docs/HARNESSES-COMPARE.md) (feature matrix against mini-swe-agent, Pi, OpenCode, Qwen Code, Hermes Agent).
-
-What is still missing (more in [FUTURE](docs/FUTURE.md)):
-
-* Provider (model) OAuth logins: the `OAuthLogin` SPI exists, no provider login is shipped
-* Flows: question routing by `who` is a label only, not enforced ([WORKFLOW](docs/WORKFLOW.md#12-runs-history-and-resume))
-* Authentication & authorization on the web UI: `jllm-web` is a reference front end meant for localhost or a trusted
-  network. Sign-in is password or one OpenID Connect provider ([setup](jllm-web/README.md#sign-in-with-openid-connect)); no
-  other providers, no IdP role mapping. Do not expose it publicly without a reverse proxy or TLS.
-
-## The idea
-
-You have an application with data, services and rules. You want a model to work with them, not just to chat. The
-harness runs the agent loop (model call, tool calls, results, repeat) inside your process and lets you decide what the
-agent can touch and what needs a human's approval.
+> Not related to other projects named *jllm* (for example beehive-lab/jllm or cmc-labo/jllm, which are inference
+> engines). JLLM talks to any OpenAI-compatible endpoint, so those can serve as its model backend.
 
 ```java
 AgentHarness h = AgentHarness.builder()
@@ -57,160 +23,79 @@ h.subscribe(chatId, 0, ev -> push(ev));          // text, tool_call, approval_re
 h.start(chatId, "Why was invoice 4711 charged twice?");
 ```
 
-`start` returns at once; the run happens on a virtual thread and reports through events, so any front end (a web
-socket, a desktop UI, a message queue) can follow it, answer approvals and cancel.
+## Why enterprises pick it
 
-**Let it script. Keep it contained.** The optional [jllm-js](docs/JS.md) plugin lets the agent write and run
-JavaScript on the fly, in a sandbox with no way out except the tools you allow. Real automation, no shell, no
-surprises.
+| | |
+|---|---|
+| **Framework-free core** | Jackson, the JDK `HttpClient`, jsoup, slf4j-api. No Spring, JPA or Micrometer in the library. Fits Spring Boot, Quarkus, Jakarta EE or plain Java ([Spring recipes](docs/getting-started/spring-boot.md)) |
+| **Governed tool calls** | tool kinds, permission modes, regex deny rules, hidden tools, per-host network approval, hooks to deny, rewrite or audit ([security model](docs/enterprise/security-model.md)) |
+| **Isolation** | path jail for file tools, Docker sandbox per command or per chat (also remote), and a JavaScript sandbox with no host access ([JS](docs/guides/js.md)) |
+| **Deterministic flows** | business processes as JSON maps of steps: your engine decides the path, the model does bounded work inside a step ([flows](docs/guides/workflow.md)) |
+| **Your infrastructure** | ports for chat stores, tokens, metrics, approvals and sandbox; OIDC sign-in and roles in the reference web app ([identity](docs/enterprise/identity-and-access.md), [governance](docs/enterprise/governance-and-audit.md)) |
+| **Open license** | Apache-2.0, small dependency footprint ([compliance](docs/enterprise/compliance-and-licensing.md)) |
 
-### Three ways to give the agent tools
+Model support: Anthropic and any OpenAI-compatible endpoint (OpenAI, Qwen, Grok, Gemini, llama.cpp, vLLM, Ollama),
+with fallback chains and an optional fast model for summaries and classification.
 
-| Source | You write | The agent sees |
+## Three ways to give the agent tools
+
+| Source | You write |
+|---|---|
+| Your Java code | a `HarnessTool` or `SimpleTool` with a lambda |
+| MCP servers | a `mcpServers` entry: URL or command, headers, allow and deny lists |
+| REST APIs | a `restApis` entry: OpenAPI URL, allowed and denied paths, OAuth per user |
+
+Built-in tools (files in a path jail, shell, web, sub-agents, skills) are also there and can be switched on and off.
+See [MCP and REST](docs/guides/mcp.md) and [TOOLS](docs/guides/tools.md).
+
+## Where it fits
+
+JLLM is an agent runtime, not a RAG toolkit or a model SDK. Use it beside Spring AI or LangChain4j when the agent must
+act under approval and isolation. Comparison: [JVM landscape](docs/comparisons/jvm-landscape.md),
+[terminal agents](docs/comparisons/harnesses-compare.md), [Why JLLM](docs/why-jllm.md).
+
+## Modules
+
+| Module | What | Doc |
 |---|---|---|
-| **Your Java code** | a `HarnessTool` (or `SimpleTool` with a lambda): name, description, JSON schema, group, kind | `db_query`, `create_ticket`, ... whatever you register |
-| **MCP servers** | a `mcpServers` entry in the settings file: URL and headers | `mcp__<server>__<tool>`, discovered at startup from the server's `tools/list` |
-| **REST APIs** | a `restApis` entry: OpenAPI URL, base URL, `allowedPaths` / `denyPaths` | `<api>__<operationId>`, one tool per visible operation |
-
-Your own tool, in a few lines:
-
-```java
-HarnessTool sql = new SimpleTool("db_query",
-    "Run a read-only SQL query against the reporting database. Returns CSV, at most 500 rows.",
-    SimpleTool.schema("sql", "SELECT statement", "limit:integer?", "Row limit (default 100)"),
-    "Db", ToolKind.READ_ONLY,
-    (ctx, in) -> reporting.query(in.path("sql").asText(), in.path("limit").asInt(100)));
-```
-
-MCP servers and REST APIs need no code, only configuration:
-
-```json
-{
-  "mcpServers": [{"name": "docs", "url": "https://h/mcp",
-                  "headers": {"Authorization": "Bearer ${DOCS_TOKEN}"}, "readOnly": true}],
-  "restApis":   [{"name": "pets", "openApiUrl": "https://h/openapi.yaml", "baseUrl": "https://h/api",
-                  "allowedPaths": ["GET /pets", "/pets/{id}"]}]
-}
-```
-
-- **MCP**: streamable-HTTP servers or stdio child processes (`command`/`args`/`env`), static headers (`${ENV_VAR}` expanded), tools listed at startup. A server that is
-  down does not stop the harness. OAuth with `"oauth": true` (`/login mcp:<name>`, see [MCP](docs/MCP.md#oauth)),
-  shared or with each user's own token.
-- **REST**: the OpenAPI 3 spec is parsed and each operation that passes `allowedPaths` and `denyPaths` becomes a tool whose
-  input schema comes from the spec. Hidden operations are not reachable. GET/HEAD are read-only, other methods need approval.
-  OAuth2 per API (`oauth`: authorization code, device code or client credentials; endpoints from the issuer or the
-  spec): every call carries the token of the user behind the chat, and a missing login is a tool result asking the
-  user to connect, never a changed tool list ([MCP](docs/MCP.md#oauth-1)).
-- **Token storage**: one `TokenStore` for every login: a file (encrypted with `JLLM_TOKEN_KEY` when there are users),
-  the OS secret store (macOS Keychain, Windows DPAPI, Linux Secret Service) for a single user, or your own
-  ([MCP](docs/MCP.md#6-token-storage)).
-- **Visibility lists**: MCP `allowList`/`denyList` (tool names) and REST `allowedPaths`/`denyPaths` (`METHOD /path`).
-  Absent allow = all, `[]` = none, `["*"]` = all; deny hides matches. Hidden tools never reach the model. Separate from the
-  `permissions` rules, which decide approval of visible tools.
-- **Built-in tools** are also there: files (confined to the working directory), shell, web search and fetch, sub-agents
-  (`task`), skills.
-- All sources can be switched on and off at runtime (`/tools`, `/mcp`, `/apis` in any front end, or the `tools()` and
-  `sources()` facade methods). Tools are sorted once and fixed per chat, so the provider's prompt cache stays valid.
-
-### Control
-
-- **Tool kind** (`READ_ONLY`, `FILE_EDIT`, `OTHER`) drives approval. Read-only tools never ask. Mark your own tools
-  honestly: the kind is a promise, and read-only sub-agents only get `READ_ONLY` tools.
-- **Modes** `default`, `plan`, `edit`, `auto` set what runs without asking; deny rules apply in every mode.
-- **Approvals** arrive as `approval_request` events with a preview. Your UI answers with `resolveApproval(...)`, can
-  grant a tool for the rest of the chat, and can edit a proposed context rewrite.
-- **Hooks** around agents, model calls and tool calls can observe, deny or rewrite a tool input (audit, policy,
-  redaction). **Plugins** bundle tools, hooks and slash commands.
-- **Ports** for your infrastructure: `ChatSessionStore`, `SubAgentRunLog`, `ToolApprovalPolicy`, `HarnessMetrics`,
-  `SandboxExecutor`. The defaults are in memory.
-- **Isolation**: the default sandbox has none. For untrusted input set `sandbox.backend` to `docker` (CLI
-  `--sandbox docker`, optionally `--docker-mode daemon`) or use your own `SandboxExecutor`.
-
-Details: [harness README](core/jllm-harness/README.md), [EXTENDING](docs/EXTENDING.md) (custom tools, hooks, policies,
-providers, stores), [MCP and REST](docs/MCP.md), [TOOLS](docs/TOOLS.md).
-
-## Flows
-
-Optional [`jllm-workflows`](docs/WORKFLOW.md) plugin. A flow is a JSON file of steps; the engine, not the model, decides
-what runs next. "Deterministic" means the orchestration: the same flow with the same inputs and decisions walks the same
-path. The model's answers are not deterministic, so every model call sits in a bounded step.
-
-- **Steps**: `task` (a prompt with slots and an enforced answer shape, run by a harness agent), `action` (a Java action,
-  no model), `decide` (a turning point), `ask` (pause and ask a person), `call` (start another flow) and `finish`.
-- **Turning points** pick one declared outcome, decided by a Java chooser, by the model from a closed list, or by a
-  person. The model can never invent a path. Decisions are recorded and reused on resume.
-- **Run, wait, resume**: a run that needs an answer goes to `waiting`, survives restarts and resumes without repeating
-  finished steps. Journaled model replies and decisions are not requested again.
-- **Questions**: `ask` steps (text, single or multi select, pattern, timeout), `clarify` on tasks (the reply is checked
-  for a question and the run pauses to ask its owner), and customer requests sent to a running flow.
-- **Nested flows**: `call` runs a child flow as a run of its own with explicit input and a declared result; depth and
-  loops are checked.
-- **Task approvals**: a task whose agent has tools runs in the real agent loop; a tool that needs approval asks the run's
-  owner (allow or refuse). The role and the user's disabled tools can only narrow the task's tools.
-- **Ownership**: personal flows per user, global flows defined by an admin and shareable with roles; global flows run as
-  the user who starts them. Java actions can be restricted to roles, checked when a flow is saved.
-- **Unattended** flows (`"unattended": true`) never ask; a flow that could ask is refused at save time.
-- **Error handler**, retries and limits per flow; every flow is validated when saved.
-
-```
-/flow-start refund {"order": "A-1001", "message": "I want my money back"}
-run 7c1e...: WAITING
-Approve the refund of 120? [single, asks operator]
-/flow-resume 7c1e... approve
-```
-
-Run them from any front end with `/flows`, `/flow-start`, `/flow-resume`, `/flow-request` and `/flow-cancel`; from a
-command line with `WorkflowCli` (`list`, `start`, `resume`, `history`, `cancel`; no chat needed); or from the `jllm-web`
-Flows screen (graph designer with server-side validation, personal and global flows) and Runs screen (history, cancel,
-open questions, a badge with the waiting count). Enable both plugins under `plugins` in the settings file. A sample
-flow, `develop-app` (plan, implement, review loop, test loop), is in [runConfig/flows](runConfig/flows) and seeded as a
-global flow by `jllm.flows-seed-dir` ([jllm-web](jllm-web/README.md#sample-global-flows)).
-
-Not yet: the `who` label of a question (operator, customer) is shown but not enforced; the run's owner answers every
-question. Details: [WORKFLOW](docs/WORKFLOW.md).
-
-## Models
-
-Anthropic (prompt caching, thinking, citations) and any OpenAI-compatible endpoint (OpenAI, Qwen, llama.cpp, vLLM,
-Ollama), selectable by name from a settings `providers` list and switchable with `/model`. An optional fast model handles summaries, tool-group selection and the `auto`-mode classifier. A stricter
-prompt for small local models is available. If a provider fails, the next one in the `order` chain is tried. Three
-context strategies for long chats: `compaction` (default), `mnemonic` (never rewrites the log) and `scope` (whole-request
-budget, large tool results offloaded to disk, pinned first message, a `todo_write` task list).
+| [jllm-harness](core/jllm-harness) | the library | [README](core/jllm-harness/README.md) |
+| [jllm-cli](jllm-cli) | terminal front end, one shaded jar | [README](jllm-cli/README.md) |
+| [jllm-web-commons](jllm-web-commons) | REST + SSE chat API as a Spring Boot auto-configuration | [README](jllm-web-commons/README.md) |
+| [jllm-web](jllm-web) | reference web app: OIDC and password sign-in, roles, Vue chat UI, flow editor | [README](jllm-web/README.md) |
+| [jllm-workflows](plugins/jllm-workflows), [jllm-workflow-web](plugins/jllm-workflow-web) | optional flow engine and its web endpoints | [WORKFLOW](docs/guides/workflow.md) |
+| jllm-js, jllm-pdf, jllm-docs | optional plugins: JavaScript sandbox, document readers | [JS](docs/guides/js.md), [TOOLS](docs/guides/tools.md#document-readers) |
 
 ## Quick start
 
 ```sh
-# terminal
 mvn -pl jllm-cli -am package -DskipTests
-java -jar jllm-cli/target/jllm-cli-1.0.0.jar --provider anthropic --mode edit
+java -jar jllm-cli/target/jllm-cli-1.0.0.jar --provider anthropic --mode edit      # terminal
 
-# browser, http://localhost:8080
 mvn -pl jllm-web -am package -DskipTests
-java -jar jllm-web/target/jllm-web-1.0.0.jar --provider anthropic
+java -jar jllm-web/target/jllm-web-1.0.0.jar --provider anthropic                 # http://localhost:8080
 ```
 
-Set `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`, `GROK_API_KEY`, `QWEN_API_KEY`) first. Embedding the library is shown above and in the
-[harness README](core/jllm-harness/README.md#embedding).
+Set `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`, `GROK_API_KEY`, `QWEN_API_KEY`) first.
 
 ## Documentation
 
-| Document | Content |
+| For | Start here |
 |---|---|
-| [jllm-harness](core/jllm-harness/README.md) | embedding, settings file, hooks, plugins, modes, context strategies, fast model |
-| [jllm-cli](jllm-cli/README.md) | flags, directories, interactive session, slash commands, local models |
-| [jllm-pdf](docs/TOOLS.md#document-readers) / [jllm-docs](docs/TOOLS.md#document-readers) | optional `read_file` readers for pdf and docx (plugins: jar in the plugin directory, enabled under `plugins` in the settings) |
-| [jllm-js](docs/JS.md) | optional `run_js` tool: JavaScript (GraalJS, regex supported, synchronous `tools.*` calls without `await`) in a sandbox whose only view of the world is the harness tools; `bash` stays available to the roles that list it (plugin: jar in the plugin directory, enabled under `plugins`) |
-| [jllm-web](jllm-web/README.md) | `jllm.*` properties, REST and SSE API, frontend structure |
-| [USAGE](docs/USAGE.md) | harness build, permission modes, settings file, embedding, events |
-| [TOOLS](docs/TOOLS.md) | built-in tools, kinds, path jail, per-chat tool set, tool-call pipeline |
-| [SANDBOX](docs/SANDBOX.md) | the four sandbox executors: directories, isolation, Docker settings |
-| [MCP](docs/MCP.md) | MCP servers and OpenAPI REST APIs as tools |
-| [SKILLS](docs/SKILLS.md) | skills, instruction files, agent prompts |
-| [EXTENDING](docs/EXTENDING.md) | custom tools, hooks, plugins, policies, providers, agent types, context strategies, stores, sandbox, tests |
-| [CACHES](docs/CACHES.md) | prompt-cache layout, compaction, mnemonic and scope algorithms |
-| [INTERNALS](docs/INTERNALS.md) | architecture, run lifecycle, loop, approvals, sub-agents, concurrency, persistence |
-| [WORKFLOW](docs/WORKFLOW.md) | optional `jllm-workflows` plugin: deterministic flows (JSON steps, Java actions, three choosers, questions and `clarify`, nested flows, task approvals, personal and global flows with roles, unattended runs, error handler), chat commands, command line, web API and flow editor |
-| [FLOW](docs/FLOW.md) | step-by-step diagrams of every pipeline |
+| **Evaluating** | [Why JLLM](docs/why-jllm.md), [security model](docs/enterprise/security-model.md), [compliance](docs/enterprise/compliance-and-licensing.md), [limits](docs/enterprise/roadmap-and-limits.md) |
+| **Integrating** | [Embed in Java](docs/getting-started/embed-in-java.md), [Spring Boot](docs/getting-started/spring-boot.md), [Extending](docs/guides/extending.md) |
+| **Operating** | [Deployment](docs/enterprise/deployment.md), [identity](docs/enterprise/identity-and-access.md), [observability](docs/enterprise/observability.md), [governance](docs/enterprise/governance-and-audit.md) |
+| **Everything** | [Docs index](docs/index.md), [long overview](docs/reference/overview.md) |
+
+## Known limits and what is next
+
+Today: single OIDC provider and no IdP role mapping; one global API key per model provider; the web app is a
+reference front end to run behind your proxy; no Spring Boot starter (recipes only); no external security audit.
+
+Stores (chat history, users, roles, tokens) are files by default. To use your own storage, implement the store
+interfaces and register them as beans or on the builder ([ports](docs/enterprise/governance-and-audit.md#ports-for-your-stores)).
+
+Next: IdP role mapping (token claims to roles) and per-user model credentials (own API key or OAuth login per
+provider, in development). Details: [roadmap and limits](docs/enterprise/roadmap-and-limits.md).
 
 ## Credits
 
@@ -222,4 +107,4 @@ Set `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`, `GROK_API_KEY`, `QWEN_API_KEY`) fi
 ## License
 
 [Apache License 2.0](LICENSE). Redistributions and derivative works must keep the copyright notice and the
-[NOTICE](NOTICE) file, so the original attribution is preserved.
+[NOTICE](NOTICE) file.

@@ -34,10 +34,10 @@ Main [--provider anthropic|openai|gemini|grok|qwen|llamacpp|ollama] [--model M] 
 | `--mode` | `default` | initial [permission mode](../core/jllm-harness/README.md#modes-working-directory-and-scratch-directory) |
 | `--workdir` | current directory | project directory; the file tools are confined to it |
 | `--prompt` | none | run one turn non-interactively, then exit |
-| `--settings` | none | harness [settings file](../docs/USAGE.md#5-settings-file), merged over `~/.jllm/settings.json` and `.jllm/settings.json` |
+| `--settings` | none | harness [settings file](../docs/reference/usage.md#5-settings-file), merged over `~/.jllm/settings.json` and `.jllm/settings.json` |
 | `--system-prompt` | none | text appended to the built-in system prompt |
 | `--system-prompt-file` | none | file appended to the system prompt |
-| `--system-prompt-replace` | none | file that replaces the built-in system prompt; also `SYSTEM.md` / `APPEND_SYSTEM.md` in `~/.jllm/` and `.jllm/` (see [USAGE](../docs/USAGE.md#system-prompt-files)) |
+| `--system-prompt-replace` | none | file that replaces the built-in system prompt; also `SYSTEM.md` / `APPEND_SYSTEM.md` in `~/.jllm/` and `.jllm/` (see [USAGE](../docs/reference/usage.md#system-prompt-files)) |
 | `--max-turns` | 40 (0 or less: default) | model calls per user turn |
 | `--context-tokens` | 100000 | the model's context window; wins over `context.maxTokens` |
 | `--max-tokens` | 32000 | output limit of one response, not the window |
@@ -45,10 +45,10 @@ Main [--provider anthropic|openai|gemini|grok|qwen|llamacpp|ollama] [--model M] 
 | `--search-api-key` | `BRAVE_API_KEY` env var | Brave key for `web_search`; without it DuckDuckGo is scraped |
 | `--small-model` | off | bare, or `=false`; adds the small-model rules to the system prompt |
 | `--pricing.input-per-million`, `output-per-million`, `cache-read-per-million`, `cache-write-per-million` | 0 | USD per million tokens, for the cost estimate; same keys as `jllm.pricing.*` of the web app |
-| `--sandbox` | `local` | `local` (no isolation) or `docker`: `bash` runs in a container with the project directory mounted ([SANDBOX](../docs/SANDBOX.md)); wins over `sandbox.backend` |
+| `--sandbox` | `local` | `local` (no isolation) or `docker`: `bash` runs in a container with the project directory mounted ([SANDBOX](../docs/guides/sandbox.md)); wins over `sandbox.backend` |
 | `--docker-image` | `python:3.12-slim` | image of the docker sandbox; wins over `sandbox.docker.image` |
 | `--docker-mode` | `oneshot` | `oneshot` (a container per command) or `daemon` (one long-running container for `bash` and the file tools; kept between runs); wins over `sandbox.docker.mode` |
-| `--docker-remote` | off | bare, or `=false`; the docker daemon is on another machine: the project is uploaded to the container and backed up on exit and on `/sandbox backup` ([SANDBOX](../docs/SANDBOX.md#remote-docker)); wins over `sandbox.docker.remote` |
+| `--docker-remote` | off | bare, or `=false`; the docker daemon is on another machine: the project is uploaded to the container and backed up on exit and on `/sandbox backup` ([SANDBOX](../docs/guides/sandbox.md#remote-docker)); wins over `sandbox.docker.remote` |
 | `--docker-remote-host` | from `DOCKER_HOST` | address where the remote host's published ports are reached |
 | `--sandbox-clean` | | no value; removes the daemon-mode container of the startup directory, prints what was removed, exits. Project files stay |
 | `--sandbox-clean-all` | | no value; removes every CLI sandbox container, then exits |
@@ -67,7 +67,7 @@ On startup the CLI prints three directories:
 | history dir | `<project>/.jllm/history/<chatId>/<agentId>/` | `messages.jsonl`, sub-agent runs, `mnemonic.json` |
 
 When the project directory is not writable, scratch and history go under `sandbox.tempDir`
-(default `${java.io.tmpdir}/agent-harness`). Chats persist there. At startup the CLI offers to continue the newest saved chat (`--resume prompt|no|<id>`, default `prompt`; `--prompt` and piped input never ask), see [USAGE](../docs/USAGE.md#saved-chats-and-restarting).
+(default `${java.io.tmpdir}/agent-harness`). Chats persist there. At startup the CLI offers to continue the newest saved chat (`--resume prompt|no|<id>`, default `prompt`; `--prompt` and piped input never ask), see [USAGE](../docs/reference/usage.md#saved-chats-and-restarting).
 
 The CLI has **no isolation**: shell commands run as the current user, and plan mode cannot stop a shell command from
 writing to the project directory.
@@ -151,7 +151,7 @@ by default (`execution.maxParallel`), which suits one local GPU. `--small-model`
 
 `Main` builds the harness with `CwdSandboxExecutor` (rooted at the project dir), `FileChatSessionStore`,
 `FileHistorySubAgentRunLog` and `FileMnemonicStore`, then subscribes to the chat's events. Precedence for the same
-setting: flag, then settings file, then default. See [USAGE](../docs/USAGE.md) for the settings file and the event
+setting: flag, then settings file, then default. See [USAGE](../docs/reference/usage.md) for the settings file and the event
 contract.
 
 ### Credentials and user policy
@@ -168,7 +168,7 @@ principal. What that means for each call:
 - **Principal:** `sessions().principal(chatId)` returns `null`. Nothing in the CLI reads it.
 
 The resolvers exist for embedders that serve several users from one process (see
-[USAGE, Multi-user embedding](../docs/USAGE.md#multi-user-embedding)). A CLI session could set them, but
+[USAGE, Multi-user embedding](../docs/reference/usage.md#multi-user-embedding)). A CLI session could set them, but
 `Main` does not, so the behavior above is fixed.
 
 ## Plugins

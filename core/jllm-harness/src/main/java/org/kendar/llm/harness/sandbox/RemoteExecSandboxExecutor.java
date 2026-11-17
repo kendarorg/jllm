@@ -28,7 +28,7 @@ import java.util.function.Predicate;
  * {@code /workspace}; {@link Kind#WEB} has one container per chat with {@code /workspace} on an anonymous volume that
  * is not on the host. The directory layout on the host (history, sessions) comes from the wrapped
  * {@link LocalDirSandboxExecutor}. The daemon listens on {@code 127.0.0.1} only (published port) and every request
- * carries a per-container token; see docs/SANDBOX.md.
+ * carries a per-container token; see docs/guides/sandbox.md.
  */
 public class RemoteExecSandboxExecutor implements SandboxExecutor {
 
