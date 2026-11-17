@@ -3,8 +3,8 @@
 Evaluates the jllm harness against real language models. The module contains only tests and is left out of the
 default build: it is available only through the `eval` Maven profile.
 
-At the moment it provides the shared infrastructure: configuration, model access, a connection check and run
-metadata. Eval cases, graders and reports will build on it.
+It provides the shared infrastructure for evaluations: configuration, access to the target, judge and fast models,
+a connection check and run metadata.
 
 ## Quick start
 
@@ -30,8 +30,8 @@ Each run evaluates exactly one target, chosen with `eval.target`.
 | Target | Description |
 |---|---|
 | `anthropic` | Claude Haiku 5.5 (`claude-haiku-5-5`) through the Anthropic API. |
-| `remote.<name>` | An OpenAI-compatible server you run yourself, defined by a named entry in the properties file. The reference entry is Qwen3.6-27B served natively on an M4 Pro Mac. The eval only calls it: it never starts, stops or reloads it. |
-| `local.<strong\|alt\|small>` | A llama.cpp server running in Docker on an NVIDIA GPU, started by you with docker compose. The planned models are Qwen3.6-27B at 4-bit (`strong`), gpt-oss-20b (`alt`) and an 8-12B model at 4-bit with the small-model prompt (`small`). |
+| `remote.<name>` | An OpenAI-compatible server you run yourself, defined by a named entry in the properties file (for example Qwen3.6-27B served natively on a Mac). The eval only calls it: it never starts, stops or reloads it. |
+| `local.<strong\|alt\|small>` | A llama.cpp server running in Docker on an NVIDIA GPU, started by you with docker compose. Three models are defined: `strong` (Qwen3.6-27B, 4-bit), `alt` (gpt-oss-20b) and `small` (an 8-12B model, 4-bit, run with the small-model prompt). |
 
 ## Configuration
 
