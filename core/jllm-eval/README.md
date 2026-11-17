@@ -1,115 +1,152 @@
 # jllm-eval
 
-Test-only module that evaluates the harness with real language models. It currently provides infrastructure only: no cases,
-graders or reports yet. It is **not** part of the default build; it exists only under the `eval` profile.
+Evaluates the jllm harness against real language models. The module contains only tests and is left out of the
+default build: it is available only through the `eval` Maven profile.
 
-## Running
+At the moment it provides the shared infrastructure: configuration, model access, a connection check and run
+metadata. Eval cases, graders and reports will build on it.
 
-For a `local.*` target, start the llama.cpp server first with docker compose (the eval never starts it; see
-[Local server](#local-server-docker-compose-by-hand)):
+## Quick start
 
-```
-cd core/jllm-eval/docker
-docker compose --env-file strong.env up -d     # strong | alt | small
-cd ../../..
-```
-
-Then run the tests from the repository root:
+1. Choose a target (see [Targets](#targets)) and, for a local model, start its server (see
+   [Local models](#local-models)).
+2. Run the tests from the repository root with JDK 21:
 
 ```
 mvn -Peval -pl core/jllm-eval -am test -Dgroups=smoke -Deval.target=anthropic
 mvn -Peval -pl core/jllm-eval -am test -Dgroups=smoke -Deval.target=remote.mac
 mvn -Peval -pl core/jllm-eval -am test -Dgroups=smoke -Deval.target=local.strong
-mvn -Peval -pl core/jllm-eval -am test -Dgroups=unit            # no model needed
 ```
 
-- `-Dgroups`: `smoke`, `full`, `strategy`, `unit` (checks that need no model). Default `smoke,unit`.
-- Everything runs strictly sequentially: one fork, no parallel classes or methods.
-- Needs JDK 21 (`JAVA_HOME`).
+`-Dgroups` selects the test groups: `smoke`, `full` or `strategy`. The extra group `unit` holds the checks that need
+no model at all (`mvn -Peval -pl core/jllm-eval -am test -Dgroups=unit`). The default is `smoke,unit`.
+
+Tests, classes and methods always run one after the other, in a single JVM.
+
+## Targets
+
+Each run evaluates exactly one target, chosen with `eval.target`.
+
+| Target | Description |
+|---|---|
+| `anthropic` | Claude Haiku 5.5 (`claude-haiku-5-5`) through the Anthropic API. |
+| `remote.<name>` | An OpenAI-compatible server you run yourself, defined by a named entry in the properties file. The reference entry is Qwen3.6-27B served natively on an M4 Pro Mac. The eval only calls it: it never starts, stops or reloads it. |
+| `local.<strong\|alt\|small>` | A llama.cpp server running in Docker on an NVIDIA GPU, started by you with docker compose. The planned models are Qwen3.6-27B at 4-bit (`strong`), gpt-oss-20b (`alt`) and an 8-12B model at 4-bit with the small-model prompt (`small`). |
 
 ## Configuration
 
-All settings live in `src/test/resources/eval.properties`. Any key can be overridden by `-D<key>=value` or by the
-environment variable made of the key in upper case with non-alphanumerics replaced by `_`
-(`eval.target` -> `EVAL_TARGET`). Order: `-D`, environment, file. Startup validation reports **every** invalid or
-missing key in one message.
+All settings are in `src/test/resources/eval.properties`. Any key can be overridden with `-D<key>=<value>` or with an
+environment variable: take the key, upper-case it and replace every character that is not a letter or digit with `_`
+(`eval.target` becomes `EVAL_TARGET`). The command line wins over the environment, which wins over the file.
 
-Secrets (`*.apiKey`) come only from the environment or `-D`; a secret in the properties file is a validation error.
-Secrets are masked in every `toString`, exception message, `run.json` and connection-check message.
+At startup every setting is validated, and a single error message lists all invalid or missing keys.
+
+### Secrets
+
+API keys and tokens (every key ending in `.apiKey`) are read only from the environment or the command line. A secret
+found in the properties file is a validation error. Configured secrets are masked wherever they could be printed:
+object descriptions, exception messages, connection-check output and `run.json`.
+
+| Key | Where to set it |
+|---|---|
+| `eval.anthropic.apiKey` | `EVAL_ANTHROPIC_APIKEY`, `-Deval.anthropic.apiKey`, or `ANTHROPIC_API_KEY` |
+| `eval.remote.<name>.apiKey` | Optional. Environment or command line. |
+| `eval.judge.openai.apiKey` | Optional. Environment or command line. |
+
+### Properties
 
 | Key | Meaning |
 |---|---|
-| `eval.target` | `anthropic`, `remote.<name>` or `local.<strong\|alt\|small>` |
-| `eval.anthropic.baseUrl` / `.model` / `.contextTokens` / `.timeoutSeconds` | Anthropic API. Model default `claude-haiku-5-5` |
-| `eval.anthropic.apiKey` | `EVAL_ANTHROPIC_APIKEY`, `-D`, or `ANTHROPIC_API_KEY` |
-| `eval.remote.<name>.protocol` | `openai` (OpenAI-compatible) or `anthropic` |
-| `eval.remote.<name>.baseUrl` / `.model` / `.contextTokens` / `.smallModel` / `.timeoutSeconds` | Remote entry |
-| `eval.remote.<name>.apiKey` | Optional credential (environment or `-D` only) |
-| `eval.judge` | `anthropic` (default) or `openai` |
-| `eval.judge.anthropic.model` | Judge model when `anthropic` (uses `eval.anthropic.*` connection and key) |
-| `eval.judge.openai.baseUrl` / `.model` / `.contextTokens` / `.timeoutSeconds` / `.apiKey` | Judge endpoint when `openai`; independent of any target entry |
-| `eval.fast` | `target` (default), `anthropic` or `remote.<name>` |
-| `eval.fast.anthropic.model` | Fast model when `anthropic` |
-| `eval.local.port` | Host port of the compose-run llama.cpp server |
-| `eval.local.model.<k>.file` | GGUF file name in the compose models folder (k = `strong`, `alt`, `small`) |
-| `eval.local.model.<k>.alias` | Model name the server exposes, **without quantization** (`--alias`) |
-| `eval.local.model.<k>.contextTokens` | Context size passed to the server (`-c`) and to the harness; lower it (e.g. `65536`) to force a smaller window |
-| `eval.local.model.<k>.maxContextTokens` | Optional ceiling; `contextTokens` above it is rejected |
-| `eval.local.model.<k>.smallModel` | Use the harness small-model prompt |
-| `eval.local.model.<k>.extraArgs` | Extra llama.cpp server arguments |
-| `eval.timeout.connect` / `eval.timeout.warmup` | Seconds for reachability probes / warm-up |
-| `eval.trials` | Default number of trials |
-| `eval.outputDir` | Output folder; each run writes `run-<timestamp>/run.json` |
-
-## Targets (exactly one per run)
-
-- **anthropic**: Claude Haiku 5.5 (`claude-haiku-5-5`) through the Anthropic API.
-- **remote.&lt;name&gt;**: an external OpenAI-compatible server managed by hand (reference: Qwen3.6-27B served natively
-  on an M4 Pro Mac). The eval never starts, stops or reloads it; it only checks it and calls it.
-- **local.&lt;strong|alt|small&gt;**: one llama.cpp server in Docker, started **by hand** with `docker/docker-compose.yml`
-  (single request slot, only the target model loaded). The eval never starts or stops it.
-  Planned models: strong = Qwen3.6-27B 4-bit, alt = gpt-oss-20b,
-  small = an 8-12B 4-bit model with the small-model prompt. File names come from the properties.
+| `eval.target` | `anthropic`, `remote.<name>` or `local.<strong\|alt\|small>`. |
+| `eval.anthropic.baseUrl` | Anthropic API address. |
+| `eval.anthropic.model` | Model identifier. Defaults to `claude-haiku-5-5`. |
+| `eval.anthropic.contextTokens` | Context size used by the harness. |
+| `eval.anthropic.timeoutSeconds` | Request timeout. |
+| `eval.remote.<name>.protocol` | `openai` (OpenAI-compatible) or `anthropic`. |
+| `eval.remote.<name>.baseUrl` | Server address, including `/v1` for OpenAI-compatible servers. |
+| `eval.remote.<name>.model` | Model identifier the server serves. |
+| `eval.remote.<name>.contextTokens` | Context size used by the harness. |
+| `eval.remote.<name>.smallModel` | `true` to use the harness small-model prompt. |
+| `eval.remote.<name>.timeoutSeconds` | Request timeout. |
+| `eval.judge` | `anthropic` (default) or `openai`. |
+| `eval.judge.anthropic.model` | Judge model when the judge is `anthropic`. It uses the `eval.anthropic.*` address and key. |
+| `eval.judge.openai.baseUrl`, `.model`, `.contextTokens`, `.timeoutSeconds` | Judge endpoint when the judge is `openai`. |
+| `eval.fast` | Fast model: `target` (default), `anthropic` or `remote.<name>`. |
+| `eval.fast.anthropic.model` | Fast model when `eval.fast=anthropic`. |
+| `eval.local.port` | Host port of the local llama.cpp server. |
+| `eval.local.model.<k>.file` | GGUF file name (`<k>` is `strong`, `alt` or `small`). |
+| `eval.local.model.<k>.alias` | Model name the server exposes, without the quantization. |
+| `eval.local.model.<k>.contextTokens` | Context size for the server and the harness. |
+| `eval.local.model.<k>.maxContextTokens` | Optional upper limit; a larger `contextTokens` is rejected. |
+| `eval.local.model.<k>.smallModel` | `true` to use the harness small-model prompt. |
+| `eval.local.model.<k>.extraArgs` | Extra llama.cpp server arguments. |
+| `eval.timeout.connect` | Seconds allowed for a reachability probe. |
+| `eval.timeout.warmup` | Seconds allowed for the warm-up call. |
+| `eval.trials` | Default number of trials. |
+| `eval.outputDir` | Output folder. Each run writes `run-<timestamp>/run.json` there. |
 
 ## Judge and fast model
 
-Exactly one judge per run (`eval.judge`), no fallback and no mixing, configured separately from the target even
-when both point at the same server. `selfGraded` in `run.json` is true when judge and target are the same model on
-the same server (same protocol, address and model id). The fast model defaults to the target itself.
+A run has exactly one judge, chosen with `eval.judge`: Haiku 5.5 through the Anthropic API (the default), or one
+OpenAI-compatible endpoint. There is no fallback and no mixing. The judge is configured separately from the target,
+even when both use the same server.
+
+The run is marked as self-graded (`selfGraded` in `run.json`) when the judge and the target are the same model on the
+same server.
+
+The fast model is the target itself unless `eval.fast` selects Haiku 5.5 or a remote entry.
 
 ## Connection check
 
-Before any test, the target, the judge and a separate fast model are probed (`/models`, or the Anthropic model
-endpoint) for reachability and for serving the configured model, then get one short warm-up call. Warm-up times are
-stored in `run.json` apart from test timings. Any failure stops the run with a message naming the entry and address.
+Before any test runs, the target, the judge and the fast model (when it is a separate endpoint) are each checked:
+the server must be reachable and must serve the configured model. Each then receives one short warm-up call. Warm-up
+times are stored in `run.json`, apart from test timings. If anything fails, the run stops with a message naming the
+entry and its address.
 
-## Local server (docker compose, by hand)
+## Local models
+
+The local target is a llama.cpp server that you start yourself with docker compose. The eval treats it like a remote
+server: it never starts, stops or restarts it, and the connection check fails with a clear message if the server is
+down or serves a different model name.
+
+The compose file and one environment file per model are in `docker/`:
 
 ```
 cd core/jllm-eval/docker
-docker compose --env-file strong.env up -d                    # load one model
-docker compose --env-file alt.env up -d --force-recreate      # switch model
-docker compose down
+docker compose --env-file strong.env up -d                  # start a model
+docker compose --env-file alt.env up -d --force-recreate    # switch to another model
+docker compose down                                         # stop
 ```
 
-`docker/<k>.env` holds image (pinned), port, host folders, model file, alias (no quantization) and context size
-(`CTX_TOKENS`, e.g. 65536). Keep file, alias and context in sync with `eval.local.model.<k>.*`. The eval treats the
-server like a remote entry: the connection check fails with a clear message if it is down or serves another alias.
-No Testcontainers and no container reaper are used.
+Each `docker/<k>.env` file sets the pinned image, the port, the host folders for models and download cache, the model
+file, the alias and the context size (`CTX_TOKENS`). The server runs with a single request slot and loads only that
+one model.
 
-## Code (all under `src/test/java/org/kendar/llm/eval`)
+The alias is the model name the server reports, and it never includes the quantization. Set a smaller `CTX_TOKENS`
+(for example `65536`) to force a shorter context in tests. The file name, alias and context size also appear under
+`eval.local.model.<k>.*` in `eval.properties`; keep the two in sync.
+
+## Run metadata
+
+At startup the run writes `run.json` to its output folder. It records the target type and name, the model
+identifier, the quantization when it can be read from the file name, the context size, the server or image
+version, the judge, the fast model, the self-graded flag, the start time, the git commit and the warm-up times.
+
+## Getting model clients
+
+`EvalModels.target()`, `EvalModels.judge()` and `EvalModels.fast()` return ready-to-use harness model clients. They
+are built with the harness's own provider classes.
+
+## Classes
+
+All classes are under `src/test/java/org/kendar/llm/eval`.
 
 | Class | Role |
 |---|---|
-| `EvalConfig` | Loads, resolves and validates all settings |
-| `ModelEndpoint` | One resolved endpoint; converts to harness `ProviderSettings` |
-| `Secrets` | Secret registry and masking |
-| `ConnectionCheck` | Reachability, served model, warm-up |
-| `RunMetadata` | Run description, written as `run.json` |
-| `EvalRun` | Per-run singleton: config, connection check, metadata |
-| `EvalModels` | `target()`, `judge()`, `fast()`: harness `ModelClient`s built by `ProviderCatalog` |
-
-## Not yet verified
-
-Live-model acceptance (smoke test with each target, the compose-run local servers) was not run: no model was connected
-when this module was written. The model-free checks (`-Dgroups=unit`) pass.
+| `EvalConfig` | Loads, resolves and validates the settings. |
+| `ModelEndpoint` | One resolved endpoint; converts to harness provider settings. |
+| `Secrets` | Registers secrets and masks them in output. |
+| `ConnectionCheck` | Reachability, served model and warm-up. |
+| `RunMetadata` | Describes the run and writes `run.json`. |
+| `EvalRun` | Sets up the run once and shares it with all tests. |
+| `EvalModels` | Entry point for the target, judge and fast clients. |
