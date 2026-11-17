@@ -7,8 +7,8 @@ Two ready-made front ends over the same library. They are working examples, not 
 Java 21 and Maven.
 
 ```sh
-mvn -pl jllm-cli -am package -DskipTests
-mvn -pl jllm-web -am package -DskipTests
+mvn -pl jllm-cli -am package
+mvn -pl jllm-web -am package
 ```
 
 Set a key first: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GROK_API_KEY` or `QWEN_API_KEY`. A local Ollama needs no key

@@ -6,7 +6,7 @@ standard tools. One class, `org.kendar.llm.cli.Main`, packaged as a shaded runna
 ## Build and run
 
 ```sh
-mvn -pl jllm-cli -am package -DskipTests
+mvn -pl jllm-cli -am package
 java -jar jllm-cli/target/jllm-cli-1.0.0.jar --provider anthropic --mode edit
 ```
 

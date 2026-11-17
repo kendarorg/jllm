@@ -68,14 +68,23 @@ act under approval and isolation. Comparison: [JVM landscape](docs/comparisons/j
 ## Quick start
 
 ```sh
-mvn -pl jllm-cli -am package -DskipTests
+mvn -pl jllm-cli -am package
 java -jar jllm-cli/target/jllm-cli-1.0.0.jar --provider anthropic --mode edit      # terminal
 
-mvn -pl jllm-web -am package -DskipTests
+mvn -pl jllm-web -am package
 java -jar jllm-web/target/jllm-web-1.0.0.jar --provider anthropic                 # http://localhost:8080
 ```
 
 Set `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`, `GROK_API_KEY`, `QWEN_API_KEY`) first.
+
+## Maven Central
+
+All modules are available on Maven Central under the group `org.kendar.llm`.
+
+## Tests and coverage
+
+`mvn test` (or any later phase) runs the tests with JaCoCo and writes the aggregated report to
+[docs/coverage](docs/coverage/index.html).
 
 ## Documentation
 

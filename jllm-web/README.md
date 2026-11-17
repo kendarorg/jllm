@@ -6,7 +6,7 @@ Vue 3 chat UI. The Spring layer is a thin adapter; all agent logic lives in the 
 ## Build and run
 
 ```sh
-mvn -pl jllm-web -am package -DskipTests
+mvn -pl jllm-web -am package
 java -jar jllm-web/target/jllm-web-1.1.0-jllm.jar --provider anthropic --jllm.webauth-dir=runConfig/webauth
 ```
 

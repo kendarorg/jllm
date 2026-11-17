@@ -183,11 +183,11 @@ budget, large tool results offloaded to disk, pinned first message, a `todo_writ
 
 ```sh
 # terminal
-mvn -pl jllm-cli -am package -DskipTests
+mvn -pl jllm-cli -am package
 java -jar jllm-cli/target/jllm-cli-1.0.0.jar --provider anthropic --mode edit
 
 # browser, http://localhost:8080
-mvn -pl jllm-web -am package -DskipTests
+mvn -pl jllm-web -am package
 java -jar jllm-web/target/jllm-web-1.0.0.jar --provider anthropic
 ```
 

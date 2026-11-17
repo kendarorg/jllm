@@ -51,8 +51,8 @@ the containers on another host and uploads each workspace. Settings and the daem
 ## Build
 
 ```sh
-mvn -pl jllm-cli -am package -DskipTests        # one shaded runnable jar
-mvn -pl jllm-web -am package -DskipTests        # Spring Boot jar
+mvn -pl jllm-cli -am package        # one shaded runnable jar
+mvn -pl jllm-web -am package        # Spring Boot jar
 ```
 
 Libraries are published as `org.kendar.llm` artifacts; see [PUBLISHING](../reference/publishing.md).
