@@ -231,8 +231,68 @@ Hermes Agent, mini-swe-agent), picked three gaps, planned in the root `extend.md
 `HARNESSES-COMPARE.md` gained the stuck-detection and verify-on-stop rows, and its jllm column lists the three
 features. Model streaming moved out of `FUTURE.md`.
 
+## 13. Plugins, JavaScript tool and module layout
+- **`run_js` tool** (module `jllm-js`): the agent runs JavaScript in a sandbox with no host access (no files, network,
+  processes or `require`). Scripts reach tools only through a `tools` object. Defaults: 30 s timeout, statement cap,
+  50 KB output limit.
+- **Plugins from a directory:** plugins load from `pluginDir` (default `./plugins`) and are enabled per id in the
+  settings. `pdf` and `docs` became plugins that can be switched on or off; each builds as a standalone jar.
+- **Sandboxing and approvals:** scratch-directory jail for scripts and agents, an environment-variable whitelist, an
+  approval service for tool calls, web host allow-lists with wildcards, invalid-certificate handling, and per-run or
+  per-chat storage quotas. Sandbox backends: local, Docker, remote Docker, CWD and local-directory executors.
+- **Tool catalog:** one catalog with per-scope tool sets; the fixed tool set keeps the prompt prefix stable. The agent
+  loop was rewritten with cancellation support.
+- **Web settings:** system-prompt files (append or replace), plugin enable/disable, and prices for cost estimates.
+- **Module layout:** the library split into `core/` (`jllm-commons`, `jllm-harness`, `jllm-fs`, `jllm-webbrowse`,
+  `jllm-apimcp`, `jllm-test-support`) and `plugins/` (`jllm-pdf`, `jllm-docs`, `jllm-js`). Version `1.1.0-jllm`.
+
+## 14. OAuth for MCP servers and REST APIs
+Authorization code, device code and client credentials, shared or per user. The browser flow runs through `/api/oauth`
+and `/oauth/callback` (single-use state, 10 minutes, bound to the user who started it). A `TokenStore` keeps tokens in
+an AES-GCM encrypted file (`JLLM_TOKEN_KEY`, rotation with `JLLM_TOKEN_KEY_OLD`) or in the OS secret store (Keychain,
+DPAPI, Secret Service). A missing login gives a `login_required` tool result rather than a changed tool list, so the
+cache is unaffected. Visibility lists (`allowList`/`denyList` for MCP, `allowedPaths`/`denyPaths` for REST) keep hidden
+tools away from the model. Upload limits were lowered to 100 MB per file and 200 MB per request
+(`JLLM_UPLOAD_MAX_FILE_SIZE`, `JLLM_UPLOAD_MAX_REQUEST_SIZE`).
+
+## 15. Storage behind interfaces
+Web users, roles, skills, login sessions and harness settings now go through interfaces, so another backend, such as
+SQL, can be plugged in without touching controllers or the harness. File implementations stay the default
+(`jllm.store=file`).
+- **Core:** `SettingsSource` / `SettingsLayer` (global, then project, then explicit; a later layer wins) with
+  `FileSettingsSource`; `ProjectMcpTrust` as an interface, with answers tied to a SHA-256 hash of the definition;
+  `UserSkill` and `SkillText` for skills whose text is read on every load.
+- **`jllm-web-commons`:** `UserRepository`, `RoleRepository`, `SkillRepository`, `LoginSessionRepository`, the `Role`
+  record, and an optional token store supplied by `HarnessIdentity`.
+- **`jllm-web`:** the file implementations (`FileUserRepository`, `FileRoleRepository`, `FileSkillRepository`,
+  `InMemoryLoginSessionRepository`). `webauth/` and `tmp/` moved under `runConfig/`.
+- A MySQL store is documented in the `jllm-web` README, not shipped.
+
+## 16. Workflows, web plugin host and OIDC
+- **`jllm-workflows` plugin:** a flow engine with run, resume and wait-for-input, nested flows, clarify and classify
+  steps, task approvals, ownership and unattended runs; a flow store, run store and validator; a CLI and slash
+  commands. Flows use an agentic task path in `AgentLoop` (`AgentOneShotModel`).
+- **Plugin API in core:** `OneShotModel`, `PluginEvents`, `PluginStorage`, `ServiceRegistry`, `WebContext`, `WebRequest`,
+  `WebResponse`, `WorkflowApi`.
+- **Web plugin host:** `WebPlugin`, `WebPluginHost`, `WebPluginController` and file-backed `PluginStorage`. The
+  `jllm-workflow-web` module exposes the API only; all UI lives in `jllm-web`.
+- **OIDC sign-in** in `jllm-web` (`OidcClient`, `OidcController`, `OidcProperties`).
+- **UI:** a flow editor (canvas, step, task and settings forms), workflow and skills panels, with parts of the admin
+  and settings panels moved to shared components. Per-role permissions for flows and a sample `develop-app` flow.
+- Docs: `guides/workflow.md`.
+
+## 17. Distribution and documentation
+- **Release:** `release/release.sh` and `release.ps1` build a distribution from `release/template` (run scripts,
+  sample settings, users, roles and an example flow). Poms carry the metadata for Maven Central, and signing and
+  publishing live in the `deploy` profile (`docs/sign_and_distribute.md`).
+- **Docs reorganized** into `getting-started/`, `guides/`, `reference/`, `enterprise/` and `comparisons/`, with
+  `why-jllm.md`, an index, a JVM landscape comparison, a coverage report and enterprise pages (security model,
+  identity, governance, observability, deployment, roadmap and limits). `FUTURE.md` was removed.
+- The `jllm-js` plugin's own assembly descriptor was dropped in favour of the shared build.
+
 ## Overall direction
-- **Where it lives:** an embedded component, then a standalone library with a CLI, then a web front end.
+- **Where it lives:** an embedded component, then a standalone library with a CLI, then a web front end, then a
+  plugin host with workflows and pluggable storage.
 - **Model target:** Anthropic, then local llama.cpp/Qwen, then small models.
 - **Context management:** three-tier compaction, then opencode-style compaction, then a second strategy that never
   rewrites the log, then a budgeted one with offloading and a task list.
