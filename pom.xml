@@ -119,13 +119,8 @@
                         <artifactId>flatten-maven-plugin</artifactId>
                         <version>1.2.5</version>
                         <configuration>
-                            <pomElements>
-                                <name>keep</name>
-                                <description>keep</description>
-                                <scm>keep</scm>
-                                <url>keep</url>
-                                <developers>keep</developers>
-                            </pomElements>
+                            <updatePomFile>true</updatePomFile>
+                            <flattenMode>ossrh</flattenMode>
                         </configuration>
                         <executions>
                             <execution>

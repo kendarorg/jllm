@@ -16,6 +16,15 @@
     <name>jllm-js</name>
     <description>run_js plugin for jllm-harness: a JavaScript sandbox (GraalJS community) over the harness tools.</description>
 
+    <url>https://github.com/kendarorg/jllm</url>
+
+    <scm>
+        <connection>scm:git:git://github.com/kendarorg/jllm.git</connection>
+        <developerConnection>scm:git:git://github.com/kendarorg/jllm.git</developerConnection>
+        <url>https://www.github.com/kendarorg/jllm</url>
+        <tag>HEAD</tag>
+    </scm>
+
     <properties>
         <graalvm.version>25.5.5.0.3</graalvm.version>
     </properties>

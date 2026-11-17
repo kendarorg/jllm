@@ -16,6 +16,15 @@
     <name>jllm-pdf</name>
     <description>PDF reader plugin for jllm-harness (Apache PDFBox).</description>
 
+    <url>https://github.com/kendarorg/jllm</url>
+
+    <scm>
+        <connection>scm:git:git://github.com/kendarorg/jllm.git</connection>
+        <developerConnection>scm:git:git://github.com/kendarorg/jllm.git</developerConnection>
+        <url>https://www.github.com/kendarorg/jllm</url>
+        <tag>HEAD</tag>
+    </scm>
+
     <dependencies>
         <dependency>
             <groupId>org.kendar.llm</groupId>
