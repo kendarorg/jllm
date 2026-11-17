@@ -5,6 +5,17 @@ graders or reports yet. It is **not** part of the default build; it exists only 
 
 ## Running
 
+For a `local.*` target, start the llama.cpp server first with docker compose (the eval never starts it; see
+[Local server](#local-server-docker-compose-by-hand)):
+
+```
+cd core/jllm-eval/docker
+docker compose --env-file strong.env up -d     # strong | alt | small
+cd ../../..
+```
+
+Then run the tests from the repository root:
+
 ```
 mvn -Peval -pl core/jllm-eval -am test -Dgroups=smoke -Deval.target=anthropic
 mvn -Peval -pl core/jllm-eval -am test -Dgroups=smoke -Deval.target=remote.mac
