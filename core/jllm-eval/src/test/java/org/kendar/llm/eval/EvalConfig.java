@@ -33,6 +33,8 @@ public final class EvalConfig {
     private int warmupTimeoutSeconds;
     private int trials;
     private Path outputDir;
+    private Path embeddingModelDir;
+    private String embeddingSha256;
 
     private EvalConfig(Map<String, String> sys, Map<String, String> env, Properties file) {
         this.sys = sys;
@@ -72,6 +74,10 @@ public final class EvalConfig {
     public int warmupTimeoutSeconds() { return warmupTimeoutSeconds; }
     public int trials() { return trials; }
     public Path outputDir() { return outputDir; }
+    /** Folder holding the embedding model files; not required to exist (embedding tests skip when files are missing). */
+    public Path embeddingModelDir() { return embeddingModelDir; }
+    /** Expected SHA-256 of the embedding model file, lower case; null when unset (model verification then fails). */
+    public String embeddingSha256() { return embeddingSha256; }
 
     /** True when judge and target are the same model on the same server. */
     public boolean selfGraded() {
@@ -170,9 +176,29 @@ public final class EvalConfig {
         String out = str("eval.outputDir", true);
         outputDir = Path.of(out == null ? "target/eval-output" : out);
 
+        resolveEmbedding();
         resolveTarget();
         resolveJudge();
         resolveFast();
+    }
+
+    private void resolveEmbedding() {
+        String dir = str("eval.embedding.modelDir", true);
+        if (dir != null) {
+            try {
+                embeddingModelDir = Path.of(dir);
+                if (java.nio.file.Files.exists(embeddingModelDir) && !java.nio.file.Files.isDirectory(embeddingModelDir)) {
+                    errors.add("eval.embedding.modelDir: not a directory ('" + dir + "')");
+                }
+            } catch (java.nio.file.InvalidPathException e) {
+                errors.add("eval.embedding.modelDir: not a valid path ('" + dir + "')");
+            }
+        }
+        String sha = raw("eval.embedding.sha256");
+        if (sha != null) {
+            if (sha.matches("(?i)[0-9a-f]{64}")) embeddingSha256 = sha.toLowerCase(Locale.ROOT);
+            else errors.add("eval.embedding.sha256: must be 64 hex characters (got '" + sha + "')");
+        }
     }
 
     private void resolveTarget() {

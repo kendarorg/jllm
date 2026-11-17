@@ -80,10 +80,28 @@ object descriptions, exception messages, connection-check output and `run.json`.
 | `eval.local.model.<k>.maxContextTokens` | Optional upper limit; a larger `contextTokens` is rejected. |
 | `eval.local.model.<k>.smallModel` | `true` to use the harness small-model prompt. |
 | `eval.local.model.<k>.extraArgs` | Extra llama.cpp server arguments. |
+| `eval.embedding.modelDir` | Folder with the embedding model files (`model_quantized.onnx`, `vocab.txt`). Not committed; see below. |
+| `eval.embedding.sha256` | Expected SHA-256 of `model_quantized.onnx`. The loader refuses the model when this is unset or differs. |
 | `eval.timeout.connect` | Seconds allowed for a reachability probe. |
 | `eval.timeout.warmup` | Seconds allowed for the warm-up call. |
 | `eval.trials` | Default number of trials. |
 | `eval.outputDir` | Output folder. Each run writes `run-<timestamp>/run.json` there. |
+
+## Embedding model
+
+The embedding grader uses bge-small-en-v1.5 (int8 ONNX), run in-process with ONNX Runtime and a pure-Java WordPiece
+tokenizer. The files are not committed. Download them into `eval.embedding.modelDir` (default
+`core/jllm-eval/eval-models/bge-small-en-v1.5`):
+
+```
+https://huggingface.co/Xenova/bge-small-en-v1.5/resolve/main/onnx/model_quantized.onnx   (34014426 bytes)
+https://huggingface.co/Xenova/bge-small-en-v1.5/resolve/main/vocab.txt                   (30522 lines)
+```
+
+Expected SHA-256 of `model_quantized.onnx` (matches the Hugging Face LFS hash of the file):
+`6c9c6101a956d62dfb5e7190c538226c0c5bb9cb27b651234b6df063ee7dbfe4`. The loader hashes the file and fails on a
+mismatch, or when `eval.embedding.sha256` is unset. Tests that need the model are skipped when the files are missing.
+Vectors are cached on disk under the output folder's `embedding-cache`.
 
 ## Judge and fast model
 
