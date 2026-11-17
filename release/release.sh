@@ -14,8 +14,19 @@ while [ $# -gt 0 ]; do
 done
 cd "$root"
 if [ "$skip" = 0 ]; then
-  [ -n "${JAVA_HOME:-}" ] || { echo "set JAVA_HOME to a JDK 21" >&2; exit 1; }
-  "$JAVA_HOME/bin/java" -version 2>&1 | grep -qE 'version "(2[1-9]|[3-9][0-9])' || { echo "JDK 21+ required" >&2; exit 1; }
+  is_jdk() { [ -x "$1/bin/java" ] && "$1/bin/java" -version 2>&1 | grep -qE 'version "(2[1-9]|[3-9][0-9])'; }
+  # JAVA_HOME, else jenv, else the JDKs of IntelliJ (~/.jdks, the lowest 21+), else java on the PATH
+  if ! { [ -n "${JAVA_HOME:-}" ] && is_jdk "$JAVA_HOME"; }; then
+    JAVA_HOME=""
+    if command -v jenv >/dev/null; then d=$(jenv getjava 2>/dev/null) && is_jdk "$d" && JAVA_HOME="$d"; fi
+    [ -n "$JAVA_HOME" ] || for d in $(ls -d "$HOME"/.jdks/*/ 2>/dev/null | sort -V); do is_jdk "${d%/}" && { JAVA_HOME="${d%/}"; break; }; done
+    if [ -z "$JAVA_HOME" ] && command -v java >/dev/null; then
+      h=$(dirname "$(dirname "$(readlink -f "$(command -v java)")")"); is_jdk "$h" && JAVA_HOME="$h"
+    fi
+    [ -n "$JAVA_HOME" ] || { echo "JDK 21+ not found: set JAVA_HOME to a JDK 21" >&2; exit 1; }
+    export JAVA_HOME
+  fi
+  echo "using JDK $JAVA_HOME"
   rm -rf target/plugins
   mvn -B -DskipTests clean install
 fi
@@ -38,4 +49,4 @@ elif command -v python3 >/dev/null || command -v python >/dev/null; then
 else echo "need zip or python to build the archive" >&2; exit 1; fi
 sha256sum "$name.zip" > SHA256SUMS
 echo "built $out/$name.zip"
-echo "publish: gh release create v$version \"$out/$name.zip\" \"$out/SHA256SUMS\" --title \"jllm $version\" --notes-file \"$root/release/template/README.txt\""
+echo "publish: gh release create v$version \"$out/$name.zip\" \"$out/SHA256SUMS\" --title \"jllm $version\" --notes-file \"$root/release/template/README.md\""
