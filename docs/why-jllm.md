@@ -41,14 +41,16 @@ in-memory or file defaults, so you can put them on your database and your observ
 
 ## When not to choose JLLM
 
-- You need **RAG, vector stores or many native provider clients**. JLLM has none of these; combine it with
-  LangChain4j or Spring AI.
-- You want a **Spring Boot starter** or a Quarkus extension. There is none; Spring support is documented as recipes.
+- You need **many native provider clients**. JLLM has few; combine it with LangChain4j or Spring AI.
+- RAG and vector stores are not built in, but they are easy to add: expose your retrieval as a
+  [tool](guides/tools.md) (see [extending](guides/extending.md#1-tools)).
+- You want a **Spring Boot starter** or a Quarkus extension. There is none; Spring support is documented as [recipes](getting-started/spring-boot.md).
 - You need **identity-provider role mapping** (groups or claims to roles), multiple OIDC providers, SAML or SCIM.
-  Not implemented ([limits](enterprise/roadmap-and-limits.md)).
+  Not implemented yet ([limits](enterprise/roadmap-and-limits.md)).
 - You need a **vendor-backed support contract, certifications or an external security audit**. There is none.
 - You need **horizontal scale out of the box**. The default stores are files and memory, a run lives in one process,
-  and a database store is a documented extension, not shipped.
+  and a database store is a documented extension, not shipped. But it is easy to add: see the
+  [MySQL store example](../jllm-web/README.md#a-possible-extension-a-mysql-store).
 - Provider OAuth logins (subscription accounts instead of API keys) are not shipped.
 
 Start with [Embed in Java](getting-started/embed-in-java.md) or [try the CLI and web app](getting-started/cli-and-web.md).
