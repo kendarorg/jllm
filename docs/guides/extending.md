@@ -74,8 +74,9 @@ A plugin jar (loaded from the plugin directory by the CLI and the web app):
 </dependency>
 ```
 
-Package third-party libraries into the plugin (`jar-with-dependencies`, as `plugins/jllm-pdf` and `plugins/jllm-js`
-do); never the `jllm-*` jars. An application embedding the harness depends on `jllm-harness` (compile scope); a web
+Package third-party libraries into the plugin (`jar-with-dependencies`, as `plugins/jllm-pdf` does); never the `jllm-*`
+jars. A library too large or too delicate to bundle can be left to the host instead, as `plugins/jllm-js` does with
+GraalJS: declare it `provided` and fail clearly at startup when it is missing. An application embedding the harness depends on `jllm-harness` (compile scope); a web
 application on `jllm-web-commons`.
 
 ## 1. Tools

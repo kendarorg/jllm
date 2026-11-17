@@ -30,6 +30,18 @@
     </properties>
 
     <dependencies>
+        <!-- GraalJS for the jllm-js plugin, which does not bundle it -->
+        <dependency>
+            <groupId>org.graalvm.polyglot</groupId>
+            <artifactId>polyglot</artifactId>
+            <version>${graalvm.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.graalvm.polyglot</groupId>
+            <artifactId>js</artifactId>
+            <version>${graalvm.version}</version>
+            <type>pom</type>
+        </dependency>
         <dependency>
             <groupId>org.kendar.llm</groupId>
             <artifactId>jllm-web-commons</artifactId>

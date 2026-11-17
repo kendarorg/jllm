@@ -25,10 +25,6 @@
         <tag>HEAD</tag>
     </scm>
 
-    <properties>
-        <graalvm.version>25.5.5.0.3</graalvm.version>
-    </properties>
-
     <dependencies>
         <dependency>
             <groupId>org.kendar.llm</groupId>
@@ -42,16 +38,19 @@
             <version>${project.version}</version>
             <scope>test</scope>
         </dependency>
+        <!-- GraalJS is carried by the host (jllm-cli, jllm-web), not bundled in the plugin jar -->
         <dependency>
             <groupId>org.graalvm.polyglot</groupId>
             <artifactId>polyglot</artifactId>
             <version>${graalvm.version}</version>
+            <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>org.graalvm.polyglot</groupId>
             <artifactId>js</artifactId>
             <version>${graalvm.version}</version>
             <type>pom</type>
+            <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>org.kendar.llm</groupId>
@@ -70,31 +69,6 @@
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-assembly-plugin</artifactId>
-                <version>3.7.1</version>
-                <configuration>
-                    <descriptors>
-                        <descriptor>src/assembly/plugin.xml</descriptor>
-                    </descriptors>
-                    <archive>
-                        <manifestEntries>
-                            <!-- Truffle refuses to start in a fat jar that lost this attribute -->
-                            <Multi-Release>true</Multi-Release>
-                        </manifestEntries>
-                    </archive>
-                </configuration>
-                <executions>
-                    <execution>
-                        <id>plugin-jar</id>
-                        <phase>package</phase>
-                        <goals>
-                            <goal>single</goal>
-                        </goals>
-                    </execution>
-                </executions>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-antrun-plugin</artifactId>
                 <version>3.1.0</version>
                 <executions>
@@ -108,7 +82,7 @@
                             <target>
                                 <mkdir dir="${plugins.location}"/>
                                 <delete>
-                                    <fileset dir="${plugins.location}" includes="${project.artifactId}-*-jar-with-dependencies.jar"/>
+                                    <fileset dir="${plugins.location}" includes="${project.artifactId}-*.jar"/>
                                 </delete>
                             </target>
                         </configuration>
@@ -131,7 +105,7 @@
                                 <resource>
                                     <directory>${project.build.directory}</directory>
                                     <includes>
-                                        <include>${project.artifactId}-*-jar-with-dependencies.jar</include>
+                                        <include>${project.artifactId}-${project.version}.jar</include>
                                     </includes>
                                 </resource>
                             </resources>

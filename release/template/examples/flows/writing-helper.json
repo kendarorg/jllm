@@ -1,0 +1,60 @@
+{
+  "name": "writing-helper",
+  "start": "topic",
+  "tasks": {
+    "write": {
+      "agent": "general",
+      "tools": [],
+      "clarify": false,
+      "system": "You are a careful writing assistant. Reply with the finished text only.",
+      "prompt": "Write {{steps.format}} about the following subject, in a {{steps.style}} style:\n{{steps.topic}}",
+      "answer": "text"
+    },
+    "shorten": {
+      "agent": "general",
+      "tools": [],
+      "clarify": false,
+      "system": "You are a careful editor. Reply with the finished text only.",
+      "prompt": "Make this text about half as long and keep its tone and its facts:\n{{steps.write}}",
+      "answer": "text"
+    },
+    "translate": {
+      "agent": "general",
+      "tools": [],
+      "clarify": false,
+      "system": "You are a careful translator. Reply with the translation only.",
+      "prompt": "Translate this text to Italian, keeping its tone:\n{{steps.write}}",
+      "answer": "text"
+    }
+  },
+  "steps": {
+    "topic": {
+      "type": "ask", "kind": "text",
+      "text": "What should the text be about?",
+      "next": "format"
+    },
+    "format": {
+      "type": "ask", "kind": "single",
+      "text": "What do you want to get?",
+      "options": { "an email": "A short email", "a bullet list summary": "A bullet list", "a social media post": "A social media post" },
+      "next": "style"
+    },
+    "style": {
+      "type": "ask", "kind": "single",
+      "text": "Which style?",
+      "options": { "formal": "Formal", "friendly": "Friendly", "playful": "Playful" },
+      "next": "write"
+    },
+    "write": { "type": "task", "task": "write", "next": "review" },
+    "review": {
+      "type": "decide", "by": "user", "who": "owner",
+      "question": "Here is the text:\n\n{{steps.write}}\n\nWhat now?",
+      "outcomes": { "keep": "done", "shorter": "shorten", "italian": "translate" }
+    },
+    "shorten": { "type": "task", "task": "shorten", "next": "done_short" },
+    "translate": { "type": "task", "task": "translate", "next": "done_it" },
+    "done": { "type": "finish", "result": { "text": "{{steps.write}}" } },
+    "done_short": { "type": "finish", "result": { "text": "{{steps.shorten}}" } },
+    "done_it": { "type": "finish", "result": { "text": "{{steps.translate}}" } }
+  }
+}

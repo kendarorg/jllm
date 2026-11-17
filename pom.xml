@@ -55,6 +55,8 @@
 
     <properties>
         <revision>1.1.0-jllm</revision>
+        <central-publish.skip>false</central-publish.skip>
+        <graalvm.version>25.5.5.0.3</graalvm.version>
         <maven.compiler.source>21</maven.compiler.source>
         <maven.compiler.target>21</maven.compiler.target>
         <maven.compiler.release>21</maven.compiler.release>
@@ -171,6 +173,7 @@
                         <extensions>true</extensions>
                         <configuration>
                             <publishingServerId>central</publishingServerId>
+                            <skipPublishing>${central-publish.skip}</skipPublishing>
                         </configuration>
                     </plugin>
                 </plugins>
