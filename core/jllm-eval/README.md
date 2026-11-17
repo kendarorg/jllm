@@ -13,13 +13,13 @@ a connection check and run metadata.
 2. Run the tests from the repository root with JDK 21:
 
 ```
-mvn -Peval -pl core/jllm-eval -am test -Dgroups=smoke -Deval.target=anthropic
-mvn -Peval -pl core/jllm-eval -am test -Dgroups=smoke -Deval.target=remote.mac
-mvn -Peval -pl core/jllm-eval -am test -Dgroups=smoke -Deval.target=local.strong
+mvn -f ../../pom.xml -Peval -pl core/jllm-eval -am test -Dgroups=smoke -Deval.target=anthropic
+mvn -f ../../pom.xml -Peval -pl core/jllm-eval -am test -Dgroups=smoke -Deval.target=remote.mac
+mvn -f ../../pom.xml -Peval -pl core/jllm-eval -am test -Dgroups=smoke -Deval.target=local.strong
 ```
 
 `-Dgroups` selects the test groups: `smoke`, `full` or `strategy`. The extra group `unit` holds the checks that need
-no model at all (`mvn -Peval -pl core/jllm-eval -am test -Dgroups=unit`). The default is `smoke,unit`.
+no model at all (`mvn -f ../../pom.xml -Peval -pl core/jllm-eval -am test -Dgroups=unit`). The default is `smoke,unit`.
 
 Tests, classes and methods always run one after the other, in a single JVM.
 
@@ -120,6 +120,66 @@ Before any test runs, the target, the judge and the fast model (when it is a sep
 the server must be reachable and must serve the configured model. Each then receives one short warm-up call. Warm-up
 times are stored in `run.json`, apart from test timings. If anything fails, the run stops with a message naming the
 entry and its address.
+
+## Remote llama.cpp server (example: docker host 192.168.1.96)
+
+Use this when the model runs in docker on another machine, such as a GPU box on the LAN. The eval never starts or
+stops it; you manage the stack there. The target is a named `remote.<name>` entry (`remote.gpu` ships in
+`eval.properties`), not `local.*`, because `local.*` always talks to this machine.
+
+All commands below are run from the `core/jllm-eval` folder.
+
+**Guided setup of the server.** On the GPU machine, `docker/llm.sh` (Linux) or `docker/llm.ps1` (Windows) walks
+through the deployment: it checks docker and the GPU, asks which model (`strong`, `alt`, `small`), checks that the
+`.gguf` file is there (and tells you how to download it if not), starts the container with one request slot, waits
+until the model has loaded, and prints the exact `eval.remote.gpu.*` values and Maven command to use on the eval
+machine. `up`, `status` and `down` are the commands; the image is pulled, not built.
+
+```
+./docker/llm.sh up strong          # Linux
+.\docker\llm.ps1 up strong         # Windows
+```
+
+If your GPU machine runs a different compose stack (presets chosen with `LLM_ENV`), follow the manual points instead:
+
+**On the GPU machine** (docker compose stack with `LLM_ENV` set to the Qwen3.6-27B preset):
+
+1. Keep `NP=1` (one slot) and leave `CACHE_RAM` empty. Cache-ratio and strategy results are only valid on a single
+   slot; with several slots or a host prompt cache they are flagged unreliable.
+2. Keep `BIND_ADDR=0.0.0.0` (the default) and open `LLAMA_PORT` (8080) in the host firewall.
+3. Leave `API_KEY` at `none`. If you set a real one, give the eval the same value in `EVAL_REMOTE_GPU_APIKEY`.
+
+**On the machine running the eval:**
+
+4. Check the server answers and note two values:
+   `curl http://192.168.1.96:8080/v1/models` shows the model id; `curl http://192.168.1.96:8080/props` shows `n_ctx`.
+5. In `eval.properties` (or with `-D`), make `eval.remote.gpu.model` equal that id and `eval.remote.gpu.contextTokens`
+   not larger than `n_ctx`. A different address or entry name works the same way: define `eval.remote.<name>.*` and
+   select it with `-Deval.target=remote.<name>`.
+6. Set the judge key in the environment, never in a file or on a shared command line. The default judge is Haiku 5.5
+   through the Anthropic API, so the key is for that, not for the target (PowerShell):
+
+   ```
+   $env:ANTHROPIC_API_KEY = "<your key>"
+   $env:JAVA_HOME = "$HOME\.jdks\corretto-21.0.9"
+   ```
+
+7. Run, in this order, so a setup mistake costs little:
+
+   ```
+   mvn -f ../../pom.xml -Peval -pl core/jllm-eval -am test "-Dgroups=unit"
+   mvn -f ../../pom.xml -Peval -pl core/jllm-eval -am test "-Dgroups=smoke" "-Deval.target=remote.gpu"
+   mvn -f ../../pom.xml -Peval -pl core/jllm-eval -am test "-Dgroups=full" "-Deval.target=remote.gpu"
+   mvn -f ../../pom.xml -Peval -pl core/jllm-eval -am test "-Dgroups=strategy" "-Deval.target=remote.gpu"
+   ```
+
+   The connection check runs first. If it stops the run, the message names the entry and the address: unreachable
+   (firewall, wrong IP, stack down) or a different model id (fix step 5). Use `-Deval.trials=1` for a quick first pass.
+8. Read the results in `eval-results/qwen3.6-27b/run-<timestamp>/report.md`. The recap is also copied to
+   `eval-results/history/`.
+
+The judge differs from the target here, so the run is not self-graded. A 27B model on one slot is slow: the default
+request timeout is 1800 s, and the `full` and `strategy` groups can take hours.
 
 ## Local models
 
