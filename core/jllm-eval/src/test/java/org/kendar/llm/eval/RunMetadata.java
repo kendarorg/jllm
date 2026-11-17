@@ -22,7 +22,7 @@ public record RunMetadata(String targetType, String targetName, String targetMod
         ModelEndpoint t = c.target();
         String quant = c.local() != null ? c.local().model().quantization() : "unknown";
         String server = switch (c.targetKind()) {
-            case LOCAL -> c.local().image();
+            case LOCAL -> "llama.cpp via docker compose (not managed)";
             case ANTHROPIC -> "anthropic-api";
             case REMOTE -> "remote (not managed)";
         };

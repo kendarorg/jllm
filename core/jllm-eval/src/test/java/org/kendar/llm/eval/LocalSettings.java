@@ -3,9 +3,8 @@ package org.kendar.llm.eval;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/** Settings of the llama.cpp container plus the one model selected for this run. */
-public record LocalSettings(String image, boolean gpu, String modelsDir, String cacheDir, int port,
-                            boolean keepRunning, int startupTimeoutSeconds, Model model) {
+/** The externally managed llama.cpp server (docker compose) and the model selected for this run. */
+public record LocalSettings(int port, Model model) {
 
     /** @param alias model name exposed by the server (no quantization) */
     public record Model(String key, String file, String alias, int contextTokens, boolean smallModel,
@@ -24,9 +23,4 @@ public record LocalSettings(String image, boolean gpu, String modelsDir, String 
         return "http://localhost:" + port + "/v1";
     }
 
-    /** Fingerprint of everything that requires a different server process. */
-    public String fingerprint() {
-        return String.join("|", image, String.valueOf(gpu), String.valueOf(port), model.file(), model.alias(),
-                String.valueOf(model.contextTokens()), model.extraArgs() == null ? "" : model.extraArgs().trim());
-    }
 }

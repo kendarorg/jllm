@@ -39,13 +39,8 @@ Secrets are masked in every `toString`, exception message, `run.json` and connec
 | `eval.judge.openai.baseUrl` / `.model` / `.contextTokens` / `.timeoutSeconds` / `.apiKey` | Judge endpoint when `openai`; independent of any target entry |
 | `eval.fast` | `target` (default), `anthropic` or `remote.<name>` |
 | `eval.fast.anthropic.model` | Fast model when `anthropic` |
-| `eval.local.image` | llama.cpp server image, pinned to a version tag (`latest` rejected) |
-| `eval.local.gpu` | Give the container all NVIDIA GPUs |
-| `eval.local.modelsDir` / `eval.local.cacheDir` | Host folders mounted at `/models` (read-only) and `/cache` (download cache) |
-| `eval.local.port` | Host port of the server |
-| `eval.local.keepRunning` | Leave the container running after the run (default `true`) |
-| `eval.local.startupTimeoutSeconds` | Wait for container and model load |
-| `eval.local.model.<k>.file` | GGUF file name in `modelsDir` (k = `strong`, `alt`, `small`) |
+| `eval.local.port` | Host port of the compose-run llama.cpp server |
+| `eval.local.model.<k>.file` | GGUF file name in the compose models folder (k = `strong`, `alt`, `small`) |
 | `eval.local.model.<k>.alias` | Model name the server exposes, **without quantization** (`--alias`) |
 | `eval.local.model.<k>.contextTokens` | Context size passed to the server (`-c`) and to the harness; lower it (e.g. `65536`) to force a smaller window |
 | `eval.local.model.<k>.maxContextTokens` | Optional ceiling; `contextTokens` above it is rejected |
@@ -60,8 +55,9 @@ Secrets are masked in every `toString`, exception message, `run.json` and connec
 - **anthropic**: Claude Haiku 5.5 (`claude-haiku-5-5`) through the Anthropic API.
 - **remote.&lt;name&gt;**: an external OpenAI-compatible server managed by hand (reference: Qwen3.6-27B served natively
   on an M4 Pro Mac). The eval never starts, stops or reloads it; it only checks it and calls it.
-- **local.&lt;strong|alt|small&gt;**: one llama.cpp server in Docker (Testcontainers) with a single request slot
-  (`--parallel 1`) and only the target model loaded. Planned models: strong = Qwen3.6-27B 4-bit, alt = gpt-oss-20b,
+- **local.&lt;strong|alt|small&gt;**: one llama.cpp server in Docker, started **by hand** with `docker/docker-compose.yml`
+  (single request slot, only the target model loaded). The eval never starts or stops it.
+  Planned models: strong = Qwen3.6-27B 4-bit, alt = gpt-oss-20b,
   small = an 8-12B 4-bit model with the small-model prompt. File names come from the properties.
 
 ## Judge and fast model
@@ -76,19 +72,19 @@ Before any test, the target, the judge and a separate fast model are probed (`/m
 endpoint) for reachability and for serving the configured model, then get one short warm-up call. Warm-up times are
 stored in `run.json` apart from test timings. Any failure stops the run with a message naming the entry and address.
 
-## Local server reuse
+## Local server (docker compose, by hand)
 
-The container is named `jllm-eval-llama` and labelled with a fingerprint of image, GPU flag, port, model file,
-alias, context size and extra args.
+```
+cd core/jllm-eval/docker
+docker compose --env-file strong.env up -d                    # load one model
+docker compose --env-file alt.env up -d --force-recreate      # switch model
+docker compose down
+```
 
-- No container: started once.
-- Running container with the same fingerprint: reused, the model is **not** reloaded.
-- Different fingerprint (other model, context, args, image) or stopped container: removed and started once.
-- Never restarted between tests, classes or trials.
-- Left running after the run unless `eval.local.keepRunning=false`.
-
-Testcontainers' Ryuk reaper is disabled in the surefire config (`TESTCONTAINERS_RYUK_DISABLED=true`); otherwise it
-would remove the container when the JVM exits.
+`docker/<k>.env` holds image (pinned), port, host folders, model file, alias (no quantization) and context size
+(`CTX_TOKENS`, e.g. 65536). Keep file, alias and context in sync with `eval.local.model.<k>.*`. The eval treats the
+server like a remote entry: the connection check fails with a clear message if it is down or serves another alias.
+No Testcontainers and no container reaper are used.
 
 ## Code (all under `src/test/java/org/kendar/llm/eval`)
 
@@ -97,13 +93,12 @@ would remove the container when the JVM exits.
 | `EvalConfig` | Loads, resolves and validates all settings |
 | `ModelEndpoint` | One resolved endpoint; converts to harness `ProviderSettings` |
 | `Secrets` | Secret registry and masking |
-| `LocalServer`, `TestcontainersBackend` | llama.cpp container lifecycle |
 | `ConnectionCheck` | Reachability, served model, warm-up |
 | `RunMetadata` | Run description, written as `run.json` |
-| `EvalRun` | Per-run singleton: config, server, check, metadata |
+| `EvalRun` | Per-run singleton: config, connection check, metadata |
 | `EvalModels` | `target()`, `judge()`, `fast()`: harness `ModelClient`s built by `ProviderCatalog` |
 
 ## Not verified in this step
 
-Live-model acceptance (smoke test with each target, real GPU container reuse) was not run: no model was connected
+Live-model acceptance (smoke test with each target, the compose-run local servers) was not run: no model was connected
 when this module was written. The model-free checks (`-Dgroups=unit`) pass.

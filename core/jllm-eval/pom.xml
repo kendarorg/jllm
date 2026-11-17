@@ -31,11 +31,6 @@
             <scope>test</scope>
         </dependency>
         <dependency>
-            <groupId>org.testcontainers</groupId>
-            <artifactId>testcontainers</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
             <scope>test</scope>
@@ -71,10 +66,6 @@
                             junit.jupiter.execution.parallel.mode.classes.default=same_thread
                         </configurationParameters>
                     </properties>
-                    <environmentVariables>
-                        <!-- Ryuk would remove the llama.cpp container at JVM exit; reuse needs it kept -->
-                        <TESTCONTAINERS_RYUK_DISABLED>true</TESTCONTAINERS_RYUK_DISABLED>
-                    </environmentVariables>
                 </configuration>
             </plugin>
         </plugins>

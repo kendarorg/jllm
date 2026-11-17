@@ -240,16 +240,7 @@ public final class EvalConfig {
             errors.add("eval.target: unknown local model '" + modelKey + "' (strong | alt | small)");
             return null;
         }
-        String image = str("eval.local.image", true);
-        if (image != null && (!image.contains(":") || image.endsWith(":latest"))) {
-            errors.add("eval.local.image: must be pinned to a version tag (got '" + image + "')");
-        }
-        boolean gpu = bool("eval.local.gpu", true);
-        String models = str("eval.local.modelsDir", true);
-        String cache = str("eval.local.cacheDir", true);
         int port = integer("eval.local.port", 1);
-        boolean keep = bool("eval.local.keepRunning", true);
-        int startup = integer("eval.local.startupTimeoutSeconds", 1);
         String p = "eval.local.model." + modelKey;
         String f = str(p + ".file", true);
         String alias = str(p + ".alias", true);
@@ -269,8 +260,7 @@ public final class EvalConfig {
         if (alias != null && alias.matches("(?i).*[-_.](i?q\\d(_[a-z0-9]+)*|mxfp4|f16|bf16)$")) {
             errors.add(p + ".alias: must not carry the quantization (got '" + alias + "')");
         }
-        return new LocalSettings(image == null ? "" : image, gpu, models == null ? "" : models,
-                cache == null ? "" : cache, port, keep, startup,
+        return new LocalSettings(port,
                 new LocalSettings.Model(modelKey, f == null ? "" : f, alias == null ? "" : alias, ctx, small, extra));
     }
 

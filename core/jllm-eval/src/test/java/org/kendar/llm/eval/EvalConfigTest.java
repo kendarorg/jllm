@@ -92,14 +92,6 @@ class EvalConfigTest {
     }
 
     @Test
-    void unpinnedImageIsRejected() {
-        EvalConfigException e = assertThrows(EvalConfigException.class, () -> load(
-                map("eval.target", "local.alt", "eval.local.image", "ghcr.io/ggml-org/llama.cpp:latest",
-                        "eval.judge", "openai"), map()));
-        assertTrue(e.getMessage().contains("eval.local.image"));
-    }
-
-    @Test
     void fastDefaultsToTargetAndCanBeSeparate() {
         EvalConfig same = load(map(), map("ANTHROPIC_API_KEY", "k-1234"));
         assertFalse(same.fastSeparate());
