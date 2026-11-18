@@ -270,8 +270,9 @@ public final class EvalConfig {
         boolean small = bool(p + ".smallModel", false);
         int timeout = integer(p + ".timeoutSeconds", 1);
         String key = secret(p + ".apiKey");
+        int maxRpm = integerOr(p + ".maxRpm", 0, 0);
         return new ModelEndpoint(role, name, proto == null ? "openai" : proto, base, model == null ? "" : model, ctx,
-                small, timeout, key, thinking(p + ".thinking"));
+                small, timeout, key, thinking(p + ".thinking"), maxRpm);
     }
 
     private ThinkingLevel thinking(String key) {
@@ -327,7 +328,8 @@ public final class EvalConfig {
                 int timeout = integer(p + ".timeoutSeconds", 1);
                 String name = str(p + ".name", false);
                 judge = new ModelEndpoint(Role.JUDGE, name == null ? "judge" : name, ModelEndpoint.OPENAI, base,
-                        model == null ? "" : model, ctx, false, timeout, secret(p + ".apiKey"), thinking(p + ".thinking"));
+                        model == null ? "" : model, ctx, false, timeout, secret(p + ".apiKey"), thinking(p + ".thinking"),
+                        integerOr(p + ".maxRpm", 0, 0));
             }
             default -> errors.add("eval.judge: must be 'anthropic' or 'openai' (got '" + judgeKind + "')");
         }

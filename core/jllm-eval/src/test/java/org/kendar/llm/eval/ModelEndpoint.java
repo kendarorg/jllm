@@ -11,7 +11,8 @@ import java.util.Locale;
  * {@code reasoning_effort: none} for a provider named {@code ollama}.
  */
 public record ModelEndpoint(Role role, String name, String protocol, String baseUrl, String model, int contextTokens,
-                            boolean smallModel, int timeoutSeconds, String apiKey, ThinkingLevel thinking) {
+                            boolean smallModel, int timeoutSeconds, String apiKey, ThinkingLevel thinking,
+                            int maxRpm) {
 
     public enum Role {TARGET, JUDGE, FAST}
 
@@ -23,8 +24,13 @@ public record ModelEndpoint(Role role, String name, String protocol, String base
     }
 
     public ModelEndpoint(Role role, String name, String protocol, String baseUrl, String model, int contextTokens,
+                         boolean smallModel, int timeoutSeconds, String apiKey, ThinkingLevel thinking) {
+        this(role, name, protocol, baseUrl, model, contextTokens, smallModel, timeoutSeconds, apiKey, thinking, 0);
+    }
+
+    public ModelEndpoint(Role role, String name, String protocol, String baseUrl, String model, int contextTokens,
                          boolean smallModel, int timeoutSeconds, String apiKey) {
-        this(role, name, protocol, baseUrl, model, contextTokens, smallModel, timeoutSeconds, apiKey, null);
+        this(role, name, protocol, baseUrl, model, contextTokens, smallModel, timeoutSeconds, apiKey, null, 0);
     }
 
     public boolean isAnthropic() {
@@ -33,7 +39,7 @@ public record ModelEndpoint(Role role, String name, String protocol, String base
 
     public ModelEndpoint withRole(Role r) {
         return new ModelEndpoint(r, name, protocol, baseUrl, model, contextTokens, smallModel, timeoutSeconds, apiKey,
-                thinking);
+                thinking, maxRpm);
     }
 
     /** True when both endpoints address the same model on the same server. */

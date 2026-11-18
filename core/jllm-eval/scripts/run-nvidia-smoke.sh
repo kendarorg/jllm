@@ -14,6 +14,7 @@ TEST_GROUPS="${TEST_GROUPS:-smoke,full,strategy,unit}"
 TRIALS="${TRIALS:-1}"
 MAX_TRIALS="${MAX_TRIALS:-2}"
 IGNORE_TEST_FAILURES="${IGNORE_TEST_FAILURES:-1}"
+RPM_LIMIT="${RPM_LIMIT:-40}"
 
 # ---- paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -64,12 +65,14 @@ mvn -B -ntp -f "$REPO_ROOT/pom.xml" -Peval -pl core/jllm-eval -am test \
   -Deval.remote.nvidia.contextTokens="$CTX_TOKENS" \
   -Deval.remote.nvidia.smallModel=false \
   -Deval.remote.nvidia.timeoutSeconds="$TIMEOUT_SECONDS" \
+  -Deval.remote.nvidia.maxRpm="$RPM_LIMIT" \
   -Deval.judge=openai \
   -Deval.judge.openai.name=nvidia \
   -Deval.judge.openai.baseUrl="$NVIDIA_BASE" \
   -Deval.judge.openai.model="$MODEL" \
   -Deval.judge.openai.contextTokens="$CTX_TOKENS" \
   -Deval.judge.openai.timeoutSeconds="$TIMEOUT_SECONDS" \
+  -Deval.judge.openai.maxRpm="$RPM_LIMIT" \
   -Deval.fast=target \
   -Deval.trials="$TRIALS" \
   -Deval.maxTrials="$MAX_TRIALS" \

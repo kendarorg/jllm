@@ -31,6 +31,9 @@ public final class EvalModels {
     /** Builds a client for an endpoint, no fallback chain. */
     public static ModelClient client(ModelEndpoint endpoint) {
         ProviderCatalog catalog = new ProviderCatalog(List.of(), MAPPER, 8192);
-        return catalog.client(endpoint.toProviderSettings());
+        ModelClient client = catalog.client(endpoint.toProviderSettings());
+        return endpoint.maxRpm() > 0
+                ? new PacedModelClient(client, RequestPacer.forHost(endpoint.baseUrl(), endpoint.maxRpm()))
+                : client;
     }
 }
