@@ -80,7 +80,7 @@ class CacheStrategyChecksTest {
         var r = t.requests();
         int len = CacheChecks.sharedPrefixLength(r.get(0), r.get(1));
         assertTrue(len > r.get(0).prefix().length());
-        assertEquals(CacheChecks.serialize(r.get(0)).length() - 1, len); // the closing bracket of the array differs
+        assertEquals(CacheChecks.serialize(r.get(0)).length(), len);
         assertEquals(CacheChecks.serialize(r.get(0)).length(), CacheChecks.sharedPrefixLength(r.get(0), r.get(0)));
     }
 
@@ -89,6 +89,7 @@ class CacheStrategyChecksTest {
         var t = stable(null, null, null);
         assertTrue(CacheChecks.breaks(t.build()).isEmpty());
         is(PASS, Checks.breaksAsExpected(ExpectedBreak.none()), t.ctx());
+        is(PASS, Checks.prefixStable(1.0), t.ctx());
         is(FAIL, Checks.breakOccurs(ExpectedBreak.systemOnly()), t.ctx());
     }
 

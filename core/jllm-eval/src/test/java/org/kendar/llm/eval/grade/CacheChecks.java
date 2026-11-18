@@ -73,7 +73,9 @@ public final class CacheChecks {
 
     /** The serialized request as a cache sees it: system, tools, then the messages. */
     public static String serialize(RecordedRequest r) {
-        return r.prefix() + "\u0001" + r.messages();
+        String messages = r.messages().toString();
+        // the closing bracket changes on every appended message, so it is not part of the cached prefix
+        return r.prefix() + "\u0001" + messages.substring(0, messages.length() - 1);
     }
 
     /** Length in characters of the common beginning of two serialized requests. */
