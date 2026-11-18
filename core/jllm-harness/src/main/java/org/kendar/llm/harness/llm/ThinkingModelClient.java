@@ -1,7 +1,15 @@
 package org.kendar.llm.harness.llm;
 
-/** Fills in a default {@link ThinkingLevel} on requests that carry none. */
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+
+import java.util.List;
+
+/** Fills in a default {@link ThinkingLevel} on requests that carry none, helper calls included. */
 public final class ThinkingModelClient implements ModelClient {
+
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final ModelClient delegate;
     private final ThinkingLevel level;
@@ -33,18 +41,28 @@ public final class ThinkingModelClient implements ModelClient {
 
     @Override
     public String simpleComplete(String system, String user, int maxTokens) {
-        return delegate.simpleComplete(system, user, maxTokens);
+        return simpleComplete(system, user, maxTokens, null, null);
     }
 
     @Override
     public String simpleComplete(String system, String user, int maxTokens, Double temperature,
                                  java.util.function.Consumer<Usage> usageSink) {
-        return delegate.simpleComplete(system, user, maxTokens, temperature, usageSink);
+        ArrayNode messages = MAPPER.createArrayNode();
+        messages.addObject().put("role", "user").put("content", user);
+        ModelRequest request = new ModelRequest(system, "", messages, List.of(), maxTokens);
+        if (temperature != null) request = request.withTemperature(temperature);
+        ModelResponse r = complete(request);
+        if (usageSink != null && r.usage() != null) usageSink.accept(r.usage());
+        StringBuilder sb = new StringBuilder();
+        for (JsonNode b : r.content()) {
+            if ("text".equals(b.path("type").asText())) sb.append(b.path("text").asText());
+        }
+        return sb.toString();
     }
 
     @Override
     public String simpleComplete(String system, String user, int maxTokens,
                                  java.util.function.Consumer<Usage> usageSink) {
-        return delegate.simpleComplete(system, user, maxTokens, usageSink);
+        return simpleComplete(system, user, maxTokens, null, usageSink);
     }
 }

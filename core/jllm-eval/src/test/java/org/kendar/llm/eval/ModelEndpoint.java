@@ -1,12 +1,17 @@
 package org.kendar.llm.eval;
 
 import org.kendar.llm.harness.llm.ProviderSettings;
+import org.kendar.llm.harness.llm.ThinkingLevel;
 
 import java.util.Locale;
 
-/** One resolved model endpoint: what the target, judge or fast model talk to. The credential never prints. */
+/**
+ * One resolved model endpoint: what the target, judge or fast model talk to. The credential never prints. A null
+ * {@code thinking} leaves the client's own default; the harness maps {@link ThinkingLevel#MINIMAL} to
+ * {@code reasoning_effort: none} for a provider named {@code ollama}.
+ */
 public record ModelEndpoint(Role role, String name, String protocol, String baseUrl, String model, int contextTokens,
-                            boolean smallModel, int timeoutSeconds, String apiKey) {
+                            boolean smallModel, int timeoutSeconds, String apiKey, ThinkingLevel thinking) {
 
     public enum Role {TARGET, JUDGE, FAST}
 
@@ -17,12 +22,18 @@ public record ModelEndpoint(Role role, String name, String protocol, String base
         Secrets.register(apiKey);
     }
 
+    public ModelEndpoint(Role role, String name, String protocol, String baseUrl, String model, int contextTokens,
+                         boolean smallModel, int timeoutSeconds, String apiKey) {
+        this(role, name, protocol, baseUrl, model, contextTokens, smallModel, timeoutSeconds, apiKey, null);
+    }
+
     public boolean isAnthropic() {
         return ANTHROPIC.equals(protocol);
     }
 
     public ModelEndpoint withRole(Role r) {
-        return new ModelEndpoint(r, name, protocol, baseUrl, model, contextTokens, smallModel, timeoutSeconds, apiKey);
+        return new ModelEndpoint(r, name, protocol, baseUrl, model, contextTokens, smallModel, timeoutSeconds, apiKey,
+                thinking);
     }
 
     /** True when both endpoints address the same model on the same server. */
@@ -36,11 +47,15 @@ public record ModelEndpoint(Role role, String name, String protocol, String base
         return u;
     }
 
-    /** Harness settings. OpenAI-compatible entries use the {@code llamacpp} kind: no key required unless given. */
+    /**
+     * Harness settings. OpenAI-compatible entries use the {@code llamacpp} kind, or {@code ollama} when named so: the
+     * harness keys its thinking-off value on that kind. No key required unless given.
+     */
     public ProviderSettings toProviderSettings() {
         boolean keyed = apiKey != null && !apiKey.isBlank();
-        return new ProviderSettings(name, isAnthropic() ? ANTHROPIC : "llamacpp", baseUrl, keyed ? apiKey : "", model,
-                null, 1, timeoutSeconds, isAnthropic() || keyed, false, contextTokens, smallModel, null, null, null,
+        String kind = isAnthropic() ? ANTHROPIC : "ollama".equals(name) ? "ollama" : "llamacpp";
+        return new ProviderSettings(name, kind, baseUrl, keyed ? apiKey : "", model,
+                null, 1, timeoutSeconds, isAnthropic() || keyed, false, contextTokens, smallModel, null, null, thinking,
                 null);
     }
 

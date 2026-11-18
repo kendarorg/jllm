@@ -250,7 +250,8 @@ public final class Suite {
     /** Some message of a main model request contains the text (what the model really saw). */
     public static Check requestsContain(String text) {
         String n = "requestsContain(" + text + ")";
-        return trace(n, ctx -> ctx.trace().mainRequests().stream().anyMatch(r -> r.messages().toString().contains(text))
+        String escaped = text.replace("\"", "\\\"");
+        return trace(n, ctx -> ctx.trace().mainRequests().stream().anyMatch(r -> r.messages().toString().contains(escaped))
                 ? CheckResult.pass(n, "found") : CheckResult.fail(n, "no request carried the text"));
     }
 

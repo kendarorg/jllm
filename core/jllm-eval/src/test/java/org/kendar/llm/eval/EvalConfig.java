@@ -1,6 +1,7 @@
 package org.kendar.llm.eval;
 
 import org.kendar.llm.eval.ModelEndpoint.Role;
+import org.kendar.llm.harness.llm.ThinkingLevel;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -258,7 +259,18 @@ public final class EvalConfig {
         int timeout = integer(p + ".timeoutSeconds", 1);
         String key = secret(p + ".apiKey");
         return new ModelEndpoint(role, name, proto == null ? "openai" : proto, base, model == null ? "" : model, ctx,
-                small, timeout, key);
+                small, timeout, key, thinking(p + ".thinking"));
+    }
+
+    private ThinkingLevel thinking(String key) {
+        String v = str(key, false);
+        if (v == null) return null;
+        try {
+            return ThinkingLevel.parse(v);
+        } catch (IllegalArgumentException e) {
+            errors.add(key + ": " + e.getMessage());
+            return null;
+        }
     }
 
     private LocalSettings local(String modelKey) {
@@ -301,8 +313,9 @@ public final class EvalConfig {
                 String model = str(p + ".model", true);
                 int ctx = integer(p + ".contextTokens", 1024);
                 int timeout = integer(p + ".timeoutSeconds", 1);
-                judge = new ModelEndpoint(Role.JUDGE, "judge", ModelEndpoint.OPENAI, base, model == null ? "" : model,
-                        ctx, false, timeout, secret(p + ".apiKey"));
+                String name = str(p + ".name", false);
+                judge = new ModelEndpoint(Role.JUDGE, name == null ? "judge" : name, ModelEndpoint.OPENAI, base,
+                        model == null ? "" : model, ctx, false, timeout, secret(p + ".apiKey"), thinking(p + ".thinking"));
             }
             default -> errors.add("eval.judge: must be 'anthropic' or 'openai' (got '" + judgeKind + "')");
         }
