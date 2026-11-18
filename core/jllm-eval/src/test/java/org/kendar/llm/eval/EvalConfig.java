@@ -33,6 +33,8 @@ public final class EvalConfig {
     private int connectTimeoutSeconds;
     private int warmupTimeoutSeconds;
     private int trials;
+    private int maxTrials;
+    private int caseTimeoutSeconds;
     private Path outputDir;
     private Path embeddingModelDir;
     private String embeddingSha256;
@@ -74,6 +76,10 @@ public final class EvalConfig {
     public int connectTimeoutSeconds() { return connectTimeoutSeconds; }
     public int warmupTimeoutSeconds() { return warmupTimeoutSeconds; }
     public int trials() { return trials; }
+    /** Upper bound on the trials of any case, including cases that set their own count. */
+    public int maxTrials() { return maxTrials; }
+    /** Upper bound on the seconds a user turn may take; 0 keeps each case's own timeout. */
+    public int caseTimeoutSeconds() { return caseTimeoutSeconds; }
     public Path outputDir() { return outputDir; }
     /** Folder holding the embedding model files; not required to exist (embedding tests skip when files are missing). */
     public Path embeddingModelDir() { return embeddingModelDir; }
@@ -122,6 +128,10 @@ public final class EvalConfig {
         String v = raw(key);
         if (v == null && required) errors.add(key + ": missing");
         return v;
+    }
+
+    private int integerOr(String key, int min, int def) {
+        return raw(key) == null ? def : integer(key, min);
     }
 
     private int integer(String key, int min) {
@@ -174,6 +184,8 @@ public final class EvalConfig {
         connectTimeoutSeconds = integer("eval.timeout.connect", 1);
         warmupTimeoutSeconds = integer("eval.timeout.warmup", 1);
         trials = integer("eval.trials", 1);
+        maxTrials = integerOr("eval.maxTrials", 1, 10);
+        caseTimeoutSeconds = integerOr("eval.caseTimeoutSeconds", 0, 0);
         String out = str("eval.outputDir", true);
         outputDir = Path.of(out == null ? "eval-results" : out);
 

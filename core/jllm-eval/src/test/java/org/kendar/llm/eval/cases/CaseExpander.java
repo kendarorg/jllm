@@ -56,8 +56,9 @@ public final class CaseExpander {
             TrialRunner runner = new TrialRunner(EvalModels.target(),
                     run.config().fastSeparate() ? EvalModels.fast() : null,
                     new TrialRunner.Settings(run.config().target().contextTokens(),
-                            run.config().target().smallModel()));
-            return new CaseExecutor(runner, run.outputDir(), run.config().trials(), run.metadata());
+                            run.config().target().smallModel(), run.config().caseTimeoutSeconds()));
+            return new CaseExecutor(runner, run.outputDir(), run.config().trials(), run.config().maxTrials(),
+                    run.metadata());
         };
     }
 }

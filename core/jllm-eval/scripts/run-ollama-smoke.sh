@@ -7,12 +7,14 @@ set -euo pipefail
 OLLAMA_BASE="${OLLAMA_BASE:-http://localhost:11434}"
 MODEL="${MODEL:-qwen3:30b}"
 CTX_TOKENS="${CTX_TOKENS:-16000}"          # must not exceed the context Ollama actually allocates (num_ctx)
-TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-600}"
+TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-300}"          # per model request, and warm-up
+CASE_TIMEOUT_SECONDS="${CASE_TIMEOUT_SECONDS:-$TIMEOUT_SECONDS}"  # cap on each user turn of a case
 #TEST_GROUPS="${TEST_GROUPS:-smoke}"
 TEST_GROUPS="${TEST_GROUPS:-smoke,full,strategy,unit}"
 #TESTS="${TESTS:-InfrastructureSmokeTest,ExampleToolEvalTest}"
 TESTS=""
 TRIALS="${TRIALS:-1}"
+MAX_TRIALS="${MAX_TRIALS:-2}"              # cap on trials of any case, including cases that set their own count
 # 1 (default): failed cases are reported but never fail the Maven build, so the run always completes and writes its summary
 IGNORE_TEST_FAILURES="${IGNORE_TEST_FAILURES:-1}"
 # minimal = Ollama reasoning_effort "none": Qwen3 thinking would eat the token budget and leave empty replies
@@ -37,7 +39,7 @@ grep -q "\"id\":\"$MODEL\"" <<<"$served" || {
 
 mkdir -p "$LOG_DIR"
 echo "Log: $LOG_FILE"
-echo "Model: $MODEL  ctx: $CTX_TOKENS  groups: $TEST_GROUPS  tests: ${TESTS:-all}  trials: $TRIALS"
+echo "Model: $MODEL  ctx: $CTX_TOKENS  groups: $TEST_GROUPS  tests: ${TESTS:-all}  trials: $TRIALS  max trials: $MAX_TRIALS  timeout: ${TIMEOUT_SECONDS}s  case timeout cap: ${CASE_TIMEOUT_SECONDS}s"
 
 # ---- run
 TEST_FILTER=()
@@ -66,6 +68,8 @@ mvn -B -ntp -f "$REPO_ROOT/pom.xml" -Peval -pl core/jllm-eval -am test \
   -Deval.judge.openai.thinking="$THINKING" \
   -Deval.fast=target \
   -Deval.trials="$TRIALS" \
+  -Deval.maxTrials="$MAX_TRIALS" \
+  -Deval.caseTimeoutSeconds="$CASE_TIMEOUT_SECONDS" \
   -Deval.timeout.warmup="$TIMEOUT_SECONDS" \
   2>&1 | tee "$LOG_FILE"
 status=${PIPESTATUS[0]}

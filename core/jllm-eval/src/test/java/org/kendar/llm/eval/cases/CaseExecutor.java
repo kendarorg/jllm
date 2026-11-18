@@ -26,19 +26,26 @@ public final class CaseExecutor {
     private final TrialRunner runner;
     private final Path outputDir;
     private final int defaultTrials;
+    private final int maxTrials;
     private final RunMetadata metadata;
 
     /** @param metadata attached to every saved result; may be null in unit tests */
     public CaseExecutor(TrialRunner runner, Path outputDir, int defaultTrials, RunMetadata metadata) {
+        this(runner, outputDir, defaultTrials, Integer.MAX_VALUE, metadata);
+    }
+
+    /** @param maxTrials upper bound on the trials of every case, also the ones that set their own count */
+    public CaseExecutor(TrialRunner runner, Path outputDir, int defaultTrials, int maxTrials, RunMetadata metadata) {
         this.runner = runner;
         this.outputDir = outputDir;
         this.defaultTrials = defaultTrials;
+        this.maxTrials = maxTrials;
         this.metadata = metadata;
     }
 
     /** Runs all trials of {@code c} under {@code strategy}. */
     public CaseResult run(EvalCase c, ContextStrategyKind strategy) {
-        int n = c.trials() != null ? c.trials() : defaultTrials;
+        int n = Math.min(c.trials() != null ? c.trials() : defaultTrials, maxTrials);
         Path dir = outputDir.resolve(c.feature()).resolve(c.name()).resolve(strategy.name().toLowerCase());
         List<TrialResult> trials = new ArrayList<>();
         for (int i = 1; i <= n; i++) {

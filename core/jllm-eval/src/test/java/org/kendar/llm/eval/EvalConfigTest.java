@@ -35,6 +35,18 @@ class EvalConfigTest {
     }
 
     @Test
+    void maxTrialsAndCaseTimeoutHaveDefaultsAndOverrides() {
+        EvalConfig d = load(map(), map("ANTHROPIC_API_KEY", "k-1234"));
+        assertEquals(10, d.maxTrials());
+        assertEquals(0, d.caseTimeoutSeconds());
+        EvalConfig o = load(map("eval.maxTrials", "2", "eval.caseTimeoutSeconds", "300"), map("ANTHROPIC_API_KEY", "k-1234"));
+        assertEquals(2, o.maxTrials());
+        assertEquals(300, o.caseTimeoutSeconds());
+        EvalConfig z = load(map("eval.caseTimeoutSeconds", "0"), map("ANTHROPIC_API_KEY", "k-1234"));
+        assertEquals(0, z.caseTimeoutSeconds());
+    }
+
+    @Test
     void reportsEveryInvalidKeyAtOnce() {
         EvalConfigException e = assertThrows(EvalConfigException.class, () -> load(
                 map("eval.target", "remote.mac", "eval.remote.mac.baseUrl", "nonsense",

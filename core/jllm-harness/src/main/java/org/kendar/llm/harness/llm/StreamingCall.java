@@ -12,6 +12,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.util.Optional;
 import java.util.function.IntFunction;
 import java.util.function.IntPredicate;
 import java.util.function.Supplier;
@@ -133,6 +134,7 @@ final class StreamingCall {
         HttpRequest request = build.get();
         boolean authRetried = false;
         int attempt = 0;
+        RetryBudget budget = new RetryBudget();
         while (true) {
             try {
                 HttpResponse<InputStream> resp = cancel.sendStreaming(http, request);
@@ -156,7 +158,9 @@ final class StreamingCall {
                             listener.onReset();
                         }
                         attempt++;
-                        long delay = Math.min(30_000L, backoffBaseMs << attempt);
+                        long delay = budget.reserve(attempt, backoffBaseMs, Optional.empty())
+                                .orElseThrow(() -> new ModelException(e.getMessage()
+                                        + " (retry wait budget of " + RetryBudget.MAX_WAIT_MS + " ms exhausted)", e));
                         log.warn("Model stream broke ({}): retry {} in {} ms", e.getMessage(), attempt, delay);
                         cancel.retrying(0, attempt, maxRetries, delay);
                         cancel.sleep(delay);
@@ -175,9 +179,11 @@ final class StreamingCall {
                 if (!retryableStatus.test(status) || attempt >= maxRetries) {
                     throw new ModelException(httpError.apply(status) + ": " + truncate(text));
                 }
-                long delayMs = resp.headers().firstValue("retry-after").map(StreamingCall::parseSeconds)
-                        .orElse(Math.min(30_000L, backoffBaseMs << attempt));
                 attempt++;
+                long delayMs = budget.reserve(attempt, backoffBaseMs,
+                                resp.headers().firstValue("retry-after").map(StreamingCall::parseSeconds))
+                        .orElseThrow(() -> new ModelException(httpError.apply(status) + ": " + truncate(text)
+                                + " (retry wait budget of " + RetryBudget.MAX_WAIT_MS + " ms exhausted)"));
                 cancel.retrying(status, attempt, maxRetries, delayMs);
                 cancel.sleep(delayMs);
             } catch (InterruptedException e) {
@@ -187,7 +193,9 @@ final class StreamingCall {
                 if (cancel.isCancelled()) throw new ModelCancelledException();
                 if (attempt >= maxRetries) throw new ModelException(callFailed + e.getMessage(), e);
                 attempt++;
-                long netDelay = Math.min(30_000L, backoffBaseMs << attempt);
+                long netDelay = budget.reserve(attempt, backoffBaseMs, Optional.empty())
+                        .orElseThrow(() -> new ModelException(callFailed + e.getMessage()
+                                + " (retry wait budget of " + RetryBudget.MAX_WAIT_MS + " ms exhausted)", e));
                 cancel.retrying(0, attempt, maxRetries, netDelay);
                 try {
                     cancel.sleep(netDelay);

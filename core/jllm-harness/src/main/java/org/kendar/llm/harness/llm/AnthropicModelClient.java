@@ -9,6 +9,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.Optional;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -459,6 +460,7 @@ public class AnthropicModelClient implements ModelClient {
         boolean authRetried = false;
 
         int attempt = 0;
+        RetryBudget budget = new RetryBudget();
         while (true) {
             try {
                 HttpResponse<String> resp = cancel.send(http, request);
@@ -476,11 +478,13 @@ public class AnthropicModelClient implements ModelClient {
                 if (!retryable || attempt >= props.maxRetries()) {
                     throw new ModelException("Anthropic API error " + status + ": " + truncate(resp.body()));
                 }
-                long delayMs = resp.headers().firstValue("retry-after")
-                        .map(AnthropicModelClient::parseSeconds)
-                        .orElse(Math.min(30_000L, backoffBaseMs << attempt));
-                log.warn("Anthropic API {} — retry {} in {} ms", status, attempt + 1, delayMs);
                 attempt++;
+                long delayMs = budget.reserve(attempt, backoffBaseMs,
+                                resp.headers().firstValue("retry-after").map(AnthropicModelClient::parseSeconds))
+                        .orElseThrow(() -> new ModelException("Anthropic API error " + status + ": "
+                                + truncate(resp.body()) + " (retry wait budget of " + RetryBudget.MAX_WAIT_MS
+                                + " ms exhausted)"));
+                log.warn("Anthropic API {} — retry {} in {} ms", status, attempt, delayMs);
                 cancel.retrying(status, attempt, props.maxRetries(), delayMs);
                 cancel.sleep(delayMs);
             } catch (InterruptedException e) {
@@ -491,7 +495,9 @@ public class AnthropicModelClient implements ModelClient {
                     throw new ModelException("Anthropic API call failed: " + e.getMessage(), e);
                 }
                 attempt++;
-                long netDelay = Math.min(30_000L, backoffBaseMs << attempt);
+                long netDelay = budget.reserve(attempt, backoffBaseMs, Optional.empty())
+                        .orElseThrow(() -> new ModelException("Anthropic API call failed: " + e.getMessage()
+                                + " (retry wait budget of " + RetryBudget.MAX_WAIT_MS + " ms exhausted)", e));
                 cancel.retrying(0, attempt, props.maxRetries(), netDelay);
                 try {
                     cancel.sleep(netDelay);

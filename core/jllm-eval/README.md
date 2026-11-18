@@ -87,6 +87,8 @@ object descriptions, exception messages, connection-check output and `run.json`.
 | `eval.timeout.connect` | Seconds allowed for a reachability probe. |
 | `eval.timeout.warmup` | Seconds allowed for the warm-up call. |
 | `eval.trials` | Default number of trials. |
+| `eval.maxTrials` | Cap on the trials of any case, including cases that set their own count. Default `10`. The Ollama smoke script sets `2` (`MAX_TRIALS`). |
+| `eval.caseTimeoutSeconds` | Cap on each user turn of a case, in seconds. `0` (default) keeps each case's own timeout. The Ollama smoke script sets `300` (`CASE_TIMEOUT_SECONDS`, defaults to `TIMEOUT_SECONDS`). |
 | `eval.outputDir` | Results folder (git-ignored, survives `mvn clean`). Layout: `<model>/run-<timestamp>/` with `run.json`, `<feature>/<case>/<strategy>/result.json` and traces, plus `report.md` and `summary.json` written when the run ends; `<model>/baselines/`; `summary/merged.md` compares the latest run of every model; `history/` keeps one compact recap per run, `<date>_<model>.md` and `.json`, plus `INDEX.md` (not git-ignored: commit it to keep the eval history). |
 
 ## Embedding model

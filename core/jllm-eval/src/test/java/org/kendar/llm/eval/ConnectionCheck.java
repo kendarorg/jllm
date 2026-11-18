@@ -45,7 +45,7 @@ public final class ConnectionCheck {
             try {
                 probe(e, config.connectTimeoutSeconds());
                 long t0 = System.nanoTime();
-                String answer = clients.apply(e).simpleComplete("", "Reply with the single word OK.", 32);
+                String answer = clients.apply(e).simpleComplete("", "Reply with the single word OK.", 256);
                 long ms = (System.nanoTime() - t0) / 1_000_000;
                 if (answer == null || answer.isBlank()) throw new IllegalStateException("empty warm-up answer");
                 done.put(e, ms);

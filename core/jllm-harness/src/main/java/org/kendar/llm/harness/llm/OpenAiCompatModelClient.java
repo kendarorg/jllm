@@ -14,6 +14,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -542,6 +543,7 @@ public class OpenAiCompatModelClient implements ModelClient {
         boolean authRetried = false;
 
         int attempt = 0;
+        RetryBudget budget = new RetryBudget();
         while (true) {
             try {
                 HttpResponse<String> resp = cancel.send(http, request);
@@ -559,11 +561,13 @@ public class OpenAiCompatModelClient implements ModelClient {
                 if (!retryable || attempt >= cfg.maxRetries()) {
                     throw new ModelException(cfg.name() + " API error " + status + ": " + truncate(resp.body()));
                 }
-                long delayMs = resp.headers().firstValue("retry-after")
-                        .map(OpenAiCompatModelClient::parseSeconds)
-                        .orElse(Math.min(30_000L, backoffBaseMs << attempt));
-                log.warn("{} API {} - retry {} in {} ms", cfg.name(), status, attempt + 1, delayMs);
                 attempt++;
+                long delayMs = budget.reserve(attempt, backoffBaseMs,
+                                resp.headers().firstValue("retry-after").map(OpenAiCompatModelClient::parseSeconds))
+                        .orElseThrow(() -> new ModelException(cfg.name() + " API error " + status + ": "
+                                + truncate(resp.body()) + " (retry wait budget of " + RetryBudget.MAX_WAIT_MS
+                                + " ms exhausted)"));
+                log.warn("{} API {} - retry {} in {} ms", cfg.name(), status, attempt, delayMs);
                 cancel.retrying(status, attempt, cfg.maxRetries(), delayMs);
                 cancel.sleep(delayMs);
             } catch (InterruptedException e) {
@@ -574,7 +578,9 @@ public class OpenAiCompatModelClient implements ModelClient {
                     throw new ModelException(cfg.name() + " API call failed: " + e.getMessage(), e);
                 }
                 attempt++;
-                long netDelay = Math.min(30_000L, backoffBaseMs << attempt);
+                long netDelay = budget.reserve(attempt, backoffBaseMs, Optional.empty())
+                        .orElseThrow(() -> new ModelException(cfg.name() + " API call failed: " + e.getMessage()
+                                + " (retry wait budget of " + RetryBudget.MAX_WAIT_MS + " ms exhausted)", e));
                 cancel.retrying(0, attempt, cfg.maxRetries(), netDelay);
                 try {
                     cancel.sleep(netDelay);

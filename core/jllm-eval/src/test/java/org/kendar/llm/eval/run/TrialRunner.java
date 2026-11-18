@@ -44,8 +44,12 @@ public final class TrialRunner {
     /**
      * @param contextTokens context size of the target; the compaction budget is derived from it
      * @param smallModel    use the harness prompt for small models
+     * @param turnTimeoutCapSeconds upper bound on each user turn, 0 keeps the case's own timeout
      */
-    public record Settings(int contextTokens, boolean smallModel) {
+    public record Settings(int contextTokens, boolean smallModel, int turnTimeoutCapSeconds) {
+        public Settings(int contextTokens, boolean smallModel) {
+            this(contextTokens, smallModel, 0);
+        }
     }
 
     private final ModelClient model;
@@ -103,6 +107,11 @@ public final class TrialRunner {
     private record Execution(TrialTrace trace, Path workspace, Map<String, String> before) {
     }
 
+    private int turnTimeout(EvalCase c) {
+        int cap = settings.turnTimeoutCapSeconds();
+        return cap > 0 ? Math.min(cap, c.timeoutSeconds()) : c.timeoutSeconds();
+    }
+
     private Execution execute(EvalCase c, ContextStrategyKind strategy, Path base, Map<String, Object> extras) {
         long start = System.nanoTime();
         RecordingModelClient main = new RecordingModelClient(model);
@@ -142,9 +151,10 @@ public final class TrialRunner {
                 } else if (step instanceof EvalCase.UserTurn u) {
                     finished[0] = new CountDownLatch(1);
                     h.start(chatId, u.text());
-                    if (!finished[0].await(c.timeoutSeconds(), TimeUnit.SECONDS)) {
+                    int turnTimeout = turnTimeout(c);
+                    if (!finished[0].await(turnTimeout, TimeUnit.SECONDS)) {
                         h.cancel(chatId, true);
-                        error = "timeout after " + c.timeoutSeconds() + "s in turn: " + abbreviate(u.text());
+                        error = "timeout after " + turnTimeout + "s in turn: " + abbreviate(u.text());
                         break;
                     }
                 }
