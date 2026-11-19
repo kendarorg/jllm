@@ -218,14 +218,29 @@ class MnemonicStrategyTest {
     }
 
     @Test
-    void compactDoesNothing() {
+    void compactLeavesTheLatestRequestAlone() {
         ArrayNode log = pairs(15);
         String before = log.toString();
         CompactResult r = strategy.compactNow(turn(log, null), null);
         assertFalse(r.changed());
-        assertEquals(MnemonicStrategy.NOT_USED, r.message());
+        assertEquals(MnemonicStrategy.NOTHING_TO_MASK, r.message());
         assertEquals(before, log.toString());
         assertTrue(strategy.state(CHAT, AGENT).masks.isEmpty());
+    }
+
+    @Test
+    void compactMasksEarlierTurnsAtOnceWithoutTouchingTheLog() {
+        ArrayNode log = pairs(3);
+        assistant(log, "done");
+        user(log, "thanks");
+        String before = log.toString();
+        CompactResult r = strategy.compactNow(turn(log, null), null);
+        assertTrue(r.changed());
+        assertEquals(3, strategy.state(CHAT, AGENT).masks.size(), "every read of the earlier turn, protections ignored");
+        assertTrue(r.tokensAfter() < r.tokensBefore());
+        assertEquals(before, log.toString(), "the log is append-only");
+        ArrayNode view = strategy.prepare(turn(log, null)).messages();
+        assertTrue(view.get(2).path("content").path(0).path("content").asText().contains("[masked"));
     }
 
     @Test

@@ -258,8 +258,9 @@ public final class EvalConfig {
             errors.add(prefix + ".apiKey: missing (set EVAL_ANTHROPIC_APIKEY or ANTHROPIC_API_KEY, or pass -Deval.anthropic.apiKey)");
         }
         int maxRpm = integerOr("eval.anthropic.maxRpm", 0, 0);
+        // minimal|low|medium|high; on current models it is sent as output_config.effort
         return new ModelEndpoint(role, "anthropic", ModelEndpoint.ANTHROPIC, base, model == null ? "" : model, ctx,
-                false, timeout, key, null, maxRpm);
+                false, timeout, key, thinking(prefix + ".thinking"), maxRpm);
     }
 
     private ModelEndpoint remote(Role role, String name) {

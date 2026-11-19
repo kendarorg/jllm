@@ -48,7 +48,12 @@ abstract class StrategySessionsBase extends SuiteBase {
     private static ExpectedBreak breaksWithin(String what, Part... parts) {
         Set<CacheChecks.Part> allowed = EnumSet.noneOf(CacheChecks.Part.class);
         for (Part p : parts) allowed.add(p.part);
-        return new ExpectedBreak("only " + what, b -> allowed.containsAll(b.parts()));
+        // a tool group enabled on request (request_tool_group, or the user naming a tool) only adds tools
+        return new ExpectedBreak("only " + what + " or an enabled tool group", b -> {
+            Set<CacheChecks.Part> changed = EnumSet.copyOf(b.parts());
+            if (b.toolsGrew()) changed.remove(CacheChecks.Part.TOOLS);
+            return allowed.containsAll(changed);
+        });
     }
 
     private enum Part {

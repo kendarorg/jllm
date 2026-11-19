@@ -18,6 +18,7 @@ public final class Checks {
     public static Check toolOrder(String... tools) { return TraceChecks.toolOrder(tools); }
     public static Check approvalRequested() { return TraceChecks.approvalRequested(); }
     public static Check approvalRequested(String text) { return TraceChecks.approvalRequested(text); }
+    public static Check callNeedsApproval(String tool, String field, String regex) { return TraceChecks.callNeedsApproval(tool, field, regex); }
     public static Check approvalNotRequested() { return TraceChecks.approvalNotRequested(); }
     public static Check eventPresent(String type) { return TraceChecks.eventPresent(type); }
     public static Check eventAbsent(String type) { return TraceChecks.eventAbsent(type); }

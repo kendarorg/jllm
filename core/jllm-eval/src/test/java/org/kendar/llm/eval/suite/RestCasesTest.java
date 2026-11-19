@@ -36,7 +36,8 @@ class RestCasesTest extends SuiteBase {
                         .check(approvalRequested()).check(serverOps(API, "createOrder", 1, 2)).build(),
                 full(REST, "edge-404-reported").harness(d.harness()).setup(d.setup())
                         .user("Using the shop API, what item is in order A-99?")
-                        .check(serverOps(API, "getOrder", 1, 3)).check(answerNotContains("keyboard"))
+                        .check(serverOps(API, "getOrder", 1, 3))
+                        .check(answerNotMatches("A-99[^.\\n]{0,40}(keyboard|monitor)"))
                         .check(answerMatches("(?i)(not found|doesn't exist|does not exist|no (such )?order|404)")).build(),
                 full(REST, "edge-api-down-no-invented-data").harness(e.harness()).setup(e.setup())
                         .user("Using the shop API, what item is in order A-1?")

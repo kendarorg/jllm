@@ -168,6 +168,16 @@ public final class StrategyChecks {
     }
 
     /** The first message is identical in every main request and the task list is in the last one. */
+    /** A user message made of text only: the start of a turn (a tool_result carrier is not). */
+    private static boolean plainUser(JsonNode m) {
+        if (!"user".equals(Msgs.role(m))) return false;
+        JsonNode c = m.path("content");
+        if (c.isTextual()) return true;
+        if (!c.isArray() || c.isEmpty()) return false;
+        for (JsonNode b : c) if (!"text".equals(b.path("type").asText())) return false;
+        return true;
+    }
+
     public static Check scopePinned() {
         String n = "scopePinned";
         return check(n, ctx -> {
@@ -182,11 +192,16 @@ public final class StrategyChecks {
             if (ctx.trace().toolCalls().stream().noneMatch(e -> TODO_TOOL.equals(TrialTrace.toolName(e)))) {
                 return CheckResult.fail(n, "the task list was never written (" + TODO_TOOL + ")");
             }
+            // the list is appended to the log at the start of each turn and when it changes: the turn in progress
+            // of the last request must hold it
             var msgs = reqs.get(reqs.size() - 1).messages();
-            JsonNode lastMsg = msgs.get(msgs.size() - 1);
-            if (!"user".equals(Msgs.role(lastMsg)) || !Msgs.text(lastMsg).contains(TODO_TAG)) {
-                return CheckResult.fail(n, "the task list is missing from the last request");
+            boolean found = false;
+            for (int i = msgs.size() - 1; i >= 0 && !found; i--) {
+                JsonNode m = msgs.get(i);
+                if ("user".equals(Msgs.role(m)) && Msgs.text(m).contains(TODO_TAG)) found = true;
+                if (plainUser(m)) break;
             }
+            if (!found) return CheckResult.fail(n, "the task list is missing from the turn in progress");
             return CheckResult.pass(n, "first message and task list pinned");
         });
     }

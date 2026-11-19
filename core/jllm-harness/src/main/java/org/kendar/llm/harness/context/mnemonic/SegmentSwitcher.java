@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.kendar.llm.harness.Prompts;
 import org.kendar.llm.harness.context.RequestPrefix;
+import org.kendar.llm.harness.context.compaction.ContextManager;
 import org.kendar.llm.harness.context.mnemonic.MnemonicState.Mask;
 import org.kendar.llm.harness.context.mnemonic.MnemonicState.Segment;
 import org.kendar.llm.harness.llm.ModelRequest;
@@ -185,8 +186,22 @@ public final class SegmentSwitcher {
                 out.add(first);
             }
         }
-        for (int i = start; i < n; i++) out.add(view.get(i));
+        // the content before the tail changed (marker, dropped messages): its reasoning signatures are void (400)
+        for (int i = start; i < n; i++) out.add(withoutReasoning(view.get(i)));
         return out;
+    }
+
+    /** {@code msg} without its thinking blocks; an assistant message left empty gets a placeholder text. */
+    private static JsonNode withoutReasoning(JsonNode msg) {
+        if (!"assistant".equals(Messages.role(msg)) || !msg.path("content").isArray()) return msg;
+        boolean any = false;
+        for (JsonNode b : msg.path("content")) any |= Messages.isThinking(b);
+        if (!any) return msg;
+        ObjectNode copy = msg.deepCopy();
+        ArrayNode kept = copy.putArray("content");
+        for (JsonNode b : msg.path("content")) if (!Messages.isThinking(b)) kept.add(b);
+        if (kept.isEmpty()) kept.addObject().put("type", "text").put("text", ContextManager.REASONING_OMITTED);
+        return copy;
     }
 
     static final String OMITTED = "[Earlier messages are left out of this request to fit the context window.]";

@@ -369,4 +369,21 @@ class ContextManagerFixesTest {
         assertFalse(manager(cfg).compactInherited("c", m, new int[]{2}, null, new Events(), u -> { }, null));
         assertEquals(before, m.toString());
     }
+
+    @Test
+    void anUpdateThatDropsTheObjectiveGetsItBackFromThePriorSummary() {
+        ArrayNode span = MAPPER.createArrayNode();
+        user(span, "[Summary of the earlier conversation]\n## Objective\n- Rename methods, ticket TKT-1.\n\n"
+                + "## Work State\n### Completed\n- Alpha\n\n## Relevant Files\n- a.java");
+        assistant(span, "ok");
+        String updated = "## Requirements\n- prefix calc\n\n## Work State\n### Completed\n- Alpha\n- Beta";
+
+        String out = ContextManager.withKeptSections(updated, span);
+
+        assertTrue(out.startsWith("## Objective\n- Rename methods, ticket TKT-1."), out);
+        assertFalse(out.contains("a.java"), "only the dropped section is copied back");
+        assertEquals(1, out.split("## Work State", -1).length - 1, "a present section is not duplicated");
+        assertEquals(updated, ContextManager.withKeptSections(updated, MAPPER.createArrayNode()),
+                "a first summary has nothing to copy from");
+    }
 }

@@ -4,12 +4,16 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.kendar.llm.harness.session.ChatSessionService;
+import org.kendar.llm.harness.skills.SkillCatalog;
+import org.kendar.llm.harness.skills.SkillTool;
 import org.kendar.llm.harness.tools.HarnessTool;
 import org.kendar.llm.harness.tools.HarnessToolRegistry;
 import org.kendar.llm.harness.tools.ToolContext;
 import org.kendar.llm.harness.tools.ToolKind;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 import java.util.Set;
 import java.util.TreeSet;
 
@@ -32,10 +36,29 @@ public class RequestToolGroupTool implements HarnessTool {
 
     @Override public String name() { return "request_tool_group"; }
 
+    /** Lists every group with its tools: a tool the model was not given is otherwise unknown to it. */
     @Override
     public String description() {
-        return "Enable additional tool groups that are not available yet. They become callable from your next "
-                + "step. Use only when none of the current tools can do what is needed.";
+        Map<String, List<HarnessTool>> byGroup = new TreeMap<>();
+        for (HarnessTool t : registry.all()) {
+            if (t.group() != null) byGroup.computeIfAbsent(t.group(), k -> new ArrayList<>()).add(t);
+        }
+        StringBuilder sb = new StringBuilder("Enable additional tool groups that are not available yet. They become "
+                + "callable from your next step. Use it when none of the current tools can do what is needed, or "
+                + "when the user names a tool you do not have. Groups and their tools:");
+        byGroup.forEach((g, tools) -> {
+            sb.append("\n- ").append(g).append(": ");
+            for (int i = 0; i < tools.size(); i++) {
+                HarnessTool t = tools.get(i);
+                if (i > 0) sb.append(", ");
+                sb.append(t.name());
+                if (t instanceof SkillTool s && !s.offered().isEmpty()) {
+                    sb.append(" (skills: ").append(String.join(", ",
+                            s.offered().stream().map(SkillCatalog.Skill::name).toList())).append(')');
+                }
+            }
+        });
+        return sb.toString();
     }
 
     @Override
@@ -57,13 +80,13 @@ public class RequestToolGroupTool implements HarnessTool {
 
     @Override public ToolKind kind() { return ToolKind.READ_ONLY; }
 
-    /** Groups the chat does not have yet; empty when nothing is left to request. */
-    public Set<String> missing(String chatId) {
-        Set<String> enabled = sessions.toolGroups(chatId);
-        if (enabled == null) return Set.of();
-        Set<String> out = allGroups();
-        out.removeAll(enabled);
-        return out;
+    /**
+     * True when the chat is offered this tool: it has a tool set and there are groups at all. It stays offered once
+     * every group is enabled (a request then changes nothing): taking it away would change the tool list, the start of
+     * the prompt, and void the prompt cache, while a tool set must only grow.
+     */
+    public boolean offered(String chatId) {
+        return sessions.toolGroups(chatId) != null && !allGroups().isEmpty();
     }
 
     @Override

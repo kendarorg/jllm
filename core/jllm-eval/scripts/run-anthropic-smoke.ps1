@@ -1,6 +1,6 @@
 # One-iteration smoke run of jllm-eval against the Anthropic API, Claude Haiku 5.5 as target and fast model.
 # The judge is Sonnet 5.5 by default (a different model, so the run is not self-graded); JUDGE_MODEL overrides it.
-# Asks for the Anthropic API key (hidden input) unless ANTHROPIC_API_KEY is already set.
+# The judge is Haiku 5.5 by default (JUDGE_MODEL overrides it); with the same model as target the run is self-graded.
 # Settings can be overridden through environment variables of the same name.
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -38,6 +38,10 @@ function Find-JavaHome {
 $ANTHROPIC_BASE = Get-Setting 'ANTHROPIC_BASE' 'https://api.anthropic.com'
 $MODEL = Get-Setting 'MODEL' 'claude-haiku-5-5'
 $JUDGE_MODEL = Get-Setting 'JUDGE_MODEL' 'claude-haiku-5-5'
+$THINKING = Get-Setting 'THINKING' ''   # target effort: minimal|low|medium|high; empty = the model's default
+# Sonnet 5.5 at medium effort (about 19x the Haiku cost; the judge stays on Haiku):
+# $MODEL = Get-Setting 'MODEL' 'claude-sonnet-5-5'
+# $THINKING = Get-Setting 'THINKING' 'medium'
 $CTX_TOKENS = Get-Setting 'CTX_TOKENS' '200000'
 $COMPACTION_CTX_TOKENS = Get-Setting 'COMPACTION_CTX_TOKENS' '65536'   # context of the compaction group only
 $TIMEOUT_SECONDS = Get-Setting 'TIMEOUT_SECONDS' '300'
@@ -47,8 +51,8 @@ if (($TEST_GROUPS -split ',') -contains 'all') { $TEST_GROUPS = 'smoke,full,stra
 $TRIALS = Get-Setting 'TRIALS' '1'
 $MAX_TRIALS = Get-Setting 'MAX_TRIALS' '2'
 $IGNORE_TEST_FAILURES = Get-Setting 'IGNORE_TEST_FAILURES' '1'
-$RPM_LIMIT = Get-Setting 'RPM_LIMIT' '90'   # requests per minute to the API (target, judge and fast share it); 0 = unpaced
-$PARALLELISM = [int](Get-Setting 'PARALLELISM' '6')   # test classes run at once; 1 = strictly sequential
+$RPM_LIMIT = Get-Setting 'RPM_LIMIT' '120'   # requests per minute to the API (target, judge and fast share it); 0 = unpaced
+$PARALLELISM = [int](Get-Setting 'PARALLELISM' '10')   # test classes run at once; 1 = strictly sequential
 $JAVA_HOME = Find-JavaHome   # build needs JDK 21+
 
 # ---- paths
@@ -97,7 +101,7 @@ foreach ($m in @($MODEL, $JUDGE_MODEL)) {
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 Write-Host "Log: $LogFile"
 Write-Host "JAVA_HOME: $JAVA_HOME"
-Write-Host "Model: $MODEL  judge: $JUDGE_MODEL  ctx: $CTX_TOKENS  compaction ctx: $COMPACTION_CTX_TOKENS  groups: $TEST_GROUPS  trials: $TRIALS  max trials: $MAX_TRIALS  timeout: ${TIMEOUT_SECONDS}s  rpm: $RPM_LIMIT  parallelism: $PARALLELISM"
+Write-Host "Model: $MODEL  thinking: $(if ($THINKING) { $THINKING } else { 'default' })  judge: $JUDGE_MODEL  ctx: $CTX_TOKENS  compaction ctx: $COMPACTION_CTX_TOKENS  groups: $TEST_GROUPS  trials: $TRIALS  max trials: $MAX_TRIALS  timeout: ${TIMEOUT_SECONDS}s  rpm: $RPM_LIMIT  parallelism: $PARALLELISM"
 
 # ---- run
 $prevJavaHome = $env:JAVA_HOME
@@ -128,6 +132,7 @@ $mvnArgs = @(
     "-Deval.compaction.contextTokens=$COMPACTION_CTX_TOKENS",
     "-Deval.timeout.warmup=$TIMEOUT_SECONDS"
 )
+if ($THINKING) { $mvnArgs += "-Deval.anthropic.thinking=$THINKING" }
 
 $writer = New-Object System.IO.StreamWriter($LogFile, $false, (New-Object System.Text.UTF8Encoding($false)))
 $ErrorActionPreference = 'Continue'

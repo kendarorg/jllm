@@ -24,6 +24,10 @@ class CutOffCasesTest extends SuiteBase {
         FakeLlmServer json = new FakeLlmServer()
                 .cutToolCall("write_file", "{\"path\": \"a.txt\", \"content\": \"abc")
                 .text("The write was cut off.");
+        FakeLlmServer several = new FakeLlmServer().cutText("Step one, ").cutText("step two, ").text("step three.");
+        // one more cut than the harness continues: it must stop instead of asking for ever
+        FakeLlmServer endless = new FakeLlmServer().cutText("a").cutText("b").cutText("c").cutText("d")
+                .text("never reached");
         FakeLlmServer twice = new FakeLlmServer()
                 .cutToolCall("write_file", "{\"path\": \"b.txt\", \"content\": \"abc")
                 .cutToolCall("write_file", "{\"path\": \"b.txt\", \"content\": \"abc");
@@ -37,6 +41,14 @@ class CutOffCasesTest extends SuiteBase {
                         .check(fileMissing("q.txt"))
                         .check(requestsContain("Not executed: your response was cut off"))
                         .check(runOutcome("completed")).build(),
+                full(CUTOFF, "cut-text-continued-several-times").model(several.client())
+                        .user("List the three steps in one line.").trials(1)
+                        .check(requestsContain("[harness: response cut off]"))
+                        .check(answerContains("step three")).check(runOutcome("completed")).build(),
+                full(CUTOFF, "edge-endless-cut-text-stops").model(endless.client())
+                        .user("Write a long story.").trials(1)
+                        .check(requestsContain("[harness: response cut off]"))
+                        .check(answerNotContains("never reached")).check(runOutcome("truncated")).build(),
                 full(CUTOFF, "edge-broken-json-call-not-executed").model(json.client())
                         .user("Write abc into a.txt.").trials(1)
                         .check(fileMissing("a.txt"))

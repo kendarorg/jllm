@@ -57,7 +57,7 @@ class MnemonicSelectionTest {
                 .withoutStandardTools().settings(mnemonic).build();
         assertInstanceOf(MnemonicStrategy.class, h.contextStrategy());
         String chat = h.sessions().create(null).chatId();
-        assertEquals(MnemonicStrategy.NOT_USED, h.commands().execute(chat, "/compact").output());
+        assertTrue(h.commands().execute(chat, "/compact").output().contains(MnemonicStrategy.NOTHING_TO_MASK));
         assertTrue(h.commands().execute(chat, "/status").output().contains("context strategy: mnemonic"));
 
         AgentHarness byConfig = AgentHarness.builder().modelClient(new ScriptedModel())

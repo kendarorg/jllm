@@ -252,6 +252,15 @@ public final class Suite {
                 ? CheckResult.pass(n, "found") : CheckResult.fail(n, "no tool result contains the text"));
     }
 
+    /** Some tool result event (cut at 2000 chars) matches the regex. */
+    public static Check anyToolResultMatches(String regex) {
+        String n = "toolResultMatches(" + regex + ")";
+        Pattern p = Pattern.compile(regex);
+        return trace(n, ctx -> ctx.trace().events("tool_result").stream()
+                .anyMatch(e -> e.data() != null && p.matcher(e.data().path("output").asText("")).find())
+                ? CheckResult.pass(n, "found") : CheckResult.fail(n, "no tool result matches"));
+    }
+
     /** Some message of a main model request contains the text (what the model really saw). */
     public static Check requestsContain(String text) {
         String n = "requestsContain(" + text + ")";

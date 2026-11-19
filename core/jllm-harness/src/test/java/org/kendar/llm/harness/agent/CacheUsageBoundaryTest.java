@@ -114,7 +114,7 @@ class CacheUsageBoundaryTest {
         assertEquals(400, u.get("cacheReadTokens").asLong());
         assertEquals(30, u.get("cacheCreationTokens").asLong());
 
-        // (b) wire format: cache breakpoint on the last system block and last tool only, never in messages
+        // (b) wire format: cache breakpoint on the last system block, the last tool and the last message block
         for (JsonNode body : sent) {
             JsonNode system = body.get("system");
             assertEquals(2, system.size());
@@ -124,7 +124,10 @@ class CacheUsageBoundaryTest {
             JsonNode tools = body.get("tools");
             assertEquals("ephemeral", tools.get(tools.size() - 1).at("/cache_control/type").asText());
             for (int i = 0; i < tools.size() - 1; i++) assertTrue(tools.get(i).path("cache_control").isMissingNode());
-            assertFalse(MAPPER.writeValueAsString(body.get("messages")).contains("cache_control"));
+            String msgs = MAPPER.writeValueAsString(body.get("messages"));
+            assertEquals(1, msgs.split("cache_control", -1).length - 1, "one breakpoint in the messages");
+            JsonNode lastMsg = body.get("messages").get(body.get("messages").size() - 1).get("content");
+            assertEquals("ephemeral", lastMsg.get(lastMsg.size() - 1).at("/cache_control/type").asText());
         }
 
         // stable prefix: system + tools bytes identical before/after the message log was rewritten

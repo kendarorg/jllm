@@ -36,7 +36,7 @@ class JsCasesTest extends SuiteBase {
                 full(JS, "failure-runaway-loop-reported")
                         .harness(js(100_000))
                         .user("Use run_js to run `while(true){}` and tell me exactly what happened.")
-                        .check(toolCalled("run_js")).check(anyToolResultContains("\"ok\":false"))
+                        .check(toolCalled("run_js")).check(anyToolResultMatches("\"?ok\"?\\s*:\\s*false"))
                         .check(answerNotMatches("(completed successfully|ran successfully|finished without)")).build());
     }
 }

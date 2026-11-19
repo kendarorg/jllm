@@ -29,8 +29,10 @@ public final class CacheChecks {
      * @param firstChanged   index of the first changed message (when MESSAGES is in parts), else -1
      * @param before         that message in the earlier request, null when it did not exist
      * @param after          that message in the later request, null when it no longer exists
+     * @param toolsGrew      the later tool list holds every earlier tool and more (a tool group was enabled)
      */
-    public record Break(int request, Set<Part> parts, int firstChanged, JsonNode before, JsonNode after) {
+    public record Break(int request, Set<Part> parts, int firstChanged, JsonNode before, JsonNode after,
+                        boolean toolsGrew) {
         @Override
         public String toString() {
             return "request " + request + " changed " + parts + (firstChanged >= 0 ? " from message " + firstChanged : "");
@@ -123,7 +125,8 @@ public final class CacheChecks {
             if (parts.isEmpty()) continue;
             out.add(new Break(b.index(), parts, changed ? k : -1,
                     changed && k < a.messages().size() ? a.messages().get(k) : null,
-                    changed && k < b.messages().size() ? b.messages().get(k) : null));
+                    changed && k < b.messages().size() ? b.messages().get(k) : null,
+                    parts.contains(Part.TOOLS) && new java.util.HashSet<>(b.toolNames()).containsAll(a.toolNames())));
         }
         return out;
     }

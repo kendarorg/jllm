@@ -34,13 +34,14 @@ import java.util.function.LongSupplier;
  *   <li>level 2, when the response would no longer fit under the ceiling: a segment switch keeps the first user
  *   request, handoff notes written by the model, a recall index and a verbatim tail</li>
  *   <li>emergency: the newest tool results alone leave no room, they are masked too</li>
+ *   <li>/compact: everything maskable before the latest user turn is masked at once, protections ignored</li>
  * </ol>
  * Everything masked or moved out stays retrievable word for word through {@code history_recall}.
  */
 public class MnemonicStrategy implements ContextStrategy {
 
     private static final Logger log = LoggerFactory.getLogger(MnemonicStrategy.class);
-    static final String NOT_USED = "Not used with the mnemonic context strategy";
+    static final String NOTHING_TO_MASK = "Nothing to mask before the latest request";
 
     /** Live state of one agent: decisions plus runtime-only data (log reference, calibration, index). */
     static final class Agent {
@@ -105,7 +106,7 @@ public class MnemonicStrategy implements ContextStrategy {
                 m.minAgeTurns(), m.dropOldThinking()));
         this.switcher = new SegmentSwitcher(mapper);
         this.recall = new HistoryRecallTool(this, subAgentRuns == null ? SubAgentRunLog.noop() : subAgentRuns,
-                m.recallMaxChars(), mapper);
+                mapper);
     }
 
     @Override
@@ -215,8 +216,25 @@ public class MnemonicStrategy implements ContextStrategy {
 
     @Override
     public CompactResult compactNow(ContextTurn t, String focus) {
-        long size = contextTokens(t.chatId(), t.agentKey(), t.log());
-        return new CompactResult(false, size, size, 0, NOT_USED);
+        Agent a = agent(t.chatId(), t.agentKey(), t.main());
+        synchronized (a) {
+            a.log = t.log();
+            validate(a.state, t.log());
+            int inherited = t.inherited() == null ? 0 : Math.max(t.inherited()[0], 0);
+            int from = Math.max(inherited, Math.max(a.state.frontier, a.state.start()));
+            long before = estimate(a, renderer.render(t.log(), a.state), t.prefix());
+            List<Mask> masks = planner.manual(t.log(), a.state, from);
+            if (masks.isEmpty()) return new CompactResult(false, before, before, 0, NOTHING_TO_MASK);
+            a.state.masks.addAll(masks);
+            a.state.frontier = Math.max(a.state.frontier, masks.get(0).index());
+            metrics.context("mask");
+            save(t.chatId(), t.agentKey(), a);
+            ArrayNode view = renderer.render(t.log(), a.state);
+            long after = estimate(a, view, t.prefix());
+            // the caller publishes the compaction event (manual), as for the other strategies
+            a.lastChars = chars(view, t.prefix());
+            return new CompactResult(true, before, after, masks.size());
+        }
     }
 
     @Override
@@ -369,6 +387,13 @@ public class MnemonicStrategy implements ContextStrategy {
         long tailMax = Math.round(config.mnemonic().tailMax(config.contextBudgetTokens()) / a.ratio);
         int cut = SegmentSwitcher.chooseCut(t.log(), start, applied, tailMax);
         if (cut <= 0) return false;
+        // the new head carries notes and an index: moving out less than that saves nothing and rewrites the notes
+        // (each rewrite may drop a fact) on every request, as when the fixed prefix alone fills most of the window
+        long moved = 0;
+        for (int i = start; i < cut; i++) moved += Messages.tokens(applied.get(i - start));
+        if (!overflowed && moved <= config.mnemonic().notesMaxTokens() + config.mnemonic().indexMaxTokens()) {
+            return false;
+        }
         String notes;
         try {
             notes = switcher.notes(t.prefix(), notesView(a, view, t.prefix(), overflowed),
@@ -442,6 +467,30 @@ public class MnemonicStrategy implements ContextStrategy {
         if (measured <= 0 || a.lastChars <= 0) return;
         double r = measured / (a.lastChars / Messages.CHARS_PER_TOKEN);
         if (r >= 0.5 && r <= 2.0) a.ratio = r;
+    }
+
+    /** Smallest recall page: below this a page is mostly its continuation hint. */
+    static final int MIN_RECALL_CHARS = 1000;
+
+    /**
+     * Characters of one history_recall page for agent {@code a}: what is left of the window after its last request
+     * and the response, at most the configured page. A larger page is masked again by the emergency level before
+     * the model reads it, and the model recalls it again.
+     */
+    int recallChars(Agent a) {
+        int max = config.mnemonic().recallMaxChars();
+        if (a == null || a.lastChars <= 0) return max;
+        double ratio;
+        long lastChars;
+        synchronized (a) {
+            ratio = a.ratio;
+            lastChars = a.lastChars;
+        }
+        long used = Math.round(Math.ceil(lastChars / Messages.CHARS_PER_TOKEN) * ratio);
+        long room = config.contextBudgetTokens() - config.maxTokens() - used;
+        // the result's wrapper and the next step's own text need some of the room too
+        long chars = Math.round(room * 0.8 / ratio * Messages.CHARS_PER_TOKEN);
+        return (int) Math.max(MIN_RECALL_CHARS, Math.min(max, chars));
     }
 
     private static long estimate(Agent a, ArrayNode view, RequestPrefix prefix) {

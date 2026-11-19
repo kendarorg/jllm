@@ -47,6 +47,10 @@ class SkillsCasesTest extends SuiteBase {
                 full(SKILLS, "skill-steps-followed")
                         .harness(skill("release-notes", "Use when asked to prepare release notes",
                                 "# Release notes\nThe file must be named RELEASE-NOTES.md and its first line must be '# Release 1.0'.\n"))
+                        // something to write notes about: an empty workspace makes declining the right answer
+                        .setup(files("CHANGELOG.md", "## Unreleased\n- Added CSV export of reports\n"
+                                        + "- Fixed the login timeout on slow networks\n- Dropped support for Java 17\n",
+                                "src/Report.java", "public class Report {\n    public String toCsv() { return \"\"; }\n}\n"))
                         .user("Prepare the release notes file for this project.")
                         .check(toolCalled("skill")).check(fileContains("RELEASE-NOTES.md", "# Release 1.0")).build(),
                 full(SKILLS, "no-skill-needed")

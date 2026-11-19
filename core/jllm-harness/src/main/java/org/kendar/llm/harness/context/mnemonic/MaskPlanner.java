@@ -55,6 +55,17 @@ final class MaskPlanner {
     }
 
     /**
+     * Manual compaction (/compact): every maskable block from {@code from} up to the latest user turn, which is kept
+     * as it is. The age and recent-token protections do not apply: the user asked for the context to shrink now.
+     */
+    List<Mask> manual(ArrayNode log, MnemonicState st, int from) {
+        int lastUser = lastPlainUser(log);
+        List<Mask> chosen = new ArrayList<>();
+        for (int i = Math.max(from, 0); i < lastUser; i++) chosen.addAll(candidates(log, st, i, true));
+        return chosen;
+    }
+
+    /**
      * Emergency: the newest tool results alone leave no room for the response. Masks the largest results of the
      * trailing tool-result message, protection ignored, but only if that frees at least {@code needed}.
      */

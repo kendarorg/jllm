@@ -92,7 +92,7 @@ class ThinkingLevelTest {
 
     @Test
     void anthropicMapsLevelToBudgetAndMinimalIsOff() {
-        AnthropicModelClient c = new AnthropicModelClient(AnthropicSettings.defaults("k"), mapper);
+        AnthropicModelClient c = new AnthropicModelClient(budgetModel(), mapper);
 
         JsonNode low = c.buildBody(req().withThinkingLevel(ThinkingLevel.LOW));
         assertEquals("enabled", low.path("thinking").path("type").asText());
@@ -117,12 +117,27 @@ class ThinkingLevelTest {
 
     @Test
     void forcedToolChoiceIsSuppressedWhenThinkingIsOn() {
-        AnthropicModelClient c = new AnthropicModelClient(AnthropicSettings.defaults("k"), mapper);
+        AnthropicModelClient c = new AnthropicModelClient(budgetModel(), mapper);
         ModelRequest r = new ModelRequest("p", "", mapper.createArrayNode(), List.of(tool()), 0, "any", false)
                 .withThinkingLevel(ThinkingLevel.MEDIUM);
         assertEquals("auto", c.buildBody(r).path("tool_choice").path("type").asText());
         assertEquals("any", c.buildBody(r.withThinkingLevel(ThinkingLevel.MINIMAL))
                 .path("tool_choice").path("type").asText());
+    }
+
+    @Test
+    void effortModelsThinkAlwaysSoForcedToolUseIsNeverSent() {
+        AnthropicModelClient c = new AnthropicModelClient(AnthropicSettings.defaults("k"), mapper);
+        ModelRequest r = new ModelRequest("p", "", mapper.createArrayNode(), List.of(tool()), 0, "any", false);
+        JsonNode body = c.buildBody(r.withThinkingLevel(ThinkingLevel.MINIMAL));
+        assertEquals("auto", body.path("tool_choice").path("type").asText());
+        assertEquals("low", body.path("output_config").path("effort").asText());
+        assertFalse(body.has("thinking"), "budget_tokens is a 400 on these models");
+    }
+
+    /** A model before adaptive thinking: it takes a thinking budget. */
+    private static AnthropicSettings budgetModel() {
+        return new AnthropicSettings("k", "https://api.anthropic.com", "claude-haiku-4-5", 8192, 5, "1h", 0, 600, true);
     }
 
     @Test

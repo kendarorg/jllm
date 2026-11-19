@@ -268,8 +268,14 @@ public class AnthropicModelClient implements ModelClient {
         ObjectNode body = mapper.createObjectNode();
         body.put("model", props.model());
 
-        int thinking = req.thinkingLevel() != null ? req.thinkingLevel().anthropicBudget() : props.thinkingBudget();
+        boolean effortModel = usesEffort(props.model());
+        int thinking = effortModel ? 0
+                : req.thinkingLevel() != null ? req.thinkingLevel().anthropicBudget() : props.thinkingBudget();
         int maxTokens = req.maxTokens() > 0 ? req.maxTokens() : props.maxTokens();
+        if (effortModel && req.thinkingLevel() != null) {
+            // these models think adaptively and reject budget_tokens: the level becomes the effort
+            body.putObject("output_config").put("effort", effort(req.thinkingLevel()));
+        }
         if (thinking >= 1024) {
             maxTokens = Math.max(maxTokens, thinking + 1024);
             ObjectNode t = body.putObject("thinking");
@@ -307,11 +313,68 @@ public class AnthropicModelClient implements ModelClient {
                 lastTool.set("input_schema", t.inputSchema());
             }
             cacheControl(lastTool);
-            applyToolChoice(body, req, thinking >= 1024);
+            // effort models always think (adaptively): forced tool use is rejected with it
+            applyToolChoice(body, req, effortModel || thinking >= 1024);
         }
         ArrayNode msgs = withoutFinishedThinking(req.messages());
-        body.set("messages", props.citations() ? withSearchResults(msgs) : msgs);
+        body.set("messages", withMessageBreakpoint(props.citations() ? withSearchResults(msgs) : msgs));
         return body;
+    }
+
+    private static final java.util.regex.Pattern EFFORT_MODELS =
+            java.util.regex.Pattern.compile("claude-(fable|mythos)\\b.*|claude-[a-z]+-(4-[6-9]|[5-9])\\b.*");
+
+    /**
+     * True for the models that think adaptively and take {@code output_config.effort} (Opus/Sonnet 4.6 and later,
+     * every 5.x, Fable, Mythos); the older ones take an extended-thinking budget instead.
+     */
+    static boolean usesEffort(String model) {
+        return model != null && EFFORT_MODELS.matcher(model).matches();
+    }
+
+    /** The effort of a level; thinking cannot be turned off on these models, so the minimal level is the lowest. */
+    static String effort(ThinkingLevel level) {
+        return switch (level) {
+            case MINIMAL, LOW -> "low";
+            case MEDIUM -> "medium";
+            case HIGH -> "high";
+        };
+    }
+
+    /**
+     * Copy of the messages with a cache breakpoint on the last block that can carry one. Without it only the system
+     * prompt and the tools are cached and the whole conversation is sent uncached on every request; with it each
+     * request writes the prefix that the next one reads (the API looks back up to 20 blocks for the previous one).
+     */
+    ArrayNode withMessageBreakpoint(ArrayNode messages) {
+        if (messages.isEmpty()) return messages;
+        int last = messages.size() - 1;
+        ObjectNode msg = (ObjectNode) messages.get(last).deepCopy();
+        JsonNode c = msg.path("content");
+        ArrayNode blocks;
+        if (c.isTextual()) {
+            if (c.asText().isBlank()) return messages;
+            blocks = mapper.createArrayNode();
+            blocks.addObject().put("type", "text").put("text", c.asText());
+            msg.set("content", blocks);
+        } else if (c.isArray()) {
+            blocks = (ArrayNode) c;
+        } else {
+            return messages;
+        }
+        for (int i = blocks.size() - 1; i >= 0; i--) {
+            JsonNode b = blocks.get(i);
+            String t = b.path("type").asText();
+            // reasoning cannot carry one, nor can an empty text block
+            if ("thinking".equals(t) || "redacted_thinking".equals(t)) continue;
+            if ("text".equals(t) && b.path("text").asText("").isBlank()) continue;
+            cacheControl((ObjectNode) b);
+            ArrayNode out = mapper.createArrayNode();
+            for (int k = 0; k < last; k++) out.add(messages.get(k));
+            out.add(msg);
+            return out;
+        }
+        return messages;
     }
 
     /**

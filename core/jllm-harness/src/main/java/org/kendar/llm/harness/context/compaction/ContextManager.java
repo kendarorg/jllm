@@ -18,6 +18,7 @@ import org.kendar.llm.harness.tools.HarnessTool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BooleanSupplier;
@@ -560,7 +561,7 @@ public class ContextManager {
         if (usable(prefix) && original != null) {
             try {
                 String s = summaryOnPrefix(prefix, span, instruction, usageSink);
-                if (s != null) return s;
+                if (s != null) return withKeptSections(s, span);
             } catch (ModelException e) {
                 if (!ModelException.isContextOverflow(e)) throw e;
                 rejected = span.toString().length() + instruction.length();
@@ -582,7 +583,8 @@ public class ContextManager {
             }
             String user = instruction + "\n\n<conversation>\n" + body + "</conversation>";
             try {
-                return model.simpleComplete(CompactionPrompt.SYSTEM, user, SUMMARY_TOKENS, usageSink);
+                String s = model.simpleComplete(CompactionPrompt.SYSTEM, user, SUMMARY_TOKENS, usageSink);
+                return s == null ? null : withKeptSections(s, span);
             } catch (ModelException e) {
                 if (!ModelException.isContextOverflow(e)) throw e;
                 if (rejected < 0) rejected = user.length();
@@ -638,6 +640,52 @@ public class ContextManager {
             if ("text".equals(b.path("type").asText())) text.append(b.path("text").asText());
         }
         return text.toString().isBlank() ? null : text.toString().strip();
+    }
+
+    /** Sections an update must never lose: the goal and where the work stands. */
+    static final List<String> KEPT_SECTIONS = List.of("## Objective", "## Work State");
+
+    /**
+     * {@code summary} with every {@link #KEPT_SECTIONS} heading the model dropped while updating an earlier summary
+     * copied back from that summary: a weak model rewriting the checkpoint can omit the goal, which then is lost for
+     * every later turn.
+     */
+    static String withKeptSections(String summary, ArrayNode span) {
+        if (!startsWithSummary(span)) return summary;
+        String prior = text(span.get(0)).substring(SUMMARY_PREFIX.length());
+        StringBuilder missing = new StringBuilder();
+        for (String heading : KEPT_SECTIONS) {
+            if (hasHeading(summary, heading)) continue;
+            String section = section(prior, heading);
+            if (section != null) missing.append(section).append("\n\n");
+        }
+        return missing.isEmpty() ? summary : missing + summary;
+    }
+
+    private static boolean hasHeading(String text, String heading) {
+        for (String line : text.split("\n")) if (line.strip().equals(heading)) return true;
+        return false;
+    }
+
+    /** The {@code heading} section of {@code text} up to the next level-2 heading, stripped; null if absent. */
+    static String section(String text, String heading) {
+        String[] lines = text.split("\n");
+        int start = -1;
+        for (int i = 0; i < lines.length; i++) {
+            if (lines[i].strip().equals(heading)) {
+                start = i;
+                break;
+            }
+        }
+        if (start < 0) return null;
+        StringBuilder sb = new StringBuilder(lines[start].strip());
+        for (int i = start + 1; i < lines.length && !lines[i].startsWith("## "); i++) sb.append('\n').append(lines[i]);
+        return sb.toString().strip();
+    }
+
+    private static String text(JsonNode msg) {
+        JsonNode c = msg.path("content");
+        return c.isTextual() ? c.asText() : c.path(0).path("text").asText("");
     }
 
     private static boolean startsWithSummary(ArrayNode span) {

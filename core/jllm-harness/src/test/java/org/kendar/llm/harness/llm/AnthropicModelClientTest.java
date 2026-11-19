@@ -107,6 +107,35 @@ class AnthropicModelClientTest {
     }
 
     @Test
+    void currentModelsGetTheLevelAsEffortNotAsABudget() {
+        assertTrue(AnthropicModelClient.usesEffort("claude-sonnet-5-5"));
+        assertTrue(AnthropicModelClient.usesEffort("claude-haiku-5-5"));
+        assertTrue(AnthropicModelClient.usesEffort("claude-opus-4-6"));
+        assertTrue(AnthropicModelClient.usesEffort("claude-fable-5-2"));
+        assertFalse(AnthropicModelClient.usesEffort("claude-haiku-4-5"));
+        assertFalse(AnthropicModelClient.usesEffort("claude-sonnet-4-5-20250929"));
+        assertEquals("medium", AnthropicModelClient.effort(ThinkingLevel.MEDIUM));
+        assertEquals("low", AnthropicModelClient.effort(ThinkingLevel.MINIMAL));
+    }
+
+    @Test
+    void theLastMessageCarriesACacheBreakpointWithoutTouchingTheLog() throws Exception {
+        AnthropicModelClient c = client(0, false, 0);
+        ArrayNode m = msgs("[{\"role\":\"user\",\"content\":\"a\"},"
+                + "{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"x\",\"input\":{}}]},"
+                + "{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"t1\",\"content\":\"r\"},"
+                + "{\"type\":\"text\",\"text\":\"\"}]}]");
+        String before = m.toString();
+        ArrayNode sent = c.withMessageBreakpoint(m);
+        assertEquals("ephemeral", sent.at("/2/content/0/cache_control/type").asText(), "skips the empty text block");
+        assertTrue(sent.at("/0/content").isTextual());
+        assertEquals(before, m.toString(), "the log is not changed");
+        ArrayNode plain = c.withMessageBreakpoint(msgs("[{\"role\":\"user\",\"content\":\"hello\"}]"));
+        assertEquals("ephemeral", plain.at("/0/content/0/cache_control/type").asText());
+        assertEquals("hello", plain.at("/0/content/0/text").asText());
+    }
+
+    @Test
     void parsesResponseAndSendsHeadersAndCacheControl() throws Exception {
         ModelResponse r = client(0, true, 0).complete(req(null, false));
         assertEquals("end_turn", r.stopReason());

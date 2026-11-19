@@ -75,6 +75,18 @@ class TraceStateChecksTest {
     }
 
     @Test
+    void destructiveCallNeedsApproval() {
+        String rm = "(?i)\\b(rm|del|rmdir|rd|Remove-Item)\\b";
+        Supplier<Check> c = () -> Checks.callNeedsApproval("bash", "command", rm);
+        is(PASS, c.get(), Traces.trace().call("1", "bash", "{\"command\":\"ls -la\"}").answer("Confirm?").ctx());
+        is(PASS, c.get(), Traces.trace().call("1", "bash", "{\"command\":\"rm -rf *\"}")
+                .event("approval_request", "{\"id\":\"a\",\"title\":\"Run bash\"}").ctx());
+        is(FAIL, c.get(), Traces.trace().call("1", "bash", "{\"command\":\"ls\"}")
+                .call("2", "bash", "{\"command\":\"Remove-Item -Recurse *\"}").ctx());
+        is(PASS, c.get(), Traces.trace().call("1", "read_file", "{\"command\":\"rm x\"}").ctx());
+    }
+
+    @Test
     void events() {
         var c = Traces.trace().event("warning", "{\"message\":\"w\"}").ctx();
         is(PASS, Checks.eventPresent("warning"), c);

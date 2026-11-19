@@ -30,7 +30,6 @@ final class HistoryRecallTool implements HarnessTool {
 
     private final MnemonicStrategy strategy;
     private final SubAgentRunLog runs;
-    private final int maxChars;
     private final ObjectMapper mapper;
     private final JsonNode schema = SimpleTool.schema(
             "query?", "Words to search for in what was moved out of the prompt; several variants separated by ' | '",
@@ -42,10 +41,9 @@ final class HistoryRecallTool implements HarnessTool {
     /** Indexes of sub-agent run transcripts, by run id. */
     private final Map<String, RecallIndex> runIndexes = new ConcurrentHashMap<>();
 
-    HistoryRecallTool(MnemonicStrategy strategy, SubAgentRunLog runs, int maxChars, ObjectMapper mapper) {
+    HistoryRecallTool(MnemonicStrategy strategy, SubAgentRunLog runs, ObjectMapper mapper) {
         this.strategy = strategy;
         this.runs = runs;
-        this.maxChars = maxChars;
         this.mapper = mapper;
     }
 
@@ -70,7 +68,7 @@ final class HistoryRecallTool implements HarnessTool {
         int offset = Math.max(0, input.path("offset").asInt(0));
         if (!scope.isEmpty() && !query.isEmpty()) return searchRun(ctx.chatId(), scope, query);
         MnemonicStrategy.Agent a = strategy.agentFor(ctx.chatId(), ctx.run() == null ? null : ctx.run().contextKey());
-        if (!id.isEmpty()) return get(ctx.chatId(), a, id, offset);
+        if (!id.isEmpty()) return get(ctx.chatId(), a, id, offset, strategy.recallChars(a));
         if (a == null || a.log == null) return "Nothing has been moved out of the prompt yet.";
         if (!file.isEmpty()) return file(a, file);
         if (!query.isEmpty()) return search(a, query);
@@ -119,10 +117,10 @@ final class HistoryRecallTool implements HarnessTool {
      * Word-for-word content of a recall id: the agent's own, else (a sub-agent) its parent's, whose receipts and
      * recall index came with the copied context.
      */
-    private String get(String chatId, MnemonicStrategy.Agent a, String id, int offset) {
-        String own = fromAgent(a, id, offset);
+    private String get(String chatId, MnemonicStrategy.Agent a, String id, int offset, int limit) {
+        String own = fromAgent(a, id, offset, limit);
         if (own != null) return own;
-        String inherited = fromAgent(strategy.parentOf(chatId, a), id, offset);
+        String inherited = fromAgent(strategy.parentOf(chatId, a), id, offset, limit);
         if (inherited != null) return inherited;
         SubAgentRunData run = run(chatId, id);
         if (run != null) {
@@ -130,13 +128,13 @@ final class HistoryRecallTool implements HarnessTool {
                     .append(")\nPrompt: ").append(run.prompt()).append("\nAnswer: ").append(run.answer())
                     .append("\n\nTranscript:\n");
             for (JsonNode m : transcript(run)) sb.append(Messages.role(m)).append(": ").append(Messages.text(m)).append("\n\n");
-            return page(sb.toString(), offset, id);
+            return page(sb.toString(), offset, id, limit);
         }
         return "Unknown recall id " + id + ".";
     }
 
     /** The content of {@code id} among the masks and messages of agent {@code a}; null when it is not there. */
-    private String fromAgent(MnemonicStrategy.Agent a, String id, int offset) {
+    private String fromAgent(MnemonicStrategy.Agent a, String id, int offset, int limit) {
         if (a == null || a.log == null) return null;
         synchronized (a) {
             ArrayNode log = a.log;
@@ -148,12 +146,12 @@ final class HistoryRecallTool implements HarnessTool {
                     case MnemonicState.TOOL_INPUT -> Messages.pretty(block.path("input"));
                     default -> block.path("thinking").asText("");
                 };
-                return page(text, offset, id);
+                return page(text, offset, id, limit);
             }
             if (id.startsWith("m")) {
                 for (int i = 0; i < log.size(); i++) {
                     if (SegmentSwitcher.messageId(i, log.get(i)).equals(id)) {
-                        return page(Messages.role(log.get(i)) + ":\n" + Messages.text(log.get(i)), offset, id);
+                        return page(Messages.role(log.get(i)) + ":\n" + Messages.text(log.get(i)), offset, id, limit);
                     }
                 }
             }
@@ -219,9 +217,10 @@ final class HistoryRecallTool implements HarnessTool {
         return count == 1 ? only.id() : SegmentSwitcher.messageId(i, log.get(i));
     }
 
-    private String page(String text, int offset, String id) {
+    /** @param limit characters of this page: what fits the agent's window now, at most the configured page */
+    private static String page(String text, int offset, String id, int limit) {
         if (offset >= text.length()) return "(end of " + id + ")";
-        int end = Math.min(text.length(), offset + maxChars);
+        int end = Math.min(text.length(), offset + limit);
         String out = text.substring(offset, end);
         if (end < text.length()) {
             out += "\n…[" + (text.length() - end) + " more chars: {\"id\": \"" + id + "\", \"offset\": " + end + "}]";

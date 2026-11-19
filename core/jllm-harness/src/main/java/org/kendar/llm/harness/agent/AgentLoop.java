@@ -590,7 +590,7 @@ public class AgentLoop {
         }
         List<HarnessTool> tools = new ArrayList<>(toolSelector.forGroups(sessions.toolGroups(chatId), registry.all()));
         tools.addAll(context.tools());
-        if (requestToolGroup != null && !requestToolGroup.missing(chatId).isEmpty()) tools.add(requestToolGroup);
+        if (requestToolGroup != null && requestToolGroup.offered(chatId)) tools.add(requestToolGroup);
         tools.add(subAgentTool);
         // the user's tool filter: applied to every tool offered to the model, including the ones added above
         org.kendar.llm.harness.auth.UserPolicy policy = identity.policyOf(chatId);
