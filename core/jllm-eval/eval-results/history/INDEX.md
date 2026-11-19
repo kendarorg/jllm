@@ -11,3 +11,4 @@
 | 20261119-150917 | claude-haiku-5-5 | anthropic:anthropic | claude-haiku-5-5 (self-graded) | 145 | 97.2% | 97.2% | 27161 | no baseline | [20261119-150917_claude-haiku-5-5.md](20261119-150917_claude-haiku-5-5.md) |
 | 20261119-152846 | claude-haiku-5-5 | anthropic:anthropic | claude-sonnet-5-5 | 145 | 95.9% | 95.9% | 29322 | no baseline | [20261119-152846_claude-haiku-5-5.md](20261119-152846_claude-haiku-5-5.md) |
 | 20261119-153528 | claude-haiku-5-5 | anthropic:anthropic | claude-sonnet-5-5 | 145 | 100.0% | 100.0% | 28422 | no baseline | [20261119-153528_claude-haiku-5-5.md](20261119-153528_claude-haiku-5-5.md) |
+| 20261119-154150 | claude-haiku-5-5 | anthropic:anthropic | claude-sonnet-5-5 | 145 | 100.0% | 100.0% | 29079 | no baseline | [20261119-154150_claude-haiku-5-5.md](20261119-154150_claude-haiku-5-5.md) |
