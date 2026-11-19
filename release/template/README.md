@@ -21,7 +21,8 @@ until the user picks another one: change it before exposing the app beyond local
 ## Choose the model (read this first)
 
 Nothing is preconfigured: you must pick a provider and a model, and a hosted provider charges you per token.
-Providers: `anthropic`, `openai`, `gemini`, `grok`, `qwen`, `ollama`, `llamacpp` (any OpenAI-compatible server).
+Providers: `anthropic`, `openai`, `openaiGpt62` (GPT-6.2 and later), `gemini`, `grok`, `qwen`, `ollama`, `llamacpp`
+(any OpenAI-compatible server).
 A local Ollama or llama.cpp needs no key and costs nothing.
 
 ### Where to put the key (token)

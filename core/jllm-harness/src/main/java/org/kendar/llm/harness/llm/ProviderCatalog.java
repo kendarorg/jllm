@@ -5,13 +5,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.*;
 
 /**
- * The providers of a harness: those of the settings list, the implicit built-ins ({@code anthropic}, {@code openai},
+ * The providers of a harness: those of the settings list, the implicit built-ins ({@code anthropic}, {@code openai}, {@code openaiGpt62},
  * {@code qwen}, {@code llamacpp}, {@code ollama}) and one {@code custom} entry that lives for the session only.
  */
 public final class ProviderCatalog {
 
     public static final String CUSTOM = "custom (session)";
-    private static final Set<String> BUILT_INS = Set.of("anthropic", "openai", "gemini", "grok", "qwen", "llamacpp", "ollama");
+    private static final Set<String> BUILT_INS = Set.of("anthropic", "openai", OpenAiResponsesModelClient.PROVIDER, "gemini", "grok", "qwen", "llamacpp", "ollama");
 
     private final Map<String, ProviderSettings> configured = new LinkedHashMap<>();
     private volatile ProviderSettings custom;
@@ -92,9 +92,12 @@ public final class ProviderCatalog {
         if (!p.streams()) {
             if (c instanceof AnthropicModelClient a) a.streaming(false);
             else if (c instanceof OpenAiCompatModelClient o) o.streaming(false);
+            else if (c instanceof OpenAiResponsesModelClient o) o.streaming(false);
         }
         // Anthropic never receives a temperature: Claude 5 models and the current API version reject it
-        if (p.temperature() != null && !p.effectiveType().equals("anthropic")) {
+        // nor GPT-6.2 (Responses rejects it)
+        if (p.temperature() != null && !p.effectiveType().equals("anthropic")
+                && !p.effectiveType().equals(OpenAiResponsesModelClient.PROVIDER)) {
             c = new TemperatureModelClient(c, p.temperature());
         }
         if (p.thinking() != null) c = new ThinkingModelClient(c, p.thinking());

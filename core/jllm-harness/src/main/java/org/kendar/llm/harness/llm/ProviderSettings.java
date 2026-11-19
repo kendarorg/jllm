@@ -7,7 +7,8 @@ import java.util.Locale;
  * take the defaults of the {@code type}.
  *
  * @param name           descriptive name used by {@code --provider}, {@code /model} and agent settings
- * @param type           {@code anthropic}, or an OpenAI-compatible kind ({@code openai}, {@code qwen},
+ * @param type           {@code anthropic}, or {@code openaiGpt62} (OpenAI Responses API), or an
+ *                       OpenAI-compatible kind ({@code openai}, {@code qwen},
  *                       {@code llamacpp}, {@code ollama}); default: the name
  * @param contextTokens  context window of the model; used by the fit check when switching models
  * @param smallModel     the model is small: the system prompt gets the stricter small-model rules
@@ -88,13 +89,15 @@ public record ProviderSettings(String name, String type, String baseUrl, String 
             case "qwen" -> "qwen3-coder-plus";
             case "ollama" -> ModelClients.OLLAMA_DEFAULT_MODEL;
             case "llamacpp" -> "local";
+            case OpenAiResponsesModelClient.PROVIDER -> OpenAiResponsesModelClient.DEFAULT_MODEL;
             default -> "gpt-4.1";
         };
-        String key = apiKey != null && !apiKey.isBlank() ? apiKey : System.getenv(t.toUpperCase(Locale.ROOT) + "_API_KEY");
+        String key = apiKey != null && !apiKey.isBlank() ? apiKey : ModelClientFactory.envKey(t);
         return new LlmSettings(t, baseUrl != null ? baseUrl : defUrl, key == null ? "" : key,
                 model != null ? model : defModel, maxTokens != null ? maxTokens : 8192,
                 maxRetries != null ? maxRetries : local ? 2 : 5, timeoutSeconds != null ? timeoutSeconds : local ? 1800 : 600,
                 requireApiKey != null ? requireApiKey : !local,
-                useMaxCompletionTokens != null ? useMaxCompletionTokens : t.equals("openai"));
+                useMaxCompletionTokens != null ? useMaxCompletionTokens
+                        : t.equals("openai") || t.equals(OpenAiResponsesModelClient.PROVIDER));
     }
 }

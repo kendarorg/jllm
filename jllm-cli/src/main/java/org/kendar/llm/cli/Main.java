@@ -31,7 +31,7 @@ import java.util.concurrent.TimeUnit;
  * Command line front end: an interactive chat (or a single {@code --prompt}) over the standard tools.
  *
  * <pre>
- * java -cp ... org.kendar.llm.harness.Main [--provider anthropic|openai|gemini|grok|qwen|llamacpp|ollama] [--model M]
+ * java -cp ... org.kendar.llm.harness.Main [--provider anthropic|openai|openaiGpt62|gemini|grok|qwen|llamacpp|ollama] [--model M]
  *     [--base-url U] [--api-key K] [--mode plan|edit|auto] [--workdir DIR] [--prompt TEXT]
  *     [--settings FILE] [--system-prompt TEXT] [--system-prompt-file FILE] [--system-prompt-replace FILE] [--max-turns N] [--context-tokens TOKENS]
  *     [--search-api-key BRAVE_KEY] [--context-strategy compaction|mnemonic|scope] [--max-tokens TOKENS] [--small-model]

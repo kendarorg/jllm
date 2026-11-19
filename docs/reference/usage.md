@@ -187,7 +187,7 @@ the store's lock, re-read first, rotated refresh token saved with a compare-and-
 A provider login is an `OAuthLogin` (name, `login(UserInteraction)`, optionally `login(ui, RedirectTarget)`,
 `authProvider(store, principalId)`), usually `AuthCodeLogin` or `DeviceCodeLogin` plus endpoints, registered as a
 `java.util.ServiceLoader` service. The clients take it with `AnthropicModelClient.authProvider(...)` /
-`OpenAiCompatModelClient.authProvider(...)`; it is not selectable from the settings file. No provider login is shipped.
+`OpenAiCompatModelClient.authProvider(...)` / `OpenAiResponsesModelClient.authProvider(...)`; it is not selectable from the settings file. No provider login is shipped.
 
 OAuth of MCP servers and REST APIs (per user or shared, with login-required tool results) and the `tokenStore`
 section: see [MCP](../guides/mcp.md#oauth).
@@ -206,13 +206,49 @@ own login (the reply is a link to open); other logins are reserved to the admini
 
 ### Providers and temperature
 
-`providers` is a list of named model definitions (`name`, `type` = `anthropic` | `openai` | `gemini` | `grok` | `qwen` | `llamacpp` |
+`providers` is a list of named model definitions (`name`, `type` = `anthropic` | `openai` | `openaiGpt62` | `gemini` | `grok` | `qwen` | `llamacpp` |
 `ollama`, `baseUrl`, `apiKey`, `model`, `maxTokens`, `maxRetries`, `timeoutSeconds`, `requireApiKey`,
-`useMaxCompletionTokens`, `contextTokens`, `smallModel`, `temperature`, `order`, `thinking`, `stream`). The old names `anthropic`, `openai`, `gemini`, `grok`, `qwen`,
+`useMaxCompletionTokens`, `contextTokens`, `smallModel`, `temperature`, `order`, `thinking`, `stream`). The old names `anthropic`, `openai`, `openaiGpt62`, `gemini`, `grok`, `qwen`,
 `llamacpp`, `ollama` stay valid without a definition. `gemini` uses Google's OpenAI-compatible endpoint
 (`https://generativelanguage.googleapis.com/v1beta/openai`, default model `gemini-2.5-pro`, key from
 `GEMINI_API_KEY`); native Gemini features (image input, Vertex) are not supported.
 `grok` uses xAI's OpenAI-compatible endpoint (`https://api.x.ai/v1`, default model `grok-4`, key from `GROK_API_KEY`).
+
+#### `openaiGpt62` (OpenAI Responses API)
+
+GPT-6.2 (`gpt-6.2-sol`, `gpt-6.2-astra`) accepts Chat Completions, but calls tools only through the Responses API, so
+the `openai` type cannot run the agent loop on it. `openaiGpt62` uses `OpenAiResponsesModelClient`
+(`POST <baseUrl>/responses`, default `https://api.openai.com/v1`, default model `gpt-6.2-sol`, key from
+`OPENAIGPT62_API_KEY`, else `OPENAI_API_KEY`). The name is case-insensitive.
+
+```json
+{"name": "gpt62", "type": "openaiGpt62", "model": "gpt-6.2-sol", "thinking": "medium"}
+```
+
+Prompt caching. GPT-6.2 puts the top-level `instructions` after `input` and bills them as uncached input on every
+request. The client therefore:
+
+- never sends `instructions`: `pinnedSystem` and `extraSystem` go first in `input` as two `developer` messages, so a
+  change of the policy prompt keeps the pinned part cached;
+- sends the tools in the request order with `strict: false`. Tool definitions are part of the cached prefix: adding a
+  tool group mid-chat (`request_tool_group`, a tool named by the user) invalidates the whole cache once;
+- does not send `prompt_cache_key` (not needed from GPT-5.6 on);
+- runs stateless (`store: false`, `include: ["reasoning.encrypted_content"]`). Each reasoning item is kept in the log
+  as a `thinking` block (summary text in `thinking`, the raw item in `openai_reasoning`) and passed back unchanged and
+  in order. The Anthropic client never sends these blocks.
+
+Other differences from `openai`:
+
+- `temperature` is never sent (GPT-6.2 rejects it); a value on the provider or agent type is ignored.
+- `thinking` is sent as `reasoning.effort`; `minimal` becomes `low` (GPT-6.2 has no `minimal`/`none`). A reasoning
+  summary (`summary: auto`) is requested for display; a 400 that names it, or the effort, gets a retry without it.
+- Usage: `input_tokens_details.cached_tokens` is reported as cache-read tokens.
+
+Context strategies. Reasoning items are ordinary `thinking` blocks, so compaction, masking and `stripThinking` treat
+them as they treat Claude's. Any rewrite of earlier history (summary, mask, cleared tool results) loses the cache from
+that point, and the Responses API then ignores the reasoning items after the edit: the model re-derives its reasoning
+for the rest of the turn (no error, possibly lower quality). The encrypted content is long base64 text, which inflates
+the character-based size estimate; the per-agent calibration against measured usage corrects most of it.
 
 - CLI: `--provider <name>` picks one; `--model`, `--base-url`, `--api-key` override it for the session only. With an
   unknown name, or `--model` alone, they define a `custom (session)` entry that is never written to the settings file.
@@ -234,13 +270,14 @@ own login (the reply is a link to open); other logins are reserved to the admini
 - An agent type may set `"provider": "<name>"` (wins over an inline `model`), `"temperature"` and `"thinking"`.
 - `temperature` (0 to 2) is resolved agent type, then provider, then unset; unset means nothing is sent.
   `explore` uses 0.2 and `plan` 0.3. OpenAI-compatible clients send it, and retry once without it if the server
-  rejects it. **The Anthropic client never sends it:** current Claude models and the current API version reject
+  rejects it. `openaiGpt62` never sends it. **The Anthropic client never sends it:** current Claude models and the current API version reject
   `temperature`, so a value set on an Anthropic provider is ignored.
 - `thinking` (`minimal` | `low` | `medium` | `high`) sets the reasoning effort, on a provider and on an agent type.
   Resolved request, then agent type, then provider, then unset; unset leaves the client's own default (Anthropic:
   no thinking, OpenAI-compatible: nothing sent).
   - Anthropic: extended-thinking budget of 2048 (`low`), 8192 (`medium`) or 16384 (`high`) tokens; `minimal` turns
     thinking off. `max_tokens` is raised to fit the budget, and a forced `toolChoice` is ignored while thinking is on.
+  - `openaiGpt62`: sent as `reasoning.effort`; `minimal` is `low`.
   - OpenAI-compatible (openai, gemini, grok, qwen, llamacpp, ollama): sent as `reasoning_effort`; `minimal` is `minimal`, or `none`
     on Ollama. A server that rejects it gets a retry: `minimal`/`none` steps down to `low`, anything else is
     dropped, and a warning is logged. The run continues.

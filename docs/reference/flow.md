@@ -51,6 +51,7 @@ flowchart TB
         LMC["LimitedModelClient<br/>(maxParallel)"]
         ANT["AnthropicModelClient"]
         OAI["OpenAiCompatModelClient<br/>openai gemini qwen llamacpp vLLM ollama"]
+        RSP["OpenAiResponsesModelClient<br/>openaiGpt62"]
         FAST["fast ModelClient (optional)"]
     end
 
@@ -67,7 +68,7 @@ flowchart TB
     REG --> FS & SH & WB & SK & EXT
     SH --> SBX
     FS --> SBX
-    MC --> LMC --> ANT & OAI
+    MC --> LMC --> ANT & OAI & RSP
     TS -.-> FAST
     CM -.-> FAST
     CL -.-> FAST
@@ -390,6 +391,7 @@ flowchart LR
     LMC --> P{"provider"}
     P --> ANT["AnthropicModelClient<br/>POST /v1/messages (SSE when streaming)"]
     P --> OAI["OpenAiCompatModelClient<br/>POST /chat/completions<br/>retry on 429 / 5xx with backoff or retry-after"]
+    P --> RSP["OpenAiResponsesModelClient<br/>POST /responses (openaiGpt62)<br/>system as developer input, store=false"]
 ```
 
 `ModelRequest` = `pinnedSystem` (`chatId=...; agentId`, never rewritten) + `extraSystem` (base prompt + date + mode note) + `messages` (raw Anthropic-style JSON, provider clients translate) + `tools` + `maxTokens` + `toolChoice` + `disableParallelToolUse` (= `!parallelToolUse`).

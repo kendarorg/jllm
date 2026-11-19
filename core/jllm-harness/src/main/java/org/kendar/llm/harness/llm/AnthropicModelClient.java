@@ -391,15 +391,24 @@ public class AnthropicModelClient implements ModelClient {
             }
         }
         ArrayNode out = null;
-        for (int i = 0; i < cut; i++) {
+        for (int i = 0; i < messages.size(); i++) {
             JsonNode m = messages.get(i);
             if (!"assistant".equals(m.path("role").asText()) || !m.path("content").isArray()) continue;
             ArrayNode kept = mapper.createArrayNode();
+            boolean anyForeign = false;
             for (JsonNode b : m.get("content")) {
                 String t = b.path("type").asText();
-                if (!"thinking".equals(t) && !"redacted_thinking".equals(t)) kept.add(b);
+                boolean thinking = "thinking".equals(t) || "redacted_thinking".equals(t);
+                // reasoning of another provider (GPT-6.2) has no Anthropic signature: never sent
+                boolean foreign = thinking && b.has(OpenAiResponsesModelClient.REASONING_FIELD);
+                anyForeign |= foreign;
+                if (!(thinking && (i < cut || foreign))) kept.add(b);
             }
-            if (kept.size() == m.get("content").size() || kept.isEmpty()) continue;
+            if (kept.size() == m.get("content").size()) continue;
+            if (kept.isEmpty()) {
+                if (!anyForeign) continue;
+                kept.addObject().put("type", "text").put("text", "(reasoning omitted)");
+            }
             if (out == null) out = messages.deepCopy();
             ((ObjectNode) out.get(i)).set("content", kept);
         }
