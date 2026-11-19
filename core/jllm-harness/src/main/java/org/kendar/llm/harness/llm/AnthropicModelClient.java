@@ -476,15 +476,16 @@ public class AnthropicModelClient implements ModelClient {
                 }
                 boolean retryable = status == 429 || status == 529 || status >= 500;
                 if (!retryable || attempt >= props.maxRetries()) {
-                    throw new ModelException("Anthropic API error " + status + ": " + truncate(resp.body()));
+                    throw new ModelException("Anthropic API error " + status + ": " + truncate(resp.body())
+                            + StreamingCall.rateLimitHint(resp));
                 }
                 attempt++;
                 long delayMs = budget.reserve(attempt, backoffBaseMs,
                                 resp.headers().firstValue("retry-after").map(AnthropicModelClient::parseSeconds))
                         .orElseThrow(() -> new ModelException("Anthropic API error " + status + ": "
-                                + truncate(resp.body()) + " (retry wait budget of " + RetryBudget.MAX_WAIT_MS
+                                + truncate(resp.body()) + StreamingCall.rateLimitHint(resp) + " (retry wait budget of " + RetryBudget.MAX_WAIT_MS
                                 + " ms exhausted)"));
-                log.warn("Anthropic API {} — retry {} in {} ms", status, attempt, delayMs);
+                log.warn("Anthropic API {} — retry {} in {} ms{}", status, attempt, delayMs, StreamingCall.rateLimitHint(resp));
                 cancel.retrying(status, attempt, props.maxRetries(), delayMs);
                 cancel.sleep(delayMs);
             } catch (InterruptedException e) {

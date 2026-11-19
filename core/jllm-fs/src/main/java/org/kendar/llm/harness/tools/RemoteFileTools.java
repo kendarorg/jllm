@@ -144,7 +144,7 @@ final class RemoteFileTools {
                     r.rollback();
                     throw e;
                 }
-                return "Appended " + content.length() + " chars to " + shown;
+                return "Appended " + content.length() + " chars to " + FileSystemAgentTools.written(ctx, shown);
             }
             byte[] bytes = content.getBytes(StandardCharsets.UTF_8);
             StorageQuota.Reservation r = quota.reserveRemote(ctx.chatId(), bytes.length - (old.exists() ? old.size() : 0));
@@ -155,7 +155,7 @@ final class RemoteFileTools {
                 r.rollback();
                 throw e;
             }
-            return "Wrote " + content.length() + " chars to " + shown;
+            return "Wrote " + content.length() + " chars to " + FileSystemAgentTools.written(ctx, shown);
         }
     }
 
@@ -195,7 +195,7 @@ final class RemoteFileTools {
                 r.rollback();
                 throw e;
             }
-            return "Edited " + shown + " (" + applied.replacements() + " replacement(s))\n" + applied.diff();
+            return "Edited " + FileSystemAgentTools.written(ctx, shown) + " (" + applied.replacements() + " replacement(s))\n" + applied.diff();
         }
     }
 

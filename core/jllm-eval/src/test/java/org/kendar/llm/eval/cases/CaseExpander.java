@@ -57,7 +57,8 @@ public final class CaseExpander {
                     run.config().fastSeparate() ? EvalModels.fast() : null,
                     new TrialRunner.Settings(c.tag() == EvalCase.Tag.COMPACTION
                                     ? run.config().compactionContextTokens() : run.config().target().contextTokens(),
-                            run.config().target().smallModel(), run.config().caseTimeoutSeconds()));
+                            run.config().target().smallModel(), run.config().caseTimeoutSeconds(),
+                            run.config().systemPromptExtra()));
             return new CaseExecutor(runner, run.outputDir(), run.config().trials(), run.config().maxTrials(),
                     run.metadata());
         };

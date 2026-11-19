@@ -559,15 +559,16 @@ public class OpenAiCompatModelClient implements ModelClient {
                 }
                 boolean retryable = status == 429 || status >= 500;
                 if (!retryable || attempt >= cfg.maxRetries()) {
-                    throw new ModelException(cfg.name() + " API error " + status + ": " + truncate(resp.body()));
+                    throw new ModelException(cfg.name() + " API error " + status + ": " + truncate(resp.body())
+                            + StreamingCall.rateLimitHint(resp));
                 }
                 attempt++;
                 long delayMs = budget.reserve(attempt, backoffBaseMs,
                                 resp.headers().firstValue("retry-after").map(OpenAiCompatModelClient::parseSeconds))
                         .orElseThrow(() -> new ModelException(cfg.name() + " API error " + status + ": "
-                                + truncate(resp.body()) + " (retry wait budget of " + RetryBudget.MAX_WAIT_MS
+                                + truncate(resp.body()) + StreamingCall.rateLimitHint(resp) + " (retry wait budget of " + RetryBudget.MAX_WAIT_MS
                                 + " ms exhausted)"));
-                log.warn("{} API {} - retry {} in {} ms", cfg.name(), status, attempt, delayMs);
+                log.warn("{} API {} - retry {} in {} ms{}", cfg.name(), status, attempt, delayMs, StreamingCall.rateLimitHint(resp));
                 cancel.retrying(status, attempt, cfg.maxRetries(), delayMs);
                 cancel.sleep(delayMs);
             } catch (InterruptedException e) {

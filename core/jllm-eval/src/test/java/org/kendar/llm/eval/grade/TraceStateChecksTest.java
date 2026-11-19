@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.kendar.llm.eval.grade.CheckResult.Status.FAIL;
@@ -134,6 +135,23 @@ class TraceStateChecksTest {
         Files.delete(ws.resolve("a.txt"));
         is(FAIL, Checks.workspaceUnchanged(), c);
         is(FAIL, Checks.filesUnchanged("a.txt"), c);
+    }
+
+    @Test
+    void harnessDataIsNotAWorkspaceChange() throws Exception {
+        Files.writeString(ws.resolve("keep.txt"), "same");
+        var c = Traces.trace().ctx(ws, Map.of("keep.txt", StateChecks.sha256(ws.resolve("keep.txt"))), Map.of());
+        String agent = "jllm-01a1f3ca-1845-75c3-96b4-1605629854dc";
+        Files.createDirectories(ws.resolve(agent));
+        Files.writeString(ws.resolve(agent + "/blocked.txt"), "x");
+        Files.createDirectories(ws.resolve(".jllm/checkpoints/c/1"));
+        Files.writeString(ws.resolve(".jllm/checkpoints/c/1/created.txt"), "blocked.txt\n");
+        is(PASS, Checks.workspaceUnchanged(), c);
+
+        Files.writeString(ws.resolve("blocked.txt"), "x");
+        is(FAIL, Checks.workspaceUnchanged(), c);
+        assertTrue(StateChecks.isHarnessData(".jllm/x"));
+        assertFalse(StateChecks.isHarnessData("jllm-notes/x.txt"));
     }
 
     @Test

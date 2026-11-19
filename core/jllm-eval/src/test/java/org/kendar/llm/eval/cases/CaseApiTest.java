@@ -122,6 +122,29 @@ class CaseApiTest {
     }
 
     @Test
+    void theSystemPromptExtraOfTheRunReachesTheModel() {
+        ScriptedModel model = new ScriptedModel();
+        model.enqueue(text("ok"));
+        EvalCase c = EvalCase.named("extra").user("hi").check(answerIs("ok")).build();
+
+        new TrialRunner(model, null, new TrialRunner.Settings(32_000, false, 0, "TOOLS-AS-JSON-ONLY"))
+                .run(c, ContextStrategyKind.COMPACTION, 1, out.resolve("tr"));
+
+        assertTrue(model.requests.get(0).extra().contains("TOOLS-AS-JSON-ONLY"), model.requests.get(0).extra());
+    }
+
+    @Test
+    void noExtraMeansTheHarnessPromptIsUntouched() {
+        ScriptedModel model = new ScriptedModel();
+        model.enqueue(text("ok"));
+        EvalCase c = EvalCase.named("plain").user("hi").check(answerIs("ok")).build();
+
+        runner(model).run(c, ContextStrategyKind.COMPACTION, 1, out.resolve("tr"));
+
+        assertFalse(model.requests.get(0).extra().contains("TOOLS-AS-JSON-ONLY"));
+    }
+
+    @Test
     void failingCheckStopsGradingAndMessageNamesTrace() {
         ScriptedModel model = new ScriptedModel();
         model.enqueue(text("wrong"));

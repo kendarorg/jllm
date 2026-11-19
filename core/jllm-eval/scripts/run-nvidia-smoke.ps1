@@ -48,6 +48,8 @@ $MAX_TRIALS = Get-Setting 'MAX_TRIALS' '2'
 $IGNORE_TEST_FAILURES = Get-Setting 'IGNORE_TEST_FAILURES' '1'
 $RPM_LIMIT = Get-Setting 'RPM_LIMIT' '10'
 $PARALLELISM = [int](Get-Setting 'PARALLELISM' '2')   # test classes run at once; 1 = strictly sequential
+# added to the system prompt of every case; 'none' turns it off. Some hosted models write a tool call as text.
+$SYSTEM_PROMPT_EXTRA = Get-Setting 'SYSTEM_PROMPT_EXTRA' 'Call tools only through the structured tool-calling interface with JSON arguments. Never write a tool call as plain text or inside your reasoning.'
 $JAVA_HOME = Find-JavaHome   # build needs JDK 21+
 
 # ---- paths
@@ -100,6 +102,7 @@ $prevJavaHome = $env:JAVA_HOME
 $env:JAVA_HOME = $JAVA_HOME
 $env:EVAL_REMOTE_NVIDIA_APIKEY = $apiKey
 $env:EVAL_JUDGE_OPENAI_APIKEY = $apiKey
+if ($SYSTEM_PROMPT_EXTRA -ne 'none') { $env:EVAL_SYSTEMPROMPT_EXTRA = $SYSTEM_PROMPT_EXTRA }
 
 $ignoreFailures = if ($IGNORE_TEST_FAILURES -eq '1') { 'true' } else { 'false' }
 $mvnArgs = @(
@@ -149,6 +152,7 @@ try {
     $apiKey = $null
     Remove-Item Env:EVAL_REMOTE_NVIDIA_APIKEY -ErrorAction SilentlyContinue
     Remove-Item Env:EVAL_JUDGE_OPENAI_APIKEY -ErrorAction SilentlyContinue
+    Remove-Item Env:EVAL_SYSTEMPROMPT_EXTRA -ErrorAction SilentlyContinue
 }
 
 Write-Host ''

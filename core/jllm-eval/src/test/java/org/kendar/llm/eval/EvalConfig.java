@@ -36,6 +36,7 @@ public final class EvalConfig {
     private int maxTrials;
     private int caseTimeoutSeconds;
     private int compactionContextTokens;
+    private String systemPromptExtra = "";
     private Path outputDir;
     private Path embeddingModelDir;
     private String embeddingSha256;
@@ -81,6 +82,8 @@ public final class EvalConfig {
     public int maxTrials() { return maxTrials; }
     /** Upper bound on the seconds a user turn may take; 0 keeps each case's own timeout. */
     public int caseTimeoutSeconds() { return caseTimeoutSeconds; }
+    /** Text added to the system prompt of every case; empty (default) leaves the harness prompt as it is. */
+    public String systemPromptExtra() { return systemPromptExtra; }
     /** Context size used for the cases tagged {@code compaction}; the other cases use the target's own. */
     public int compactionContextTokens() { return compactionContextTokens; }
     public Path outputDir() { return outputDir; }
@@ -189,6 +192,8 @@ public final class EvalConfig {
         trials = integer("eval.trials", 1);
         maxTrials = integerOr("eval.maxTrials", 1, 10);
         caseTimeoutSeconds = integerOr("eval.caseTimeoutSeconds", 0, 0);
+        String extra = str("eval.systemPrompt.extra", false);
+        systemPromptExtra = extra == null ? "" : extra.strip();
         compactionContextTokens = integerOr("eval.compaction.contextTokens", 1024, 65536);
         String out = str("eval.outputDir", true);
         outputDir = Path.of(out == null ? "eval-results" : out);

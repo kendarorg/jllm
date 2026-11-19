@@ -177,13 +177,14 @@ final class StreamingCall {
                     continue;
                 }
                 if (!retryableStatus.test(status) || attempt >= maxRetries) {
-                    throw new ModelException(httpError.apply(status) + ": " + truncate(text));
+                    throw new ModelException(httpError.apply(status) + ": " + truncate(text) + rateLimitHint(resp));
                 }
                 attempt++;
                 long delayMs = budget.reserve(attempt, backoffBaseMs,
                                 resp.headers().firstValue("retry-after").map(StreamingCall::parseSeconds))
-                        .orElseThrow(() -> new ModelException(httpError.apply(status) + ": " + truncate(text)
+                        .orElseThrow(() -> new ModelException(httpError.apply(status) + ": " + truncate(text) + rateLimitHint(resp)
                                 + " (retry wait budget of " + RetryBudget.MAX_WAIT_MS + " ms exhausted)"));
+                log.warn("{} - retry {} in {} ms{}", httpError.apply(status), attempt, delayMs, rateLimitHint(resp));
                 cancel.retrying(status, attempt, maxRetries, delayMs);
                 cancel.sleep(delayMs);
             } catch (InterruptedException e) {
@@ -219,6 +220,21 @@ final class StreamingCall {
         } catch (IOException ignored) {
             // best effort: the reader fails and sees the cancel
         }
+    }
+
+    /**
+     * The headers a provider uses to say when to come back ({@code retry-after}, {@code x-ratelimit-*}), as a suffix
+     * for an error message: {@code " [retry-after=30, x-ratelimit-reset-requests=12s]"}; empty when there are none.
+     */
+    static String rateLimitHint(java.net.http.HttpResponse<?> resp) {
+        StringBuilder sb = new StringBuilder();
+        resp.headers().map().forEach((k, v) -> {
+            String n = k.toLowerCase(java.util.Locale.ROOT);
+            if (n.equals("retry-after") || n.startsWith("x-ratelimit") || n.startsWith("ratelimit")) {
+                sb.append(sb.isEmpty() ? " [" : ", ").append(n).append('=').append(String.join("|", v));
+            }
+        });
+        return sb.isEmpty() ? "" : sb + "]";
     }
 
     private static long parseSeconds(String v) {

@@ -19,6 +19,8 @@ MAX_TRIALS="${MAX_TRIALS:-2}"
 IGNORE_TEST_FAILURES="${IGNORE_TEST_FAILURES:-1}"
 RPM_LIMIT="${RPM_LIMIT:-10}"
 PARALLELISM="${PARALLELISM:-2}"   # test classes run at once; 1 = strictly sequential
+# added to the system prompt of every case; "none" turns it off. Some hosted models write a tool call as text.
+SYSTEM_PROMPT_EXTRA="${SYSTEM_PROMPT_EXTRA:-Call tools only through the structured tool-calling interface with JSON arguments. Never write a tool call as plain text or inside your reasoning.}"
 
 # ---- paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -56,6 +58,7 @@ echo "Model: $MODEL  ctx: $CTX_TOKENS  compaction ctx: $COMPACTION_CTX_TOKENS  g
 # ---- run
 export EVAL_REMOTE_NVIDIA_APIKEY="$NVIDIA_API_KEY"
 export EVAL_JUDGE_OPENAI_APIKEY="$NVIDIA_API_KEY"
+[[ "$SYSTEM_PROMPT_EXTRA" == none ]] || export EVAL_SYSTEMPROMPT_EXTRA="$SYSTEM_PROMPT_EXTRA"
 
 set +e
 mvn -B -ntp -f "$REPO_ROOT/pom.xml" -Peval -pl core/jllm-eval -am test \
@@ -90,7 +93,7 @@ mvn -B -ntp -f "$REPO_ROOT/pom.xml" -Peval -pl core/jllm-eval -am test \
 status=${PIPESTATUS[0]}
 set -e
 
-unset NVIDIA_API_KEY EVAL_REMOTE_NVIDIA_APIKEY EVAL_JUDGE_OPENAI_APIKEY
+unset NVIDIA_API_KEY EVAL_REMOTE_NVIDIA_APIKEY EVAL_JUDGE_OPENAI_APIKEY EVAL_SYSTEMPROMPT_EXTRA
 
 echo
 echo "Exit: $status   Log: $LOG_FILE"

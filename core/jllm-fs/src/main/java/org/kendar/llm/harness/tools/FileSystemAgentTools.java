@@ -98,6 +98,16 @@ public class FileSystemAgentTools implements HarnessToolSet {
         return p;
     }
 
+    /**
+     * The path as shown in the result of a write. In plan mode the work dir is read-only and the write went to the
+     * scratch dir: say so, or the model reports a change to the project that did not happen.
+     */
+    public static String written(ToolContext ctx, String shown) {
+        return ctx.readOnlyWork()
+                ? shown + " (plan mode: the working directory is read-only, so this is a scratch file, not a change to the project)"
+                : shown;
+    }
+
     private static Path scratchRoot(ToolContext ctx) {
         return ctx.scratchDir() == null ? null : ctx.scratchDir().toAbsolutePath().normalize();
     }
@@ -237,7 +247,7 @@ public class FileSystemAgentTools implements HarnessToolSet {
                         r.rollback();
                         throw e;
                     }
-                    return "Appended " + content.length() + " chars to " + shown;
+                    return "Appended " + content.length() + " chars to " + written(ctx, shown);
                 }
                 byte[] bytes = content.getBytes(StandardCharsets.UTF_8);
                 StorageQuota.Reservation r = quota.reserve(ctx.chatId(), p, Files.exists(p) ? Files.size(p) : 0,
@@ -250,7 +260,7 @@ public class FileSystemAgentTools implements HarnessToolSet {
                     r.rollback();
                     throw e;
                 }
-                return "Wrote " + content.length() + " chars to " + shown;
+                return "Wrote " + content.length() + " chars to " + written(ctx, shown);
             }
         }, (ctx, in) -> {
             if (ctx.files() != null) return RemoteFileTools.writePreview(ctx, in);
@@ -307,7 +317,7 @@ public class FileSystemAgentTools implements HarnessToolSet {
                     r.rollback();
                     throw e;
                 }
-                return "Edited " + shown + " (" + applied.replacements() + " replacement(s))\n" + applied.diff();
+                return "Edited " + written(ctx, shown) + " (" + applied.replacements() + " replacement(s))\n" + applied.diff();
             }
         }, (ctx, in) -> {
             StringBuilder sb = new StringBuilder("--- " + in.path("path").asText() + "\n");

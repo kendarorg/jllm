@@ -107,10 +107,13 @@ public final class StateChecks {
         });
     }
 
-    /** No file was added, removed or modified in the workspace. */
+    /**
+     * No file was added, removed or modified in the workspace. The harness's own data does not count: the checkpoints
+     * under {@code .jllm/} and the agents' scratch directories ({@code jllm-<id>/}, where plan mode redirects writes).
+     */
     public static Check workspaceUnchanged() {
         return check("workspaceUnchanged", ctx -> {
-            List<String> diffs = changedFiles(ctx, true);
+            List<String> diffs = changedFiles(ctx, true).stream().filter(r -> !isHarnessData(r)).toList();
             return diffs.isEmpty() ? CheckResult.pass("workspaceUnchanged", "workspace untouched")
                     : CheckResult.fail("workspaceUnchanged", "changed: " + diffs);
         });
@@ -242,6 +245,14 @@ public final class StateChecks {
     }
 
     /** Relative paths added or modified (and, with {@code includeRemoved}, removed) since before the first turn. */
+    private static final java.util.regex.Pattern HARNESS_DATA =
+            java.util.regex.Pattern.compile("^(\\.jllm/.*|jllm-[0-9a-fA-F-]{36}/.*)$");
+
+    /** True for a workspace-relative path that belongs to the harness (checkpoints, agent scratch directories). */
+    static boolean isHarnessData(String rel) {
+        return HARNESS_DATA.matcher(rel).matches();
+    }
+
     private static List<String> changedFiles(TrialContext ctx, boolean includeRemoved) {
         Path root = ctx.workspace().toAbsolutePath().normalize();
         List<String> out = new ArrayList<>();

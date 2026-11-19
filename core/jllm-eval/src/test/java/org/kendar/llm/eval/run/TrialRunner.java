@@ -45,10 +45,11 @@ public final class TrialRunner {
      * @param contextTokens context size of the target; the compaction budget is derived from it
      * @param smallModel    use the harness prompt for small models
      * @param turnTimeoutCapSeconds upper bound on each user turn, 0 keeps the case's own timeout
+     * @param systemPromptExtra text added to the system prompt of every case (e.g. a reminder on how to call tools); a case's own harness setup can still replace it
      */
-    public record Settings(int contextTokens, boolean smallModel, int turnTimeoutCapSeconds) {
+    public record Settings(int contextTokens, boolean smallModel, int turnTimeoutCapSeconds, String systemPromptExtra) {
         public Settings(int contextTokens, boolean smallModel) {
-            this(contextTokens, smallModel, 0);
+            this(contextTokens, smallModel, 0, "");
         }
     }
 
@@ -133,6 +134,9 @@ public final class TrialRunner {
         AgentHarness.Builder b = AgentHarness.builder().modelClient(main).config(config)
                 .smallModel(settings.smallModel());
         if (fastRec != null) b.fastModelClient(fastRec);
+        if (settings.systemPromptExtra() != null && !settings.systemPromptExtra().isBlank()) {
+            b.systemPrompt(settings.systemPromptExtra());
+        }
         c.harness().accept(b);
 
         List<AgentEvent> events = Collections.synchronizedList(new ArrayList<>());
