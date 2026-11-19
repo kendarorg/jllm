@@ -37,7 +37,7 @@ function Find-JavaHome {
 # ---- settings
 $ANTHROPIC_BASE = Get-Setting 'ANTHROPIC_BASE' 'https://api.anthropic.com'
 $MODEL = Get-Setting 'MODEL' 'claude-haiku-5-5'
-$JUDGE_MODEL = Get-Setting 'JUDGE_MODEL' 'claude-sonnet-5-5'
+$JUDGE_MODEL = Get-Setting 'JUDGE_MODEL' 'claude-haiku-5-5'
 $CTX_TOKENS = Get-Setting 'CTX_TOKENS' '200000'
 $COMPACTION_CTX_TOKENS = Get-Setting 'COMPACTION_CTX_TOKENS' '65536'   # context of the compaction group only
 $TIMEOUT_SECONDS = Get-Setting 'TIMEOUT_SECONDS' '300'
@@ -47,8 +47,8 @@ if (($TEST_GROUPS -split ',') -contains 'all') { $TEST_GROUPS = 'smoke,full,stra
 $TRIALS = Get-Setting 'TRIALS' '1'
 $MAX_TRIALS = Get-Setting 'MAX_TRIALS' '2'
 $IGNORE_TEST_FAILURES = Get-Setting 'IGNORE_TEST_FAILURES' '1'
-$RPM_LIMIT = Get-Setting 'RPM_LIMIT' '20'   # requests per minute to the API (target, judge and fast share it); 0 = unpaced
-$PARALLELISM = [int](Get-Setting 'PARALLELISM' '4')   # test classes run at once; 1 = strictly sequential
+$RPM_LIMIT = Get-Setting 'RPM_LIMIT' '60'   # requests per minute to the API (target, judge and fast share it); 0 = unpaced
+$PARALLELISM = [int](Get-Setting 'PARALLELISM' '6')   # test classes run at once; 1 = strictly sequential
 $JAVA_HOME = Find-JavaHome   # build needs JDK 21+
 
 # ---- paths

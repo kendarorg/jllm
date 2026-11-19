@@ -7,7 +7,7 @@ set -euo pipefail
 # ---- settings
 ANTHROPIC_BASE="${ANTHROPIC_BASE:-https://api.anthropic.com}"
 MODEL="${MODEL:-claude-haiku-5-5}"
-JUDGE_MODEL="${JUDGE_MODEL:-claude-sonnet-5-5}"
+JUDGE_MODEL="${JUDGE_MODEL:-claude-haiku-5-5}"
 CTX_TOKENS="${CTX_TOKENS:-200000}"
 COMPACTION_CTX_TOKENS="${COMPACTION_CTX_TOKENS:-65536}"   # context of the compaction group only
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-300}"
@@ -18,8 +18,8 @@ if [[ ",$TEST_GROUPS," == *,all,* ]]; then TEST_GROUPS="smoke,full,strategy,comp
 TRIALS="${TRIALS:-1}"
 MAX_TRIALS="${MAX_TRIALS:-2}"
 IGNORE_TEST_FAILURES="${IGNORE_TEST_FAILURES:-1}"
-RPM_LIMIT="${RPM_LIMIT:-20}"      # requests per minute to the API (target, judge and fast share it); 0 = unpaced
-PARALLELISM="${PARALLELISM:-4}"   # test classes run at once; 1 = strictly sequential
+RPM_LIMIT="${RPM_LIMIT:-60}"      # requests per minute to the API (target, judge and fast share it); 0 = unpaced
+PARALLELISM="${PARALLELISM:-6}"   # test classes run at once; 1 = strictly sequential
 
 # ---- paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

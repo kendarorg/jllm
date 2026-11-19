@@ -15,21 +15,21 @@ import java.util.stream.Stream;
 import static org.kendar.llm.eval.grade.Checks.*;
 
 /**
- * Example 2: a short session replayed under every context strategy with a small budget. It plants a fact, switches the
- * permission mode, forces compaction with a large file and asks for the fact at the end (retention check).
+ * Example 2: a short session replayed under every context strategy. It plants a fact, switches the permission mode,
+ * reads a large file, forces a compaction with /compact (there must be enough to summarize: a tiny conversation is left
+ * alone) and asks for the fact at the end (retention check).
  */
 public class ExampleStrategyEvalTest {
 
     public static List<EvalCase> cases() {
         EvalCase c = EvalCase.named("fact-survives-compaction").feature("examples").tag(EvalCase.Tag.STRATEGY)
                 .strategies(ContextStrategyKind.COMPACTION, ContextStrategyKind.MNEMONIC, ContextStrategyKind.SCOPE)
-                .contextBudgetTokens(8_000)
+                .contextBudgetTokens(40_000) // never reached: the compaction below is forced, at the same point on every run
                 .setup(Suite.files("big.txt", Suite.filler(24_000, "archive")))
                 .user("Remember this: the vault code is 7391-KITE. Acknowledge in one short sentence.")
-                .user("Thanks. Reply with just: OK")
-                .action("/compact", (h, chat) -> h.commands().execute(chat, "/compact"))
                 .modeSwitch(PermissionMode.EDIT)
                 .user("Read big.txt completely and tell me how many lines it has.")
+                .action("/compact", (h, chat) -> h.commands().execute(chat, "/compact"))
                 .user("Without reading anything again: what is the vault code?")
                 .check(noRunError())
                 .check(eventPresent("compaction"))
