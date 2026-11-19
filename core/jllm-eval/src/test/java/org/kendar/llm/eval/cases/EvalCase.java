@@ -5,6 +5,7 @@ import org.kendar.llm.eval.grade.Check;
 import org.kendar.llm.harness.AgentHarness;
 import org.kendar.llm.harness.HarnessConfig;
 import org.kendar.llm.harness.context.ContextStrategyKind;
+import org.kendar.llm.harness.llm.ModelClient;
 import org.kendar.llm.harness.permission.PermissionMode;
 
 import java.nio.file.Path;
@@ -15,6 +16,7 @@ import java.util.Map;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
 
 /**
@@ -64,6 +66,7 @@ public final class EvalCase {
     private final List<ContextStrategyKind> strategies;
     private final BiConsumer<Path, Map<String, Object>> setup;
     private final Consumer<AgentHarness.Builder> harness;
+    private final Supplier<ModelClient> model;
     private final UnaryOperator<HarnessConfig> config;
     private final java.util.function.Function<JsonNode, Boolean> approvals;
     private final Integer trials;
@@ -84,6 +87,7 @@ public final class EvalCase {
         this.strategies = List.copyOf(b.strategies);
         this.setup = b.setup;
         this.harness = b.harness;
+        this.model = b.model;
         this.config = b.config;
         this.approvals = b.approvals;
         this.trials = b.trials;
@@ -109,6 +113,8 @@ public final class EvalCase {
     public List<ContextStrategyKind> strategies() { return strategies; }
     public BiConsumer<Path, Map<String, Object>> setup() { return setup; }
     public Consumer<AgentHarness.Builder> harness() { return harness; }
+    /** A scripted model used instead of the model under test, or null. Its requests are still recorded. */
+    public Supplier<ModelClient> model() { return model; }
     public UnaryOperator<HarnessConfig> config() { return config; }
     /** Scripted answer to an approval request (the request's event data); true approves. */
     public java.util.function.Function<JsonNode, Boolean> approvals() { return approvals; }
@@ -143,6 +149,7 @@ public final class EvalCase {
         };
         private Consumer<AgentHarness.Builder> harness = b -> {
         };
+        private Supplier<ModelClient> model;
         private UnaryOperator<HarnessConfig> config = c -> c;
         private java.util.function.Function<JsonNode, Boolean> approvals = r -> Boolean.TRUE;
         private Integer trials;
@@ -167,6 +174,8 @@ public final class EvalCase {
 
         /** Customizes the harness builder; applied last, after the eval's own defaults. */
         public Builder harness(Consumer<AgentHarness.Builder> h) { this.harness = h; return this; }
+        /** Runs the case against this model instead of the model under test (scripted servers); evaluated per trial. */
+        public Builder model(Supplier<ModelClient> m) { this.model = m; return this; }
 
         public Builder config(UnaryOperator<HarnessConfig> c) { this.config = c; return this; }
         public Builder user(String text) { steps.add(new UserTurn(text)); return this; }

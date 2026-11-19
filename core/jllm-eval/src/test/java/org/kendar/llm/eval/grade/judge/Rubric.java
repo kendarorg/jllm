@@ -17,6 +17,6 @@ public record Rubric(String name, String focus, String low, String medium, Strin
                 + "LOW (score 1-2): " + low + "\n"
                 + "MEDIUM (score 3): " + medium + "\n"
                 + "HIGH (score 4-5): " + high + "\n"
-                + "Set pass to true only for a HIGH response.";
+                + "Pass means a score of 4 or 5.";
     }
 }

@@ -46,6 +46,7 @@ public final class Suite {
 
     // ---- features (the number is the heading number in FEATURES.md) -------------------------------------------
     public static final String AGENT_LOOP = "1.1-agent-loop";
+    public static final String CUTOFF = "1.2-cut-off-responses";
     public static final String CUSTOM_TOOLS = "1.5-custom-tools";
     public static final String FILE_TOOLS = "1.6-file-tools";
     public static final String SHELL = "1.7-shell";
@@ -71,7 +72,6 @@ public final class Suite {
 
     /** Features of FEATURES.md that have no cases, and why. Checked by the structure test. */
     public static final Map<String, String> NOT_COVERED = Map.ofEntries(
-            Map.entry("1.2", "cut-off responses need a server that truncates on demand"),
             Map.entry("1.3", "steering needs input during a running turn; the case API acts only between turns"),
             Map.entry("1.4", "provider fallback, retries and streaming need a controllable server"),
             Map.entry("1.8", "web tools need the internet or a fetchable local host; host approvals vary by network"),
@@ -190,6 +190,11 @@ public final class Suite {
                     run.config().outputDir().resolve("judge-cache"));
         }
         return judge;
+    }
+
+    /** The case graded by the judge on the rubric: names the rubric for the report and adds the judge check. */
+    public static EvalCase.Builder judged(EvalCase.Builder b, Rubric rubric) {
+        return b.rubric(rubric.name()).check(judge(rubric));
     }
 
     /** The run's judge on a rubric; resolved when the check runs, so a case builds without a model. */

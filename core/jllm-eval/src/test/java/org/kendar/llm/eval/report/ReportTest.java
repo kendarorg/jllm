@@ -156,12 +156,12 @@ class ReportTest {
 
     @Test
     void baselineUpdateAndDiff() throws IOException {
-        Path r1 = synthetic("r1", "m1", "j1", false, new boolean[]{true, true, true});
+        Path r1 = synthetic("r1", "m1", "j1", false, new boolean[]{true, true, true, true, true, true, true, true, true, true});
         JsonNode first = ReportBuilder.build(r1, true);
         assertTrue(first.path("baseline").path("updated").asBoolean());
         assertTrue(Files.isRegularFile(tmp.resolve("baselines").resolve("m1.json")));
 
-        Path r2 = synthetic("r2", "m1", "j1", false, new boolean[]{true, false, false});
+        Path r2 = synthetic("r2", "m1", "j1", false, new boolean[]{true, false, false, false, false, false, false, false, false, true});
         JsonNode second = ReportBuilder.build(r2, false);
         JsonNode b = second.path("baseline");
         assertTrue(b.path("present").asBoolean());

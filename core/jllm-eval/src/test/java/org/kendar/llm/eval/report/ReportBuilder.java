@@ -77,7 +77,12 @@ public final class ReportBuilder {
         ObjectNode f = b.putObject("features");
         s.path("features").fields().forEachRemaining(e -> f.put(e.getKey(), e.getValue().path("passRate").asDouble()));
         ObjectNode c = b.putObject("cases");
-        for (JsonNode n : s.path("cases")) c.put(n.path("key").asText(), n.path("passRate").asDouble());
+        for (JsonNode n : s.path("cases")) {
+            ObjectNode cn = c.putObject(n.path("key").asText());
+            cn.put("passRate", n.path("passRate").asDouble());
+            cn.put("passes", n.path("passes").asInt());
+            cn.put("trials", n.path("trials").asInt());
+        }
         return b;
     }
 
@@ -112,17 +117,26 @@ public final class ReportBuilder {
         }
         ArrayNode reg = out.putArray("regressions");
         ArrayNode imp = out.putArray("improvements");
+        ArrayNode noise = out.putArray("withinNoise");
         for (JsonNode n : s.path("cases")) {
             String key = n.path("key").asText();
             if (!base.path("cases").has(key)) continue;
-            double was = base.path("cases").path(key).asDouble();
+            JsonNode bc = base.path("cases").path(key);
+            double was = bc.path("passRate").asDouble();
             double now = n.path("passRate").asDouble();
-            ArrayNode target = now < was - 1e-9 ? reg : now > was + 1e-9 ? imp : null;
-            if (target == null) continue;
+            if (Math.abs(now - was) < 1e-9) continue;
+            int wasN = bc.path("trials").asInt();
+            int nowN = n.path("trials").asInt();
+            int wasP = bc.path("passes").asInt();
+            int nowP = n.path("passes").asInt();
+            // a change counts only when the 95% Wilson intervals of the two runs do not overlap
+            ArrayNode target = !Wilson.separated(wasP, wasN, nowP, nowN) ? noise : now < was ? reg : imp;
             ObjectNode d = target.addObject();
             d.put("case", key);
             d.put("was", was);
             d.put("now", now);
+            d.put("wasTrials", wasN);
+            d.put("nowTrials", nowN);
         }
         return out;
     }
@@ -183,7 +197,11 @@ public final class ReportBuilder {
                 br.add(List.of("regression", x.path("case").asText(), pct(x.path("was")), pct(x.path("now"))));
             for (JsonNode x : b.path("improvements"))
                 br.add(List.of("improvement", x.path("case").asText(), pct(x.path("was")), pct(x.path("now"))));
+            for (JsonNode x : b.path("withinNoise"))
+                br.add(List.of("within noise", x.path("case").asText(), pct(x.path("was")), pct(x.path("now"))));
             d.table(List.of("change", "case", "baseline", "now"), br);
+            d.p("Regressions and improvements are reported only when the 95% Wilson intervals of both runs do not "
+                    + "overlap; \"within noise\" rows changed but the trial counts cannot tell them apart from chance.");
         }
         return d;
     }

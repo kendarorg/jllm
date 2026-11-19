@@ -2,7 +2,7 @@ package org.kendar.llm.eval.grade;
 
 import java.util.function.Function;
 
-/** One expectation on a finished trial. Checks run cheapest tier first; a case fails at the first failing check. */
+/** One expectation on a finished trial. Checks run cheapest tier first; after a failure only the paid tiers (embedding, judge) are skipped. */
 public interface Check {
 
     /** Cost order of graders: event trace, then workspace and server state, then cache, embeddings, the LLM judge. */

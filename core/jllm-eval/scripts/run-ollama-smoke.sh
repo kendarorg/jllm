@@ -15,6 +15,7 @@ TEST_GROUPS="${TEST_GROUPS:-smoke,full,strategy,unit}"
 TESTS=""
 TRIALS="${TRIALS:-1}"
 MAX_TRIALS="${MAX_TRIALS:-2}"              # cap on trials of any case, including cases that set their own count
+PARALLELISM="${PARALLELISM:-1}"   # test classes run at once; 1 = strictly sequential
 # 1 (default): failed cases are reported but never fail the Maven build, so the run always completes and writes its summary
 IGNORE_TEST_FAILURES="${IGNORE_TEST_FAILURES:-1}"
 # minimal = Ollama reasoning_effort "none": Qwen3 thinking would eat the token budget and leave empty replies
@@ -48,6 +49,9 @@ if [[ -n "$TESTS" ]]; then TEST_FILTER=(-Dtest="$TESTS"); fi
 set +e
 mvn -B -ntp -f "$REPO_ROOT/pom.xml" -Peval -pl core/jllm-eval -am test \
   -Dgroups="$TEST_GROUPS" \
+  -Drun.parallelism="$PARALLELISM" \
+  -Drun.parallel.enabled="$([[ "$PARALLELISM" -gt 1 ]] && echo true || echo false)" \
+  -Drun.parallel.classes="$([[ "$PARALLELISM" -gt 1 ]] && echo concurrent || echo same_thread)" \
   ${TEST_FILTER[@]+"${TEST_FILTER[@]}"} \
   -Dsurefire.failIfNoSpecifiedTests=false \
   -Dmaven.test.failure.ignore="$([[ "$IGNORE_TEST_FAILURES" == 1 ]] && echo true || echo false)" \

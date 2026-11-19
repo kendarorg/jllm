@@ -15,6 +15,7 @@ TRIALS="${TRIALS:-1}"
 MAX_TRIALS="${MAX_TRIALS:-2}"
 IGNORE_TEST_FAILURES="${IGNORE_TEST_FAILURES:-1}"
 RPM_LIMIT="${RPM_LIMIT:-40}"
+PARALLELISM="${PARALLELISM:-6}"   # test classes run at once; 1 = strictly sequential
 
 # ---- paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -56,6 +57,9 @@ export EVAL_JUDGE_OPENAI_APIKEY="$NVIDIA_API_KEY"
 set +e
 mvn -B -ntp -f "$REPO_ROOT/pom.xml" -Peval -pl core/jllm-eval -am test \
   -Dgroups="$TEST_GROUPS" \
+  -Drun.parallelism="$PARALLELISM" \
+  -Drun.parallel.enabled="$([[ "$PARALLELISM" -gt 1 ]] && echo true || echo false)" \
+  -Drun.parallel.classes="$([[ "$PARALLELISM" -gt 1 ]] && echo concurrent || echo same_thread)" \
   -Dsurefire.failIfNoSpecifiedTests=false \
   -Dmaven.test.failure.ignore="$([[ "$IGNORE_TEST_FAILURES" == 1 ]] && echo true || echo false)" \
   -Deval.target=remote.nvidia \

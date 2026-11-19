@@ -20,13 +20,18 @@ class SelfGradedTest {
     }
 
     @Test
-    void anthropicTargetWithAnthropicJudgeIsSelfGraded() {
-        assertTrue(load(map(), KEY).selfGraded());
+    void defaultJudgeIsNotTheDefaultTarget() {
+        assertFalse(load(map(), KEY).selfGraded());
+    }
+
+    @Test
+    void anthropicTargetWithSameModelJudgeIsSelfGraded() {
+        assertTrue(load(map("eval.judge.anthropic.model", "claude-haiku-5-5"), KEY).selfGraded());
     }
 
     @Test
     void anthropicTargetWithDifferentJudgeModelIsNot() {
-        assertFalse(load(map("eval.judge.anthropic.model", "claude-sonnet-5-5"), KEY).selfGraded());
+        assertFalse(load(map("eval.judge.anthropic.model", "claude-opus-5-5"), KEY).selfGraded());
     }
 
     @Test

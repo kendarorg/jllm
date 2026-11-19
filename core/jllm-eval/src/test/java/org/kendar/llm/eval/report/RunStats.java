@@ -175,6 +175,8 @@ final class RunStats {
             n.put("passRate", c.passRate());
             n.put("passK", c.passK());
             n.put("passed", c.passed());
+            n.put("trials", c.trials().size());
+            n.put("passes", (int) c.trials().stream().filter(Trial::passed).count());
         }
         ArrayNode warnings = root.putArray("warnings");
         if (run.selfGraded()) warnings.add("self-graded: the judge is the model under test");

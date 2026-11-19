@@ -29,7 +29,7 @@ class SuiteStructureTest {
     private static final Pattern HEADING = Pattern.compile("^#{2,4}\\s+(\\d+(?:\\.\\d+)*)\\.?\\s+(.*)$");
 
     private static List<SuiteBase> areas() {
-        return List.of(new AgentLoopCasesTest(), new CustomToolsCasesTest(), new FileToolsCasesTest(),
+        return List.of(new AgentLoopCasesTest(), new CutOffCasesTest(), new CustomToolsCasesTest(), new FileToolsCasesTest(),
                 new ShellCasesTest(), new PermissionModesCasesTest(), new PermissionRulesCasesTest(),
                 new HooksCasesTest(), new StuckCasesTest(), new McpCasesTest(), new RestCasesTest(),
                 new ToolGroupsCasesTest(), new OutputSafetyCasesTest(), new SubAgentsCasesTest(),

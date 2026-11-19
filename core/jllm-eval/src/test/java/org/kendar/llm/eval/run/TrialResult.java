@@ -8,7 +8,7 @@ import java.util.List;
 /**
  * Result of one graded trial.
  *
- * @param checks    results of the checks that ran, cheapest first, ending at the first failure
+ * @param checks    results of the checks that ran, cheapest first, the paid tiers are skipped after a failure
  * @param traceFile where the trace was saved, or null
  */
 public record TrialResult(int trial, TrialTrace trace, List<CheckResult> checks, boolean passed, Path traceFile) {

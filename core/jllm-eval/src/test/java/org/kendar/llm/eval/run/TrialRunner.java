@@ -86,12 +86,17 @@ public final class TrialRunner {
         }
     }
 
-    /** Cheapest tier first, stopping at the first failure; warnings and not-measurable never stop. */
+    /**
+     * Cheapest tier first. A failure skips only the paid tiers (embedding and judge); the free trace, state and cache
+     * checks still run, so every failing symptom of a trial is recorded. Warnings and not-measurable never skip.
+     */
     public static List<CheckResult> grade(List<Check> checks, TrialContext ctx) {
         List<Check> ordered = new ArrayList<>(checks);
         ordered.sort(Comparator.comparing(Check::tier));
         List<CheckResult> out = new ArrayList<>();
+        boolean failed = false;
         for (Check k : ordered) {
+            if (failed && k.tier().compareTo(Check.Tier.EMBEDDING) >= 0) continue;
             CheckResult r;
             try {
                 r = k.check(ctx);
@@ -99,7 +104,7 @@ public final class TrialRunner {
                 r = CheckResult.fail(k.name(), "check threw " + e);
             }
             out.add(r);
-            if (r.failed()) break;
+            if (r.failed()) failed = true;
         }
         return out;
     }
@@ -114,7 +119,7 @@ public final class TrialRunner {
 
     private Execution execute(EvalCase c, ContextStrategyKind strategy, Path base, Map<String, Object> extras) {
         long start = System.nanoTime();
-        RecordingModelClient main = new RecordingModelClient(model);
+        RecordingModelClient main = new RecordingModelClient(c.model() != null ? c.model().get() : model);
         RecordingModelClient fastRec = fast == null ? null : new RecordingModelClient(fast);
         int budget = c.contextBudgetTokens() != null ? c.contextBudgetTokens()
                 : (int) Math.max(4_000, settings.contextTokens() * 0.75);

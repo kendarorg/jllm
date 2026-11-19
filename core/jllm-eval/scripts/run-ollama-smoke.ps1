@@ -45,6 +45,7 @@ $TEST_GROUPS = Get-Setting 'TEST_GROUPS' 'smoke,full,strategy,unit'
 $TESTS = ''
 $TRIALS = Get-Setting 'TRIALS' '1'
 $MAX_TRIALS = Get-Setting 'MAX_TRIALS' '2'                     # cap on trials of any case, including cases that set their own count
+$PARALLELISM = [int](Get-Setting 'PARALLELISM' '1')   # test classes run at once; 1 = strictly sequential
 # 1 (default): failed cases are reported but never fail the Maven build, so the run always completes and writes its summary
 $IGNORE_TEST_FAILURES = Get-Setting 'IGNORE_TEST_FAILURES' '1'
 # minimal = Ollama reasoning_effort "none": Qwen3 thinking would eat the token budget and leave empty replies
@@ -87,7 +88,10 @@ Write-Host "Model: $MODEL  ctx: $CTX_TOKENS  groups: $TEST_GROUPS  tests: $tests
 $ignoreFailures = if ($IGNORE_TEST_FAILURES -eq '1') { 'true' } else { 'false' }
 $mvnArgs = @(
     '-B', '-ntp', '-f', (Join-Path $RepoRoot 'pom.xml'), '-Peval', '-pl', 'core/jllm-eval', '-am', 'test',
-    "-Dgroups=$TEST_GROUPS"
+    "-Dgroups=$TEST_GROUPS",
+    "-Drun.parallelism=$PARALLELISM",
+    "-Drun.parallel.enabled=$(if ($PARALLELISM -gt 1) { 'true' } else { 'false' })",
+    "-Drun.parallel.classes=$(if ($PARALLELISM -gt 1) { 'concurrent' } else { 'same_thread' })"
 )
 if ($TESTS) { $mvnArgs += "-Dtest=$TESTS" }
 $mvnArgs += @(

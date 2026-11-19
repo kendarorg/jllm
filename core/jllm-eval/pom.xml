@@ -19,6 +19,10 @@
     <properties>
         <!-- test groups to run: smoke, full, strategy, unit (no model needed) -->
         <groups>smoke,unit</groups>
+        <!-- test classes run concurrently when run.parallelism > 1; cases of one class stay sequential -->
+        <run.parallelism>1</run.parallelism>
+        <run.parallel.enabled>false</run.parallel.enabled>
+        <run.parallel.classes>same_thread</run.parallel.classes>
         <maven.deploy.skip>true</maven.deploy.skip>
         <central-publish.skip>true</central-publish.skip>
     </properties>
@@ -101,7 +105,7 @@
                 <version>3.5.2</version>
                 <configuration>
                     <groups>${groups}</groups>
-                    <!-- strictly sequential: one fork, no parallel classes/methods -->
+                    <!-- one fork; sequential unless run.parallelism > 1 (JUnit runs whole classes concurrently) -->
                     <forkCount>1</forkCount>
                     <reuseForks>true</reuseForks>
                     <parallel>none</parallel>
@@ -110,9 +114,12 @@
                     <failIfNoSpecifiedTests>false</failIfNoSpecifiedTests>
                     <properties>
                         <configurationParameters>
-                            junit.jupiter.execution.parallel.enabled=false
+                            junit.jupiter.execution.parallel.enabled=${run.parallel.enabled}
                             junit.jupiter.execution.parallel.mode.default=same_thread
-                            junit.jupiter.execution.parallel.mode.classes.default=same_thread
+                            junit.jupiter.execution.parallel.mode.classes.default=${run.parallel.classes}
+                            junit.jupiter.execution.parallel.config.strategy=fixed
+                            junit.jupiter.execution.parallel.config.fixed.parallelism=${run.parallelism}
+                            junit.jupiter.execution.parallel.config.fixed.max-pool-size=${run.parallelism}
                         </configurationParameters>
                     </properties>
                 </configuration>

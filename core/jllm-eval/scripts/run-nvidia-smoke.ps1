@@ -45,6 +45,7 @@ $TRIALS = Get-Setting 'TRIALS' '1'
 $MAX_TRIALS = Get-Setting 'MAX_TRIALS' '2'
 $IGNORE_TEST_FAILURES = Get-Setting 'IGNORE_TEST_FAILURES' '1'
 $RPM_LIMIT = Get-Setting 'RPM_LIMIT' '40'
+$PARALLELISM = [int](Get-Setting 'PARALLELISM' '6')   # test classes run at once; 1 = strictly sequential
 $JAVA_HOME = Find-JavaHome   # build needs JDK 21+
 
 # ---- paths
@@ -111,6 +112,9 @@ $mvnArgs = @(
     "-Deval.remote.nvidia.contextTokens=$CTX_TOKENS",
     '-Deval.remote.nvidia.smallModel=false',
     "-Deval.remote.nvidia.timeoutSeconds=$TIMEOUT_SECONDS",
+    "-Drun.parallelism=$PARALLELISM",
+    "-Drun.parallel.enabled=$(if ($PARALLELISM -gt 1) { 'true' } else { 'false' })",
+    "-Drun.parallel.classes=$(if ($PARALLELISM -gt 1) { 'concurrent' } else { 'same_thread' })",
     "-Deval.remote.nvidia.maxRpm=$RPM_LIMIT",
     '-Deval.judge=openai',
     '-Deval.judge.openai.name=nvidia',

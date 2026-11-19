@@ -23,7 +23,8 @@ class EvalConfigTest {
         assertEquals(EvalConfig.TargetKind.ANTHROPIC, c.targetKind());
         assertEquals("claude-haiku-5-5", c.target().model());
         assertEquals("anthropic", c.judgeKind());
-        assertTrue(c.selfGraded());
+        assertEquals("claude-sonnet-5-5", c.judge().model());
+        assertFalse(c.selfGraded());
     }
 
     @Test

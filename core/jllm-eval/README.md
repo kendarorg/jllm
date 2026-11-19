@@ -23,7 +23,7 @@ mvn -f ../../pom.xml -Peval -pl core/jllm-eval -am test -Dgroups=smoke -Deval.ta
 `-Dgroups` selects the test groups: `smoke`, `full` or `strategy`. The extra group `unit` holds the checks that need
 no model at all (`mvn -f ../../pom.xml -Peval -pl core/jllm-eval -am test -Dgroups=unit`). The default is `smoke,unit`.
 
-Tests, classes and methods always run one after the other, in a single JVM.
+Tests, classes and methods run one after the other in a single JVM by default. With `-Drun.parallelism=N -Drun.parallel.enabled=true -Drun.parallel.classes=concurrent` (the NVIDIA smoke scripts do this through `PARALLELISM`, default 6) up to N test classes run at once; the cases of one class stay sequential. All requests to a host still go through one shared `RequestPacer`, so `maxRpm` holds.
 
 ## Targets
 
@@ -109,7 +109,7 @@ Vectors are cached on disk under the output folder's `embedding-cache`.
 
 ## Judge and fast model
 
-A run has exactly one judge, chosen with `eval.judge`: Haiku 5.5 through the Anthropic API (the default), or one
+A run has exactly one judge, chosen with `eval.judge`: Sonnet 5.5 through the Anthropic API (the default, a different model than the Haiku 5.5 default target, so a default run is not self-graded), or one
 OpenAI-compatible endpoint. There is no fallback and no mixing. The judge is configured separately from the target,
 even when both use the same server.
 
@@ -181,7 +181,7 @@ chosen with `LLM_ENV`), follow all the points:
 5. In `eval.properties` (or with `-D`), make `eval.remote.gpu.model` equal that id and `eval.remote.gpu.contextTokens`
    not larger than `n_ctx`. A different address or entry name works the same way: define `eval.remote.<name>.*` and
    select it with `-Deval.target=remote.<name>`.
-6. Set the judge key in the environment, never in a file or on a shared command line. The default judge is Haiku 5.5
+6. Set the judge key in the environment, never in a file or on a shared command line. The default judge is Sonnet 5.5
    through the Anthropic API, so the key is for that, not for the target (PowerShell):
 
    ```
