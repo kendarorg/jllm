@@ -35,7 +35,7 @@ public final class EvalCase {
 
     /** Test group the case belongs to. */
     public enum Tag {
-        SMOKE("smoke"), FULL("full"), STRATEGY("strategy");
+        SMOKE("smoke"), FULL("full"), STRATEGY("strategy"), COMPACTION("compaction");
         private final String group;
 
         Tag(String group) {

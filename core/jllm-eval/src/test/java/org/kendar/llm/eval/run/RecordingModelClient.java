@@ -1,6 +1,7 @@
 package org.kendar.llm.eval.run;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.kendar.llm.eval.EvalLog;
 import org.kendar.llm.harness.llm.CancelToken;
 import org.kendar.llm.harness.llm.ModelClient;
 import org.kendar.llm.harness.llm.ModelRequest;
@@ -21,10 +22,22 @@ public final class RecordingModelClient implements ModelClient {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final ModelClient inner;
+    private final String label;
     private final List<RecordedRequest> requests = Collections.synchronizedList(new ArrayList<>());
 
-    public RecordingModelClient(ModelClient inner) {
+    /** @param label names the trial in the progress log, for example {@code files/read-and-answer [compaction] #1} */
+    public RecordingModelClient(ModelClient inner, String label) {
         this.inner = inner;
+        this.label = label;
+    }
+
+    private void log(boolean simple, long start, Usage usage, Throwable error) {
+        long ms = (System.nanoTime() - start) / 1_000_000;
+        EvalLog.info("    request " + (requests.size() + 1) + (simple ? " (summary)" : "") + " " + label + " "
+                + EvalLog.seconds(ms) + "s"
+                + (usage == null ? "" : ", tokens in " + usage.inputTokens() + " out " + usage.outputTokens()
+                + (usage.cacheReadTokens() > 0 ? " cached " + usage.cacheReadTokens() : ""))
+                + (error == null ? "" : ", ERROR " + error.getClass().getSimpleName() + ": " + error.getMessage()));
     }
 
     public List<RecordedRequest> requests() {
@@ -33,7 +46,8 @@ public final class RecordingModelClient implements ModelClient {
         }
     }
 
-    private void record(ModelRequest r, ModelResponse resp, long start) {
+    private void record(ModelRequest r, ModelResponse resp, long start, Throwable error) {
+        log(false, start, resp == null ? null : resp.usage(), error);
         requests.add(new RecordedRequest(requests.size(), false, r.pinnedSystem(), r.extraSystem(),
                 r.messages().deepCopy(), r.tools().stream().map(HarnessTool::name).toList(), r.maxTokens(),
                 resp == null ? null : resp.usage(), (System.nanoTime() - start) / 1_000_000));
@@ -43,11 +57,15 @@ public final class RecordingModelClient implements ModelClient {
     public ModelResponse complete(ModelRequest r) {
         long t = System.nanoTime();
         ModelResponse resp = null;
+        Throwable err = null;
         try {
             resp = inner.complete(r);
             return resp;
+        } catch (RuntimeException e) {
+            err = e;
+            throw e;
         } finally {
-            record(r, resp, t);
+            record(r, resp, t, err);
         }
     }
 
@@ -55,11 +73,15 @@ public final class RecordingModelClient implements ModelClient {
     public ModelResponse complete(ModelRequest r, CancelToken cancel) {
         long t = System.nanoTime();
         ModelResponse resp = null;
+        Throwable err = null;
         try {
             resp = inner.complete(r, cancel);
             return resp;
+        } catch (RuntimeException e) {
+            err = e;
+            throw e;
         } finally {
-            record(r, resp, t);
+            record(r, resp, t, err);
         }
     }
 
@@ -67,11 +89,15 @@ public final class RecordingModelClient implements ModelClient {
     public ModelResponse stream(ModelRequest r, CancelToken cancel, StreamListener listener) {
         long t = System.nanoTime();
         ModelResponse resp = null;
+        Throwable err = null;
         try {
             resp = inner.stream(r, cancel, listener);
             return resp;
+        } catch (RuntimeException e) {
+            err = e;
+            throw e;
         } finally {
-            record(r, resp, t);
+            record(r, resp, t, err);
         }
     }
 
@@ -97,12 +123,17 @@ public final class RecordingModelClient implements ModelClient {
                           java.util.function.Function<Consumer<Usage>, String> call) {
         long t = System.nanoTime();
         Usage[] seen = new Usage[1];
+        Throwable err = null;
         try {
             return call.apply(u -> {
                 seen[0] = seen[0] == null ? u : seen[0].plus(u);
                 if (outer != null) outer.accept(u);
             });
+        } catch (RuntimeException e) {
+            err = e;
+            throw e;
         } finally {
+            log(true, t, seen[0], err);
             requests.add(new RecordedRequest(requests.size(), true, system, "", MAPPER.createArrayNode().add(user),
                     List.of(), maxTokens, seen[0], (System.nanoTime() - t) / 1_000_000));
         }

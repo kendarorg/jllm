@@ -37,10 +37,12 @@ function Find-JavaHome {
 $OLLAMA_BASE = Get-Setting 'OLLAMA_BASE' 'http://localhost:11434'
 $MODEL = Get-Setting 'MODEL' 'qwen3:30b'
 $CTX_TOKENS = Get-Setting 'CTX_TOKENS' '16000'                 # must not exceed the context Ollama actually allocates (num_ctx)
+$COMPACTION_CTX_TOKENS = Get-Setting 'COMPACTION_CTX_TOKENS' '65536'   # context of the compaction group only
 $TIMEOUT_SECONDS = Get-Setting 'TIMEOUT_SECONDS' '300'         # per model request, and warm-up
 $CASE_TIMEOUT_SECONDS = Get-Setting 'CASE_TIMEOUT_SECONDS' $TIMEOUT_SECONDS  # cap on each user turn of a case
 #$TEST_GROUPS = Get-Setting 'TEST_GROUPS' 'smoke'
-$TEST_GROUPS = Get-Setting 'TEST_GROUPS' 'smoke,full,strategy,unit'
+$TEST_GROUPS = (Get-Setting 'TEST_GROUPS' 'all') -replace '\s', ''   # 'all' or a comma separated list of: smoke,full,strategy,compaction,unit
+if (($TEST_GROUPS -split ',') -contains 'all') { $TEST_GROUPS = 'smoke,full,strategy,compaction,unit' }
 #$TESTS = Get-Setting 'TESTS' 'InfrastructureSmokeTest,ExampleToolEvalTest'
 $TESTS = ''
 $TRIALS = Get-Setting 'TRIALS' '1'
@@ -82,7 +84,7 @@ New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 Write-Host "Log: $LogFile"
 Write-Host "JAVA_HOME: $JAVA_HOME"
 $testsShown = if ($TESTS) { $TESTS } else { 'all' }
-Write-Host "Model: $MODEL  ctx: $CTX_TOKENS  groups: $TEST_GROUPS  tests: $testsShown  trials: $TRIALS  max trials: $MAX_TRIALS  timeout: ${TIMEOUT_SECONDS}s  case timeout cap: ${CASE_TIMEOUT_SECONDS}s"
+Write-Host "Model: $MODEL  ctx: $CTX_TOKENS  compaction ctx: $COMPACTION_CTX_TOKENS  groups: $TEST_GROUPS  tests: $testsShown  trials: $TRIALS  max trials: $MAX_TRIALS  timeout: ${TIMEOUT_SECONDS}s  case timeout cap: ${CASE_TIMEOUT_SECONDS}s"
 
 # ---- run
 $ignoreFailures = if ($IGNORE_TEST_FAILURES -eq '1') { 'true' } else { 'false' }
@@ -116,6 +118,7 @@ $mvnArgs += @(
     "-Deval.trials=$TRIALS",
     "-Deval.maxTrials=$MAX_TRIALS",
     "-Deval.caseTimeoutSeconds=$CASE_TIMEOUT_SECONDS",
+    "-Deval.compaction.contextTokens=$COMPACTION_CTX_TOKENS",
     "-Deval.timeout.warmup=$TIMEOUT_SECONDS"
 )
 

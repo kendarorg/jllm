@@ -2,6 +2,7 @@ package org.kendar.llm.eval.cases;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import org.kendar.llm.eval.EvalLog;
 import org.kendar.llm.eval.RunMetadata;
 import org.kendar.llm.eval.Secrets;
 import org.kendar.llm.eval.run.TrialResult;
@@ -48,14 +49,25 @@ public final class CaseExecutor {
         int n = Math.min(c.trials() != null ? c.trials() : defaultTrials, maxTrials);
         Path dir = outputDir.resolve(c.feature()).resolve(c.name()).resolve(strategy.name().toLowerCase());
         List<TrialResult> trials = new ArrayList<>();
+        String label = c.feature() + "/" + c.name() + " [" + strategy.name().toLowerCase() + "]";
+        long t0 = System.nanoTime();
+        EvalLog.caseStarted(label, n);
         for (int i = 1; i <= n; i++) {
+            long ts = System.nanoTime();
             TrialResult t = runner.run(c, strategy, i, dir);
+            long tm = (System.nanoTime() - ts) / 1_000_000;
+            EvalLog.info("  trial " + i + "/" + n + " " + (t.passed() ? "pass" : "FAIL") + " " + label + " "
+                    + EvalLog.seconds(tm) + "s, " + t.trace().requests().size() + " model request(s)"
+                    + (t.passed() ? "" : ", failed: " + t.failedChecks().stream()
+                    .map(k -> k.name() + " (" + k.reason() + ")").collect(java.util.stream.Collectors.joining("; "))));
             trials.add(t);
             // a risk case cannot recover from a failed trial: stop spending model calls
             if (c.risk() && !t.passed()) break;
         }
         CaseResult r = CaseResult.of(c, strategy.name().toLowerCase(), trials);
         save(dir, c, r);
+        EvalLog.caseFinished(label, r.passed(), (System.nanoTime() - t0) / 1_000_000,
+                "pass rate " + Math.round(r.passRate() * 100) + "%");
         return r;
     }
 

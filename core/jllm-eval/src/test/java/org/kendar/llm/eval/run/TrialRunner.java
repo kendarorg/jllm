@@ -69,7 +69,7 @@ public final class TrialRunner {
         try {
             tmp = Files.createTempDirectory("jllm-eval-");
             Map<String, Object> extras = new HashMap<>();
-            Execution ex = execute(c, strategy, tmp, extras);
+            Execution ex = execute(c, strategy, trial, tmp, extras);
             TrialContext ctx = new TrialContext(c.name(), ex.trace, ex.workspace, ex.before, c.userTurns(), extras);
             List<CheckResult> results = grade(c.checks(), ctx);
             if (ex.trace.error() != null) {
@@ -117,10 +117,12 @@ public final class TrialRunner {
         return cap > 0 ? Math.min(cap, c.timeoutSeconds()) : c.timeoutSeconds();
     }
 
-    private Execution execute(EvalCase c, ContextStrategyKind strategy, Path base, Map<String, Object> extras) {
+    private Execution execute(EvalCase c, ContextStrategyKind strategy, int trial, Path base,
+                              Map<String, Object> extras) {
+        String label = c.feature() + "/" + c.name() + " [" + strategy.name().toLowerCase() + "] #" + trial;
         long start = System.nanoTime();
-        RecordingModelClient main = new RecordingModelClient(c.model() != null ? c.model().get() : model);
-        RecordingModelClient fastRec = fast == null ? null : new RecordingModelClient(fast);
+        RecordingModelClient main = new RecordingModelClient(c.model() != null ? c.model().get() : model, label);
+        RecordingModelClient fastRec = fast == null ? null : new RecordingModelClient(fast, label);
         int budget = c.contextBudgetTokens() != null ? c.contextBudgetTokens()
                 : (int) Math.max(4_000, settings.contextTokens() * 0.75);
         HarnessConfig config = HarnessConfig.defaults().withAgentId("jllm").withMaxTokens(4096)

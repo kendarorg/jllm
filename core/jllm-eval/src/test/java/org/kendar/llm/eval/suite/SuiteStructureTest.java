@@ -35,7 +35,8 @@ class SuiteStructureTest {
                 new ToolGroupsCasesTest(), new OutputSafetyCasesTest(), new SubAgentsCasesTest(),
                 new SkillsCasesTest(), new OutputLimitsCasesTest(), new SessionsCasesTest(),
                 new CommandsCasesTest(), new PromptCacheCasesTest(), new PdfCasesTest(), new DocsCasesTest(),
-                new JsCasesTest(), new WorkflowsCasesTest(), new StrategySessionsCasesTest());
+                new JsCasesTest(), new WorkflowsCasesTest(), new StrategyRefactoringSessionTest(), new StrategyResearchLargeOutputsSessionTest(),
+                new StrategyModeSwitchesSessionTest(), new StrategyToolTogglesSessionTest());
     }
 
     private static List<EvalCase> all() {
@@ -122,7 +123,7 @@ class SuiteStructureTest {
             assertEquals(2, cases.stream().filter(c -> c.name().startsWith("edge-")).count(), f + " edge cases");
             long smoke = cases.stream().filter(c -> c.tag() == EvalCase.Tag.SMOKE).count();
             assertTrue(smoke >= 1 && smoke <= 2, f + " smoke cases: " + smoke);
-            cases.forEach(c -> assertNotEquals(EvalCase.Tag.STRATEGY, c.tag()));
+            cases.forEach(c -> assertNotEquals(EvalCase.Tag.COMPACTION, c.tag()));
         });
     }
 
@@ -143,7 +144,7 @@ class SuiteStructureTest {
         List<EvalCase> sessions = all().stream().filter(c -> c.feature().equals(Suite.STRATEGIES)).toList();
         assertEquals(4, sessions.size());
         for (EvalCase c : sessions) {
-            assertEquals(EvalCase.Tag.STRATEGY, c.tag());
+            assertEquals(EvalCase.Tag.COMPACTION, c.tag());
             assertEquals(3, c.strategies().size(), c.name());
             assertNotNull(c.contextBudgetTokens(), c.name());
             assertTrue(c.contextBudgetTokens() <= 12_000, c.name());
@@ -151,6 +152,9 @@ class SuiteStructureTest {
             assertTrue(c.checks().stream().anyMatch(k -> k.name().startsWith("retained")), c.name() + " has no retention check");
             assertTrue(c.checks().stream().anyMatch(k -> k.name().startsWith("breaksAsExpected")), c.name() + " has no cache check");
             assertTrue(c.checks().stream().anyMatch(k -> k.name().contains("@")), c.name() + " has no strategy invariant");
+            assertTrue(c.steps().stream().anyMatch(st -> st instanceof EvalCase.Action a && a.label().equals("/compact")),
+                    c.name() + " does not force a compaction at a fixed point");
+            assertTrue(c.checks().stream().anyMatch(k -> k.name().equals("answerIsNotASummary")), c.name() + " has no echo check");
         }
     }
 
@@ -164,7 +168,7 @@ class SuiteStructureTest {
     void tagsMatchFactories() {
         for (EvalCase c : all()) {
             boolean strategy = c.feature().equals(Suite.STRATEGIES);
-            assertEquals(strategy, c.tag() == EvalCase.Tag.STRATEGY, c.name());
+            assertEquals(strategy, c.tag() == EvalCase.Tag.COMPACTION, c.name());
             if (!strategy) assertEquals(List.of(org.kendar.llm.harness.context.ContextStrategyKind.COMPACTION), c.strategies());
         }
     }

@@ -38,9 +38,11 @@ function Find-JavaHome {
 $NVIDIA_BASE = Get-Setting 'NVIDIA_BASE' 'https://integrate.api.nvidia.com/v1'
 $MODEL = Get-Setting 'MODEL' 'meta/muse-glimmer-30b'
 $CTX_TOKENS = Get-Setting 'CTX_TOKENS' '16000'
+$COMPACTION_CTX_TOKENS = Get-Setting 'COMPACTION_CTX_TOKENS' '65536'   # context of the compaction group only
 $TIMEOUT_SECONDS = Get-Setting 'TIMEOUT_SECONDS' '300'
 $CASE_TIMEOUT_SECONDS = Get-Setting 'CASE_TIMEOUT_SECONDS' $TIMEOUT_SECONDS
-$TEST_GROUPS = Get-Setting 'TEST_GROUPS' 'smoke,full,strategy,unit'
+$TEST_GROUPS = (Get-Setting 'TEST_GROUPS' 'all') -replace '\s', ''   # 'all' or a comma separated list of: smoke,full,strategy,compaction,unit
+if (($TEST_GROUPS -split ',') -contains 'all') { $TEST_GROUPS = 'smoke,full,strategy,compaction,unit' }
 $TRIALS = Get-Setting 'TRIALS' '1'
 $MAX_TRIALS = Get-Setting 'MAX_TRIALS' '2'
 $IGNORE_TEST_FAILURES = Get-Setting 'IGNORE_TEST_FAILURES' '1'
@@ -91,7 +93,7 @@ if (-not ($served.data | Where-Object { $_.id -eq $MODEL })) {
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 Write-Host "Log: $LogFile"
 Write-Host "JAVA_HOME: $JAVA_HOME"
-Write-Host "Model: $MODEL  ctx: $CTX_TOKENS  groups: $TEST_GROUPS  trials: $TRIALS  max trials: $MAX_TRIALS  timeout: ${TIMEOUT_SECONDS}s"
+Write-Host "Model: $MODEL  ctx: $CTX_TOKENS  compaction ctx: $COMPACTION_CTX_TOKENS  groups: $TEST_GROUPS  trials: $TRIALS  max trials: $MAX_TRIALS  timeout: ${TIMEOUT_SECONDS}s"
 
 # ---- run
 $prevJavaHome = $env:JAVA_HOME
@@ -127,6 +129,7 @@ $mvnArgs = @(
     "-Deval.trials=$TRIALS",
     "-Deval.maxTrials=$MAX_TRIALS",
     "-Deval.caseTimeoutSeconds=$CASE_TIMEOUT_SECONDS",
+    "-Deval.compaction.contextTokens=$COMPACTION_CTX_TOKENS",
     "-Deval.timeout.warmup=$TIMEOUT_SECONDS"
 )
 

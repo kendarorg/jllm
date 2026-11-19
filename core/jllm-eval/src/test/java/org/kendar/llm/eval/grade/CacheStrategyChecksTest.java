@@ -261,12 +261,26 @@ class CacheStrategyChecksTest {
     void compactionSections() {
         String full = StrategyChecks.SUMMARY_PREFIX + "\n" + String.join("\n\n", StrategyChecks.SUMMARY_SECTIONS);
         String partial = StrategyChecks.SUMMARY_PREFIX + "\n## Objective\nx\n## Requirements\ny";
+        String minimal = StrategyChecks.SUMMARY_PREFIX + "\n## Objective\nx\n## Work State\n### Completed\nz\n## Next Move\nn";
+        String turn = StrategyChecks.TURN_SUMMARY_PREFIX + "\n## Objective\nx";
         var ok = Traces.trace().request("s", TOOLS, null, msg("user", full));
         is(PASS, Checks.compactionSummaryHasSections(), ok.ctx());
         var bad = Traces.trace().request("s", TOOLS, null, msg("user", partial));
         is(FAIL, Checks.compactionSummaryHasSections(), bad.ctx());
         var none = Traces.trace().request("s", TOOLS, null, msg("user", "plain"));
         is(FAIL, Checks.compactionSummaryHasSections(), none.ctx());
+        var min = Traces.trace().request("s", TOOLS, null, msg("user", minimal));
+        is(PASS, Checks.compactionSummaryHasSections(), min.ctx());
+        var inTurn = Traces.trace().request("s", TOOLS, null, msg("user", turn));
+        is(FAIL, Checks.compactionSummaryHasSections(), inTurn.ctx());
+    }
+
+    @Test
+    void answerIsNotASummary() {
+        var echo = Traces.trace().answer(StrategyChecks.TURN_SUMMARY_PREFIX + "\n## Objective\nx");
+        is(FAIL, Checks.answerIsNotASummary(), echo.ctx());
+        var fine = Traces.trace().answer("The key is KEY-1.");
+        is(PASS, Checks.answerIsNotASummary(), fine.ctx());
     }
 
     // ---- retention ------------------------------------------------------------------------------------------

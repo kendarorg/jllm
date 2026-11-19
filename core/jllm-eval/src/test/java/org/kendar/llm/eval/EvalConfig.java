@@ -35,6 +35,7 @@ public final class EvalConfig {
     private int trials;
     private int maxTrials;
     private int caseTimeoutSeconds;
+    private int compactionContextTokens;
     private Path outputDir;
     private Path embeddingModelDir;
     private String embeddingSha256;
@@ -80,6 +81,8 @@ public final class EvalConfig {
     public int maxTrials() { return maxTrials; }
     /** Upper bound on the seconds a user turn may take; 0 keeps each case's own timeout. */
     public int caseTimeoutSeconds() { return caseTimeoutSeconds; }
+    /** Context size used for the cases tagged {@code compaction}; the other cases use the target's own. */
+    public int compactionContextTokens() { return compactionContextTokens; }
     public Path outputDir() { return outputDir; }
     /** Folder holding the embedding model files; not required to exist (embedding tests skip when files are missing). */
     public Path embeddingModelDir() { return embeddingModelDir; }
@@ -186,6 +189,7 @@ public final class EvalConfig {
         trials = integer("eval.trials", 1);
         maxTrials = integerOr("eval.maxTrials", 1, 10);
         caseTimeoutSeconds = integerOr("eval.caseTimeoutSeconds", 0, 0);
+        compactionContextTokens = integerOr("eval.compaction.contextTokens", 1024, 65536);
         String out = str("eval.outputDir", true);
         outputDir = Path.of(out == null ? "eval-results" : out);
 

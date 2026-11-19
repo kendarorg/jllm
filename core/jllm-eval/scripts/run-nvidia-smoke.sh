@@ -8,9 +8,12 @@ set -euo pipefail
 NVIDIA_BASE="${NVIDIA_BASE:-https://integrate.api.nvidia.com/v1}"
 MODEL="${MODEL:-meta/muse-glimmer-30b}"
 CTX_TOKENS="${CTX_TOKENS:-16000}"
+COMPACTION_CTX_TOKENS="${COMPACTION_CTX_TOKENS:-65536}"   # context of the compaction group only
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-300}"
 CASE_TIMEOUT_SECONDS="${CASE_TIMEOUT_SECONDS:-$TIMEOUT_SECONDS}"
-TEST_GROUPS="${TEST_GROUPS:-smoke,full,strategy,unit}"
+TEST_GROUPS="${TEST_GROUPS:-all}"   # "all" or a comma separated list of: smoke,full,strategy,compaction,unit
+TEST_GROUPS="${TEST_GROUPS// /}"
+if [[ ",$TEST_GROUPS," == *,all,* ]]; then TEST_GROUPS="smoke,full,strategy,compaction,unit"; fi
 TRIALS="${TRIALS:-1}"
 MAX_TRIALS="${MAX_TRIALS:-2}"
 IGNORE_TEST_FAILURES="${IGNORE_TEST_FAILURES:-1}"
@@ -48,7 +51,7 @@ grep -q "\"id\":\"$MODEL\"" <<<"$served" || {
 
 mkdir -p "$LOG_DIR"
 echo "Log: $LOG_FILE"
-echo "Model: $MODEL  ctx: $CTX_TOKENS  groups: $TEST_GROUPS  trials: $TRIALS  max trials: $MAX_TRIALS  timeout: ${TIMEOUT_SECONDS}s"
+echo "Model: $MODEL  ctx: $CTX_TOKENS  compaction ctx: $COMPACTION_CTX_TOKENS  groups: $TEST_GROUPS  trials: $TRIALS  max trials: $MAX_TRIALS  timeout: ${TIMEOUT_SECONDS}s"
 
 # ---- run
 export EVAL_REMOTE_NVIDIA_APIKEY="$NVIDIA_API_KEY"
@@ -81,6 +84,7 @@ mvn -B -ntp -f "$REPO_ROOT/pom.xml" -Peval -pl core/jllm-eval -am test \
   -Deval.trials="$TRIALS" \
   -Deval.maxTrials="$MAX_TRIALS" \
   -Deval.caseTimeoutSeconds="$CASE_TIMEOUT_SECONDS" \
+  -Deval.compaction.contextTokens="$COMPACTION_CTX_TOKENS" \
   -Deval.timeout.warmup="$TIMEOUT_SECONDS" \
   2>&1 | tee "$LOG_FILE"
 status=${PIPESTATUS[0]}

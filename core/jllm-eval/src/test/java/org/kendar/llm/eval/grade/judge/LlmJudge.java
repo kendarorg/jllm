@@ -229,8 +229,7 @@ public final class LlmJudge implements Judge {
             JsonNode d = e.data();
             switch (e.type()) {
                 case "tool_call" -> sb.append("call ").append(d.path("name").asText("")).append(' ')
-                        .append(clip(d.path("input").toString(), 300)).append('
-');
+                        .append(clip(d.path("input").toString(), 300)).append('\n');
                 case "tool_result" -> {
                     String out = d.path("output").asText("");
                     sb.append("result ").append(d.path("name").asText("")).append(" error=")
@@ -240,28 +239,22 @@ public final class LlmJudge implements Judge {
                         String hits = excerpts(out, terms);
                         if (!hits.isEmpty()) sb.append(" [lines matching the answer: ").append(hits).append(']');
                     }
-                    sb.append('
-');
+                    sb.append('\n');
                 }
                 case "approval_request" -> sb.append("approval requested ").append(clip(String.valueOf(d), 200))
-                        .append('
-');
+                        .append('\n');
                 case "warning", "error", "cancelled" -> sb.append(e.type()).append(' ')
-                        .append(clip(String.valueOf(d), 200)).append('
-');
+                        .append(clip(String.valueOf(d), 200)).append('\n');
                 default -> {
                 }
             }
         }
-        if (trace.error() != null) sb.append("run error: ").append(clip(trace.error(), 200)).append('
-');
+        if (trace.error() != null) sb.append("run error: ").append(clip(trace.error(), 200)).append('\n');
         if (sb.length() == 0) return "(no tool activity)";
         String s = sb.toString();
         if (s.length() <= MAX_TRACE_CHARS) return s;
         int tail = MAX_TRACE_CHARS - TRACE_HEAD_CHARS;
-        return s.substring(0, TRACE_HEAD_CHARS) + "
-[trace truncated: middle omitted]
-"
+        return s.substring(0, TRACE_HEAD_CHARS) + "\n[trace truncated: middle omitted]\n"
                 + s.substring(s.length() - tail);
     }
 
@@ -269,7 +262,7 @@ public final class LlmJudge implements Judge {
     private static Set<String> terms(String answer) {
         Set<String> out = new LinkedHashSet<>();
         if (answer == null) return out;
-        for (String w : answer.split("[^\p{L}\p{N}_.-]+")) {
+        for (String w : answer.split("[^\\p{L}\\p{N}_.-]+")) {
             if (w.length() >= 5 || (w.length() >= 3 && w.chars().anyMatch(Character::isDigit)))
                 out.add(w.toLowerCase(Locale.ROOT));
         }
@@ -279,8 +272,7 @@ public final class LlmJudge implements Judge {
     private static String excerpts(String output, Set<String> terms) {
         if (terms.isEmpty()) return "";
         List<String> hit = new ArrayList<>();
-        for (String line : output.split("
-")) {
+        for (String line : output.split("\n")) {
             String low = line.toLowerCase(Locale.ROOT);
             for (String t : terms) {
                 if (low.contains(t)) {

@@ -20,7 +20,7 @@ mvn -f ../../pom.xml -Peval -pl core/jllm-eval -am test -Dgroups=smoke -Deval.ta
 mvn -f ../../pom.xml -Peval -pl core/jllm-eval -am test -Dgroups=smoke -Deval.target=local.strong
 ```
 
-`-Dgroups` selects the test groups: `smoke`, `full` or `strategy`. The extra group `unit` holds the checks that need
+`-Dgroups` selects the test groups: `smoke`, `full`, `strategy` or `compaction` (the long sessions that force compaction; they run with `eval.compaction.contextTokens`). The extra group `unit` holds the checks that need
 no model at all (`mvn -f ../../pom.xml -Peval -pl core/jllm-eval -am test -Dgroups=unit`). The default is `smoke,unit`.
 
 Tests, classes and methods run one after the other in a single JVM by default. With `-Drun.parallelism=N -Drun.parallel.enabled=true -Drun.parallel.classes=concurrent` (the NVIDIA smoke scripts do this through `PARALLELISM`, default 6) up to N test classes run at once; the cases of one class stay sequential. All requests to a host still go through one shared `RequestPacer`, so `maxRpm` holds.
@@ -88,7 +88,8 @@ object descriptions, exception messages, connection-check output and `run.json`.
 | `eval.timeout.warmup` | Seconds allowed for the warm-up call. |
 | `eval.trials` | Default number of trials. |
 | `eval.maxTrials` | Cap on the trials of any case, including cases that set their own count. Default `10`. The Ollama smoke script sets `2` (`MAX_TRIALS`). |
-| `eval.caseTimeoutSeconds` | Cap on each user turn of a case, in seconds. `0` (default) keeps each case's own timeout. The Ollama smoke script sets `300` (`CASE_TIMEOUT_SECONDS`, defaults to `TIMEOUT_SECONDS`). |
+| `eval.compaction.contextTokens` | Context size for the cases tagged `compaction` only; every other case uses the target's `contextTokens`. Default `65536`. The smoke scripts set it from `COMPACTION_CTX_TOKENS`. |
+| `eval.caseTimeoutSeconds` | Cap on each user turn of a case, in seconds. `0` (default) keeps each case's own timeout. The smoke scripts set `300` (`CASE_TIMEOUT_SECONDS`, defaults to `TIMEOUT_SECONDS`), which also caps the `4-strategies` sessions (they declare 1800): on a slow model set `CASE_TIMEOUT_SECONDS=1800` for those runs. |
 | `eval.outputDir` | Results folder (git-ignored, survives `mvn clean`). Layout: `<model>/run-<timestamp>/` with `run.json`, `<feature>/<case>/<strategy>/result.json` and traces, plus `report.md` and `summary.json` written when the run ends; `<model>/baselines/`; `summary/merged.md` compares the latest run of every model; `history/` keeps one compact recap per run, `<date>_<model>.md` and `.json`, plus `INDEX.md` (not git-ignored: commit it to keep the eval history). |
 
 ## Embedding model
@@ -116,7 +117,7 @@ even when both use the same server.
 The run is marked as self-graded (`selfGraded` in `run.json`) when the judge and the target are the same model on the
 same server.
 
-The fast model is the target itself unless `eval.fast` selects Haiku 5.5 or a remote entry.
+The fast model is the target itself unless `eval.fast` selects Haiku 5.5 or a remote entry. Context summaries are written by the fast model: with the target as fast model a slow target pays 30-180 s per summary, so select a faster one for the compaction cases. The `4-strategies` sessions compact at fixed points with `/compact` (outside any turn, so the summary does not count against the turn timeout); budget-driven compaction still happens inside turns.
 
 ## Connection check
 
@@ -226,8 +227,8 @@ Each `docker/<k>.env` file sets the pinned image, the port, the host folders for
 file, the alias and the context size (`CTX_TOKENS`). The server runs with a single request slot and loads only that
 one model.
 
-The alias is the model name the server reports, and it never includes the quantization. Set a smaller `CTX_TOKENS`
-(for example `65536`) to force a shorter context in tests. The file name, alias and context size also appear under
+The alias is the model name the server reports, and it never includes the quantization. The `docker/*.env` files allocate `98304` (96k) so the compaction cases can run at 64k while the other cases keep their
+own `contextTokens`; set a smaller `CTX_TOKENS` to force a shorter context in tests. The file name, alias and context size also appear under
 `eval.local.model.<k>.*` in `eval.properties`; keep the two in sync.
 
 ## Run metadata

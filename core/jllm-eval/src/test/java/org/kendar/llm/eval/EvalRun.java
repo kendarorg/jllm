@@ -41,7 +41,13 @@ public final class EvalRun {
 
     private static EvalRun start() {
         Instant start = Instant.now();
+        EvalLog.info("run starting: loading configuration");
         EvalConfig config = EvalConfig.load();
+        EvalLog.info("target " + config.target().name() + " model " + config.target().model() + ", judge "
+                + config.judge().model() + (config.selfGraded() ? " (self-graded)" : "") + ", trials "
+                + config.trials() + " (max " + config.maxTrials() + "), max rpm " + config.target().maxRpm()
+                + ", test classes in parallel: " + System.getProperty("run.parallelism", "1"));
+        EvalLog.info("connection check and warm-up call (the first call can take minutes on a cold model)");
         ConnectionCheck.Result check = ConnectionCheck.run(config, EvalModels::client);
         RunMetadata meta = RunMetadata.of(config, check, start);
         Path dir = config.outputDir().resolve(slug(meta.targetModel())).resolve("run-" + DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")
@@ -49,6 +55,7 @@ public final class EvalRun {
         try {
             Path file = meta.write(dir);
             EvalRun run = new EvalRun(config, meta, dir, file);
+            EvalLog.info("warm-up done " + check.warmupMillis() + " ms; results in " + dir);
             Runtime.getRuntime().addShutdownHook(new Thread(run::summarize, "eval-summary"));
             return run;
         } catch (java.io.IOException e) {

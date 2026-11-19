@@ -43,6 +43,11 @@ public final class Checks {
 
     // cache
     public static Check cachedRatioAtLeast(double min, boolean sharedServer) { return CacheChecks.cachedRatioAtLeast(min, sharedServer); }
+    /** Graded on a local target; only reported on a hosted one (anthropic, remote), where caching is intermittent. */
+    public static Check cachedRatioAtLeastOnLocal(double min) {
+        return CacheChecks.cachedRatioAtLeast(min,
+                () -> org.kendar.llm.eval.EvalRun.get().config().targetKind() != org.kendar.llm.eval.EvalConfig.TargetKind.LOCAL);
+    }
     public static Check breaksAsExpected(CacheChecks.ExpectedBreak expected) { return CacheChecks.breaksAsExpected(expected); }
     public static Check breakOccurs(CacheChecks.ExpectedBreak expected) { return CacheChecks.breakOccurs(expected); }
     public static Check prefixStable(double minFraction) { return CacheChecks.prefixStable(minFraction); }
@@ -54,6 +59,7 @@ public final class Checks {
     public static Check scopeOffloadsLargeOutputs(int maxChars) { return StrategyChecks.scopeOffloadsLargeOutputs(maxChars); }
     public static Check scopePinned() { return StrategyChecks.scopePinned(); }
     public static Check compactionSummaryHasSections() { return StrategyChecks.compactionSummaryHasSections(); }
+    public static Check answerIsNotASummary() { return StrategyChecks.answerIsNotASummary(); }
 
     // retention
     public static Check retained(Similarity similarity, Judge judge, RetentionChecks.Fact... facts) { return RetentionChecks.retained(similarity, judge, facts); }

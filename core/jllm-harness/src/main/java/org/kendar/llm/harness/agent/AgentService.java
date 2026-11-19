@@ -316,7 +316,12 @@ public class AgentService {
             run.running = true;
         }
         try {
-            return loop.compact(chatId, focus);
+            CompactResult r = loop.compact(chatId, focus);
+            if (r.changed()) {
+                publish(run, "compaction", mapper.createObjectNode().put("tier", 2).put("manual", true)
+                        .put("tokensBefore", r.tokensBefore()).put("estimatedTokens", r.tokensAfter()));
+            }
+            return r;
         } finally {
             run.running = false;
         }

@@ -7,10 +7,13 @@ set -euo pipefail
 OLLAMA_BASE="${OLLAMA_BASE:-http://localhost:11434}"
 MODEL="${MODEL:-qwen3:30b}"
 CTX_TOKENS="${CTX_TOKENS:-16000}"          # must not exceed the context Ollama actually allocates (num_ctx)
+COMPACTION_CTX_TOKENS="${COMPACTION_CTX_TOKENS:-65536}"   # context of the compaction group only
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-300}"          # per model request, and warm-up
 CASE_TIMEOUT_SECONDS="${CASE_TIMEOUT_SECONDS:-$TIMEOUT_SECONDS}"  # cap on each user turn of a case
 #TEST_GROUPS="${TEST_GROUPS:-smoke}"
-TEST_GROUPS="${TEST_GROUPS:-smoke,full,strategy,unit}"
+TEST_GROUPS="${TEST_GROUPS:-all}"   # "all" or a comma separated list of: smoke,full,strategy,compaction,unit
+TEST_GROUPS="${TEST_GROUPS// /}"
+if [[ ",$TEST_GROUPS," == *,all,* ]]; then TEST_GROUPS="smoke,full,strategy,compaction,unit"; fi
 #TESTS="${TESTS:-InfrastructureSmokeTest,ExampleToolEvalTest}"
 TESTS=""
 TRIALS="${TRIALS:-1}"
@@ -40,7 +43,7 @@ grep -q "\"id\":\"$MODEL\"" <<<"$served" || {
 
 mkdir -p "$LOG_DIR"
 echo "Log: $LOG_FILE"
-echo "Model: $MODEL  ctx: $CTX_TOKENS  groups: $TEST_GROUPS  tests: ${TESTS:-all}  trials: $TRIALS  max trials: $MAX_TRIALS  timeout: ${TIMEOUT_SECONDS}s  case timeout cap: ${CASE_TIMEOUT_SECONDS}s"
+echo "Model: $MODEL  ctx: $CTX_TOKENS  compaction ctx: $COMPACTION_CTX_TOKENS  groups: $TEST_GROUPS  tests: ${TESTS:-all}  trials: $TRIALS  max trials: $MAX_TRIALS  timeout: ${TIMEOUT_SECONDS}s  case timeout cap: ${CASE_TIMEOUT_SECONDS}s"
 
 # ---- run
 TEST_FILTER=()
@@ -74,6 +77,7 @@ mvn -B -ntp -f "$REPO_ROOT/pom.xml" -Peval -pl core/jllm-eval -am test \
   -Deval.trials="$TRIALS" \
   -Deval.maxTrials="$MAX_TRIALS" \
   -Deval.caseTimeoutSeconds="$CASE_TIMEOUT_SECONDS" \
+  -Deval.compaction.contextTokens="$COMPACTION_CTX_TOKENS" \
   -Deval.timeout.warmup="$TIMEOUT_SECONDS" \
   2>&1 | tee "$LOG_FILE"
 status=${PIPESTATUS[0]}

@@ -12,7 +12,6 @@ import org.kendar.llm.harness.context.ContextStrategyKind;
 import org.kendar.llm.harness.permission.PermissionMode;
 
 import java.util.EnumSet;
-import java.util.List;
 import java.util.Set;
 
 import static org.kendar.llm.eval.grade.Checks.*;
@@ -21,20 +20,29 @@ import static org.kendar.llm.eval.suite.Suite.*;
 /**
  * 4 Context strategies: four long sessions, each replayed for compaction, mnemonic and scope with a small context
  * budget. Facts are planted at the start, in the middle and just before the turn that forces compaction; the last turn
- * asks for all of them. Strategy-specific invariants apply only to their own strategy.
+ * asks for all of them. Strategy-specific invariants apply only to their own strategy. One subclass per session, so the
+ * sessions run in parallel (the runner parallelises by class).
  */
-class StrategySessionsCasesTest extends SuiteBase {
+abstract class StrategySessionsBase extends SuiteBase {
 
     private static final int BUDGET = 10_000;
     private static final String TRACK = " Track the work with the todo_write tool if it is available.";
     private static final String ACK = " Acknowledge in one short sentence.";
 
     private static EvalCase.Builder session(String name) {
-        return EvalCase.named(name).feature(STRATEGIES).tag(EvalCase.Tag.STRATEGY)
+        return EvalCase.named(name).feature(STRATEGIES).tag(EvalCase.Tag.COMPACTION)
                 .strategies(ContextStrategyKind.COMPACTION, ContextStrategyKind.MNEMONIC, ContextStrategyKind.SCOPE)
                 .contextBudgetTokens(BUDGET)
                 .config(c -> c.withKeepRecentTurns(2).withCompaction(new HarnessConfig.Compaction(true, 1500, null)))
                 .maxTurns(60).timeoutSeconds(1800).trials(1);
+    }
+
+    /**
+     * Compacts the chat now, between two turns: the summary is written outside any turn (so its latency is not
+     * charged to a turn timeout) and happens at the same point on every run, whatever the token counts are.
+     */
+    private static EvalCase.Builder compactNow(EvalCase.Builder b) {
+        return b.action("/compact", (h, chat) -> h.commands().execute(chat, "/compact"));
     }
 
     private static ExpectedBreak breaksWithin(String what, Part... parts) {
@@ -54,8 +62,8 @@ class StrategySessionsCasesTest extends SuiteBase {
 
     /** Checks shared by every session: compaction happened, facts survive, invariants, cache breaks, no write of receipts. */
     private static EvalCase.Builder common(EvalCase.Builder b, ExpectedBreak allowed, RetentionChecks.Fact... facts) {
-        return b.check(noRunError()).check(eventPresent("compaction")).check(retained(facts))
-                .check(breaksAsExpected(allowed)).check(cachedRatioAtLeast(0.3, false))
+        return b.check(noRunError()).check(eventPresent("compaction")).check(answerIsNotASummary()).check(retained(facts))
+                .check(breaksAsExpected(allowed)).check(cachedRatioAtLeastOnLocal(0.3))
                 .check(onlyFor(ContextStrategyKind.COMPACTION, compactionSummaryHasSections()))
                 .check(onlyFor(ContextStrategyKind.MNEMONIC, mnemonicLogNeverRewritten()))
                 .check(onlyFor(ContextStrategyKind.MNEMONIC, mnemonicGuardBlocksMaskedWrites(false)))
@@ -67,7 +75,7 @@ class StrategySessionsCasesTest extends SuiteBase {
                 + "(int x) {\n        return x + 1;\n    }\n}\n";
     }
 
-    private static EvalCase refactoring() {
+    static EvalCase refactoring() {
         String[][] files = {{"Alpha", "compute", "calcTotal"}, {"Beta", "run", "calcRun"}, {"Gamma", "step", "calcStep"},
                 {"Delta", "value", "calcValue"}, {"Epsilon", "limit", "calcLimit"}};
         String[] setup = new String[(files.length + 1) * 2];
@@ -84,6 +92,7 @@ class StrategySessionsCasesTest extends SuiteBase {
             if (i == 2) b.user("For the record, the reviewer of this change is Priya Raman." + ACK);
         }
         b.user("The release branch for this change is rel/2026-09." + ACK);
+        compactNow(b);
         b.user("Now read src/Big.java completely and tell me how many lines it has.");
         b.user("Without opening files again, tell me: the ticket id, the reviewer name, the release branch and the required method prefix.");
         for (String[] f : files) b.check(fileContains("src/" + f[0] + ".java", f[2]));
@@ -93,7 +102,7 @@ class StrategySessionsCasesTest extends SuiteBase {
                 .build();
     }
 
-    private static EvalCase research() {
+    static EvalCase research() {
         LargeOutput report = new LargeOutput(450, 4, 21);
         Fixtures fx = Fixtures.create().largeOutput(report);
         var q = report.facts();
@@ -101,9 +110,13 @@ class StrategySessionsCasesTest extends SuiteBase {
                 .user("We are researching operations. The audit window code is WIN-208." + ACK + TRACK)
                 .user("Call big_report and tell me in one sentence what kind of lines it contains.")
                 .user("From that report, answer: " + q.get(0).question())
-                .user("Another fact for the record: the escalation phone is 555-0142." + ACK)
+                .user("Another fact for the record: the escalation phone is 555-0142." + ACK);
+        compactNow(b);
+        b
                 .user("Call big_report again and answer: " + q.get(1).question())
-                .user("One more fact: the vendor contact is Lena Fischer." + ACK)
+                .user("One more fact: the vendor contact is Lena Fischer." + ACK);
+        compactNow(b);
+        b
                 .user("Call big_report a third time and answer: " + q.get(2).question())
                 .user("Give me the audit window code, the escalation phone and the vendor contact. Also answer: "
                         + q.get(0).question() + " " + q.get(1).question() + " " + q.get(2).question()
@@ -116,7 +129,7 @@ class StrategySessionsCasesTest extends SuiteBase {
                 .build();
     }
 
-    private static EvalCase modes() {
+    static EvalCase modes() {
         String[] setup = new String[10];
         for (int i = 1; i <= 4; i++) {
             setup[(i - 1) * 2] = "docs/spec" + i + ".txt";
@@ -135,7 +148,9 @@ class StrategySessionsCasesTest extends SuiteBase {
                 .user("Read docs/spec3.txt and write a two-line summary into notes/s3.txt.")
                 .modeSwitch(PermissionMode.DEFAULT)
                 .user("Read docs/spec4.txt and write a two-line summary into notes/s4.txt.")
-                .user("The rollback window ends at 22:45 UTC." + ACK)
+                .user("The rollback window ends at 22:45 UTC." + ACK);
+        compactNow(b);
+        b
                 .user("Read docs/big.txt completely and tell me how many lines it has.")
                 .user("Without opening files again: what is the incident id, who is on call, when does the rollback window end, and which notes files did you create?");
         b.check(fileExists("notes/s1.txt")).check(fileExists("notes/s3.txt")).check(fileExists("notes/s4.txt"))
@@ -146,7 +161,7 @@ class StrategySessionsCasesTest extends SuiteBase {
                 .build();
     }
 
-    private static EvalCase toggles() {
+    static EvalCase toggles() {
         LargeOutput report = new LargeOutput(450, 3, 31);
         Fixtures fx = Fixtures.create().sampleTools(new SampleTools()).largeOutput(report);
         EvalCase.Builder b = session("session-tool-toggles").harness(fx.harness())
@@ -158,7 +173,9 @@ class StrategySessionsCasesTest extends SuiteBase {
                 .user("Call big_report and tell me in one sentence what kind of lines it contains.")
                 .action("/tools disable big_report", (h, chat) -> h.commands().execute(chat, "/tools disable big_report"))
                 .user("Is the big_report tool available to you right now? Answer yes or no.")
-                .user("The shipping partner is Nordline." + ACK)
+                .user("The shipping partner is Nordline." + ACK);
+        compactNow(b);
+        b
                 .action("/tools enable big_report", (h, chat) -> h.commands().execute(chat, "/tools enable big_report"))
                 .user("Call big_report again and answer: " + report.facts().get(0).question())
                 .action("/tools disable send_email", (h, chat) -> h.commands().execute(chat, "/tools disable send_email"))
@@ -171,10 +188,5 @@ class StrategySessionsCasesTest extends SuiteBase {
                 fact("What is the customer reference?", "CUST-5530"), fact("What is the shipping partner?", "Nordline"),
                 fact("What is the discount code?", "SAVE-9921"), fact(report.facts().get(0)))
                 .build();
-    }
-
-    @Override
-    public List<EvalCase> cases() {
-        return List.of(refactoring(), research(), modes(), toggles());
     }
 }

@@ -61,6 +61,7 @@ final class PacedModelClient implements ModelClient {
     private void pace(CancelToken cancel) {
         long waitMs = pacer.reserveMs();
         if (waitMs <= 0) return;
+        if (waitMs >= 2_000) EvalLog.info("rate limit: waiting " + EvalLog.seconds(waitMs) + "s for a request slot");
         try {
             if (cancel != null) {
                 cancel.sleep(waitMs);

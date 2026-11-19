@@ -136,6 +136,14 @@ public final class CacheChecks {
      * @param sharedServer true when the server is shared or multi-slot: the outcome is then WARN, never FAIL
      */
     public static Check cachedRatioAtLeast(double min, boolean sharedServer) {
+        return cachedRatioAtLeast(min, () -> sharedServer);
+    }
+
+    /**
+     * As above; {@code sharedServer} is asked when the check runs, so it can depend on the run's target. A hosted
+     * provider caches a repeated prefix only intermittently, so its ratio is reported, not graded.
+     */
+    public static Check cachedRatioAtLeast(double min, java.util.function.BooleanSupplier sharedServer) {
         String n = String.format(Locale.ROOT, "cachedRatioAtLeast(%.2f)", min);
         return Check.of(n, Check.Tier.CACHE, ctx -> {
             if (!measurable(ctx.trace())) {
@@ -147,7 +155,7 @@ public final class CacheChecks {
             if (Double.isNaN(mean)) return CheckResult.notMeasurable(n, "fewer than two requests with usage");
             String detail = String.format(Locale.ROOT, "mean cached ratio %.2f over %d request(s)", mean, later.size());
             boolean ok = mean >= min;
-            if (sharedServer) {
+            if (sharedServer.getAsBoolean()) {
                 return CheckResult.warn(n, "shared server, not graded: " + detail + (ok ? "" : ", below " + min));
             }
             return ok ? CheckResult.pass(n, detail) : CheckResult.fail(n, detail + ", below " + min);

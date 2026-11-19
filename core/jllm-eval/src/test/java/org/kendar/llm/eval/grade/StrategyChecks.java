@@ -35,10 +35,17 @@ public final class StrategyChecks {
     /** Tag wrapping the task list appended to the last user message by the scope strategy. */
     public static final String TODO_TAG = "<todo_list>";
     public static final String SUMMARY_PREFIX = "[Summary of the earlier conversation]";
-    /** Headings the compaction summary must contain (compaction-template.md). */
+    /** Start of the summary of the older steps of a request in progress (an in-turn compaction). */
+    public static final String TURN_SUMMARY_PREFIX = "[Summary of the earlier steps of this request]";
+    /** Headings of the whole summary template (compaction-template.md). */
     public static final List<String> SUMMARY_SECTIONS = List.of("## Objective", "## Requirements", "## Decisions",
             "## Work State", "### Completed", "### Active", "### Blocked", "## Next Move", "## Relevant Files",
             "## Important Context");
+    /**
+     * Headings every summary has: compaction-rules.md lets the model omit a section with nothing to say, so the
+     * others (e.g. Decisions on a session that decided nothing) are not required.
+     */
+    public static final List<String> REQUIRED_SUMMARY_SECTIONS = List.of("## Objective", "## Work State", "## Next Move");
 
     private StrategyChecks() {
     }
@@ -192,16 +199,31 @@ public final class StrategyChecks {
             Set<String> summaries = new LinkedHashSet<>();
             for (RecordedRequest r : ctx.trace().mainRequests()) {
                 stream(r).filter(m -> "user".equals(Msgs.role(m))).map(Msgs::text)
-                        .filter(t -> t.startsWith(SUMMARY_PREFIX)).forEach(summaries::add);
+                        .filter(StrategyChecks::isSummary).forEach(summaries::add);
             }
             if (summaries.isEmpty()) return CheckResult.fail(n, "no summary was produced");
             for (String s : summaries) {
-                for (String section : SUMMARY_SECTIONS) {
+                for (String section : REQUIRED_SUMMARY_SECTIONS) {
                     if (!s.contains(section)) return CheckResult.fail(n, "summary lacks '" + section + "'");
                 }
             }
-            return CheckResult.pass(n, summaries.size() + " summary(ies) with all sections");
+            return CheckResult.pass(n, summaries.size() + " summary(ies) with the required sections");
         });
+    }
+
+    /** The final answer is a reply, not a copy of the checkpoint the model was given. */
+    public static Check answerIsNotASummary() {
+        String n = "answerIsNotASummary";
+        return check(n, ctx -> {
+            String a = ctx.trace().finalAnswer();
+            return a != null && isSummary(a.stripLeading())
+                    ? CheckResult.fail(n, "the answer starts with a summary checkpoint")
+                    : CheckResult.pass(n, "the answer is not a summary");
+        });
+    }
+
+    private static boolean isSummary(String text) {
+        return text.startsWith(SUMMARY_PREFIX) || text.startsWith(TURN_SUMMARY_PREFIX);
     }
 
     // ---- helpers --------------------------------------------------------------------------------------------

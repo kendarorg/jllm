@@ -35,4 +35,10 @@ public abstract class SuiteBase {
     Stream<DynamicNode> strategyCases() {
         return CaseExpander.expand(Suite.withTag(cases(), EvalCase.Tag.STRATEGY));
     }
+
+    @Tag("compaction")
+    @TestFactory
+    Stream<DynamicNode> compactionCases() {
+        return CaseExpander.expand(Suite.withTag(cases(), EvalCase.Tag.COMPACTION));
+    }
 }

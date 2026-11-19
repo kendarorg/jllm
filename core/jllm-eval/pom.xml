@@ -17,7 +17,7 @@
     <description>Test-only module: evaluates the harness with real language models. Built only with -Peval.</description>
 
     <properties>
-        <!-- test groups to run: smoke, full, strategy, unit (no model needed) -->
+        <!-- test groups to run: smoke, full, strategy, compaction, unit (no model needed) -->
         <groups>smoke,unit</groups>
         <!-- test classes run concurrently when run.parallelism > 1; cases of one class stay sequential -->
         <run.parallelism>1</run.parallelism>
