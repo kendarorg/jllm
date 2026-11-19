@@ -59,7 +59,7 @@ public final class StrategyChecks {
 
     /**
      * Earlier messages stay byte-identical from one request to the next, except messages that became a mask receipt
-     * and boundaries excused by a segment or emergency compaction event (one boundary per event).
+     * and boundaries excused by a segment, emergency or manual compaction event (one boundary per event).
      */
     public static Check mnemonicLogNeverRewritten() {
         String n = "mnemonicLogNeverRewritten";
@@ -68,7 +68,9 @@ public final class StrategyChecks {
             long excuses = ctx.trace().events("compaction").stream().filter(e -> {
                 JsonNode d = e.data();
                 String kind = d == null ? "" : d.path("kind").asText("");
+                // a user /compact may rewrite the log (it carries no kind or strategy)
                 return kind.equals("segment") || kind.equals("emergency")
+                        || (d != null && d.path("manual").asBoolean(false))
                         || (d != null && !"mnemonic".equals(d.path("strategy").asText("mnemonic")));
             }).count();
             long used = 0;
@@ -167,7 +169,6 @@ public final class StrategyChecks {
         });
     }
 
-    /** The first message is identical in every main request and the task list is in the last one. */
     /** A user message made of text only: the start of a turn (a tool_result carrier is not). */
     private static boolean plainUser(JsonNode m) {
         if (!"user".equals(Msgs.role(m))) return false;
@@ -178,6 +179,7 @@ public final class StrategyChecks {
         return true;
     }
 
+    /** The first message is identical in every main request and the task list is in the last one. */
     public static Check scopePinned() {
         String n = "scopePinned";
         return check(n, ctx -> {

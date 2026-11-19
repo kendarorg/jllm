@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.kendar.llm.harness.HarnessTestSupport.MAPPER;
 
-/** Signed reasoning whose preceding content was rewritten after it was made must not be sent. */
+/** Signed reasoning: left out behind a new segment head, kept (for the API to drop) after a mask. */
 class RendererReasoningTest {
 
     private final Renderer renderer = new Renderer(MAPPER);
@@ -33,17 +33,17 @@ class RendererReasoningTest {
     }
 
     @Test
-    void reasoningMadeBeforeAMaskBeforeItIsLeftOut() {
+    void aMaskOnlyChangesTheMaskedBlock() {
         ArrayNode log = log();
         MnemonicState st = new MnemonicState();
-        // result 1 (index 2) masked when the log had 5 messages: the reasoning at index 3 was made on the unmasked text
+        // result 1 (index 2) masked when the log had 5 messages: the reasoning at index 3 was made on the unmasked
+        // text, but stays: the log is append-only apart from the mask, the API drops the voided block (drop_block)
         st.masks.add(new MnemonicState.Mask(2, "h", 0, MnemonicState.TOOL_RESULT, "r1", TextNode.valueOf("[masked]"),
                 10, 5));
         ArrayNode view = renderer.render(log, st);
-        assertTrue(hasThinking(view.get(1)), "before the mask: still bound to the same content");
-        assertFalse(hasThinking(view.get(3)));
-        assertEquals("tool_use", view.get(3).path("content").path(0).path("type").asText());
-        assertTrue(hasThinking(log.get(3)), "the log is not changed");
+        assertTrue(hasThinking(view.get(1)));
+        assertEquals("[masked]", view.get(2).path("content").path(0).path("content").asText());
+        assertEquals(log.get(3), view.get(3));
     }
 
     @Test

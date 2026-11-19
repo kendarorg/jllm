@@ -76,6 +76,7 @@ public final class EvalCase {
     private final int maxTurns;
     private final int timeoutSeconds;
     private final Integer contextBudgetTokens;
+    private final Map<ContextStrategyKind, Integer> strategyBudgets;
     private final PermissionMode mode;
 
     private EvalCase(Builder b) {
@@ -97,6 +98,7 @@ public final class EvalCase {
         this.maxTurns = b.maxTurns;
         this.timeoutSeconds = b.timeoutSeconds;
         this.contextBudgetTokens = b.contextBudgetTokens;
+        this.strategyBudgets = Map.copyOf(b.strategyBudgets);
         this.mode = b.mode;
     }
 
@@ -128,6 +130,12 @@ public final class EvalCase {
     public int timeoutSeconds() { return timeoutSeconds; }
     /** Context budget forcing early compaction, or null for the run's context size. */
     public Integer contextBudgetTokens() { return contextBudgetTokens; }
+    /** The budget for one strategy: its override, else {@link #contextBudgetTokens()}. */
+    public Integer contextBudgetTokens(ContextStrategyKind strategy) {
+        return strategyBudgets.getOrDefault(strategy, contextBudgetTokens);
+    }
+    /** Per-strategy budget overrides. */
+    public Map<ContextStrategyKind, Integer> strategyBudgets() { return strategyBudgets; }
     /** Initial permission mode, or null for the default one. */
     public PermissionMode mode() { return mode; }
 
@@ -159,6 +167,7 @@ public final class EvalCase {
         private int maxTurns = 40;
         private int timeoutSeconds = 600;
         private Integer contextBudgetTokens;
+        private final Map<ContextStrategyKind, Integer> strategyBudgets = new LinkedHashMap<>();
         private PermissionMode mode;
 
         private Builder(String name) {
@@ -218,6 +227,11 @@ public final class EvalCase {
         public Builder maxTurns(int n) { this.maxTurns = n; return this; }
         public Builder timeoutSeconds(int s) { this.timeoutSeconds = s; return this; }
         public Builder contextBudgetTokens(int t) { this.contextBudgetTokens = t; return this; }
+        /** Overrides the budget for one strategy only. */
+        public Builder contextBudgetTokens(ContextStrategyKind strategy, int t) {
+            strategyBudgets.put(strategy, t);
+            return this;
+        }
 
         public EvalCase build() {
             if (steps.stream().noneMatch(s -> s instanceof UserTurn)) {

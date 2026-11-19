@@ -36,8 +36,10 @@ class PdfCasesTest extends SuiteBase {
                         .check(answerContains(third.answer())).build(),
                 full(PDF, "failure-plugin-off-not-invented")
                         .harness(c.harness()).setup(c.setup())
+                        // no shell: a host python with pypdf would read the file without the plugin
+                        .action("/tools disable Shell", (h, chat) -> h.commands().execute(chat, "/tools disable Shell"))
                         .user("Read report.pdf and answer: " + first.question() + " If you cannot read it, say so.")
-                        .check(toolCalled("read_file")).check(answerNotContains(first.answer()))
+                        .check(toolCalled("read_file")).check(toolNotOffered("bash")).check(answerNotContains(first.answer()))
                         .check(anyToolResultContains("No reader for .pdf")).build());
     }
 }

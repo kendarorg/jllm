@@ -43,20 +43,21 @@ final class Renderer {
             }
         }
         List<JsonNode> applied = applied(log, st, start);
-        for (int k = 0; k < applied.size(); k++) out.add(withValidReasoning(applied.get(k), start + k, st, seg));
+        for (int k = 0; k < applied.size(); k++) out.add(withValidReasoning(applied.get(k), start + k, seg));
         return out;
     }
 
     /**
-     * Anthropic binds a thinking block's signature to the content before it as it was when the block was made: a
-     * mask before it, or a new segment head, decided after it was appended voids it (400 "Invalid signature"). Such
-     * blocks are left out; the decisions only grow, so a block once left out stays out.
+     * Anthropic binds a thinking block's signature to the content before it as it was when the block was made. A new
+     * segment head replaces that content entirely, so the blocks of the tail made before it are left out; the
+     * decisions only grow, so a block once left out stays out. A mask is not handled here: the log must stay
+     * append-only apart from the masked block, and the model client asks the API to drop the blocks a mask voids.
      */
-    private static JsonNode withValidReasoning(JsonNode msg, int index, MnemonicState st, Segment seg) {
+    private static JsonNode withValidReasoning(JsonNode msg, int index, Segment seg) {
         if (!"assistant".equals(Messages.role(msg)) || !msg.path("content").isArray()) return msg;
         boolean any = false;
         for (JsonNode b : msg.path("content")) any |= Messages.isThinking(b);
-        if (!any || !rewrittenBefore(index, st, seg)) return msg;
+        if (!any || !rewrittenBefore(index, seg)) return msg;
         ObjectNode copy = msg.deepCopy();
         ArrayNode kept = copy.putArray("content");
         for (JsonNode b : msg.path("content")) if (!Messages.isThinking(b)) kept.add(b);
@@ -64,16 +65,9 @@ final class Renderer {
         return copy;
     }
 
-    /**
-     * True when the content before message {@code index} changed after that message was appended. Dropped reasoning
-     * does not count: it is from earlier user turns, whose reasoning the client never sends anyway.
-     */
-    static boolean rewrittenBefore(int index, MnemonicState st, Segment seg) {
-        if (seg != null && seg.logSize() > index) return true;
-        for (Mask m : st.masks) {
-            if (m.index() < index && m.logSize() > index && !MnemonicState.THINKING.equals(m.kind())) return true;
-        }
-        return false;
+    /** True when a segment head replaced the content before message {@code index} after it was appended. */
+    static boolean rewrittenBefore(int index, Segment seg) {
+        return seg != null && seg.logSize() > index;
     }
 
     /** Messages {@code start..} of the log with their masks applied, aligned with the log indexes. */

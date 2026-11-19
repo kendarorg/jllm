@@ -26,7 +26,14 @@ import static org.kendar.llm.eval.suite.Suite.*;
 abstract class StrategySessionsBase extends SuiteBase {
 
     private static final int BUDGET = 10_000;
-    private static final String TRACK = " Track the work with the todo_write tool if it is available.";
+    /**
+     * Scope pins the system prompt, tools and task list and keeps the turn in progress whole: with a ~5k-token fixed
+     * part, 10k leaves it no room and every request ends over budget. Sessions that do not test offloading give it
+     * more room; the research session keeps the small budget, since offloading only happens over budget.
+     */
+    private static final int SCOPE_BUDGET = 30_000;
+    private static final String TRACK = " If you have a todo_write tool, call it now with a task list for this"
+            + " session and keep it current.";
     private static final String ACK = " Acknowledge in one short sentence.";
 
     private static EvalCase.Builder session(String name) {
@@ -90,7 +97,7 @@ abstract class StrategySessionsBase extends SuiteBase {
         }
         setup[files.length * 2] = "src/Big.java";
         setup[files.length * 2 + 1] = "// " + filler(30000, "Big") + "\n";
-        EvalCase.Builder b = session("session-refactoring").setup(files(setup))
+        EvalCase.Builder b = session("session-refactoring").contextBudgetTokens(ContextStrategyKind.SCOPE, SCOPE_BUDGET).setup(files(setup))
                 .user("Project rules for this refactoring session: the ticket is TKT-4471 and every renamed method must start with the prefix calc." + ACK + TRACK);
         for (int i = 0; i < files.length; i++) {
             b.user("Open src/" + files[i][0] + ".java and rename the method " + files[i][1] + " to " + files[i][2] + ". Keep it short.");
@@ -142,7 +149,7 @@ abstract class StrategySessionsBase extends SuiteBase {
         }
         setup[8] = "docs/big.txt";
         setup[9] = filler(30000, "big");
-        EvalCase.Builder b = session("session-mode-switches").setup(files(setup))
+        EvalCase.Builder b = session("session-mode-switches").contextBudgetTokens(ContextStrategyKind.SCOPE, SCOPE_BUDGET).setup(files(setup))
                 .user("Session note: the incident id is INC-7712." + ACK + TRACK)
                 .modeSwitch(PermissionMode.EDIT)
                 .user("Read docs/spec1.txt and write a two-line summary into notes/s1.txt.")
@@ -169,7 +176,7 @@ abstract class StrategySessionsBase extends SuiteBase {
     static EvalCase toggles() {
         LargeOutput report = new LargeOutput(450, 3, 31);
         Fixtures fx = Fixtures.create().sampleTools(new SampleTools()).largeOutput(report);
-        EvalCase.Builder b = session("session-tool-toggles").harness(fx.harness())
+        EvalCase.Builder b = session("session-tool-toggles").contextBudgetTokens(ContextStrategyKind.SCOPE, SCOPE_BUDGET).harness(fx.harness())
                 .setup((ws, extras) -> {
                     fx.setup().accept(ws, extras);
                     files("docs/big.txt", filler(30000, "big")).accept(ws, extras);

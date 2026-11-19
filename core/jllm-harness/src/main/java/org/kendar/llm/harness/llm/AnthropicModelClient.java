@@ -25,6 +25,8 @@ public class AnthropicModelClient implements ModelClient {
 
     private static final Logger log = LoggerFactory.getLogger(AnthropicModelClient.class);
     private static final String API_VERSION = "2023-06-01";
+    /** Beta that allows {@code thinking.block_binding} (drop reasoning whose prefix changed instead of a 400). */
+    static final String BINDING_BETA = "thinking-binding-controls-2026-08-01";
 
     private final AnthropicSettings props;
     private final ObjectMapper mapper;
@@ -83,7 +85,8 @@ public class AnthropicModelClient implements ModelClient {
         } catch (IOException e) {
             throw new ModelException("Cannot serialize request", e);
         }
-        JsonNode json = StreamingCall.run(http, () -> request(payload), auth, cancel, listener, props.maxRetries(),
+        boolean binding = bindsThinking(body);
+        JsonNode json = StreamingCall.run(http, () -> request(payload, binding), auth, cancel, listener, props.maxRetries(),
                 backoffBaseMs, s -> s == 429 || s == 529 || s >= 500, s -> "Anthropic API error " + s,
                 "Anthropic API call failed: ", () -> this::assemble);
         return toResponse(json);
@@ -317,8 +320,27 @@ public class AnthropicModelClient implements ModelClient {
             applyToolChoice(body, req, effortModel || thinking >= 1024);
         }
         ArrayNode msgs = withoutFinishedThinking(req.messages());
+        if (effortModel && hasSignedThinking(msgs)) {
+            // a context strategy may rewrite content before replayed reasoning (a mnemonic mask): the API then drops
+            // the voided blocks instead of rejecting the request (400 "bound to a different conversation")
+            body.putObject("thinking").put("type", "adaptive").putObject("block_binding")
+                    .put("prefix_mismatch_behavior", "drop_block");
+        }
         body.set("messages", withMessageBreakpoint(props.citations() ? withSearchResults(msgs) : msgs));
         return body;
+    }
+
+    /** True when a replayed thinking block carries an Anthropic signature (other servers send none). */
+    static boolean hasSignedThinking(ArrayNode messages) {
+        for (JsonNode m : messages) {
+            if (!m.path("content").isArray()) continue;
+            for (JsonNode b : m.path("content")) {
+                String t = b.path("type").asText();
+                if ("redacted_thinking".equals(t)
+                        || ("thinking".equals(t) && !b.path("signature").asText("").isEmpty())) return true;
+            }
+        }
+        return false;
     }
 
     private static final java.util.regex.Pattern EFFORT_MODELS =
@@ -510,11 +532,17 @@ public class AnthropicModelClient implements ModelClient {
         if ("1h".equals(props.cacheTtl())) cc.put("ttl", "1h");
     }
 
-    private HttpRequest request(String payload) {
+    /** True when the body sets {@code thinking.block_binding}, which needs {@link #BINDING_BETA}. */
+    static boolean bindsThinking(JsonNode body) {
+        return body.path("thinking").has("block_binding");
+    }
+
+    private HttpRequest request(String payload, boolean binding) {
         HttpRequest.Builder rb = HttpRequest.newBuilder(URI.create(props.baseUrl().replaceAll("/+$", "") + "/v1/messages"))
                 .timeout(Duration.ofSeconds(Math.max(1, props.timeoutSeconds())))
                 .header("content-type", "application/json")
                 .header("anthropic-version", API_VERSION);
+        if (binding) rb.header("anthropic-beta", BINDING_BETA);
         if (auth != null) {
             try {
                 auth.headers().forEach(rb::header);
@@ -534,7 +562,8 @@ public class AnthropicModelClient implements ModelClient {
         } catch (IOException e) {
             throw new ModelException("Cannot serialize request", e);
         }
-        java.util.function.Supplier<HttpRequest> build = () -> request(payload);
+        boolean binding = bindsThinking(body);
+        java.util.function.Supplier<HttpRequest> build = () -> request(payload, binding);
         HttpRequest request = build.get();
         boolean authRetried = false;
 

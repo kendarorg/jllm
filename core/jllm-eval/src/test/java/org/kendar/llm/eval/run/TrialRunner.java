@@ -124,7 +124,7 @@ public final class TrialRunner {
         long start = System.nanoTime();
         RecordingModelClient main = new RecordingModelClient(c.model() != null ? c.model().get() : model, label);
         RecordingModelClient fastRec = fast == null ? null : new RecordingModelClient(fast, label);
-        int budget = c.contextBudgetTokens() != null ? c.contextBudgetTokens()
+        int budget = c.contextBudgetTokens(strategy) != null ? c.contextBudgetTokens(strategy)
                 : (int) Math.max(4_000, settings.contextTokens() * 0.75);
         HarnessConfig config = HarnessConfig.defaults().withAgentId("jllm").withMaxTokens(4096)
                 .withMaxTurns(c.maxTurns()).withApprovalTimeoutSeconds(Math.max(30, c.timeoutSeconds()))

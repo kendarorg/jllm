@@ -41,7 +41,8 @@ $JUDGE_MODEL = Get-Setting 'JUDGE_MODEL' 'claude-haiku-5-5'
 $THINKING = Get-Setting 'THINKING' ''   # target effort: minimal|low|medium|high; empty = the model's default
 # Sonnet 5.5 at medium effort (about 19x the Haiku cost; the judge stays on Haiku):
 # $MODEL = Get-Setting 'MODEL' 'claude-sonnet-5-5'
-# $THINKING = Get-Setting 'THINKING' 'medium'
+$JUDGE_MODEL = Get-Setting 'JUDGE_MODEL' 'claude-sonnet-5-5'
+$THINKING = Get-Setting 'THINKING' 'medium'
 $CTX_TOKENS = Get-Setting 'CTX_TOKENS' '200000'
 $COMPACTION_CTX_TOKENS = Get-Setting 'COMPACTION_CTX_TOKENS' '65536'   # context of the compaction group only
 $TIMEOUT_SECONDS = Get-Setting 'TIMEOUT_SECONDS' '300'
@@ -51,8 +52,8 @@ if (($TEST_GROUPS -split ',') -contains 'all') { $TEST_GROUPS = 'smoke,full,stra
 $TRIALS = Get-Setting 'TRIALS' '1'
 $MAX_TRIALS = Get-Setting 'MAX_TRIALS' '2'
 $IGNORE_TEST_FAILURES = Get-Setting 'IGNORE_TEST_FAILURES' '1'
-$RPM_LIMIT = Get-Setting 'RPM_LIMIT' '120'   # requests per minute to the API (target, judge and fast share it); 0 = unpaced
-$PARALLELISM = [int](Get-Setting 'PARALLELISM' '10')   # test classes run at once; 1 = strictly sequential
+$RPM_LIMIT = Get-Setting 'RPM_LIMIT' '300'   # requests per minute to the API (target, judge and fast share it); 0 = unpaced
+$PARALLELISM = [int](Get-Setting 'PARALLELISM' '20')   # test classes run at once; 1 = strictly sequential
 $JAVA_HOME = Find-JavaHome   # build needs JDK 21+
 
 # ---- paths

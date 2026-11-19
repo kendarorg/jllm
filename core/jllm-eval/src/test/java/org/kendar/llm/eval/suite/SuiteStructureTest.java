@@ -6,6 +6,7 @@ import org.kendar.llm.eval.cases.EvalCase;
 import org.kendar.llm.eval.grade.Check;
 import org.kendar.llm.eval.suite.examples.ExampleStrategyEvalTest;
 import org.kendar.llm.eval.suite.examples.ExampleToolEvalTest;
+import org.kendar.llm.harness.context.ContextStrategyKind;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -148,6 +149,8 @@ class SuiteStructureTest {
             assertEquals(3, c.strategies().size(), c.name());
             assertNotNull(c.contextBudgetTokens(), c.name());
             assertTrue(c.contextBudgetTokens() <= 12_000, c.name());
+            assertTrue(c.strategyBudgets().keySet().stream().allMatch(k -> k == ContextStrategyKind.SCOPE),
+                    c.name() + ": only scope may get a larger budget");
             assertTrue(c.userTurns().size() >= 8, c.name() + " is not a long session");
             assertTrue(c.checks().stream().anyMatch(k -> k.name().startsWith("retained")), c.name() + " has no retention check");
             assertTrue(c.checks().stream().anyMatch(k -> k.name().startsWith("breaksAsExpected")), c.name() + " has no cache check");

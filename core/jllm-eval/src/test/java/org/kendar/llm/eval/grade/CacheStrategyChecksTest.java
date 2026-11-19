@@ -173,6 +173,10 @@ class CacheStrategyChecksTest {
                 .request("s", TOOLS, null, msg("user", "different"), m2)
                 .event("compaction", "{\"strategy\":\"mnemonic\",\"kind\":\"mask\"}");
         is(FAIL, Checks.mnemonicLogNeverRewritten(), maskOnlyEvent.ctx());
+        var manual = Traces.trace().request("s", TOOLS, null, m1, m2)
+                .request("s", TOOLS, null, msg("user", "different"), m2)
+                .event("compaction", "{\"tier\":2,\"manual\":true}");
+        is(PASS, Checks.mnemonicLogNeverRewritten(), manual.ctx());
 
         // the handoff-notes request (handoff merged into the last message) is a side call, not a second rewrite
         var notes = m2.deepCopy();

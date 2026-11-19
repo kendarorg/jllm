@@ -26,6 +26,7 @@ class AnthropicModelClientTest {
     private HttpServer server;
     private final Queue<String> bodies = new ConcurrentLinkedQueue<>();
     private final Queue<String> keys = new ConcurrentLinkedQueue<>();
+    private final List<String> betas = new java.util.concurrent.CopyOnWriteArrayList<>();
     private final AtomicInteger calls = new AtomicInteger();
     private volatile int[] statuses = {200};
     private volatile String retryAfter = null;
@@ -40,6 +41,7 @@ class AnthropicModelClientTest {
             bodies.add(new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
             keys.add(ex.getRequestHeaders().getFirst("x-api-key") + "|"
                     + ex.getRequestHeaders().getFirst("anthropic-version"));
+            betas.add(String.valueOf(ex.getRequestHeaders().getFirst("anthropic-beta")));
             int st = statuses[Math.min(n, statuses.length - 1)];
             byte[] out = (st == 200 ? okBody : "{\"type\":\"error\"}").getBytes(StandardCharsets.UTF_8);
             ex.getResponseHeaders().add("content-type", "application/json");
@@ -104,6 +106,29 @@ class AnthropicModelClientTest {
         assertEquals("tool_use", out.get(1).get("content").get(0).get("type").asText());
         assertEquals("thinking", out.get(5).get("content").get(0).get("type").asText());
         assertEquals("thinking", m.get(1).get("content").get(0).get("type").asText());
+    }
+
+    @Test
+    void replayedSignedReasoningAsksTheApiToDropVoidedBlocks() throws Exception {
+        AnthropicModelClient c = new AnthropicModelClient(new AnthropicSettings("k-123",
+                "http://127.0.0.1:" + server.getAddress().getPort(), "claude-haiku-5-5", 2048, 0, "1h", 0, 10, false),
+                mapper, 1);
+        ArrayNode inTurn = msgs("[{\"role\":\"user\",\"content\":\"a\"},"
+                + "{\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"\",\"signature\":\"s\"},"
+                + "{\"type\":\"tool_use\",\"id\":\"1\",\"name\":\"x\",\"input\":{}}]},"
+                + "{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"1\",\"content\":\"r\"}]}]");
+        c.complete(new ModelRequest("", "", inTurn, List.of(), 0));
+        assertEquals("adaptive", lastBody().at("/thinking/type").asText());
+        assertEquals("drop_block", lastBody().at("/thinking/block_binding/prefix_mismatch_behavior").asText());
+        assertEquals(AnthropicModelClient.BINDING_BETA, betas.get(betas.size() - 1));
+
+        c.complete(new ModelRequest("", "", msgs("[{\"role\":\"user\",\"content\":\"a\"}]"), List.of(), 0));
+        assertTrue(lastBody().path("thinking").isMissingNode(), "no reasoning replayed: nothing to bind");
+        assertEquals("null", betas.get(betas.size() - 1));
+
+        ArrayNode unsigned = msgs(inTurn.toString().replace(",\"signature\":\"s\"", ""));
+        c.complete(new ModelRequest("", "", unsigned, List.of(), 0));
+        assertTrue(lastBody().path("thinking").isMissingNode(), "a server without signatures gets no beta field");
     }
 
     @Test
