@@ -33,7 +33,9 @@ public final class EvalModels {
         ProviderCatalog catalog = new ProviderCatalog(List.of(), MAPPER, 8192);
         ModelClient client = catalog.client(endpoint.toProviderSettings());
         return endpoint.maxRpm() > 0
-                ? new PacedModelClient(client, RequestPacer.forHost(endpoint.baseUrl(), endpoint.maxRpm()))
+                ? new PacedModelClient(client, RequestPacer.forHost(endpoint.baseUrl(), endpoint.maxRpm()),
+                Integer.getInteger("eval.rateLimit.retries", 5), Integer.getInteger("eval.rateLimit.waitSeconds", 10) * 1000L,
+                Integer.getInteger("eval.rateLimit.stepSeconds", 5) * 1000L)
                 : client;
     }
 }

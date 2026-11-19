@@ -17,8 +17,8 @@ if [[ ",$TEST_GROUPS," == *,all,* ]]; then TEST_GROUPS="smoke,full,strategy,comp
 TRIALS="${TRIALS:-1}"
 MAX_TRIALS="${MAX_TRIALS:-2}"
 IGNORE_TEST_FAILURES="${IGNORE_TEST_FAILURES:-1}"
-RPM_LIMIT="${RPM_LIMIT:-40}"
-PARALLELISM="${PARALLELISM:-6}"   # test classes run at once; 1 = strictly sequential
+RPM_LIMIT="${RPM_LIMIT:-10}"
+PARALLELISM="${PARALLELISM:-2}"   # test classes run at once; 1 = strictly sequential
 
 # ---- paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

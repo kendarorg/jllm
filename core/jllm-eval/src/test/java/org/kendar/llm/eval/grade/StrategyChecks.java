@@ -43,9 +43,10 @@ public final class StrategyChecks {
             "## Important Context");
     /**
      * Headings every summary has: compaction-rules.md lets the model omit a section with nothing to say, so the
-     * others (e.g. Decisions on a session that decided nothing) are not required.
+     * others (e.g. Decisions on a session that decided nothing, Next Move once the request is answered) are not
+     * required.
      */
-    public static final List<String> REQUIRED_SUMMARY_SECTIONS = List.of("## Objective", "## Work State", "## Next Move");
+    public static final List<String> REQUIRED_SUMMARY_SECTIONS = List.of("## Objective", "## Work State");
 
     private StrategyChecks() {
     }

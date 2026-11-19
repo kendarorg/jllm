@@ -46,8 +46,8 @@ if (($TEST_GROUPS -split ',') -contains 'all') { $TEST_GROUPS = 'smoke,full,stra
 $TRIALS = Get-Setting 'TRIALS' '1'
 $MAX_TRIALS = Get-Setting 'MAX_TRIALS' '2'
 $IGNORE_TEST_FAILURES = Get-Setting 'IGNORE_TEST_FAILURES' '1'
-$RPM_LIMIT = Get-Setting 'RPM_LIMIT' '40'
-$PARALLELISM = [int](Get-Setting 'PARALLELISM' '6')   # test classes run at once; 1 = strictly sequential
+$RPM_LIMIT = Get-Setting 'RPM_LIMIT' '10'
+$PARALLELISM = [int](Get-Setting 'PARALLELISM' '2')   # test classes run at once; 1 = strictly sequential
 $JAVA_HOME = Find-JavaHome   # build needs JDK 21+
 
 # ---- paths

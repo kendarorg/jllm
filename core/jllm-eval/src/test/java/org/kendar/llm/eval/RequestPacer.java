@@ -31,6 +31,11 @@ final class RequestPacer {
         return slot - now;
     }
 
+    /** After a rate-limit answer: no call of this host starts before {@code ms} from now (callers already waiting too). */
+    synchronized void pauseMs(long ms) {
+        nextSlotMs = Math.max(nextSlotMs, System.currentTimeMillis() + ms);
+    }
+
     long intervalMs() {
         return intervalMs;
     }

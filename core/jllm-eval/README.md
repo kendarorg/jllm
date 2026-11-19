@@ -23,7 +23,7 @@ mvn -f ../../pom.xml -Peval -pl core/jllm-eval -am test -Dgroups=smoke -Deval.ta
 `-Dgroups` selects the test groups: `smoke`, `full`, `strategy` or `compaction` (the long sessions that force compaction; they run with `eval.compaction.contextTokens`). The extra group `unit` holds the checks that need
 no model at all (`mvn -f ../../pom.xml -Peval -pl core/jllm-eval -am test -Dgroups=unit`). The default is `smoke,unit`.
 
-Tests, classes and methods run one after the other in a single JVM by default. With `-Drun.parallelism=N -Drun.parallel.enabled=true -Drun.parallel.classes=concurrent` (the NVIDIA smoke scripts do this through `PARALLELISM`, default 6) up to N test classes run at once; the cases of one class stay sequential. All requests to a host still go through one shared `RequestPacer`, so `maxRpm` holds.
+Tests, classes and methods run one after the other in a single JVM by default. With `-Drun.parallelism=N -Drun.parallel.enabled=true -Drun.parallel.classes=concurrent` (the NVIDIA smoke scripts do this through `PARALLELISM`, default 2) up to N test classes run at once; the cases of one class stay sequential. All requests to a host still go through one shared `RequestPacer`, so `maxRpm` holds.
 
 ## Targets
 
@@ -64,6 +64,7 @@ object descriptions, exception messages, connection-check output and `run.json`.
 | `eval.anthropic.model` | Model identifier. Defaults to `claude-haiku-5-5`. |
 | `eval.anthropic.contextTokens` | Context size used by the harness. |
 | `eval.anthropic.timeoutSeconds` | Request timeout. |
+| `eval.anthropic.maxRpm` | Requests per minute allowed to the Anthropic API, `0` (default) = unpaced. Shared by target, judge and fast model; a 429 then pauses the host and is repeated (see `eval.rateLimit.*`). |
 | `eval.remote.<name>.protocol` | `openai` (OpenAI-compatible) or `anthropic`. |
 | `eval.remote.<name>.baseUrl` | Server address, including `/v1` for OpenAI-compatible servers. |
 | `eval.remote.<name>.model` | Model identifier the server serves. |
@@ -89,6 +90,7 @@ object descriptions, exception messages, connection-check output and `run.json`.
 | `eval.trials` | Default number of trials. |
 | `eval.maxTrials` | Cap on the trials of any case, including cases that set their own count. Default `10`. The Ollama smoke script sets `2` (`MAX_TRIALS`). |
 | `eval.compaction.contextTokens` | Context size for the cases tagged `compaction` only; every other case uses the target's `contextTokens`. Default `65536`. The smoke scripts set it from `COMPACTION_CTX_TOKENS`. |
+| `eval.rateLimit.retries` / `waitSeconds` / `stepSeconds` | On an HTTP 429 from a paced endpoint (one with `maxRpm`) every call to that host pauses for `waitSeconds` (default 10), plus `stepSeconds` (default 5) per further repeat, and the call is repeated, up to `retries` times (default 5: 10 s, 15 s, 20 s, 25 s, 30 s), on top of the harness client's own short retry. |
 | `eval.caseTimeoutSeconds` | Cap on each user turn of a case, in seconds. `0` (default) keeps each case's own timeout. The smoke scripts set `300` (`CASE_TIMEOUT_SECONDS`, defaults to `TIMEOUT_SECONDS`), which also caps the `4-strategies` sessions (they declare 1800): on a slow model set `CASE_TIMEOUT_SECONDS=1800` for those runs. |
 | `eval.outputDir` | Results folder (git-ignored, survives `mvn clean`). Layout: `<model>/run-<timestamp>/` with `run.json`, `<feature>/<case>/<strategy>/result.json` and traces, plus `report.md` and `summary.json` written when the run ends; `<model>/baselines/`; `summary/merged.md` compares the latest run of every model; `history/` keeps one compact recap per run, `<date>_<model>.md` and `.json`, plus `INDEX.md` (not git-ignored: commit it to keep the eval history). |
 

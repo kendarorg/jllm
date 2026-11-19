@@ -26,6 +26,7 @@ public class ExampleStrategyEvalTest {
                 .contextBudgetTokens(8_000)
                 .setup(Suite.files("big.txt", Suite.filler(24_000, "archive")))
                 .user("Remember this: the vault code is 7391-KITE. Acknowledge in one short sentence.")
+                .user("Thanks. Reply with just: OK")
                 .action("/compact", (h, chat) -> h.commands().execute(chat, "/compact"))
                 .modeSwitch(PermissionMode.EDIT)
                 .user("Read big.txt completely and tell me how many lines it has.")
