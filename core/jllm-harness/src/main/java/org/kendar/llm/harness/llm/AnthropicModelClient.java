@@ -278,17 +278,24 @@ public class AnthropicModelClient implements ModelClient {
         }
         body.put("max_tokens", maxTokens);
 
-        ArrayNode system = body.putArray("system");
-        ObjectNode pinned = system.addObject();
-        pinned.put("type", "text");
-        pinned.put("text", req.pinnedSystem());
-        ObjectNode last = pinned;
+        // the API rejects an empty text block (and a cache_control on one): leave blank parts out, and the whole
+        // system field when both are blank (e.g. a plain "reply OK" connection check)
+        ArrayNode system = mapper.createArrayNode();
+        ObjectNode last = null;
+        if (req.pinnedSystem() != null && !req.pinnedSystem().isBlank()) {
+            last = system.addObject();
+            last.put("type", "text");
+            last.put("text", req.pinnedSystem());
+        }
         if (req.extraSystem() != null && !req.extraSystem().isBlank()) {
             last = system.addObject();
             last.put("type", "text");
             last.put("text", req.extraSystem());
         }
-        cacheControl(last);
+        if (last != null) {
+            cacheControl(last);
+            body.set("system", system);
+        }
 
         if (req.tools() != null && !req.tools().isEmpty()) {
             ArrayNode tools = body.putArray("tools");

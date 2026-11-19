@@ -122,6 +122,26 @@ class AnthropicModelClientTest {
     }
 
     @Test
+    void anEmptySystemIsLeftOutInsteadOfSentAsAnEmptyCachedBlock() throws Exception {
+        // the API answers 400 "cache_control cannot be set for empty text blocks"
+        client(0, true, 0).simpleComplete("", "Reply with the single word OK.", 16);
+        assertTrue(lastBody().path("system").isMissingNode(), lastBody().toString());
+
+        client(0, true, 0).simpleComplete("   ", "again", 16);
+        assertTrue(lastBody().path("system").isMissingNode(), lastBody().toString());
+    }
+
+    @Test
+    void aBlankPinnedPartIsDroppedAndTheCacheBreakpointMovesToTheExtraPart() throws Exception {
+        client(0, true, 0).complete(new ModelRequest("", "EXTRA", msgs("[{\"role\":\"user\",\"content\":\"a\"}]"),
+                java.util.List.of(), 100));
+        JsonNode sys = lastBody().get("system");
+        assertEquals(1, sys.size());
+        assertEquals("EXTRA", sys.get(0).get("text").asText());
+        assertEquals("ephemeral", sys.get(0).at("/cache_control/type").asText());
+    }
+
+    @Test
     void toolChoiceVariants() throws Exception {
         AnthropicModelClient c = client(0, true, 0);
         c.complete(req("any", false));

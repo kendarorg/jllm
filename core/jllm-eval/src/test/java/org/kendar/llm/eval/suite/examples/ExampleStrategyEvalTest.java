@@ -29,6 +29,7 @@ public class ExampleStrategyEvalTest {
                 .user("Remember this: the vault code is 7391-KITE. Acknowledge in one short sentence.")
                 .modeSwitch(PermissionMode.EDIT)
                 .user("Read big.txt completely and tell me how many lines it has.")
+                .user("Thanks. Reply with just: OK") // /compact keeps the latest turn: the big read must not be it
                 .action("/compact", (h, chat) -> h.commands().execute(chat, "/compact"))
                 .user("Without reading anything again: what is the vault code?")
                 .check(noRunError())
