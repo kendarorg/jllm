@@ -16,10 +16,10 @@ import java.util.List;
 import java.util.function.Consumer;
 
 /** Level 2: moves the older part of the conversation out of the prompt, behind handoff notes. */
-final class SegmentSwitcher {
+public final class SegmentSwitcher {
 
     /** The handoff instruction appended to the notes request. */
-    static final String HANDOFF = Prompts.load("mnemonic-handoff.md");
+    public static final String HANDOFF = Prompts.load("mnemonic-handoff.md");
 
     private final ObjectMapper mapper;
 
@@ -134,7 +134,7 @@ final class SegmentSwitcher {
         Integer instruction = last >= 0 && last < cut && last != first ? last : null;
         return new Segment(cut, Messages.hash(cut, log.get(cut)), first,
                 first < 0 ? null : Messages.hash(first, log.get(first)), notes, index, instruction,
-                instruction == null ? null : Messages.hash(instruction, log.get(instruction)));
+                instruction == null ? null : Messages.hash(instruction, log.get(instruction)), log.size());
     }
 
     private static int firstUser(ArrayNode log, int from, int to) {

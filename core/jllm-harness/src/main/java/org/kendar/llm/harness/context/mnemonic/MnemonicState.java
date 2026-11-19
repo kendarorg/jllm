@@ -29,8 +29,11 @@ public final class MnemonicState {
      * @param replacement what the block's content (tool_result) or input (tool_use) becomes; null for reasoning,
      *                    which is dropped
      * @param saved       estimated tokens saved
+     * @param logSize     size of the log when the decision was made: messages before it were sent unmasked, so
+     *                    their signed reasoning is bound to the unmasked content
      */
-    public record Mask(int index, String hash, int block, String kind, String id, JsonNode replacement, long saved) {
+    public record Mask(int index, String hash, int block, String kind, String id, JsonNode replacement, long saved,
+                       int logSize) {
     }
 
     /**
@@ -40,13 +43,10 @@ public final class MnemonicState {
      *                    request), kept verbatim at the top; -1 if none
      * @param instruction index of the user instruction in progress when the cut falls after it, kept verbatim after
      *                    the first request; null when it stays in the tail (or in files written before it existed)
+     * @param logSize     size of the log at the switch: the messages before it were sent after another head
      */
     public record Segment(int cut, String cutHash, int firstUser, String firstUserHash, String notes, String index,
-                          Integer instruction, String instructionHash) {
-
-        public Segment(int cut, String cutHash, int firstUser, String firstUserHash, String notes, String index) {
-            this(cut, cutHash, firstUser, firstUserHash, notes, index, null, null);
-        }
+                          Integer instruction, String instructionHash, int logSize) {
     }
 
     public final List<Mask> masks = new ArrayList<>();

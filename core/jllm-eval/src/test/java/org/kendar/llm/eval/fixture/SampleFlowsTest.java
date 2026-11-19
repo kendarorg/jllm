@@ -30,10 +30,13 @@ class SampleFlowsTest {
 
     @BeforeEach
     void setUp() {
-        SampleFlowActions.reset();
         SampleFlows.install(dir);
         api = WorkflowApiImpl.create(ActionProvider.load(getClass().getClassLoader()),
                 new RunStore.Files(dir.resolve("runs")), new FlowStore.Files(dir.resolve("flows")), "admin");
+    }
+
+    private List<String> executions() {
+        return SampleFlowActions.executions(dir.resolve("runs"));
     }
 
     private JsonNode start(String flow, String input) throws Exception {
@@ -55,7 +58,7 @@ class SampleFlowsTest {
         assertEquals("completed", run.path("status").asText(), run.toString());
         assertEquals("HELLO BIG WORLD", run.at("/result/upper").asText());
         assertEquals("3", run.at("/result/words").asText());
-        assertEquals(List.of("normalizeText", "countWords"), SampleFlowActions.executions());
+        assertEquals(List.of("normalizeText", "countWords"), executions());
     }
 
     @Test
@@ -64,7 +67,7 @@ class SampleFlowsTest {
         assertEquals("review", start("branching", "{\"amount\":500}").at("/result/decision").asText());
         assertEquals("rejected", start("branching", "{\"amount\":5000}").at("/result/decision").asText());
         assertEquals(List.of("amountBand:small", "approve", "amountBand:large", "flagReview", "amountBand:huge"),
-                SampleFlowActions.executions());
+                executions());
     }
 
     @Test
@@ -79,13 +82,13 @@ class SampleFlowsTest {
         run = api.answer(U, Set.of(), id, new TextNode("A-1001"));
         assertEquals("waiting", run.path("status").asText(), run.toString());
         assertTrue(run.toString().contains("How should we pay you back?"), run.toString());
-        assertTrue(SampleFlowActions.executions().isEmpty(), "the sub-flow has not run yet");
+        assertTrue(executions().isEmpty(), "the sub-flow has not run yet");
 
         run = api.answer(U, Set.of(), id, new TextNode("credit"));
         assertEquals("completed", run.path("status").asText(), run.toString());
         assertEquals("A-1001", run.at("/result/order").asText());
         assertEquals("credit", run.at("/result/how").asText());
         assertEquals("shipped", run.at("/result/status").asText());
-        assertEquals(List.of("loadOrder:A-1001"), SampleFlowActions.executions());
+        assertEquals(List.of("loadOrder:A-1001"), executions());
     }
 }

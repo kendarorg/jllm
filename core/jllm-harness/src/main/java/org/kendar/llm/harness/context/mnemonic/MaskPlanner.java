@@ -98,7 +98,7 @@ final class MaskPlanner {
                         + Messages.callSummary(use) + " -> ~" + Messages.tokens(text) + " tokens, " + MARKER + id + "]";
                 TextNode r = TextNode.valueOf(receipt);
                 long saved = size - Messages.tokens(r);
-                if (saved > 0) out.add(new Mask(i, hash, k, MnemonicState.TOOL_RESULT, id, r, saved));
+                if (saved > 0) out.add(new Mask(i, hash, k, MnemonicState.TOOL_RESULT, id, r, saved, log.size()));
             } else if ("tool_use".equals(type) && b.path("input").isObject()) {
                 String id = "a" + id(hash, k);
                 ObjectNode input = (ObjectNode) b.path("input");
@@ -113,12 +113,12 @@ final class MaskPlanner {
                     any = true;
                 }
                 long saved = Messages.tokens(input) - Messages.tokens(replaced);
-                if (any && saved > 0) out.add(new Mask(i, hash, k, MnemonicState.TOOL_INPUT, id, replaced, saved));
+                if (any && saved > 0) out.add(new Mask(i, hash, k, MnemonicState.TOOL_INPUT, id, replaced, saved, log.size()));
             } else if (Messages.isThinking(b) && limits.dropOldThinking() && earlierUserTurn && nonThinking > 0) {
                 // reasoning may only be dropped from earlier user turns, never from the open tool-use chain
                 long size = Messages.tokens(b);
                 if (size < limits.minMaskTokens()) continue;
-                out.add(new Mask(i, hash, k, MnemonicState.THINKING, "t" + id(hash, k), null, size));
+                out.add(new Mask(i, hash, k, MnemonicState.THINKING, "t" + id(hash, k), null, size, log.size()));
             }
         }
         return out;

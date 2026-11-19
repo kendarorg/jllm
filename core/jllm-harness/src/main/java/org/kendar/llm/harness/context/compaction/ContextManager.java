@@ -39,7 +39,7 @@ public class ContextManager {
     /** Starts the summary of the older tool rounds of the turn in progress (see {@link #compactOverflow}). */
     static final String TURN_SUMMARY_PREFIX = "[Summary of the earlier steps of this request]\n";
     /** Stands in for an assistant message that held nothing but reasoning once the reasoning is dropped. */
-    static final String REASONING_OMITTED = "[reasoning omitted]";
+    public static final String REASONING_OMITTED = "[reasoning omitted]";
     private static final String OMITTED = "[earlier history omitted]\n";
     private static final int SUMMARY_TOKENS = 3000;
     /** Manual compaction leaves a conversation alone when what it would summarize is smaller than this. */

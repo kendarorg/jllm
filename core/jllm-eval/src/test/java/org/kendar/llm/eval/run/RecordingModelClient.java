@@ -47,8 +47,9 @@ public final class RecordingModelClient implements ModelClient {
     }
 
     private void record(ModelRequest r, ModelResponse resp, long start, Throwable error) {
-        log(false, start, resp == null ? null : resp.usage(), error);
-        requests.add(new RecordedRequest(requests.size(), false, r.pinnedSystem(), r.extraSystem(),
+        boolean side = RecordedRequest.handoffNotes(r.messages());
+        log(side, start, resp == null ? null : resp.usage(), error);
+        requests.add(new RecordedRequest(requests.size(), side, r.pinnedSystem(), r.extraSystem(),
                 r.messages().deepCopy(), r.tools().stream().map(HarnessTool::name).toList(), r.maxTokens(),
                 resp == null ? null : resp.usage(), (System.nanoTime() - start) / 1_000_000));
     }

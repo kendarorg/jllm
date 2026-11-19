@@ -60,7 +60,7 @@ final class Traces {
     Traces request(String system, List<String> tools, Usage usage, JsonNode... messages) {
         ArrayNode arr = M.createArrayNode();
         for (JsonNode m : messages) arr.add(m);
-        requests.add(new RecordedRequest(requests.size(), false, system, null, arr, tools, 1000, usage, 1));
+        requests.add(new RecordedRequest(requests.size(), RecordedRequest.handoffNotes(arr), system, null, arr, tools, 1000, usage, 1));
         return this;
     }
 

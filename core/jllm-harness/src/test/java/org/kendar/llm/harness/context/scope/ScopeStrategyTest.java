@@ -117,15 +117,34 @@ class ScopeStrategyTest {
     }
 
     @Test
-    void todoListIsAddedToTheRequestOnly() {
+    void todoListIsAppendedOnlyToTheNewestMessage() {
         todos.replace("c1", "main", MAPPER.createArrayNode().add(MAPPER.createObjectNode()
                 .put("content", "write tests").put("status", "in_progress")));
         ArrayNode log = MAPPER.createArrayNode();
         user(log, "go");
-        ContextView v = strategy(100_000).prepare(turn(log));
-        String last = v.messages().get(0).path("content").toString();
-        assertTrue(last.contains("<todo_list>") && last.contains("write tests"), last);
-        assertEquals(1, log.get(0).path("content").size(), "the stored log is untouched");
+        ScopeStrategy s = strategy(100_000);
+        ContextView v = s.prepare(turn(log));
+        assertTrue(v.logChanged());
+        String first = log.get(0).path("content").toString();
+        assertTrue(first.contains("<todo_list>") && first.contains("write tests"), first);
+        // a tool step with the list unchanged: nothing is added, nothing earlier moves
+        log.addObject().put("role", "assistant").putArray("content").addObject().put("type", "text").put("text", "ok");
+        log.addObject().put("role", "user").putArray("content").addObject().put("type", "tool_result")
+                .put("tool_use_id", "t1").put("content", "done");
+        String before = log.toString();
+        assertFalse(s.prepare(turn(log)).logChanged());
+        assertEquals(before, log.toString());
+        // the list changes: a new snapshot goes to the newest message, the old one stays where it was
+        todos.replace("c1", "main", MAPPER.createArrayNode().add(MAPPER.createObjectNode()
+                .put("content", "write tests").put("status", "completed")));
+        assertTrue(s.prepare(turn(log)).logChanged());
+        assertEquals(first, log.get(0).path("content").toString());
+        String newest = log.get(2).path("content").toString();
+        assertTrue(newest.contains("<todo_list>") && newest.contains("[x]"), newest);
+        // a new user turn gets its own snapshot
+        user(log, "next");
+        assertTrue(s.prepare(turn(log)).logChanged());
+        assertTrue(log.get(3).path("content").toString().contains("<todo_list>"));
     }
 
     @Test

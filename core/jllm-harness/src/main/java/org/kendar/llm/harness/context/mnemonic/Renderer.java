@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.kendar.llm.harness.context.compaction.ContextManager;
 import org.kendar.llm.harness.context.mnemonic.MnemonicState.Mask;
 import org.kendar.llm.harness.context.mnemonic.MnemonicState.Segment;
 
@@ -42,8 +43,37 @@ final class Renderer {
             }
         }
         List<JsonNode> applied = applied(log, st, start);
-        applied.forEach(out::add);
+        for (int k = 0; k < applied.size(); k++) out.add(withValidReasoning(applied.get(k), start + k, st, seg));
         return out;
+    }
+
+    /**
+     * Anthropic binds a thinking block's signature to the content before it as it was when the block was made: a
+     * mask before it, or a new segment head, decided after it was appended voids it (400 "Invalid signature"). Such
+     * blocks are left out; the decisions only grow, so a block once left out stays out.
+     */
+    private static JsonNode withValidReasoning(JsonNode msg, int index, MnemonicState st, Segment seg) {
+        if (!"assistant".equals(Messages.role(msg)) || !msg.path("content").isArray()) return msg;
+        boolean any = false;
+        for (JsonNode b : msg.path("content")) any |= Messages.isThinking(b);
+        if (!any || !rewrittenBefore(index, st, seg)) return msg;
+        ObjectNode copy = msg.deepCopy();
+        ArrayNode kept = copy.putArray("content");
+        for (JsonNode b : msg.path("content")) if (!Messages.isThinking(b)) kept.add(b);
+        if (kept.isEmpty()) kept.addObject().put("type", "text").put("text", ContextManager.REASONING_OMITTED);
+        return copy;
+    }
+
+    /**
+     * True when the content before message {@code index} changed after that message was appended. Dropped reasoning
+     * does not count: it is from earlier user turns, whose reasoning the client never sends anyway.
+     */
+    static boolean rewrittenBefore(int index, MnemonicState st, Segment seg) {
+        if (seg != null && seg.logSize() > index) return true;
+        for (Mask m : st.masks) {
+            if (m.index() < index && m.logSize() > index && !MnemonicState.THINKING.equals(m.kind())) return true;
+        }
+        return false;
     }
 
     /** Messages {@code start..} of the log with their masks applied, aligned with the log indexes. */

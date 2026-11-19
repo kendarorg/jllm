@@ -125,7 +125,7 @@ class FixturesTest {
                 WorkflowApi api = h.services().lookup(WorkflowApi.class).orElseThrow();
                 var run = api.start(SampleFlows.USER, Set.of(), "branching", "personal", M.readTree("{\"amount\":10}"), null);
                 assertEquals("approved", run.at("/result/decision").asText(), run.toString());
-                assertEquals(List.of("amountBand:small", "approve"), SampleFlowActions.executions());
+                assertEquals(List.of("amountBand:small", "approve"), fx.flowExecutions());
             }
         }
     }

@@ -223,12 +223,21 @@ public final class Fixtures implements AutoCloseable {
         };
     }
 
+    private Path runsDir() {
+        return workflowDir.resolve("runs");
+    }
+
+    /** The sample flow actions run by this fixture's own flows since the last reset, in order. */
+    public List<String> flowExecutions() {
+        return workflowDir == null ? List.of() : SampleFlowActions.executions(runsDir());
+    }
+
     /** Clears every call log and counter and brings the servers up. */
     public void reset() {
         for (Source s : concat()) s.server.reset();
         if (tools != null) tools.reset();
-        SampleFlowActions.reset();
         if (workflowDir != null) {
+            SampleFlowActions.forget(runsDir());
             TEMP_DIRS.remove(workflowDir);
             deleteQuietly(workflowDir);
             workflowDir = null;

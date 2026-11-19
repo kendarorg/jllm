@@ -3,6 +3,7 @@ package org.kendar.llm.eval.grade;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.kendar.llm.harness.context.mnemonic.SegmentSwitcher;
 import org.kendar.llm.harness.llm.Usage;
 
 import java.nio.file.Files;
@@ -172,6 +173,22 @@ class CacheStrategyChecksTest {
                 .request("s", TOOLS, null, msg("user", "different"), m2)
                 .event("compaction", "{\"strategy\":\"mnemonic\",\"kind\":\"mask\"}");
         is(FAIL, Checks.mnemonicLogNeverRewritten(), maskOnlyEvent.ctx());
+
+        // the handoff-notes request (handoff merged into the last message) is a side call, not a second rewrite
+        var notes = m2.deepCopy();
+        notes.withArray("content").addObject().put("type", "text").put("text", SegmentSwitcher.HANDOFF);
+        var segmentSwitch = Traces.trace().request("s", TOOLS, null, m1, m2)
+                .request("s", TOOLS, null, m1, notes)
+                .request("s", TOOLS, null, msg("user", "[Context segment 2]"))
+                .event("compaction", "{\"strategy\":\"mnemonic\",\"kind\":\"segment\"}");
+        assertEquals(2, segmentSwitch.build().mainRequests().size());
+        is(PASS, Checks.mnemonicLogNeverRewritten(), segmentSwitch.ctx());
+        var notesThenRewrite = Traces.trace().request("s", TOOLS, null, m1, m2)
+                .request("s", TOOLS, null, m1, notes)
+                .request("s", TOOLS, null, msg("user", "[Context segment 2]"))
+                .request("s", TOOLS, null, msg("user", "rewritten"))
+                .event("compaction", "{\"strategy\":\"mnemonic\",\"kind\":\"segment\"}");
+        is(FAIL, Checks.mnemonicLogNeverRewritten(), notesThenRewrite.ctx());
     }
 
     @Test
@@ -255,6 +272,20 @@ class CacheStrategyChecksTest {
         var noList = Traces.trace().call("1", "todo_write", "{}")
                 .request("s", TOOLS, null, m1).request("s", TOOLS, null, m1, msg("assistant", "a"), msg("user", "plain"));
         is(FAIL, Checks.scopePinned(), noList.ctx());
+
+        // pinned at the start of the turn, then a tool step without a change: still in the turn in progress
+        var earlierInTurn = Traces.trace().call("1", "todo_write", "{}")
+                .request("s", TOOLS, null, m1)
+                .request("s", TOOLS, null, m1, msg("assistant", "a"), withTodo, msg("assistant", "b"),
+                        toolResultMsg("t1", "done"));
+        is(PASS, Checks.scopePinned(), earlierInTurn.ctx());
+
+        // a newer turn without the list
+        var newTurn = Traces.trace().call("1", "todo_write", "{}")
+                .request("s", TOOLS, null, m1)
+                .request("s", TOOLS, null, m1, msg("assistant", "a"), withTodo, msg("assistant", "b"),
+                        msg("user", "a new request"));
+        is(FAIL, Checks.scopePinned(), newTurn.ctx());
     }
 
     @Test

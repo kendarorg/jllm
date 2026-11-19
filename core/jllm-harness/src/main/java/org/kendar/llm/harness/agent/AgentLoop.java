@@ -577,12 +577,16 @@ public class AgentLoop {
     }
 
     /**
-     * The tool set is chosen once, on the chat's first message, and stored; it only grows through
-     * request_tool_group. Keeping it stable keeps the prompt prefix (and the model's KV cache) intact.
+     * The tool set is chosen once, on the chat's first message, and stored; it only grows, through
+     * request_tool_group or a user message naming a tool it lacks. Keeping it stable keeps the prompt prefix (and the
+     * model's KV cache) intact.
      */
     private List<HarnessTool> chatTools(String chatId, String userText) {
         if (!sessions.hasToolGroups(chatId)) {
             sessions.setToolGroups(chatId, toolSelector.selectGroups(userText, registry.all()));
+        } else if (userText != null && !userText.isBlank()) {
+            java.util.Set<String> named = ToolSelector.namedGroups(userText, registry.all(), sessions.toolGroups(chatId));
+            if (!named.isEmpty()) sessions.addToolGroups(chatId, named);
         }
         List<HarnessTool> tools = new ArrayList<>(toolSelector.forGroups(sessions.toolGroups(chatId), registry.all()));
         tools.addAll(context.tools());
@@ -1019,8 +1023,9 @@ public class AgentLoop {
             if (view.logChanged() && persist) sessions.saveMessages(chatId, messages);
             if (view.changed()) {
             }
+            // checked on what is sent: a strategy may leave reasoning out of the view without touching the log
             if (turnHadThinking && !thinkingOff && !org.kendar.llm.harness.context.compaction.ContextManager
-                    .currentTurnHasThinking(messages)) {
+                    .currentTurnHasThinking(view.messages())) {
                 thinkingOff = true;
                 sink.emit("warning", mapper.createObjectNode().put("message",
                         "Context compacted mid-turn: thinking is off for the rest of this turn"));

@@ -2,7 +2,6 @@ package org.kendar.llm.eval.suite;
 
 import org.kendar.llm.eval.cases.EvalCase;
 import org.kendar.llm.eval.fixture.Fixtures;
-import org.kendar.llm.eval.fixture.SampleFlowActions;
 import org.kendar.llm.eval.grade.Check;
 import org.kendar.llm.eval.grade.CheckResult;
 
@@ -18,9 +17,9 @@ import static org.kendar.llm.eval.suite.Suite.*;
  */
 class WorkflowsCasesTest extends SuiteBase {
 
-    private static Check executions(String name, Predicate<List<String>> test, String description) {
+    private static Check executions(String name, Fixtures f, Predicate<List<String>> test, String description) {
         return Check.of(name, Check.Tier.STATE, ctx -> {
-            List<String> ex = SampleFlowActions.executions();
+            List<String> ex = f.flowExecutions();
             return test.test(ex) ? CheckResult.pass(name, description + ": " + ex)
                     : CheckResult.fail(name, "expected " + description + " but ran " + ex);
         });
@@ -35,7 +34,7 @@ class WorkflowsCasesTest extends SuiteBase {
                         .action("/flow-start linear", (h, chat) -> h.commands().execute(chat,
                                 "/flow-start linear {\"text\":\"hello flow\"}"))
                         .user("Reply with the single word PONG.")
-                        .check(executions("linearRan", ex -> ex.contains("normalizeText") && ex.contains("countWords"),
+                        .check(executions("linearRan", a, ex -> ex.contains("normalizeText") && ex.contains("countWords"),
                                 "normalizeText and countWords"))
                         .check(answerContains("PONG")).check(toolNotOffered("linear")).build(),
                 full(WORKFLOWS, "branching-flow-takes-large-branch")
@@ -43,14 +42,14 @@ class WorkflowsCasesTest extends SuiteBase {
                         .action("/flow-start branching", (h, chat) -> h.commands().execute(chat,
                                 "/flow-start branching {\"amount\":500}"))
                         .user("Reply with the single word PONG.")
-                        .check(executions("largeBranch", ex -> ex.contains("amountBand:large") && ex.contains("flagReview")
+                        .check(executions("largeBranch", b, ex -> ex.contains("amountBand:large") && ex.contains("flagReview")
                                 && !ex.contains("approve"), "large band, flagReview, no approve"))
                         .check(answerContains("PONG")).build(),
                 full(WORKFLOWS, "failure-unknown-flow-runs-nothing")
                         .harness(c.harness()).setup(c.setup())
                         .action("/flow-start nosuchflow", (h, chat) -> h.commands().execute(chat, "/flow-start nosuchflow"))
                         .user("Reply with the single word PONG.")
-                        .check(executions("nothingRan", List::isEmpty, "no action executed"))
+                        .check(executions("nothingRan", c, List::isEmpty, "no action executed"))
                         .check(answerContains("PONG")).build());
     }
 }
