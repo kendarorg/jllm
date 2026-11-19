@@ -6,7 +6,7 @@ set -euo pipefail
 
 # ---- settings
 NVIDIA_BASE="${NVIDIA_BASE:-https://integrate.api.nvidia.com/v1}"
-MODEL="${MODEL:-nvidia/nemotron-3.5-lightning-30b-a3b}"
+MODEL="${MODEL:-meta/muse-glimmer-30b}"
 CTX_TOKENS="${CTX_TOKENS:-16000}"
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-300}"
 CASE_TIMEOUT_SECONDS="${CASE_TIMEOUT_SECONDS:-$TIMEOUT_SECONDS}"
