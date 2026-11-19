@@ -51,8 +51,8 @@ class ManualCompactEventTest {
         AgentHarness h = AgentHarness.builder().modelClient(model).config(config(base).withKeepRecentTurns(1))
                 .withoutStandardTools().build();
         ChatSessionData chat = h.sessions().create(null);
-        turn(h, chat.chatId(), "first " + "x".repeat(400));
-        turn(h, chat.chatId(), "second " + "y".repeat(400));
+        turn(h, chat.chatId(), "first " + "x".repeat(2000));
+        turn(h, chat.chatId(), "second " + "y".repeat(2000));
         turn(h, chat.chatId(), "third");
 
         List<String> types = Collections.synchronizedList(new ArrayList<>());

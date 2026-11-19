@@ -42,6 +42,8 @@ public class ContextManager {
     static final String REASONING_OMITTED = "[reasoning omitted]";
     private static final String OMITTED = "[earlier history omitted]\n";
     private static final int SUMMARY_TOKENS = 3000;
+    /** Manual compaction leaves a conversation alone when what it would summarize is smaller than this. */
+    static final int MIN_SUMMARY_SOURCE_TOKENS = 500;
     /** Highest {@link #render(ArrayNode, int)} level: user text only. */
     private static final int MAX_SHRINK = 3;
     /** Attempt n of a too-long summary request is cut to this share of the first refused size (attempt 0: whole). */
@@ -359,7 +361,11 @@ public class ContextManager {
         int cleared = microcompact(messages, 1);
         boolean summarized = false;
         int cut = cutIndex(messages, 1);
-        if (cut > 0 && !onlySummary(messages, cut)) {
+        // a summary is never smaller than its template: below this size the model call (slow, and a weak model then
+        // summarizes the instructions instead of the conversation) buys nothing
+        long spanTokens = cut > 0 ? estimateTokens(slice(original, 0, cut), null) : 0;
+        boolean tooSmall = cut > 0 && spanTokens < MIN_SUMMARY_SOURCE_TOKENS;
+        if (cut > 0 && !tooSmall && !onlySummary(messages, cut)) {
             String summary = summarizeSpan(messages, cut, focus, usageSink, prefix, original);
             if (summary != null) { // null: even the shortest form was rejected, nothing to compact yet
                 replaceSpan(messages, cut, summary);
@@ -368,7 +374,9 @@ public class ContextManager {
             }
         }
         if (cleared > 0 || summarized) stripThinking(messages, true);
-        return new CompactResult(cleared > 0 || summarized, before, estimateTokens(messages, null), cleared);
+        String note = tooSmall && !summarized && cleared == 0
+                ? "Nothing worth compacting: only about " + spanTokens + " tokens precede the latest turn" : null;
+        return new CompactResult(cleared > 0 || summarized, before, estimateTokens(messages, null), cleared, note);
     }
 
     /**

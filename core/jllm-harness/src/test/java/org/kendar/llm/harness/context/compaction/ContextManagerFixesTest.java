@@ -202,7 +202,7 @@ class ContextManagerFixesTest {
     void manualCompactSummarizesFromTheLogBeforeToolResultsAreCleared() {
         ArrayNode m = MAPPER.createArrayNode();
         user(m, "q1");
-        toolRound(m, "t1", "RESULT-ONE " + "z".repeat(500));
+        toolRound(m, "t1", "RESULT-ONE " + "z".repeat(3000));
         user(m, "q2");
         toolRound(m, "t2", "r");
         model.simpleReplies.add("S");
@@ -221,7 +221,7 @@ class ContextManagerFixesTest {
         ArrayNode m = MAPPER.createArrayNode();
         for (int i = 1; i <= 4; i++) {
             user(m, "q" + i + " " + "p".repeat(1200));
-            toolRound(m, "t" + i, "RESULT-" + i + " " + "z".repeat(500));
+            toolRound(m, "t" + i, "RESULT-" + i + " " + "z".repeat(3000));
         }
         model.simpleReplies.add("S");
 
@@ -295,7 +295,7 @@ class ContextManagerFixesTest {
         ArrayNode m = MAPPER.createArrayNode();
         for (int i = 1; i <= 4; i++) {
             user(m, "q" + i);
-            toolRound(m, "t" + i, "z".repeat(500));
+            toolRound(m, "t" + i, "z".repeat(3000));
         }
         // messages alone (~700 tokens) are under the 1020 ceiling; with 900 tokens of system text they are not, and
         // clearing the old results (tier 1) is not enough
