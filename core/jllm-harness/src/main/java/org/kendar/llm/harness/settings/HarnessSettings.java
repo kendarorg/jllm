@@ -195,6 +195,11 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
                 ? DEFAULT_WEB_FETCH_MAX_BYTES : web.fetchMaxBytes();
     }
 
+    /** {@code sandbox.shell}, or the OS default shell. */
+    public org.kendar.llm.harness.sandbox.LocalShell sandboxShell() {
+        return org.kendar.llm.harness.sandbox.LocalShell.of(sandbox == null ? null : sandbox.shell());
+    }
+
     /** {@code sandbox.outputLogMaxBytes}, or its default; 0 = unlimited (a negative value is the default too). */
     public long sandboxOutputLogMaxBytes() {
         Long v = sandbox == null ? null : sandbox.outputLogMaxBytes();
@@ -354,16 +359,19 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
      * @param localFallback      with the docker backend: run locally when docker is unavailable (default true)
      * @param docker             docker backend settings; unset values keep the defaults
      * @param outputLogMaxBytes  cap of the spill log of a long shell output; default 51200, 0 = unlimited
+     * @param shell              local backend: the shell the bash tool runs ({@code cmd}, {@code powershell},
+     *                           {@code pwsh}, {@code bash}, {@code zsh}, {@code sh} or a path to one); default the OS
+     *                           one ({@code cmd} on Windows, {@code zsh} on macOS, {@code bash} elsewhere)
      */
     public record Sandbox(String tempDir, Integer timeoutSeconds, String backend, Boolean localFallback,
-                          Docker docker, Long outputLogMaxBytes) {
+                          Docker docker, Long outputLogMaxBytes, String shell) {
 
         public Sandbox(String tempDir, Integer timeoutSeconds, String backend, Boolean localFallback, Docker docker) {
-            this(tempDir, timeoutSeconds, backend, localFallback, docker, null);
+            this(tempDir, timeoutSeconds, backend, localFallback, docker, null, null);
         }
 
         public Sandbox(String tempDir, Integer timeoutSeconds) {
-            this(tempDir, timeoutSeconds, null, null, null, null);
+            this(tempDir, timeoutSeconds, null, null, null, null, null);
         }
     }
 
@@ -405,7 +413,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
         }
         Sandbox s = sandbox == null ? new Sandbox(null, null) : sandbox;
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution,
-                new Sandbox(s.tempDir(), s.timeoutSeconds(), backend.toLowerCase(), s.localFallback(), s.docker(), s.outputLogMaxBytes()),
+                new Sandbox(s.tempDir(), s.timeoutSeconds(), backend.toLowerCase(), s.localFallback(), s.docker(), s.outputLogMaxBytes(), s.shell()),
                 context, fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
                 toolsWhitelistedEnvVars, files, web, loop, hooks, tokenStore);
     }
@@ -417,7 +425,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution,
                 new Sandbox(s.tempDir(), s.timeoutSeconds(), s.backend(), s.localFallback(),
                         new Docker(d.binary(), image, d.memory(), d.cpus(), d.pidsLimit(), d.user(), d.network(),
-                                d.mode(), d.remote(), d.remoteHost()), s.outputLogMaxBytes()),
+                                d.mode(), d.remote(), d.remoteHost()), s.outputLogMaxBytes(), s.shell()),
                 context, fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
                 toolsWhitelistedEnvVars, files, web, loop, hooks, tokenStore);
     }
@@ -432,7 +440,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution,
                 new Sandbox(s.tempDir(), s.timeoutSeconds(), s.backend(), s.localFallback(),
                         new Docker(d.binary(), d.image(), d.memory(), d.cpus(), d.pidsLimit(), d.user(), d.network(),
-                                mode.toLowerCase(), d.remote(), d.remoteHost()), s.outputLogMaxBytes()),
+                                mode.toLowerCase(), d.remote(), d.remoteHost()), s.outputLogMaxBytes(), s.shell()),
                 context, fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
                 toolsWhitelistedEnvVars, files, web, loop, hooks, tokenStore);
     }
@@ -445,7 +453,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
                 new Sandbox(s.tempDir(), s.timeoutSeconds(), s.backend(), s.localFallback(),
                         new Docker(d.binary(), d.image(), d.memory(), d.cpus(), d.pidsLimit(), d.user(), d.network(),
                                 d.mode(), remote != null ? remote : d.remote(),
-                                remoteHost != null ? remoteHost : d.remoteHost()), s.outputLogMaxBytes()),
+                                remoteHost != null ? remoteHost : d.remoteHost()), s.outputLogMaxBytes(), s.shell()),
                 context, fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
                 toolsWhitelistedEnvVars, files, web, loop, hooks, tokenStore);
     }

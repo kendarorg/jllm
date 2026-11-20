@@ -88,7 +88,39 @@ class ApprovalGateTest {
         assertEquals(0, executions.get());
         JsonNode tr = toolResultOf(1);
         assertTrue(tr.get("is_error").asBoolean());
-        assertEquals("The user rejected this tool call", tr.get("content").asText());
+        assertEquals(AgentLoop.REJECTED, tr.get("content").asText());
+    }
+
+    @Test
+    void sameCallRejectedTwiceInARunIsNotAskedAgain() {
+        registerBash(true);
+        rig.model.enqueue(toolUse("t1", "bash", "{\"x\":\"rm\"}"), toolUse("t2", "bash", "{\"x\":\"rm\"}"),
+                toolUse("t3", "bash", "{\"x\":\"rm -i\"}"), text("ok"));
+        Events ev = answering(false, null);
+
+        rig.loop.run(chatId, "run it", ev, () -> false);
+
+        assertEquals(0, executions.get());
+        assertEquals(AgentLoop.REJECTED, toolResultOf(1).get("content").asText());
+        assertEquals(AgentLoop.REJECTED_AGAIN, toolResultOf(2).get("content").asText());
+        assertTrue(toolResultOf(2).get("is_error").asBoolean());
+        // a different call is still the user's to decide
+        assertEquals(AgentLoop.REJECTED, toolResultOf(3).get("content").asText());
+        assertEquals(2, ev.ofType("approval_request").size());
+    }
+
+    @Test
+    void aRejectionDoesNotCarryOverToTheNextRun() {
+        registerBash(true);
+        rig.model.enqueue(toolUse("t1", "bash", "{\"x\":\"rm\"}"), text("ok"),
+                toolUse("t2", "bash", "{\"x\":\"rm\"}"), text("ok"));
+        Events ev = answering(false, null);
+
+        rig.loop.run(chatId, "run it", ev, () -> false);
+        rig.loop.run(chatId, "now run it", ev, () -> false);
+
+        assertEquals(2, ev.ofType("approval_request").size(), "a new run asks again");
+        assertEquals(AgentLoop.REJECTED, toolResultOf(3).get("content").asText());
     }
 
     @Test
@@ -103,7 +135,7 @@ class ApprovalGateTest {
 
         assertTrue(System.currentTimeMillis() - t0 < 4000);
         assertEquals(0, executions.get());
-        assertEquals("The user rejected this tool call", toolResultOf(1).get("content").asText());
+        assertEquals(AgentLoop.REJECTED, toolResultOf(1).get("content").asText());
         assertTrue(rig.approvals.pending(chatId).isEmpty(), "timed-out approval is cleaned up");
     }
 

@@ -1,7 +1,6 @@
 package org.kendar.llm.eval;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -21,11 +20,6 @@ class SecretMaskingTest {
 
     private static final String SECRET = "sk-ant-SUPER-SECRET-123456";
 
-    @AfterEach
-    void reset() {
-        Secrets.clear();
-    }
-
     @Test
     void secretNeverAppearsInAnyPrintableForm(@TempDir Path dir) throws Exception {
         EvalConfig c = load(map("eval.anthropic.apiKey", SECRET, "eval.target", "remote.mac",
@@ -38,12 +32,12 @@ class SecretMaskingTest {
         assertFalse(c.fast().toString().contains(SECRET));
 
         // exception messages, even when the secret sits inside the text
-        assertFalse(new EvalConfigException(List.of("bad value " + SECRET)).getMessage().contains(SECRET));
-        assertFalse(Secrets.mask("Authorization: Bearer " + SECRET).contains(SECRET));
+        assertFalse(new EvalConfigException(List.of("bad value " + SECRET), c.secrets()).getMessage().contains(SECRET));
+        assertFalse(c.secrets().mask("Authorization: Bearer " + SECRET).contains(SECRET));
 
         // run metadata file
         RunMetadata meta = RunMetadata.of(c, new ConnectionCheck.Result(Map.of()), Instant.now());
-        String json = Files.readString(meta.write(dir));
+        String json = Files.readString(meta.write(dir, c.secrets()));
         assertFalse(json.contains(SECRET), json);
         assertFalse(new ObjectMapper().writeValueAsString(meta).contains(SECRET));
 
@@ -54,8 +48,8 @@ class SecretMaskingTest {
 
     @Test
     void maskReplacesEveryOccurrenceAndHandlesNulls() {
-        Secrets.register(SECRET);
-        assertEquals("a *** b ***", Secrets.mask("a " + SECRET + " b " + SECRET));
-        assertNull(Secrets.mask(null));
+        Secrets s = new Secrets(List.of(SECRET));
+        assertEquals("a *** b ***", s.mask("a " + SECRET + " b " + SECRET));
+        assertNull(s.mask(null));
     }
 }

@@ -23,7 +23,10 @@ public interface ModelClient {
         return complete(request, cancel);
     }
 
-    /** Single-shot, tool-less completion returning the concatenated text. */
+    /**
+     * Single-shot, tool-less completion returning the concatenated text. Thinking is off (a helper's small limit would
+     * go to reasoning); a reply cut before any text is retried once with a larger limit.
+     */
     String simpleComplete(String system, String user, int maxTokens);
 
     /**

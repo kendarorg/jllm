@@ -842,29 +842,24 @@ public class AgentLoop {
     }
 
     /**
-     * The shell description, only when this chat's user may run the shell tool: a user without it (e.g. run_js only)
-     * must not be told about cmd.exe or bash, or the model claims and tries a shell it does not have.
+     * Date, OS, directories and permission mode: after the cached system prefix. The shell is described by the bash
+     * tool itself, so a chat without it (policy, chat toggle, deny rule) is never told about one.
      */
-    private String shellNote(String chatId) {
-        HarnessTool shell = registry.get("bash");
-        boolean usable = shell != null && identity.policyOf(chatId).allows(shell)
-                && sessions.chatAllowsTool(chatId, "bash");
-        if (usable) return sandbox.shellEnvironment();
-        return "OS: " + System.getProperty("os.name") + ". There is no shell tool in this chat: do not claim or "
-                + "suggest shell commands.";
-    }
-
-    /** Date, OS and shell, directories and permission mode: after the cached system prefix. */
     private String modeNote(PermissionMode mode, ToolContext ctx) {
         String scratch = "\n\nToday's date: " + LocalDate.now()
-                + "\n" + shellNote(ctx.chatId())
+                + "\nOS: " + System.getProperty("os.name") + " " + System.getProperty("os.version") + "."
                 + "\nWorking directory (project files go here, relative paths resolve here): "
                 + sandbox.displayPath(ctx.workDir())
                 + "\nScratch directory (only for throwaway files, never for deliverables): "
                 + sandbox.displayPath(ctx.scratchDir());
         return switch (mode) {
-            case PLAN -> "\n\nMode: PLAN. Investigate and write a plan; do not change the working directory ("
-                    + sandbox.displayPath(ctx.workDir()) + "), treat it as read-only. Shell commands run in the scratch directory." + scratch;
+            case PLAN -> "\n\nMode: PLAN. Investigate read-only and write a plan; do not change the working directory ("
+                    + sandbox.displayPath(ctx.workDir()) + "). Do not call write_file or edit_file to carry out the request:"
+                    + " the changes it asks for are steps of the plan, done only after the user approves (a write would"
+                    + " only reach a scratch copy, never the project). Shell commands run in the scratch directory."
+                    + " The answer is the plan: numbered steps naming each file and what changes in it, the risks or"
+                    + " open questions, and a closing request for the user's approval. Never report a file as created"
+                    + " or changed." + scratch;
             case EDIT -> "\n\nMode: EDIT. File edits are applied without asking; shell commands may ask." + scratch;
             case AUTO -> "\n\nMode: AUTO. Tool calls run without asking." + scratch;
             default -> "\n\nMode: DEFAULT. Tool calls that change things ask the user first." + scratch;
@@ -994,6 +989,7 @@ public class AgentLoop {
         String agentName = label == null ? HookContext.MAIN : label;
         String changeKey = changeKey(chatId, agentName);
         changed.remove(changeKey);
+        rejectedCalls.remove(changeKey);
         int[] stopAttempts = {0};
         boolean turnHadThinking = false; // a thinking block of this turn is in the log
         boolean thinkingOff = false;     // history was rewritten mid-turn: their signatures are void, stop thinking
@@ -1191,6 +1187,7 @@ public class AgentLoop {
                             stopAttempts, stuck);
                     if (checked == null) continue;
                     changed.remove(changeKey);
+                    rejectedCalls.remove(changeKey);
                     return new LoopResult(finalText, checked);
                 }
             }
@@ -1239,7 +1236,20 @@ public class AgentLoop {
     }
 
     /** Opens the user message that re-enters the loop after a STOP hook vetoed the stop. */
-    static final String VERIFY_NOTE = "The stop check failed. Fix the problem and finish again.";
+    static final String VERIFY_NOTE = "The stop check failed. Fix the problem and finish again. If it cannot be fixed "
+            + "with what you have, stop and say what is missing; do not invent files or content.";
+
+    /** Result of a call the user rejected. */
+    public static final String REJECTED = "User rejected. Do not retry. Tell the user and ask how to proceed.";
+    /** Result of a call identical to one the user rejected earlier in the run: the user is not asked again. */
+    public static final String REJECTED_AGAIN = "User already rejected. Do not retry. Tell the user and ask how to proceed.";
+
+    /** Calls (tool name + input) the user rejected in the current run, per chat + agent name. */
+    private final Map<String, java.util.Set<String>> rejectedCalls = new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static String rejectedKey(String chatId, String label) {
+        return changeKey(chatId, label == null ? HookContext.MAIN : label);
+    }
 
     /** Agents (chat + agent name) in which a tool that changes things ran during the current run. */
     private final java.util.Set<String> changed = java.util.concurrent.ConcurrentHashMap.newKeySet();
@@ -1549,10 +1559,27 @@ public class AgentLoop {
         if (rule != null && rule.kind() == PermissionRules.Kind.DENY) {
             return new Authz("Denied by permission rule: " + rule.rule(), pre, input);
         }
+        // a host shell is not jailed like the file tools: a command line climbing out of the work dir is refused
+        String command = commandOf(name, input);
+        if (command != null && ctx.files() == null) {
+            java.nio.file.Path cwd = ctx.readOnlyWork() && ctx.scratchDir() != null ? ctx.scratchDir() : ctx.workDir();
+            String escaping = org.kendar.llm.harness.sandbox.ShellPaths.escapingPath(command, cwd, ctx.workDir(),
+                    ctx.scratchDir());
+            if (escaping != null) {
+                return new Authz(org.kendar.llm.harness.tools.FileSystemAgentTools.escapes(escaping).getMessage(), pre,
+                        input);
+            }
+        }
         if (decision == Decision.DENY) return new Authz("Denied by permission policy (mode " + mode + ")", pre, input);
         if (decision == Decision.ASK) {
+            String key = rejectedKey(ctx.chatId(), label);
+            String call = name + "\u0000" + input;
+            java.util.Set<String> seen = rejectedCalls.get(key);
+            // the user said no to this exact call already: asking again would only repeat the question
+            if (seen != null && seen.contains(call)) return new Authz(REJECTED_AGAIN, pre, input);
             if (!approve(tool, input, ctx, sink, cancelled, label)) {
-                return new Authz("The user rejected this tool call", pre, input);
+                rejectedCalls.computeIfAbsent(key, k -> java.util.concurrent.ConcurrentHashMap.newKeySet()).add(call);
+                return new Authz(REJECTED, pre, input);
             }
             approvals.grantCommand(ctx.chatId(), name, commandOf(name, input));
         }
@@ -1570,13 +1597,13 @@ public class AgentLoop {
         }
     }
 
-    /** The shell command line of a bash call, else null: only commands are granted verbatim. */
     /** The work-dir-relative directory a file-writing call targets, or null when none can be offered or granted. */
     private static String writeDirOf(HarnessTool tool, JsonNode input, ToolContext ctx) {
         if (tool.kind() != ToolKind.FILE_EDIT || ctx.readOnlyWork() || ctx.files() != null || input == null) return null;
         return ApprovalService.writeDirOf(ctx.workDir(), input.path("path").asText(null));
     }
 
+    /** The shell command line of a bash call, else null: only commands are granted verbatim. */
     private static String commandOf(String toolName, JsonNode input) {
         return "bash".equals(toolName) && input != null && input.hasNonNull("command")
                 ? input.get("command").asText() : null;

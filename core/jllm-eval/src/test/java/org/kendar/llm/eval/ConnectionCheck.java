@@ -51,7 +51,7 @@ public final class ConnectionCheck {
                 done.put(e, ms);
                 byRole.put(e.role(), ms);
             } catch (Exception ex) {
-                failures.add(Secrets.mask(e.role() + " entry '" + e.name() + "' at " + e.baseUrl() + " (model '"
+                failures.add(config.secrets().mask(e.role() + " entry '" + e.name() + "' at " + e.baseUrl() + " (model '"
                         + e.model() + "'): " + ex.getMessage()));
             }
         }

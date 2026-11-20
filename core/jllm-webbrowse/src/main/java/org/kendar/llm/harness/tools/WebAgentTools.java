@@ -394,7 +394,7 @@ public class WebAgentTools implements HarnessToolSet {
                 "Download a URL as is (no text conversion) to a file in the chat work dir: use it for PDFs, images "
                         + "and anything web_fetch would truncate. Returns the path, size and content type.",
                 SimpleTool.schema("url", "http(s) URL to download", "path", "File path relative to the work dir"),
-                GROUP, ToolKind.READ_ONLY, (ctx, in) -> {
+                GROUP, ToolKind.FILE_EDIT, (ctx, in) -> {
             URI uri = URI.create(in.path("url").asText());
             if (!"http".equalsIgnoreCase(uri.getScheme()) && !"https".equalsIgnoreCase(uri.getScheme())) {
                 throw new IllegalArgumentException("Only http/https URLs are supported");
@@ -443,7 +443,7 @@ public class WebAgentTools implements HarnessToolSet {
                         java.nio.file.Files.deleteIfExists(tmp);
                     }
                 }
-                return "Saved " + size + " bytes (" + type + ") to " + shown;
+                return FileSystemAgentTools.written(ctx, "Saved " + size + " bytes (" + type + ") to", shown);
             }
         });
     }

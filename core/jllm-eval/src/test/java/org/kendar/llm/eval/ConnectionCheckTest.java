@@ -22,7 +22,6 @@ class ConnectionCheckTest {
 
     @AfterEach
     void stop() {
-        Secrets.clear();
         if (server != null) server.stop(0);
     }
 

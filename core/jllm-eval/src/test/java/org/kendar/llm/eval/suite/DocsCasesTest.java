@@ -41,6 +41,6 @@ class DocsCasesTest extends SuiteBase {
                         }).setup(c.setup())
                         .user("Read old.doc and tell me what it contains. If you cannot read it, tell me why and what I should do.")
                         .check(toolCalled("read_file")).check(anyToolResultContains("legacy .doc not supported"))
-                        .check(toolNotCalled("bash")).build());
+                        .check(answerContains("docx")).build());
     }
 }

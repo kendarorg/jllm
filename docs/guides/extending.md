@@ -184,7 +184,7 @@ chain (each hook sees the previous rewrite); added context is joined with newlin
 lines; a hook that throws is logged and skipped.
 
 **Verify on stop.** A `STOP` hook that returns `HookResult.continueWith(message)` keeps the agent working: the loop
-appends "The stop check failed. Fix the problem and finish again." and the message as a user message, sends
+appends "The stop check failed. Fix the problem and finish again. If it cannot be fixed with what you have, stop and say what is missing; do not invent files or content." and the message as a user message, sends
 `verify_failed`, and calls the model again. After `loop.verify.maxReentries` (default 3) re-entries, or the same
 message twice in a row, the run ends `UNVERIFIED` (a sub-agent reports status `unverified`). Existing `STOP` hooks
 that assumed the main agent should check `ctx.agent()`. A test run needs no code: `hooks.stop` in the settings
@@ -528,7 +528,7 @@ public interface SandboxExecutor {
     Path workDir(String chatId);          // root of the file tools' jail
     Path location();
     default Path scratchDir(String chatId, String agentId);
-    default String shellEnvironment();    // told to the model (OS, shell)
+    default String shellDescription();    // appended to the bash tool description (shell syntax)
     default void deleteWorkDir(String chatId);
     default FileBackend files(String chatId, String agentId);  // null: the file tools use workDir on the host
     default String displayPath(Path p);   // how the model and the user see a path

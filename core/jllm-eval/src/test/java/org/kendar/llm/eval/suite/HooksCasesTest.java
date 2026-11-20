@@ -51,8 +51,8 @@ class HooksCasesTest extends SuiteBase {
                         .check(answerContains("64")).check(runOutcome("completed")).build(),
                 full(HOOKS, "edge-user-prompt-adds-context")
                         .harness(b -> b.hook(HookEvent.USER_PROMPT, ctx -> HookResult.addContext(
-                                "The secret word of this session is PINEAPPLE-22.")))
-                        .user("What is the secret word of this session?")
+                                "The theme word of this session is PINEAPPLE-22.")))
+                        .user("What is the theme word of this session?")
                         .check(answerContains("PINEAPPLE-22")).build(),
                 full(HOOKS, "risk-unfixable-stop-check-ends-unverified")
                         .harness(b -> b.hook(HookEvent.STOP, ctx -> HookResult.continueWith(

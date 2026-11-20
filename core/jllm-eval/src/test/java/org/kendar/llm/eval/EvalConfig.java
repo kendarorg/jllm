@@ -21,6 +21,8 @@ public final class EvalConfig {
     private final Map<String, String> env;
     private final Properties file;
     private final List<String> errors = new ArrayList<>();
+    private final Set<String> secretValues = new LinkedHashSet<>();
+    private Secrets secrets = Secrets.NONE;
 
     private TargetKind targetKind;
     private String targetName;
@@ -52,7 +54,7 @@ public final class EvalConfig {
         try (InputStream in = EvalConfig.class.getResourceAsStream("/eval.properties")) {
             if (in != null) p.load(in);
         } catch (IOException e) {
-            throw new EvalConfigException(List.of("cannot read eval.properties: " + e.getMessage()));
+            throw new EvalConfigException(List.of("cannot read eval.properties: " + e.getMessage()), Secrets.NONE);
         }
         Map<String, String> sys = new HashMap<>();
         System.getProperties().forEach((k, v) -> sys.put(String.valueOf(k), String.valueOf(v)));
@@ -62,11 +64,14 @@ public final class EvalConfig {
     public static EvalConfig load(Properties file, Map<String, String> sys, Map<String, String> env) {
         EvalConfig c = new EvalConfig(sys, env, file);
         c.resolve();
-        if (!c.errors.isEmpty()) throw new EvalConfigException(c.errors);
+        c.secrets = new Secrets(c.secretValues);
+        if (!c.errors.isEmpty()) throw new EvalConfigException(c.errors, c.secrets);
         return c;
     }
 
     // ---- accessors
+    /** The secret values this configuration read: mask everything printed or written with them. */
+    public Secrets secrets() { return secrets; }
     public TargetKind targetKind() { return targetKind; }
     public String targetName() { return targetName; }
     public ModelEndpoint target() { return target; }
@@ -126,7 +131,7 @@ public final class EvalConfig {
             v = f.contains(".") ? raw(f) : env.get(f);
             if (v != null && v.isBlank()) v = null;
         }
-        if (v != null) Secrets.register(v);
+        if (v != null) secretValues.add(v);
         return v;
     }
 

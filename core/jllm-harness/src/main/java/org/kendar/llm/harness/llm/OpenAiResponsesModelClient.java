@@ -122,15 +122,7 @@ public class OpenAiResponsesModelClient implements ModelClient {
 
     @Override
     public String simpleComplete(String system, String user, int maxTokens, java.util.function.Consumer<Usage> usageSink) {
-        ArrayNode messages = mapper.createArrayNode();
-        messages.addObject().put("role", "user").put("content", user);
-        ModelResponse r = complete(new ModelRequest(system, "", messages, java.util.List.of(), maxTokens));
-        if (usageSink != null && r.usage() != null) usageSink.accept(r.usage());
-        StringBuilder sb = new StringBuilder();
-        for (JsonNode b : r.content()) {
-            if ("text".equals(b.path("type").asText())) sb.append(b.path("text").asText());
-        }
-        return sb.toString();
+        return SimpleCompletion.run(this, system, user, maxTokens, null, usageSink);
     }
 
     private void checkKey() {

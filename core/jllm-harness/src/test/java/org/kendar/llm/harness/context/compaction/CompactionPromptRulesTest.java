@@ -16,6 +16,14 @@ class CompactionPromptRulesTest {
     }
 
     @Test
+    void updateDropsFinishedStepsButNeverValuesOfTheEarlierCheckpoint() {
+        // "drop what is done" alone made a model drop codes it had only acknowledged
+        String update = CompactionPrompt.update(null);
+        assertTrue(update.contains("never values"), update);
+        assertTrue(update.contains("stays word for word unless the user replaced it"), update);
+    }
+
+    @Test
     void systemPromptTellsTheModelNotToRepeatACheckpointAsItsAnswer() {
         String system = Prompts.load("system-prompt.md");
         assertTrue(system.contains("[Summary of the earlier ...]"));

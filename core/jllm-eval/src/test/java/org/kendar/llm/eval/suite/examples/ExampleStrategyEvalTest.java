@@ -26,15 +26,15 @@ public class ExampleStrategyEvalTest {
                 .strategies(ContextStrategyKind.COMPACTION, ContextStrategyKind.MNEMONIC, ContextStrategyKind.SCOPE)
                 .contextBudgetTokens(40_000) // never reached: the compaction below is forced, at the same point on every run
                 .setup(Suite.files("big.txt", Suite.filler(24_000, "archive")))
-                .user("Remember this: the vault code is 7391-KITE. Acknowledge in one short sentence.")
+                .user("Remember this: the booking reference is 7391-KITE. Acknowledge in one short sentence.")
                 .modeSwitch(PermissionMode.EDIT)
                 .user("Read big.txt completely and tell me how many lines it has.")
                 .user("Thanks. Reply with just: OK") // /compact keeps the latest turn: the big read must not be it
                 .action("/compact", (h, chat) -> h.commands().execute(chat, "/compact"))
-                .user("Without reading anything again: what is the vault code?")
+                .user("Without reading anything again: what is the booking reference?")
                 .check(noRunError())
                 .check(eventPresent("compaction"))
-                .check(Suite.retained(Suite.fact("What is the vault code?", "7391-KITE")))
+                .check(Suite.retained(Suite.fact("What is the booking reference?", "7391-KITE")))
                 .check(Suite.onlyFor(ContextStrategyKind.COMPACTION, compactionSummaryHasSections()))
                 .check(Suite.onlyFor(ContextStrategyKind.MNEMONIC, mnemonicLogNeverRewritten()))
                 .trials(1)

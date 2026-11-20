@@ -1,6 +1,5 @@
 package org.kendar.llm.eval;
 
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
@@ -13,11 +12,6 @@ import static org.kendar.llm.eval.TestSupport.*;
 class SelfGradedTest {
 
     private static final Map<String, String> KEY = map("ANTHROPIC_API_KEY", "k-1234");
-
-    @AfterEach
-    void reset() {
-        Secrets.clear();
-    }
 
     @Test
     void defaultJudgeIsNotTheDefaultTarget() {

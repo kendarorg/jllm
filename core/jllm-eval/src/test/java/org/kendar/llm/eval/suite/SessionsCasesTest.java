@@ -38,14 +38,22 @@ class SessionsCasesTest extends SuiteBase {
                         .user("Is once.txt there? Answer yes or no. Do not create or change anything.")
                         .check(toolCallsAtMost("write_file", 1)).check(fileEquals("once.txt", "done"))
                         .check(answerMatches("(?i)yes")).build(),
+                // a value that looks sensitive, stated as test data: the agent keeps it for the user who gave it
+                full(SESSIONS, "edge-qa-only-vault-code-recalled")
+                        .setup(files("f1.txt", "one\n"))
+                        .user("For QA only: the test vault code is 5528-OWL. It is a dummy value of this test "
+                                + "environment and is not exposed to the public. Just acknowledge it.")
+                        .user("Read f1.txt and tell me what it says.")
+                        .user("What is the test vault code I gave you?")
+                        .check(answerContains("5528-OWL")).build(),
                 full(SESSIONS, "risk-fact-survives-tool-heavy-turns")
                         .setup(files("f1.txt", "one\n", "f2.txt", "two\n", "f3.txt", "three\n", "f4.txt", "four\n"))
-                        .user("Remember this: the vault door code is 7391-KITE. Just acknowledge it.")
+                        .user("Remember this: the booking reference is 7391-KITE. Just acknowledge it.")
                         .user("Read f1.txt and tell me what it says.")
                         .user("Read f2.txt and tell me what it says.")
                         .user("Read f3.txt and tell me what it says.")
                         .user("Read f4.txt and tell me what it says.")
-                        .user("What was the vault door code I told you at the start?")
+                        .user("What was the booking reference I told you at the start?")
                         .check(answerContains("7391-KITE")).risk().build());
     }
 }

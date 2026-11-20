@@ -132,6 +132,20 @@ AgentHarness h = AgentHarness.builder()
   ```json
   {"execution": {"maxParallel": 4}}
   ```
+- `sandbox.shell` (local backend): the shell the `bash` tool runs. Unset: the OS one (`cmd` on Windows, `zsh` on
+  macOS, `bash` elsewhere). `cmd` runs `cmd /c`, `powershell`/`pwsh` run `-NoProfile -NonInteractive -Command`, any
+  other name or path runs `<shell> -c`. The `bash` tool description tells the model which shell and syntax it has.
+
+  ```json
+  {"sandbox": {"shell": "pwsh"}}
+  ```
+  ```json
+  {"sandbox": {"shell": "/bin/bash"}}
+  ```
+  ```json
+  {"sandbox": {"shell": "/bin/zsh"}}
+  ```
+  Windows (PowerShell 7), Linux/Unix (bash), macOS (zsh). A Docker backend always runs `sh -c` in the container.
 - `execution.useContextStack` (default `true`): a sub-agent continues the parent's request prefix (same pinned text,
   system prompt and tool list; role text and task go in its first message) so the parent's KV cache is reused and still
   valid when the sub-agent returns. The agent type's tool restrictions are applied when a call is executed. `false`

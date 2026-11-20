@@ -16,11 +16,10 @@ import java.util.concurrent.TimeUnit;
 /** Default executor: plain subprocess in {@code base-dir/{chatId}}. No isolation, network or resource limits. */
 public class LocalDirSandboxExecutor implements SandboxExecutor {
 
-    private static final boolean WINDOWS = System.getProperty("os.name", "").toLowerCase().contains("win");
-
     private static final Logger log = LoggerFactory.getLogger(LocalDirSandboxExecutor.class);
 
     private final HarnessConfig config;
+    private volatile LocalShell shell = LocalShell.osDefault();
 
     public LocalDirSandboxExecutor(HarnessConfig config) {
         this.config = config;
@@ -34,12 +33,13 @@ public class LocalDirSandboxExecutor implements SandboxExecutor {
     }
 
     @Override
-    public String shellEnvironment() {
-        String os = "OS: " + System.getProperty("os.name") + " " + System.getProperty("os.version") + ". ";
-        return WINDOWS
-                ? os + "The bash tool runs Windows cmd.exe (cmd /c), not bash: use cmd syntax (dir, type, findstr, "
-                        + "where, &&, 2>nul). head, tail, grep, ls, cat, sed and /dev/null do not exist."
-                : os + "The bash tool runs bash -c.";
+    public String shellDescription() {
+        return shell.description();
+    }
+
+    @Override
+    public void shell(LocalShell shell) {
+        if (shell != null) this.shell = shell;
     }
 
     @Override
@@ -105,7 +105,7 @@ public class LocalDirSandboxExecutor implements SandboxExecutor {
     }
 
     private ExecutionResult run(Path dir, String command, Duration timeout) {
-        List<String> cmd = WINDOWS ? List.of("cmd", "/c", command) : List.of("bash", "-c", command);
+        List<String> cmd = shell.argv(command);
         Process p = null;
         TailCapture capture = new TailCapture(CAPTURE_LIMIT, logLimit);
         try {

@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import org.kendar.llm.eval.EvalLog;
 import org.kendar.llm.eval.RunMetadata;
-import org.kendar.llm.eval.Secrets;
+import org.kendar.llm.eval.EvalRun;
 import org.kendar.llm.eval.run.TrialResult;
 import org.kendar.llm.eval.run.TrialRunner;
 import org.kendar.llm.harness.context.ContextStrategyKind;
@@ -30,7 +30,10 @@ public final class CaseExecutor {
     private final int maxTrials;
     private final RunMetadata metadata;
 
-    /** @param metadata attached to every saved result; may be null in unit tests */
+    /**
+     * @param metadata attached to every saved result; null in unit tests, whose cases then stay out of the run's
+     *                 progress counters (they share the JVM with the eval suites)
+     */
     public CaseExecutor(TrialRunner runner, Path outputDir, int defaultTrials, RunMetadata metadata) {
         this(runner, outputDir, defaultTrials, Integer.MAX_VALUE, metadata);
     }
@@ -51,12 +54,14 @@ public final class CaseExecutor {
         List<TrialResult> trials = new ArrayList<>();
         String label = c.feature() + "/" + c.name() + " [" + strategy.name().toLowerCase() + "]";
         long t0 = System.nanoTime();
-        EvalLog.caseStarted(label, n);
+        if (metadata != null) EvalLog.caseStarted(label, n);
+        else EvalLog.info("unit case start " + label + " (" + n + " trial(s))");
         for (int i = 1; i <= n; i++) {
             long ts = System.nanoTime();
             TrialResult t = runner.run(c, strategy, i, dir);
             long tm = (System.nanoTime() - ts) / 1_000_000;
-            EvalLog.info("  trial " + i + "/" + n + " " + (t.passed() ? "pass" : "FAIL") + " " + label + " "
+            EvalLog.info("  trial " + i + "/" + n + " " + (t.passed() ? "pass" : metadata != null ? "FAIL" : "fail")
+                    + " " + label + " "
                     + EvalLog.seconds(tm) + "s, " + t.trace().requests().size() + " model request(s)"
                     + (t.passed() ? "" : ", failed: " + t.failedChecks().stream()
                     .map(k -> k.name() + " (" + k.reason() + ")").collect(java.util.stream.Collectors.joining("; "))));
@@ -66,8 +71,11 @@ public final class CaseExecutor {
         }
         CaseResult r = CaseResult.of(c, strategy.name().toLowerCase(), trials);
         save(dir, c, r);
-        EvalLog.caseFinished(label, r.passed(), (System.nanoTime() - t0) / 1_000_000,
-                "pass rate " + Math.round(r.passRate() * 100) + "%");
+        long millis = (System.nanoTime() - t0) / 1_000_000;
+        String detail = "pass rate " + Math.round(r.passRate() * 100) + "%";
+        if (metadata != null) EvalLog.caseFinished(label, r.passed(), millis, detail);
+        else EvalLog.info("unit case " + (r.passed() ? "pass" : "fail") + " " + label + " in " + EvalLog.seconds(millis)
+                + "s - " + detail);
         return r;
     }
 
@@ -95,7 +103,7 @@ public final class CaseExecutor {
                 return m;
             }).toList());
             doc.put("run", metadata);
-            Files.writeString(dir.resolve("result.json"), Secrets.mask(MAPPER.writeValueAsString(doc)),
+            Files.writeString(dir.resolve("result.json"), EvalRun.activeSecrets().mask(MAPPER.writeValueAsString(doc)),
                     StandardCharsets.UTF_8);
         } catch (IOException e) {
             throw new UncheckedIOException(e);

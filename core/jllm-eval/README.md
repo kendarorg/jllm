@@ -6,24 +6,118 @@ default build: it is available only through the `eval` Maven profile.
 It provides the shared infrastructure for evaluations: configuration, access to the target, judge and fast models,
 a connection check and run metadata.
 
+## Smoke script
+
+`scripts/run-smoke.sh` (bash) and `scripts/run-smoke.ps1` (PowerShell) run the eval through Maven with a tested model
+(target) and a judge that each pick their own provider, model, endpoint and key. The fast model is the target. The
+output goes to the console and to `eval-results/smoke-<target provider>-<timestamp>.log`.
+
+```
+./scripts/run-smoke.sh                                   # choose a preset from scripts/envs/
+./scripts/run-smoke.sh llamacpp-qwen-judge-sonnet.env    # use that preset
+./scripts/run-smoke.sh none                              # no preset: environment and defaults only
+.\scripts\run-smoke.ps1 nvidia.env                       # same from PowerShell
+```
+
+The script checks that each endpoint answers and serves the model before starting Maven.
+
+### Providers
+
+| Provider | API | Key | Default base | Default model |
+|---|---|---|---|---|
+| `anthropic` | Anthropic | required | `https://api.anthropic.com` | `claude-haiku-5-5` |
+| `nvidia` | OpenAI-compatible (NVIDIA NIM) | required | `https://integrate.api.nvidia.com` | `meta/muse-glimmer-30b` |
+| `ollama` | OpenAI-compatible | always `none` | `http://localhost:11434` | `qwen3:30b` |
+| `llamacpp` | OpenAI-compatible (llama.cpp server) | always `none` | `http://localhost:8080` | `qwen-local` |
+
+`*_BASE` is the machine address only (`scheme://host[:port]`); the script adds the API path `/v1`.
+
+### Presets (`scripts/envs/*.env`)
+
+A preset is a file of `NAME=VALUE` lines with the settings below. Without an argument the script lists the presets and
+asks which one to use (`0` = none). A variable already set in the environment wins over the preset. Presets must not
+contain keys: the script refuses any `*API_KEY*` line.
+
+| Preset | Target | Judge |
+|---|---|---|
+| `anthropic.env` | Haiku 5.5 | Haiku 5.5 (self-graded) |
+| `anthropic-sonnet.env` | Sonnet 5.5, medium effort | Sonnet 5.5 |
+| `nvidia.env` | NVIDIA NIM muse-glimmer-30b | same model (self-graded) |
+| `nvidia-judge-anthropic.env` | NVIDIA NIM muse-glimmer-30b | Haiku 5.5 |
+| `ollama.env` | Ollama qwen3:30b, thinking minimal | same model (self-graded) |
+| `llamacpp-qwen-judge-sonnet.env` | llama.cpp `qwen-local` (Qwen 27B) at `http://192.168.1.96:17001` | Sonnet 5.5, medium effort |
+
+To add a setup, copy a preset and change it.
+
+### Keys
+
+Keys are never stored in a preset. For `anthropic` and `nvidia` the script reads them from the environment and, when
+not set there, asks for them with hidden input:
+
+- target: `TARGET_API_KEY`, then `ANTHROPIC_API_KEY` / `NVIDIA_API_KEY`
+- judge: `JUDGE_API_KEY`, then `ANTHROPIC_API_KEY` / `NVIDIA_API_KEY`; when target and judge use the same provider an
+  empty answer reuses the target key
+
+`ollama` and `llamacpp` always use the key `none` (never read, never asked). Keys reach the JVM only through
+environment variables, which the script removes when Maven ends.
+
+### Settings
+
+Per role, prefix `TARGET_` or `JUDGE_`:
+
+| Setting | Meaning |
+|---|---|
+| `*_PROVIDER` | `anthropic`, `nvidia`, `ollama` or `llamacpp`. Target default `anthropic`; judge default = target provider. |
+| `*_MODEL` | Model id. Judge default: the target model on the same provider, else the provider default. |
+| `*_BASE` | Machine address, without `/v1`. |
+| `*_CTX_TOKENS` | Context tokens (`anthropic` 200000, others 16000). Must not exceed what the server allocates. |
+| `*_RPM` | Requests per minute; `0` = unpaced (`anthropic` 300, `nvidia` 10, others 0). |
+| `*_THINKING` | `minimal`, `low`, `medium` or `high`; empty = the model's default (`ollama` defaults to `minimal`). |
+
+With both roles on `anthropic`, the judge shares the target's base, context, timeout and rpm (there is one
+`eval.anthropic.*` block); only `JUDGE_MODEL` and `JUDGE_THINKING` apply to it.
+
+Shared:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `TEST_GROUPS` | `all` | `all` or a comma separated list of `smoke`, `full`, `strategy`, `compaction`, `unit`. |
+| `TESTS` | empty | Optional comma separated test classes (`-Dtest`). |
+| `TRIALS` | `1` | Trials per case (`eval.trials`). |
+| `MAX_TRIALS` | `2` | Cap on the trials of any case (`eval.maxTrials`). |
+| `TIMEOUT_SECONDS` | `300` | Per model request, and warm-up. |
+| `CASE_TIMEOUT_SECONDS` | `TIMEOUT_SECONDS` | Cap on each user turn of a case (`eval.caseTimeoutSeconds`). |
+| `COMPACTION_CTX_TOKENS` | `65536` | Context of the `compaction` group (`eval.compaction.contextTokens`). |
+| `PARALLELISM` | `anthropic` 20, `nvidia` 2, others 1 | Test classes run at once; `1` = strictly sequential. |
+| `IGNORE_TEST_FAILURES` | `1` | `1`: failed cases never fail the Maven build, so the run always writes its summary. |
+| `SYSTEM_PROMPT_EXTRA` | reminder for `nvidia`, else `none` | `eval.systemPrompt.extra`; `none` turns it off. |
+
+The PowerShell script picks a JDK 21+ by itself (`JAVA_HOME` if it qualifies, else the usual install folders); the
+bash script uses the `mvn` and JDK on the `PATH`.
+
+### Progress and results
+
+During the run the log shows the planned number of case runs and, after each one,
+`progress <done>/<planned> done, <to do> to do: <passed> passed, <failed> failed`, plus `not run` for cases whose
+group was skipped or stopped early. The count follows the JUnit selection (`TEST_GROUPS`, `TESTS`).
+
+Each run adds a recap to `eval-results/history/` and a row to `eval-results/history/INDEX.md`. Only `INDEX.md` is
+tracked by git; the per-run files are ignored.
+
 ## Quick start
 
 1. Choose a target (see [Targets](#targets)). For a model served by llama.cpp in docker on a remote GPU machine,
    deploy it with `./docker/llm.sh up strong --host <address>` (bash) or `.\docker\llm.ps1 up strong -DockerHost
    <address>` (PowerShell): the script checks the remote docker host and GPU, loads the model, waits for it and prints
    the settings to use (see [Guided server setup](#guided-server-setup)).
-2. Run the tests from this folder (`core/jllm-eval`) with JDK 21:
+2. Pick or write a preset in `scripts/envs/` and run the smoke script (see [Smoke script](#smoke-script)).
 
-```
-mvn -f ../../pom.xml -Peval -pl core/jllm-eval -am test -Dgroups=smoke -Deval.target=anthropic
-mvn -f ../../pom.xml -Peval -pl core/jllm-eval -am test -Dgroups=smoke -Deval.target=remote.mac
-mvn -f ../../pom.xml -Peval -pl core/jllm-eval -am test -Dgroups=smoke -Deval.target=local.strong
-```
+`TEST_GROUPS` selects the test groups: `smoke`, `full`, `strategy` or `compaction` (the long sessions that force
+compaction; they run with `COMPACTION_CTX_TOKENS`). The extra group `unit` holds the checks that need no model at all.
 
-`-Dgroups` selects the test groups: `smoke`, `full`, `strategy` or `compaction` (the long sessions that force compaction; they run with `eval.compaction.contextTokens`). The extra group `unit` holds the checks that need
-no model at all (`mvn -f ../../pom.xml -Peval -pl core/jllm-eval -am test -Dgroups=unit`). The default is `smoke,unit`.
-
-Tests, classes and methods run one after the other in a single JVM by default. With `-Drun.parallelism=N -Drun.parallel.enabled=true -Drun.parallel.classes=concurrent` (the NVIDIA smoke scripts do this through `PARALLELISM`, default 2) up to N test classes run at once; the cases of one class stay sequential. All requests to a host still go through one shared `RequestPacer`, so `maxRpm` holds.
+Test classes run one after the other by default. With `PARALLELISM` above 1, up to that many test classes run at once;
+the cases of one class stay sequential. All requests to a host still go through one shared `RequestPacer`, so the
+rpm limits hold.
 
 ## Targets
 
@@ -88,10 +182,10 @@ object descriptions, exception messages, connection-check output and `run.json`.
 | `eval.timeout.connect` | Seconds allowed for a reachability probe. |
 | `eval.timeout.warmup` | Seconds allowed for the warm-up call. |
 | `eval.trials` | Default number of trials. |
-| `eval.maxTrials` | Cap on the trials of any case, including cases that set their own count. Default `10`. The Ollama smoke script sets `2` (`MAX_TRIALS`). |
+| `eval.maxTrials` | Cap on the trials of any case, including cases that set their own count. Default `10`. The smoke script sets it from `MAX_TRIALS` (presets: `2`). |
 | `eval.compaction.contextTokens` | Context size for the cases tagged `compaction` only; every other case uses the target's `contextTokens`. Default `65536`. The smoke scripts set it from `COMPACTION_CTX_TOKENS`. |
 | `eval.rateLimit.retries` / `waitSeconds` / `stepSeconds` | On an HTTP 429 from a paced endpoint (one with `maxRpm`) every call to that host pauses for `waitSeconds` (default 10), plus `stepSeconds` (default 5) per further repeat, and the call is repeated, up to `retries` times (default 5: 10 s, 15 s, 20 s, 25 s, 30 s), on top of the harness client's own short retry. |
-| `eval.systemPrompt.extra` | Text added to the system prompt of every case (empty by default). The NVIDIA smoke scripts set a reminder to call tools through the structured interface, because some hosted models write a tool call as plain text; `SYSTEM_PROMPT_EXTRA=none` turns it off. A case's own `systemPrompt` setup replaces it. Because it changes the prompt under test, results with and without it are not comparable. |
+| `eval.systemPrompt.extra` | Text added to the system prompt of every case (empty by default). The smoke script sets, by default when the target is `nvidia`, a reminder to call tools through the structured interface, because some hosted models write a tool call as plain text; `SYSTEM_PROMPT_EXTRA=none` turns it off. A case's own `systemPrompt` setup replaces it. Because it changes the prompt under test, results with and without it are not comparable. |
 | `eval.caseTimeoutSeconds` | Cap on each user turn of a case, in seconds. `0` (default) keeps each case's own timeout. The smoke scripts set `300` (`CASE_TIMEOUT_SECONDS`, defaults to `TIMEOUT_SECONDS`), which also caps the `4-strategies` sessions (they declare 1800): on a slow model set `CASE_TIMEOUT_SECONDS=1800` for those runs. |
 | `eval.outputDir` | Results folder (git-ignored, survives `mvn clean`). Layout: `<model>/run-<timestamp>/` with `run.json`, `<feature>/<case>/<strategy>/result.json` and traces, plus `report.md` and `summary.json` written when the run ends; `<model>/baselines/`; `summary/merged.md` compares the latest run of every model; `history/` keeps one compact recap per run, `<date>_<model>.md` and `.json`, plus `INDEX.md` (not git-ignored: commit it to keep the eval history). |
 
@@ -182,28 +276,21 @@ chosen with `LLM_ENV`), follow all the points:
 
 4. Check the server answers and note two values:
    `curl http://192.168.1.96:8080/v1/models` shows the model id; `curl http://192.168.1.96:8080/props` shows `n_ctx`.
-5. In `eval.properties` (or with `-D`), make `eval.remote.gpu.model` equal that id and `eval.remote.gpu.contextTokens`
-   not larger than `n_ctx`. A different address or entry name works the same way: define `eval.remote.<name>.*` and
-   select it with `-Deval.target=remote.<name>`.
-6. Set the judge key in the environment, never in a file or on a shared command line. The default judge is Sonnet 5.5
-   through the Anthropic API, so the key is for that, not for the target (PowerShell):
+5. Copy `scripts/envs/llamacpp-qwen-judge-sonnet.env` to a new preset and set `TARGET_BASE` to the machine address
+   (`http://192.168.1.96:8080`, no `/v1`), `TARGET_MODEL` to that id and `TARGET_CTX_TOKENS` not larger than `n_ctx`.
+6. The judge is Sonnet 5.5 through the Anthropic API: the script asks for its key unless `JUDGE_API_KEY` or
+   `ANTHROPIC_API_KEY` is set. The target key is always `none`.
+7. Run, in this order, so a setup mistake costs little (PowerShell; bash takes the same variables):
 
    ```
-   $env:ANTHROPIC_API_KEY = "<your key>"
-   $env:JAVA_HOME = "$HOME\.jdks\corretto-21.0.9"
+   $env:TEST_GROUPS = "unit";     .\scripts\run-smoke.ps1 <your preset>.env
+   $env:TEST_GROUPS = "smoke";    .\scripts\run-smoke.ps1 <your preset>.env
+   $env:TEST_GROUPS = "full";     .\scripts\run-smoke.ps1 <your preset>.env
+   $env:TEST_GROUPS = "strategy"; .\scripts\run-smoke.ps1 <your preset>.env
    ```
 
-7. Run, in this order, so a setup mistake costs little:
-
-   ```
-   mvn -f ../../pom.xml -Peval -pl core/jllm-eval -am test "-Dgroups=unit"
-   mvn -f ../../pom.xml -Peval -pl core/jllm-eval -am test "-Dgroups=smoke" "-Deval.target=remote.gpu"
-   mvn -f ../../pom.xml -Peval -pl core/jllm-eval -am test "-Dgroups=full" "-Deval.target=remote.gpu"
-   mvn -f ../../pom.xml -Peval -pl core/jllm-eval -am test "-Dgroups=strategy" "-Deval.target=remote.gpu"
-   ```
-
-   The connection check runs first. If it stops the run, the message names the entry and the address: unreachable
-   (firewall, wrong IP, stack down) or a different model id (fix step 5). Use `-Deval.trials=1` for a quick first pass.
+   The script checks the endpoint first; if it stops, the message names the role and the address: unreachable
+   (firewall, wrong IP, stack down) or a different model id (fix step 5).
 8. Read the results in `eval-results/qwen3.6-27b/run-<timestamp>/report.md`. The recap is also copied to
    `eval-results/history/`.
 
@@ -253,7 +340,7 @@ All classes are under `src/test/java/org/kendar/llm/eval`.
 |---|---|
 | `EvalConfig` | Loads, resolves and validates the settings. |
 | `ModelEndpoint` | One resolved endpoint; converts to harness provider settings. |
-| `Secrets` | Registers secrets and masks them in output. |
+| `Secrets` | The secret values of one configuration (`EvalConfig.secrets()`); masks them in output. Per config, not global. |
 | `ConnectionCheck` | Reachability, served model and warm-up. |
 | `RunMetadata` | Describes the run and writes `run.json`. |
 | `EvalRun` | Sets up the run once and shares it with all tests. |

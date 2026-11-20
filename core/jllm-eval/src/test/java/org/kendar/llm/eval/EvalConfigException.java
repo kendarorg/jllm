@@ -6,8 +6,8 @@ import java.util.List;
 public class EvalConfigException extends RuntimeException {
     private final List<String> errors;
 
-    public EvalConfigException(List<String> errors) {
-        super(Secrets.mask("Invalid jllm-eval configuration (" + errors.size() + "):\n  - " + String.join("\n  - ", errors)));
+    public EvalConfigException(List<String> errors, Secrets secrets) {
+        super(secrets.mask("Invalid jllm-eval configuration (" + errors.size() + "):\n  - " + String.join("\n  - ", errors)));
         this.errors = List.copyOf(errors);
     }
 

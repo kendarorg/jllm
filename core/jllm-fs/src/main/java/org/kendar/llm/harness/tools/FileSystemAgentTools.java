@@ -99,13 +99,28 @@ public class FileSystemAgentTools implements HarnessToolSet {
     }
 
     /**
-     * The path as shown in the result of a write. In plan mode the work dir is read-only and the write went to the
-     * scratch dir: say so, or the model reports a change to the project that did not happen.
+     * The result line of a write: {@code "<action> <shown>"}. In plan mode the work dir is read-only and the write went
+     * to the scratch dir: the line opens with what did not happen, or the model reports a change to the project.
+     *
+     * @param action what was done, worded to precede the path ("Wrote 5 chars to", "Edited")
      */
-    public static String written(ToolContext ctx, String shown) {
+    public static String written(ToolContext ctx, String action, String shown) {
         return ctx.readOnlyWork()
-                ? shown + " (plan mode: the working directory is read-only, so this is a scratch file, not a change to the project)"
-                : shown;
+                ? "Plan mode: " + shown + " was NOT created or changed in the project (the working directory is "
+                + "read-only). " + action + " its copy in the scratch directory instead. Do not report the project "
+                + "file as created or changed, and make no more writes for the plan: describe this change in the plan "
+                + "as a step to do once the user approves."
+                : action + " " + shown;
+    }
+
+    /**
+     * The refusal of a path outside the work dir. It says the limit holds for every tool, or the model retries the
+     * same read through the shell.
+     */
+    public static IllegalArgumentException escapes(String path) {
+        return new IllegalArgumentException("Path escapes the work dir: " + path + ". Files outside the work dir are "
+                + "off-limits for every tool, the shell included: tell the user you cannot access it, do not try "
+                + "another way.");
     }
 
     private static Path scratchRoot(ToolContext ctx) {
@@ -115,9 +130,7 @@ public class FileSystemAgentTools implements HarnessToolSet {
     private static Path resolveIn(Path rootDir, String path) {
         Path root = rootDir.toAbsolutePath().normalize();
         Path resolved = root.resolve(path).normalize();
-        if (!resolved.startsWith(root)) {
-            throw new IllegalArgumentException("Path escapes the work dir: " + path);
-        }
+        if (!resolved.startsWith(root)) throw escapes(path);
         // resolve symlinks on the deepest existing ancestor so a link inside the work dir cannot point outside it
         try {
             Path realRoot = root.toRealPath();
@@ -125,18 +138,24 @@ public class FileSystemAgentTools implements HarnessToolSet {
             while (existing != null && !Files.exists(existing, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
                 existing = existing.getParent();
             }
-            if (existing != null && !existing.toRealPath().startsWith(realRoot)) {
-                throw new IllegalArgumentException("Path escapes the work dir: " + path);
-            }
+            if (existing != null && !existing.toRealPath().startsWith(realRoot)) throw escapes(path);
         } catch (IOException e) {
             throw new IllegalArgumentException("Cannot resolve path: " + path, e);
         }
         return resolved;
     }
 
+    /** The model only uses read_file on a document when the description says it can. */
+    static String readFileDescription(DocumentReaders readers) {
+        String d = "Read a text file from the chat work dir. Optional 1-based offset and line limit.";
+        List<String> ext = readers == null ? List.of() : readers.extensions();
+        if (ext.isEmpty()) return d;
+        return d + " Also reads " + ext.stream().map(e -> "." + e).collect(Collectors.joining(", "))
+                + " files: returns their text.";
+    }
+
     private HarnessTool readFile() {
-        return new SimpleTool("read_file",
-                "Read a text file from the chat work dir. Optional 1-based offset and line limit.",
+        return new SimpleTool("read_file", readFileDescription(readers),
                 SimpleTool.schema(
                         "path", "File path relative to the work dir",
                         "offset:integer?", "First line to return (1-based)",
@@ -247,7 +266,7 @@ public class FileSystemAgentTools implements HarnessToolSet {
                         r.rollback();
                         throw e;
                     }
-                    return "Appended " + content.length() + " chars to " + written(ctx, shown);
+                    return written(ctx, "Appended " + content.length() + " chars to", shown);
                 }
                 byte[] bytes = content.getBytes(StandardCharsets.UTF_8);
                 StorageQuota.Reservation r = quota.reserve(ctx.chatId(), p, Files.exists(p) ? Files.size(p) : 0,
@@ -260,7 +279,7 @@ public class FileSystemAgentTools implements HarnessToolSet {
                     r.rollback();
                     throw e;
                 }
-                return "Wrote " + content.length() + " chars to " + written(ctx, shown);
+                return written(ctx, "Wrote " + content.length() + " chars to", shown);
             }
         }, (ctx, in) -> {
             if (ctx.files() != null) return RemoteFileTools.writePreview(ctx, in);
@@ -317,7 +336,7 @@ public class FileSystemAgentTools implements HarnessToolSet {
                     r.rollback();
                     throw e;
                 }
-                return "Edited " + written(ctx, shown) + " (" + applied.replacements() + " replacement(s))\n" + applied.diff();
+                return written(ctx, "Edited", shown) + " (" + applied.replacements() + " replacement(s))\n" + applied.diff();
             }
         }, (ctx, in) -> {
             StringBuilder sb = new StringBuilder("--- " + in.path("path").asText() + "\n");

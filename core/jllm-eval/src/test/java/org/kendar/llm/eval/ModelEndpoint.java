@@ -19,10 +19,6 @@ public record ModelEndpoint(Role role, String name, String protocol, String base
     public static final String ANTHROPIC = "anthropic";
     public static final String OPENAI = "openai";
 
-    public ModelEndpoint {
-        Secrets.register(apiKey);
-    }
-
     public ModelEndpoint(Role role, String name, String protocol, String baseUrl, String model, int contextTokens,
                          boolean smallModel, int timeoutSeconds, String apiKey, ThinkingLevel thinking) {
         this(role, name, protocol, baseUrl, model, contextTokens, smallModel, timeoutSeconds, apiKey, thinking, 0);

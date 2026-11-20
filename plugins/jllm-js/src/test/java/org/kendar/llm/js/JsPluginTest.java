@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.AgentHarness;
 import org.kendar.llm.harness.agent.AgentEvent;
+import org.kendar.llm.harness.agent.AgentLoop;
 import org.kendar.llm.harness.tools.HarnessTool;
 import org.kendar.llm.harness.tools.SimpleTool;
 import org.kendar.llm.harness.tools.ToolKind;
@@ -106,7 +107,7 @@ class JsPluginTest {
 
         List<AgentEvent> events = run(harness(model), false);
 
-        assertEquals("The user rejected this tool call", outer(events).get(0));
+        assertEquals(AgentLoop.REJECTED, outer(events).get(0));
     }
 
     @Test

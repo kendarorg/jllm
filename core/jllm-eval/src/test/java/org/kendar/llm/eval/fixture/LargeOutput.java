@@ -17,13 +17,13 @@ import java.util.Random;
 public final class LargeOutput {
 
     private static final String[] QUESTIONS = {
-            "What is the access code of the backup vault?",
+            "What is the tracking number of the backup tape shipment?",
             "Which host runs the nightly billing export?",
             "How many days are audit logs retained?",
             "Who owns the March payments gateway incident?",
             "Which port does the metrics collector listen on?"};
     private static final String[] SENTENCES = {
-            "The access code of the backup vault is %s.",
+            "The tracking number of the backup tape shipment is %s.",
             "The nightly billing export runs on host %s.",
             "Audit logs are retained for %s days.",
             "The March payments gateway incident is owned by %s.",
@@ -48,7 +48,7 @@ public final class LargeOutput {
         if (lines < factCount * 4) throw new IllegalArgumentException("too few lines");
         this.lines = lines;
         Random rnd = new Random(seed);
-        String[] answers = {"VLT-" + (1000 + rnd.nextInt(9000)),
+        String[] answers = {"TRK-" + (1000 + rnd.nextInt(9000)),
                 "bill-" + (char) ('a' + rnd.nextInt(26)) + (100 + rnd.nextInt(900)),
                 RETENTION[rnd.nextInt(RETENTION.length)],
                 OWNERS[rnd.nextInt(OWNERS.length)],

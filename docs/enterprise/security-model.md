@@ -53,8 +53,9 @@ It does not protect against code already inside the container, and it has no TLS
 
 ## 3. Network egress
 
-- `web_fetch` and `web_download` ask before contacting a host, although they are read-only. The user may grant a host
-  and its subdomains for one chat. A redirect to another host asks again; https to http redirects are refused.
+- `web_fetch` and `web_download` ask before contacting a host. The user may grant a host
+  and its subdomains for one chat. `web_download` writes a file, so it is also gated like `write_file` (approval,
+  plan-mode scratch copy), and a `write_file` permission rule covers it too. A redirect to another host asks again; https to http redirects are refused.
 - An invalid TLS certificate asks separately, for that one call and host only.
 - `web_search` and `wikipedia_search` call fixed hosts.
 - MCP servers and REST APIs are reachable only if listed in the settings.

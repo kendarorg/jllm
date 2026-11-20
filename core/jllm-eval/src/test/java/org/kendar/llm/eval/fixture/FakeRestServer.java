@@ -1,12 +1,15 @@
 package org.kendar.llm.eval.fixture;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -30,8 +33,8 @@ public final class FakeRestServer extends FakeServer {
         Response handle(Map<String, String> pathParams, String body);
     }
 
-    private record Route(String method, String template, String operationId, String summary, Pattern pattern,
-                         List<String> params, Handler handler) {
+    private record Route(String method, String template, String operationId, String summary,
+                         Map<String, String> bodyFields, Pattern pattern, List<String> params, Handler handler) {
     }
 
     private final List<Route> routes = new ArrayList<>();
@@ -40,8 +43,14 @@ public final class FakeRestServer extends FakeServer {
         super(name);
     }
 
-    /** Adds an operation, e.g. {@code route("GET", "/orders/{id}", "getOrder", "Returns one order", handler)}. */
-    public FakeRestServer route(String method, String template, String operationId, String summary, Handler h) {
+    /**
+     * Adds an operation, e.g. {@code route("GET", "/orders/{id}", "getOrder", "Returns one order", null, handler)}.
+     *
+     * @param bodyFields required string fields of the JSON body (name to description), published in the spec; null
+     *                   for an operation without a body
+     */
+    public FakeRestServer route(String method, String template, String operationId, String summary,
+                                Map<String, String> bodyFields, Handler h) {
         List<String> params = new ArrayList<>();
         Matcher m = Pattern.compile("\\{([A-Za-z0-9_]+)}").matcher(template);
         StringBuilder rx = new StringBuilder();
@@ -50,7 +59,8 @@ public final class FakeRestServer extends FakeServer {
             m.appendReplacement(rx, "([^/]+)");
         }
         m.appendTail(rx);
-        routes.add(new Route(method, template, operationId, summary, Pattern.compile(rx.toString()), params, h));
+        routes.add(new Route(method, template, operationId, summary, bodyFields, Pattern.compile(rx.toString()),
+                params, h));
         return this;
     }
 
@@ -60,23 +70,44 @@ public final class FakeRestServer extends FakeServer {
      */
     public static FakeRestServer sample(String name) {
         Map<String, String> orders = new LinkedHashMap<>();
-        orders.put("A-1", "{\"id\":\"A-1\",\"item\":\"keyboard\",\"status\":\"shipped\"}");
-        orders.put("A-2", "{\"id\":\"A-2\",\"item\":\"monitor\",\"status\":\"processing\"}");
+        orders.put("A-1", order("A-1", "keyboard", "shipped"));
+        orders.put("A-2", order("A-2", "monitor", "processing"));
+        AtomicInteger next = new AtomicInteger(3); // ids are never reused, as in a real store
         return new FakeRestServer(name)
-                .route("GET", "/orders", "listOrders", "Lists all orders",
+                .route("GET", "/orders", "listOrders", "Lists all orders", null,
                         (p, b) -> Response.ok("[" + String.join(",", orders.values()) + "]"))
-                .route("GET", "/orders/{id}", "getOrder", "Returns one order",
+                .route("GET", "/orders/{id}", "getOrder", "Returns one order", null,
                         (p, b) -> orders.containsKey(p.get("id")) ? Response.ok(orders.get(p.get("id")))
                                 : new Response(404, "{\"error\":\"order not found\"}"))
-                .route("POST", "/orders", "createOrder", "Creates an order from a JSON body with an item",
+                .route("POST", "/orders", "createOrder", "Creates an order for an item",
+                        Map.of("item", "What is ordered, e.g. keyboard"),
                         (p, b) -> {
-                            String id = "A-" + (orders.size() + 1);
-                            orders.put(id, "{\"id\":\"" + id + "\",\"item\":\"new\",\"status\":\"processing\"}");
+                            String item = field(b, "item");
+                            if (item == null || item.isBlank()) {
+                                return new Response(400, "{\"error\":\"item is required\"}");
+                            }
+                            String id = "A-" + next.getAndIncrement();
+                            orders.put(id, order(id, item, "processing"));
                             return new Response(201, orders.get(id));
                         })
-                .route("DELETE", "/orders/{id}", "deleteOrder", "Deletes an order",
+                .route("DELETE", "/orders/{id}", "deleteOrder", "Deletes an order", null,
                         (p, b) -> orders.remove(p.get("id")) != null ? Response.ok("{\"deleted\":true}")
                                 : new Response(404, "{\"error\":\"order not found\"}"));
+    }
+
+    private static String order(String id, String item, String status) {
+        return M.createObjectNode().put("id", id).put("item", item).put("status", status).toString();
+    }
+
+    /** A text field of a JSON body; null when the body is missing, not JSON or has no such text field. */
+    private static String field(String body, String name) {
+        if (body == null || body.isBlank()) return null;
+        try {
+            JsonNode n = M.readTree(body).path(name);
+            return n.isTextual() ? n.asText() : null;
+        } catch (IOException e) {
+            return null;
+        }
     }
 
     @Override
@@ -116,7 +147,17 @@ public final class FakeRestServer extends FakeServer {
             if (r.params().isEmpty()) op.remove("parameters");
             if (r.method().equals("POST") || r.method().equals("PUT")) {
                 ObjectNode rb = op.putObject("requestBody");
-                rb.putObject("content").putObject("application/json").putObject("schema").put("type", "object");
+                ObjectNode schema = rb.putObject("content").putObject("application/json").putObject("schema")
+                        .put("type", "object");
+                if (r.bodyFields() != null && !r.bodyFields().isEmpty()) {
+                    rb.put("required", true);
+                    ObjectNode props = schema.putObject("properties");
+                    var required = schema.putArray("required");
+                    r.bodyFields().forEach((f, d) -> {
+                        props.putObject(f).put("type", "string").put("description", d);
+                        required.add(f);
+                    });
+                }
             }
             op.putObject("responses").putObject("200").put("description", "ok");
         }

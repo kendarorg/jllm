@@ -642,8 +642,8 @@ public class ContextManager {
         return text.toString().isBlank() ? null : text.toString().strip();
     }
 
-    /** Sections an update must never lose: the goal and where the work stands. */
-    static final List<String> KEPT_SECTIONS = List.of("## Objective", "## Work State");
+    /** Sections an update must never lose: the goal, the facts the user gave and where the work stands. */
+    static final List<String> KEPT_SECTIONS = List.of("## Objective", "## User-Stated Facts", "## Work State");
 
     /**
      * {@code summary} with every {@link #KEPT_SECTIONS} heading the model dropped while updating an earlier summary

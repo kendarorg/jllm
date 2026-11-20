@@ -75,7 +75,9 @@ class AgentLoopModesTest {
         var second = rig.model.requests.get(1);
         assertEquals(first.pinned(), second.pinned());
         assertTrue(first.extra().contains("Mode: PLAN"));
+        assertTrue(first.extra().contains("never report a project file as created or changed"), first.extra());
         assertTrue(second.extra().contains("Mode: EDIT"));
+        assertFalse(second.extra().contains("never report a project file"), second.extra());
     }
 
     @Test

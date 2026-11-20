@@ -1,33 +1,30 @@
 package org.kendar.llm.eval;
 
+import java.util.Collection;
 import java.util.Comparator;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.List;
 
-/** Registry of secret values. Everything printed, logged or written goes through {@link #mask}. */
+/**
+ * The secret values of one configuration. Everything printed, logged or written goes through {@link #mask}. Immutable:
+ * each {@link EvalConfig} owns its own, so tests loading their own configuration never see or clear another's.
+ */
 public final class Secrets {
 
     public static final String MASK = "***";
-    private static final Set<String> VALUES = ConcurrentHashMap.newKeySet();
+    public static final Secrets NONE = new Secrets(List.of());
 
-    private Secrets() {
+    /** Longest first, so a secret containing another is masked whole. */
+    private final List<String> values;
+
+    public Secrets(Collection<String> values) {
+        this.values = values.stream().filter(v -> v != null && !v.isBlank()).distinct()
+                .sorted(Comparator.comparingInt(String::length).reversed()).toList();
     }
 
-    public static void register(String secret) {
-        if (secret != null && !secret.isBlank()) VALUES.add(secret);
-    }
-
-    /** Test hook. */
-    public static void clear() {
-        VALUES.clear();
-    }
-
-    public static String mask(String text) {
+    public String mask(String text) {
         if (text == null) return null;
         String out = text;
-        for (String v : VALUES.stream().sorted(Comparator.comparingInt(String::length).reversed()).toList()) {
-            out = out.replace(v, MASK);
-        }
+        for (String v : values) out = out.replace(v, MASK);
         return out;
     }
 }

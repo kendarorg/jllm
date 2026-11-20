@@ -11,7 +11,7 @@ import java.time.format.DateTimeFormatter;
  */
 public final class EvalRun {
 
-    private static EvalRun instance;
+    private static volatile EvalRun instance;
     private static RuntimeException failure;
 
     private final EvalConfig config;
@@ -39,6 +39,15 @@ public final class EvalRun {
         return instance;
     }
 
+    /**
+     * The secrets of the started run, for what the run writes or logs (logs, traces, results, reports); none before
+     * the run starts or outside one (unit tests). Never starts the run.
+     */
+    public static Secrets activeSecrets() {
+        EvalRun run = instance;
+        return run == null ? Secrets.NONE : run.config.secrets();
+    }
+
     private static EvalRun start() {
         Instant start = Instant.now();
         EvalLog.info("run starting: loading configuration");
@@ -53,13 +62,13 @@ public final class EvalRun {
         Path dir = config.outputDir().resolve(slug(meta.targetModel())).resolve("run-" + DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")
                 .withZone(ZoneOffset.UTC).format(start));
         try {
-            Path file = meta.write(dir);
+            Path file = meta.write(dir, config.secrets());
             EvalRun run = new EvalRun(config, meta, dir, file);
             EvalLog.info("warm-up done " + check.warmupMillis() + " ms; results in " + dir);
             Runtime.getRuntime().addShutdownHook(new Thread(run::summarize, "eval-summary"));
             return run;
         } catch (java.io.IOException e) {
-            throw new IllegalStateException("Cannot write run metadata: " + Secrets.mask(e.getMessage()), e);
+            throw new IllegalStateException("Cannot write run metadata: " + config.secrets().mask(e.getMessage()), e);
         }
     }
 
@@ -94,7 +103,7 @@ public final class EvalRun {
             System.err.println("[jllm-eval] report: " + outputDir.resolve("report.md") + " ; summary: "
                     + summary.resolve("merged.md") + " ; history: " + history);
         } catch (Exception e) {
-            System.err.println("[jllm-eval] summary not written: " + Secrets.mask(String.valueOf(e)));
+            System.err.println("[jllm-eval] summary not written: " + config.secrets().mask(String.valueOf(e)));
         }
     }
 

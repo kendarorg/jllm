@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.AgentHarness;
 import org.kendar.llm.harness.agent.AgentEvent;
+import org.kendar.llm.harness.agent.AgentLoop;
 import org.kendar.llm.harness.hooks.HookEvent;
 import org.kendar.llm.harness.hooks.HookResult;
 import org.kendar.llm.harness.plugin.HarnessPlugin;
@@ -139,7 +140,7 @@ class ToolCatalogTest {
         assertTrue(ran.isEmpty());
         List<AgentEvent> asks = events.stream().filter(e -> e.type().equals("approval_request")).toList();
         assertEquals(1, asks.size());
-        assertEquals("ERR:The user rejected this tool call", outer(events).get(1));
+        assertEquals("ERR:" + AgentLoop.REJECTED, outer(events).get(1));
         assertTrue(asks.get(0).data().path("title").asText().startsWith("act"));
     }
 

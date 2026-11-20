@@ -107,19 +107,50 @@ public final class AgentHarness {
 
     /**
      * Restores the files {@code write_file} and {@code edit_file} changed in the last {@code turns} turns. Files
-     * changed by shell commands are not restored.
+     * changed by shell commands are not restored. The conversation is told: the turns that made the changes stay in
+     * it, and without the note the model takes the restored content for a failed write and writes it again.
      *
      * @throws AgentService.RunAlreadyActiveException if a run is in progress
      */
     public org.kendar.llm.harness.tools.Checkpoints.UndoResult undo(String chatId, int turns) {
         if (isRunning(chatId)) throw new AgentService.RunAlreadyActiveException(chatId);
         var files = sandbox.files(chatId, null);
+        org.kendar.llm.harness.tools.Checkpoints.UndoResult result;
         try {
-            if (files != null) return checkpoints.undo(chatId, files, turns);
-            return checkpoints.undo(chatId, sandbox.workDir(chatId), turns);
+            result = files != null ? checkpoints.undo(chatId, files, turns)
+                    : checkpoints.undo(chatId, sandbox.workDir(chatId), turns);
         } finally {
             if (quota != null) quota.forget(chatId); // restored files change the storage size: measure it again
         }
+        if (result.turns() > 0) noteUndo(chatId, result);
+        return result;
+    }
+
+    /**
+     * Appends the undo to the history: a user note and a short assistant reply, or the note as one more text block
+     * when the history ends with a user message (roles must alternate).
+     */
+    private void noteUndo(String chatId, org.kendar.llm.harness.tools.Checkpoints.UndoResult r) {
+        StringBuilder note = new StringBuilder("[/undo] I reverted the file changes of the last ").append(r.turns())
+                .append(" turn(s) with edits; the changes described above for these files no longer exist.");
+        if (!r.restored().isEmpty()) note.append(" Back to their earlier content: ").append(String.join(", ", r.restored())).append('.');
+        if (!r.deleted().isEmpty()) note.append(" Deleted (they did not exist before): ").append(String.join(", ", r.deleted())).append('.');
+        note.append(" Do not redo these changes unless I ask again; read the files for their current content.");
+        var chat = sessions.find(chatId);
+        if (chat.isEmpty()) return;
+        var messages = sessions.messages(chat.get());
+        if (messages.isEmpty()) return;
+        var last = messages.get(messages.size() - 1);
+        if ("user".equals(last.path("role").asText()) && last.path("content").isArray()) {
+            ((com.fasterxml.jackson.databind.node.ArrayNode) last.path("content")).addObject().put("type", "text")
+                    .put("text", note.toString());
+        } else {
+            var user = messages.addObject().put("role", "user");
+            user.putArray("content").addObject().put("type", "text").put("text", note.toString());
+            var ack = messages.addObject().put("role", "assistant");
+            ack.putArray("content").addObject().put("type", "text").put("text", "Understood: those changes are undone.");
+        }
+        sessions.saveMessages(chatId, messages);
     }
 
     /**
@@ -859,6 +890,7 @@ public final class AgentHarness {
             SandboxExecutor box = sandbox != null ? sandbox : new LocalDirSandboxExecutor(config);
             box.environmentWhitelist(settings.whitelistedEnvVars());
             box.outputLogLimit(settings.sandboxOutputLogMaxBytes());
+            box.shell(settings.sandboxShell()); // before the bash tool reads its description
 
             org.kendar.llm.harness.tools.Checkpoints harnessCheckpoints = new org.kendar.llm.harness.tools.Checkpoints();
             List<HarnessTool> all = new ArrayList<>();
@@ -937,10 +969,13 @@ public final class AgentHarness {
             String prompt = (systemPromptReplace != null ? systemPromptReplace : basePrompt())
                     + (smallModel || settings.isSmallModel() ? "\n\n" + Prompts.load("small-model.md") : "")
                     + (systemPrompt.isBlank() ? "" : "\n\n" + systemPrompt)
-                    + (instructions.isBlank() ? "" : "\n\n" + instructions)
                     + (context.kind() == ContextStrategyKind.MNEMONIC ? "\n\n" + MnemonicStrategy.systemAddendum() : "")
                     + (context.kind() == ContextStrategyKind.SCOPE
-                    ? "\n\n" + org.kendar.llm.harness.context.scope.ScopeStrategy.systemAddendum() : "");
+                    ? "\n\n" + org.kendar.llm.harness.context.scope.ScopeStrategy.systemAddendum() : "")
+                    // last, under their own heading: small models skip a rule buried among the defaults
+                    + (instructions.isBlank() ? "" : "\n\n## User instructions\n\nThe user's standing instructions. "
+                    + "Follow them in every answer, also when the request does not mention them; they override the "
+                    + "defaults above.\n\n" + instructions);
             AgentLoop loop = new AgentLoop(config, modelClient, context, selector,
                     new PermissionGate(approvalPolicy, permissionRules), approvals, sessions, box, registry, subAgentTool,
                     requestToolGroup, subAgentRunLog, mapper, metrics, prompt, hooks,

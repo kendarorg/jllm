@@ -31,8 +31,10 @@ A `SandboxExecutor` decides three things: where a chat works (the work directory
   child (`cmd &`) still holds the output pipe: output is read for 2 more seconds, later output is discarded. The local
   executors leave such a child running; the daemon kills it (see [Lifecycle](#lifecycle)).
 - **Links.** Deleting a work or scratch directory removes symbolic links and Windows junctions without following them.
-- **Shell description.** `shellEnvironment()` tells the model which OS and shell it has (Windows `cmd /c`, `bash -c`,
-  or `sh -c` in the container), so it writes matching syntax.
+- **Shell description.** `shellDescription()` is appended to the `bash` tool description and names the shell
+  (`sandbox.shell` locally, default `cmd /c` on Windows, `zsh -c` on macOS, `bash -c` elsewhere; `sh -c` in the
+  container), so the model writes matching syntax. A chat without the tool
+  (policy, chat toggle, deny rule) is never told about a shell.
 
 ## `CwdSandboxExecutor`: the project directory
 

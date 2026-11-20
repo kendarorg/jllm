@@ -31,10 +31,18 @@ public final class RecordingModelClient implements ModelClient {
         this.label = label;
     }
 
+    /** {@code turn k/n } shown on the request lines of a multi-turn case; empty for a single-turn one. */
+    private volatile String turn = "";
+
+    /** Marks the user turn being run: its requests log {@code turn k/n} when the case has more than one turn. */
+    public void turn(int k, int n) {
+        this.turn = n > 1 ? "turn " + k + "/" + n + " " : "";
+    }
+
     private void log(boolean simple, long start, Usage usage, Throwable error) {
         long ms = (System.nanoTime() - start) / 1_000_000;
         EvalLog.info("    request " + (requests.size() + 1) + (simple ? " (summary)" : "") + " " + label + " "
-                + EvalLog.seconds(ms) + "s"
+                + turn + EvalLog.seconds(ms) + "s"
                 + (usage == null ? "" : ", tokens in " + usage.inputTokens() + " out " + usage.outputTokens()
                 + (usage.cacheReadTokens() > 0 ? " cached " + usage.cacheReadTokens() : ""))
                 + (error == null ? "" : ", ERROR " + error.getClass().getSimpleName() + ": " + error.getMessage()));

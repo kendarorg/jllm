@@ -57,7 +57,8 @@ public class SubAgentTool implements HarnessTool {
     @Override
     public String description() {
         return "Run several independent investigations or self-contained tasks, each by its own sub-agent with "
-                + "its own context. Use for broad fan-out (e.g. one prompt per repository or per question). Each "
+                + "its own context. Use for broad fan-out (e.g. one prompt per repository or per question). Also when the "
+                + "user asks to delegate, even for one prompt. Each "
                 + "prompt must be self-contained. Returns one result per prompt; some may have failed. Agent types: "
                 + agents.all().stream().map(a -> a.name() + " (" + a.description() + ")")
                         .collect(java.util.stream.Collectors.joining("; ")) + ".";

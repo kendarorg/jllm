@@ -8,6 +8,10 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
@@ -37,6 +41,7 @@ public final class History {
             run.put("quantization", meta.path("quantization").asText(""));
             run.put("contextTokens", meta.path("contextTokens").asInt());
             run.put("commit", meta.path("gitCommit").asText("unknown"));
+            run.put("endTime", Instant.now().toString());
             String name = stamp(run.path("runFolder").asText(runDir.getFileName().toString())) + "_"
                     + ReportBuilder.safe(run.path("model").asText("model"));
             Files.createDirectories(historyDir);
@@ -65,8 +70,8 @@ public final class History {
             s.filter(p -> p.getFileName().toString().endsWith(".json")).sorted().forEach(files::add);
         }
         StringBuilder sb = new StringBuilder("# Eval history\n\n");
-        sb.append("| date | model | target | judge | cases | pass rate | pass^k | tokens/trial | vs baseline | recap |\n");
-        sb.append("|---|---|---|---|---|---|---|---|---|---|\n");
+        sb.append("| start | end | model | target | judge | cases | pass rate | pass^k | tokens/trial | vs baseline | recap |\n");
+        sb.append("|---|---|---|---|---|---|---|---|---|---|---|\n");
         for (Path f : files) {
             JsonNode s = ResultLoader.MAPPER.readTree(f.toFile());
             JsonNode r = s.path("run");
@@ -77,7 +82,8 @@ public final class History {
                     ? String.format("%+.1f pts", b.path("overallDelta").asDouble() * 100) : "no baseline";
             String base = f.getFileName().toString();
             base = base.substring(0, base.length() - 5);
-            sb.append("| ").append(base, 0, Math.min(15, base.length())).append(" | ").append(r.path("model").asText())
+            sb.append("| ").append(localTime(r.path("startTime").asText(""))).append(" | ")
+                    .append(localTime(r.path("endTime").asText(""))).append(" | ").append(r.path("model").asText())
                     .append(" | ").append(r.path("target").asText()).append(" | ").append(judge)
                     .append(" | ").append(o.path("cases").asInt())
                     .append(" | ").append(String.format("%.1f%%", o.path("passRate").asDouble() * 100))
@@ -89,5 +95,17 @@ public final class History {
         Path index = historyDir.resolve("INDEX.md");
         Files.writeString(index, sb.toString(), StandardCharsets.UTF_8);
         return index;
+    }
+
+    private static final DateTimeFormatter LOCAL = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
+    /** ISO instant to local {@code yyyy-MM-dd HH:mm:ss}; {@code -} when missing or unparsable. */
+    static String localTime(String iso) {
+        if (iso.isBlank()) return "-";
+        try {
+            return LOCAL.format(Instant.parse(iso).atZone(ZoneId.systemDefault()));
+        } catch (DateTimeParseException e) {
+            return "-";
+        }
     }
 }

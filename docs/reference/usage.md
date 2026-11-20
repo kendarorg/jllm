@@ -153,6 +153,7 @@ ignored.
 | `smallModel` | default `false`: append the small-model rules (`prompts/small-model.md`) to the system prompt; `--small-model` sets it |
 | `sandbox.tempDir`, `sandbox.timeoutSeconds` | scratch root; default shell timeout (the tool caps it at 600 s) |
 | `sandbox.backend`, `sandbox.localFallback`, `sandbox.docker.*` | `local` (default) or `docker`; fall back to local when docker is missing (default `true`); `binary`, `image`, `memory`, `cpus`, `pidsLimit`, `user`, `network`, `mode` (`oneshot` or `daemon`, a long-running container), `remote`, `remoteHost` (docker on another machine). See [SANDBOX](../guides/sandbox.md). CLI and web: `--sandbox`, `--docker-image`, `--docker-mode`, `--docker-remote`, `--docker-remote-host` |
+| `sandbox.shell` | local backend: shell of the `bash` tool (`cmd`, `powershell`, `pwsh`, `bash`, `zsh`, `sh` or a path); default the OS one (`cmd` on Windows, `zsh` on macOS, `bash` elsewhere). See [SANDBOX](../guides/sandbox.md) |
 | `sandbox.outputLogMaxBytes` | default `51200`: cap of the spill log written when a `bash` output exceeds the kept 50 KB tail; `0` = unlimited. A capped log ends with `[log truncated at N bytes]` and the tool result says `log (itself truncated)` |
 | `files.maxReadBytes` | default `1000000`: the most text one `read_file` returns and the largest file `edit_file` changes (`grep` skips larger files); `<= 0` = default |
 | `web.fetchMaxBytes` | default `5242880` (5 MB): largest response body `web_fetch` reads; `<= 0` = default |
@@ -326,7 +327,7 @@ edit followed by a test run is not a loop unless the edit is identical each time
 ### Verify on stop
 
 A `STOP` hook can refuse to let an agent finish: it returns `HookResult.continueWith(message)`, the agent gets
-"The stop check failed. Fix the problem and finish again." plus the message, and goes on. After
+"The stop check failed. Fix the problem and finish again. If it cannot be fixed with what you have, stop and say what is missing; do not invent files or content." plus the message, and goes on. After
 `loop.verify.maxReentries` (default 3) re-entries, or when the same message comes back twice in a row, the run ends
 `unverified` (a sub-agent reports status `unverified` with its answer). Not run in plan mode or after a cancel.
 

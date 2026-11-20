@@ -3,7 +3,7 @@ package org.kendar.llm.eval.run;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
-import org.kendar.llm.eval.Secrets;
+import org.kendar.llm.eval.EvalRun;
 import org.kendar.llm.eval.cases.EvalCase;
 import org.kendar.llm.eval.grade.Check;
 import org.kendar.llm.eval.grade.CheckResult;
@@ -156,10 +156,15 @@ public final class TrialRunner {
                 if (ev.type().equals("approval_request")) answerApproval(h, chatId, c, ev.data());
                 if (ev.type().equals("run_finished")) finished[0].countDown();
             });
+            int turns = c.userTurns().size();
+            int turnNo = 0;
             for (EvalCase.Step step : c.steps()) {
                 if (step instanceof EvalCase.Action a) {
                     a.body().accept(h, chatId);
                 } else if (step instanceof EvalCase.UserTurn u) {
+                    turnNo++;
+                    main.turn(turnNo, turns);
+                    if (fastRec != null) fastRec.turn(turnNo, turns);
                     finished[0] = new CountDownLatch(1);
                     h.start(chatId, u.text());
                     int turnTimeout = turnTimeout(c);
@@ -249,7 +254,7 @@ public final class TrialRunner {
         doc.put("events", trace.events());
         doc.put("requests", trace.requests());
         Path file = traceDir.resolve("trial-" + trial + ".json");
-        Files.writeString(file, Secrets.mask(MAPPER.writeValueAsString(doc)), StandardCharsets.UTF_8);
+        Files.writeString(file, EvalRun.activeSecrets().mask(MAPPER.writeValueAsString(doc)), StandardCharsets.UTF_8);
         return file;
     }
 

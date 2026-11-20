@@ -6,7 +6,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Progress lines of the run on stderr: {@code [jllm-eval HH:mm:ss.SSS thread] message}. The thread name tells
- * parallel test classes apart. Secrets are masked. Set {@code -Deval.log=false} to silence it.
+ * parallel test classes apart. The run's secrets are masked. Set {@code -Deval.log=false} to silence it.
  */
 public final class EvalLog {
 
@@ -21,7 +21,7 @@ public final class EvalLog {
 
     public static void info(String message) {
         if (!ENABLED) return;
-        System.err.println(Secrets.mask("[jllm-eval " + LocalTime.now().format(TIME) + " "
+        System.err.println(EvalRun.activeSecrets().mask("[jllm-eval " + LocalTime.now().format(TIME) + " "
                 + Thread.currentThread().getName() + "] " + message));
     }
 

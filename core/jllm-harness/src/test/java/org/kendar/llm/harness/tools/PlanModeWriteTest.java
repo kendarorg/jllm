@@ -22,7 +22,7 @@ class PlanModeWriteTest {
     }
 
     @Test
-    void theResultSaysTheFileIsAScratchFileAndNothingIsCheckpointed() throws Exception {
+    void theResultSaysTheProjectFileWasNotCreatedAndNothingIsCheckpointed() throws Exception {
         Checkpoints cp = new Checkpoints();
         FileSystemAgentTools fs = new FileSystemAgentTools(null, cp);
         Path scratch = Files.createDirectories(root.resolve("jllm-agent"));
@@ -31,8 +31,9 @@ class PlanModeWriteTest {
 
         String result = run(fs, plan, "write_file", "{\"path\":\"blocked.txt\",\"content\":\"x\"}");
 
-        assertTrue(result.contains("scratch file"), result);
-        assertTrue(result.contains("not a change to the project"), result);
+        // the outcome comes first: a model that reads only the opening must not report the file as created
+        assertTrue(result.startsWith("Plan mode: blocked.txt was NOT created or changed in the project"), result);
+        assertTrue(result.contains("Wrote 1 chars to its copy in the scratch directory"), result);
         assertTrue(Files.exists(scratch.resolve("blocked.txt")));
         assertFalse(Files.exists(root.resolve("blocked.txt")), "the working directory is untouched");
         Path checkpoints = root.resolve(".jllm/checkpoints");
@@ -45,7 +46,9 @@ class PlanModeWriteTest {
 
         String edited = run(fs, plan, "edit_file",
                 "{\"path\":\"blocked.txt\",\"old_string\":\"x\",\"new_string\":\"y\"}");
-        assertTrue(edited.contains("scratch file"), edited);
+        assertTrue(edited.startsWith("Plan mode: blocked.txt was NOT created or changed in the project"), edited);
+        assertTrue(edited.contains("Edited its copy in the scratch directory"), edited);
+        assertTrue(edited.contains("(1 replacement(s))"), edited);
     }
 
     @Test

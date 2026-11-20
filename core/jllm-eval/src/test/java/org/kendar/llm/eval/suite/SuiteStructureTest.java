@@ -119,9 +119,13 @@ class SuiteStructureTest {
         for (EvalCase c : all()) if (core(c)) byFeature.computeIfAbsent(c.feature(), k -> new ArrayList<>()).add(c);
         assertFalse(byFeature.isEmpty());
         byFeature.forEach((f, cases) -> {
-            assertEquals(6, cases.size(), f + " case count");
+            // at least 3 normal and 2 edge cases, one risk case; a feature with more ground to cover takes one more
+            assertTrue(cases.size() == 6 || cases.size() == 7, f + " case count: " + cases.size());
             assertEquals(1, cases.stream().filter(EvalCase::risk).count(), f + " risk cases");
-            assertEquals(2, cases.stream().filter(c -> c.name().startsWith("edge-")).count(), f + " edge cases");
+            long edge = cases.stream().filter(c -> c.name().startsWith("edge-")).count();
+            assertTrue(edge >= 2, f + " edge cases: " + edge);
+            long normal = cases.stream().filter(c -> !c.risk() && !c.name().startsWith("edge-")).count();
+            assertTrue(normal >= 3, f + " normal cases: " + normal);
             long smoke = cases.stream().filter(c -> c.tag() == EvalCase.Tag.SMOKE).count();
             assertTrue(smoke >= 1 && smoke <= 2, f + " smoke cases: " + smoke);
             cases.forEach(c -> assertNotEquals(EvalCase.Tag.COMPACTION, c.tag()));

@@ -20,7 +20,7 @@ class HistoryTest {
         Path run = tmp.resolve("results").resolve(model).resolve(folder);
         Files.createDirectories(run);
         Files.writeString(run.resolve("summary.json"), "{\"run\":{\"model\":\"" + model + "\",\"judgeModel\":\"j\","
-                + "\"selfGraded\":false,\"runFolder\":\"" + folder + "\"},\"overall\":{\"cases\":4,\"passRate\":"
+                + "\"selfGraded\":false,\"startTime\":\"2026-11-17T14:30:00Z\",\"runFolder\":\"" + folder + "\"},\"overall\":{\"cases\":4,\"passRate\":"
                 + passRate + ",\"passKRate\":0.5,\"tokens\":{\"perTrial\":1234}},\"baseline\":{\"present\":false}}");
         Files.writeString(run.resolve("run.json"),
                 "{\"targetType\":\"remote\",\"targetName\":\"mac\",\"quantization\":\"q4\",\"contextTokens\":65536,"
@@ -41,6 +41,9 @@ class HistoryTest {
         String index = Files.readString(hist.resolve("INDEX.md"));
         assertTrue(index.indexOf("claude-haiku-5-5") < index.indexOf("qwen3.6-27b"), index);
         assertTrue(index.contains("75.0%") && index.contains("remote:mac") && index.contains("no baseline"));
+        assertTrue(index.contains("| start | end |"), index);
+        assertTrue(index.contains("| " + History.localTime("2026-11-17T14:30:00Z") + " | "), index);
+        assertTrue(!index.contains("| - |"), index);
         String json = Files.readString(hist.resolve("20261117-143000_qwen3.6-27b.json"));
         assertTrue(json.contains("\"commit\" : \"abc\"") && json.contains("\"contextTokens\" : 65536"));
     }

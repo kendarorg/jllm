@@ -1,15 +1,10 @@
 package org.kendar.llm.harness.llm;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-
-import java.util.List;
-
-/** Fills in a default {@link ThinkingLevel} on requests that carry none, helper calls included. */
+/**
+ * Fills in a default {@link ThinkingLevel} on requests that carry none. Helper calls ({@code simpleComplete}) carry
+ * their own level (off), so the default does not reach them.
+ */
 public final class ThinkingModelClient implements ModelClient {
-
-    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final ModelClient delegate;
     private final ThinkingLevel level;
@@ -47,17 +42,8 @@ public final class ThinkingModelClient implements ModelClient {
     @Override
     public String simpleComplete(String system, String user, int maxTokens, Double temperature,
                                  java.util.function.Consumer<Usage> usageSink) {
-        ArrayNode messages = MAPPER.createArrayNode();
-        messages.addObject().put("role", "user").put("content", user);
-        ModelRequest request = new ModelRequest(system, "", messages, List.of(), maxTokens);
-        if (temperature != null) request = request.withTemperature(temperature);
-        ModelResponse r = complete(request);
-        if (usageSink != null && r.usage() != null) usageSink.accept(r.usage());
-        StringBuilder sb = new StringBuilder();
-        for (JsonNode b : r.content()) {
-            if ("text".equals(b.path("type").asText())) sb.append(b.path("text").asText());
-        }
-        return sb.toString();
+        // helper calls set their own level (off): the default here applies to the agent's requests only
+        return SimpleCompletion.run(this, system, user, maxTokens, temperature, usageSink);
     }
 
     @Override

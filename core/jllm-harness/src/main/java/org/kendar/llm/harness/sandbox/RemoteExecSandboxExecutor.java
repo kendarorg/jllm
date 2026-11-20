@@ -184,8 +184,8 @@ public class RemoteExecSandboxExecutor implements SandboxExecutor {
     }
 
     @Override
-    public String shellEnvironment() {
-        return "The bash tool runs sh -c (POSIX sh, not bash) in a long-running Linux container ("
+    public String shellDescription() {
+        return "Runs sh -c (POSIX sh, not bash) in a long-running Linux container ("
                 + config.sandbox().docker().image() + ") with the working directory at " + WORKSPACE
                 + ". Files and installed tools persist between commands; each command is a fresh shell, so cd and "
                 + "exported variables do not carry over. Background jobs a command starts (cmd &) are killed when "

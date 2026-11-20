@@ -34,10 +34,10 @@ public record RunMetadata(String targetType, String targetName, String targetMod
     }
 
     /** Writes run.json (secrets masked) and returns its path. */
-    public Path write(Path dir) throws IOException {
+    public Path write(Path dir, Secrets secrets) throws IOException {
         Files.createDirectories(dir);
         ObjectMapper m = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
-        String json = Secrets.mask(m.writeValueAsString(this));
+        String json = secrets.mask(m.writeValueAsString(this));
         Path file = dir.resolve("run.json");
         Files.writeString(file, json, StandardCharsets.UTF_8);
         return file;

@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import org.kendar.llm.eval.Secrets;
+import org.kendar.llm.eval.EvalRun;
 import org.kendar.llm.harness.HarnessPricing;
 
 import java.io.IOException;
@@ -244,7 +244,7 @@ public final class ReportBuilder {
     static void writeText(Path file, String text) {
         try {
             Files.createDirectories(file.toAbsolutePath().getParent());
-            Files.writeString(file, Secrets.mask(text), StandardCharsets.UTF_8);
+            Files.writeString(file, EvalRun.activeSecrets().mask(text), StandardCharsets.UTF_8);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }

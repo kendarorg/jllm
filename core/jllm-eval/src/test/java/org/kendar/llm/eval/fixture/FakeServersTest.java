@@ -119,7 +119,31 @@ class FakeServersTest {
             JsonNode spec = M.readTree(send("GET", server.url() + "/openapi.json", null).body());
             assertEquals("getOrder", spec.at("/paths/~1orders~1{id}/get/operationId").asText());
             assertEquals(server.url(), spec.at("/servers/0/url").asText());
+            JsonNode body = spec.at("/paths/~1orders/post/requestBody/content/application~1json/schema");
+            assertEquals("string", body.at("/properties/item/type").asText());
+            assertEquals("item", body.at("/required/0").asText());
+            assertTrue(spec.at("/paths/~1orders/post/requestBody/required").asBoolean());
             assertEquals(4, server.operationCalls().size(), "the spec request is protocol, not an operation");
+        }
+    }
+
+    @Test
+    void restServerStoresTheItemSentAndNeverReusesAnId() throws Exception {
+        try (FakeRestServer server = FakeRestServer.sample("shop")) {
+            HttpResponse<String> first = send("POST", server.url() + "/orders", "{\"item\":\"mouse\"}");
+            assertEquals(201, first.statusCode());
+            JsonNode created = M.readTree(first.body());
+            assertEquals("mouse", created.path("item").asText());
+            assertEquals("A-3", created.path("id").asText());
+            assertTrue(send("GET", server.url() + "/orders/A-3", null).body().contains("mouse"));
+
+            assertEquals(200, send("DELETE", server.url() + "/orders/A-3", null).statusCode());
+            JsonNode second = M.readTree(send("POST", server.url() + "/orders", "{\"item\":\"pad\"}").body());
+            assertEquals("A-4", second.path("id").asText(), "a deleted id is not given out again");
+
+            assertEquals(400, send("POST", server.url() + "/orders", "{}").statusCode());
+            assertEquals(400, send("POST", server.url() + "/orders", "{\"name\":\"mouse\"}").statusCode());
+            assertEquals(400, send("POST", server.url() + "/orders", null).statusCode());
         }
     }
 

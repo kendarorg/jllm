@@ -170,7 +170,7 @@ error result).
 ### Per-turn system text
 
 `extra` = base prompt + addendum + instruction files (+ sub-agent suffixes and type prompt). The loop appends a note
-built each run: today's date, `sandbox.shellEnvironment()` (OS, shell), working directory, scratch directory, and the
+built each run: today's date, the OS, working directory, scratch directory, and the
 mode sentence. The pinned block is `chatId=<id>; agentId=<id>` for the main agent and `chatId=<id>; subagent` for
 sub-agents.
 

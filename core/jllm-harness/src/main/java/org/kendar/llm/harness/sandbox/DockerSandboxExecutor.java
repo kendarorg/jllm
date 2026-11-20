@@ -110,6 +110,11 @@ public class DockerSandboxExecutor implements SandboxExecutor {
     }
 
     @Override
+    public void shell(LocalShell shell) {
+        localFallback.shell(shell);
+    }
+
+    @Override
     public boolean sharedWorkDir() {
         return localFallback.sharedWorkDir();
     }
@@ -140,8 +145,8 @@ public class DockerSandboxExecutor implements SandboxExecutor {
     }
 
     @Override
-    public String shellEnvironment() {
-        return "The bash tool runs sh -c (POSIX sh, not bash) in a Linux container (" + config.sandbox().docker().image()
+    public String shellDescription() {
+        return "Runs sh -c (POSIX sh, not bash) in a Linux container (" + config.sandbox().docker().image()
                 + ") with the working directory mounted at /workspace"
                 + ("none".equals(config.sandbox().docker().network()) ? " and no network access." : ".");
     }

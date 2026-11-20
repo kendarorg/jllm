@@ -40,6 +40,10 @@ public interface SandboxExecutor {
     default void outputLogLimit(long maxBytes) {
     }
 
+    /** The shell of commands run on this machine ({@code sandbox.shell}); container backends ignore it. */
+    default void shell(LocalShell shell) {
+    }
+
     /**
      * True when the work dir is a project shared by every chat (the CLI): a script's file jail is then the agent's
      * own scratch directory. False when the work dir belongs to the chat.
@@ -130,9 +134,12 @@ public interface SandboxExecutor {
     /** Root directory holding the per-chat working directories (absolute, normalized). */
     Path location();
 
-    /** Where and how the {@code bash} tool runs commands, told to the model so it uses the right shell syntax. */
-    default String shellEnvironment() {
-        return "OS: " + System.getProperty("os.name") + " " + System.getProperty("os.version") + ".";
+    /**
+     * Where and how the {@code bash} tool runs commands. Part of that tool's description, so a chat without the tool
+     * is never told about a shell. Empty when there is nothing to add.
+     */
+    default String shellDescription() {
+        return "";
     }
 
     /** Per-chat working directory, created on demand. Also the root of the file tools' path jail. */

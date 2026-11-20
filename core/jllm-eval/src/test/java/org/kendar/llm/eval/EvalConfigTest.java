@@ -1,6 +1,5 @@
 package org.kendar.llm.eval;
 
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
@@ -11,11 +10,6 @@ import static org.kendar.llm.eval.TestSupport.*;
 
 @Tag("unit")
 class EvalConfigTest {
-
-    @AfterEach
-    void reset() {
-        Secrets.clear();
-    }
 
     @Test
     void anthropicDefaultsToHaiku() {
