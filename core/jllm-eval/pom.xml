@@ -39,6 +39,12 @@
             <artifactId>junit-jupiter</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- TestExecutionListener API for the progress log (EvalProgressListener) -->
+        <dependency>
+            <groupId>org.junit.platform</groupId>
+            <artifactId>junit-platform-launcher</artifactId>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>org.kendar.llm</groupId>
             <artifactId>jllm-test-support</artifactId>
