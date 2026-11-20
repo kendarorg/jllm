@@ -1,19 +1,24 @@
 #!/usr/bin/env bash
 # Builds target/release/jllm-<version>.zip: cli + web + plugins + settings + users + runners.
-# Usage: release/release.sh [--skip-build] [--out DIR]
+# Usage: release/release.sh [--build] [--out DIR]
+# Without --build it asks whether to build (mvn clean install, with tests); the default is no: package the existing jars.
 set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)  # this script lives in <root>/release
-out="$root/target/release"; skip=0
+out="$root/target/release"; build=0
 while [ $# -gt 0 ]; do
   case $1 in
-    --skip-build) skip=1;;
+    --build) build=1;;
     --out) out=$2; shift;;
     *) echo "unknown argument $1" >&2; exit 2;;
   esac
   shift
 done
 cd "$root"
-if [ "$skip" = 0 ]; then
+if [ "$build" = 0 ]; then
+  read -r -p "Build with mvn clean install (tests included)? [y/N] " ans || ans=""
+  case $ans in [yY]|[yY][eE][sS]) build=1;; esac
+fi
+if [ "$build" = 1 ]; then
   is_jdk() { [ -x "$1/bin/java" ] && "$1/bin/java" -version 2>&1 | grep -qE 'version "(2[1-9]|[3-9][0-9])'; }
   # JAVA_HOME, else jenv, else the JDKs of IntelliJ (~/.jdks, the lowest 21+), else java on the PATH
   if ! { [ -n "${JAVA_HOME:-}" ] && is_jdk "$JAVA_HOME"; }; then
@@ -28,7 +33,7 @@ if [ "$skip" = 0 ]; then
   fi
   echo "using JDK $JAVA_HOME"
   rm -rf target/plugins
-  mvn -B -DskipTests clean install
+  mvn -B clean install
 fi
 version=$(sed -n 's:.*<revision>\(.*\)</revision>.*:\1:p' pom.xml | head -1)
 name="jllm-$version"; stage="$out/$name"

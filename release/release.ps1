@@ -1,11 +1,13 @@
 # Builds target\release\jllm-<version>.zip: cli + web + plugins + settings + users + runners.
-# Usage: scripts\release.ps1 [-SkipBuild] [-Out DIR]
-param([switch]$SkipBuild, [string]$Out)
+# Usage: release\release.ps1 [-Build] [-Out DIR]
+# Without -Build it asks whether to build (mvn clean install, with tests); the default is no: package the existing jars.
+param([switch]$Build, [string]$Out)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 if (-not $Out) { $Out = Join-Path $root 'target\release' }
 Set-Location $root
-if (-not $SkipBuild) {
+if (-not $Build) { $Build = (Read-Host 'Build with mvn clean install (tests included)? [y/N]') -match '^(y|yes)$' }
+if ($Build) {
   # true for a JDK 21+ directory (cmd runs it: java prints its version on stderr, which PowerShell 5.1 treats as an error)
   function Test-Jdk([string]$dir) {
     $j = Join-Path $dir 'bin\java.exe'
@@ -33,7 +35,7 @@ if (-not $SkipBuild) {
   if (-not $env:JAVA_HOME) { throw 'JDK 21+ not found: set JAVA_HOME to a JDK 21' }
   Write-Host "using JDK $env:JAVA_HOME"
   if (Test-Path target\plugins) { Remove-Item -Recurse -Force target\plugins }
-  mvn -B -DskipTests clean install
+  mvn -B clean install
   if ($LASTEXITCODE -ne 0) { throw 'maven build failed' }
 }
 $version = ([regex]::Match((Get-Content pom.xml -Raw), '<revision>(.*?)</revision>')).Groups[1].Value
