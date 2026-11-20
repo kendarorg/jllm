@@ -135,7 +135,7 @@ class LlmJudgeTest {
             assertSame(r, Rubrics.byName(r.name()));
             assertFalse(r.low().isBlank() || r.medium().isBlank() || r.high().isBlank(), r.name());
         }
-        assertEquals(7, Rubrics.all().size());
+        assertEquals(8, Rubrics.all().size());
         assertThrows(IllegalArgumentException.class, () -> Rubrics.byName("nope"));
     }
 

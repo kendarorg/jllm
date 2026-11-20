@@ -1,6 +1,7 @@
 package org.kendar.llm.eval.suite;
 
 import org.kendar.llm.eval.cases.EvalCase;
+import org.kendar.llm.eval.grade.judge.Rubrics;
 import org.kendar.llm.harness.AgentHarness;
 import org.kendar.llm.js.JsPlugin;
 
@@ -33,10 +34,9 @@ class JsCasesTest extends SuiteBase {
                         .setup(files("data.txt", "alpha,beta,gamma,delta"))
                         .user("Use one run_js call that reads data.txt through tools.read_file, splits it by comma and returns the number of items. Tell me the number.")
                         .check(toolCalled("run_js")).check(innerCallFromScript()).check(answerContains("4")).build(),
-                full(JS, "failure-runaway-loop-reported")
+                judged(full(JS, "failure-runaway-loop-reported")
                         .harness(js(100_000))
                         .user("Use run_js to run `while(true){}` and tell me exactly what happened.")
-                        .check(toolCalled("run_js")).check(anyToolResultMatches("\"?ok\"?\\s*:\\s*false"))
-                        .check(answerNotMatches("(completed successfully|ran successfully|finished without)")).build());
+                        .check(toolCalled("run_js")).check(anyToolResultMatches("\"?ok\"?\\s*:\\s*false")), Rubrics.NO_FALSE_CLAIM).build());
     }
 }
