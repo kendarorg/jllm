@@ -80,6 +80,7 @@ public final class History {
             String judge = r.path("judgeModel").asText() + (r.path("selfGraded").asBoolean() ? " (self-graded)" : "");
             String delta = b.path("present").asBoolean()
                     ? String.format("%+.1f pts", b.path("overallDelta").asDouble() * 100) : "no baseline";
+            if (b.path("updated").asBoolean()) delta += " (stored as baseline)";
             String base = f.getFileName().toString();
             base = base.substring(0, base.length() - 5);
             sb.append("| ").append(localTime(r.path("startTime").asText(""))).append(" | ")
