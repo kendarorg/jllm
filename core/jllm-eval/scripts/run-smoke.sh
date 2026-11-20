@@ -15,8 +15,10 @@
 #
 # Per role (TARGET_* / JUDGE_*):
 #   *_PROVIDER   anthropic | nvidia | ollama | llamacpp (JUDGE_PROVIDER defaults to TARGET_PROVIDER)
-#   *_MODEL      model id (judge: the target model on the same provider, else the provider default)
-#   *_BASE       machine address (scheme://host[:port]); the script adds the API path /v1
+#   *_MODEL      model id; required, never assumed
+#   *_MODEL_NAME name of the model in results, reports, baselines and history; empty = *_MODEL
+#                (e.g. TARGET_MODEL=qwen-local, TARGET_MODEL_NAME=Qwen3.6-35B for a server alias)
+#   *_BASE       machine address (scheme://host[:port]); required, never assumed; the script adds the API path /v1
 #   *_CTX_TOKENS context tokens
 #   *_RPM        requests per minute; 0 = unpaced
 #   *_THINKING   minimal|low|medium|high; empty = the model's default (ollama defaults to minimal)
@@ -60,8 +62,8 @@ if [[ "$PRESET" != none ]]; then
 fi
 
 # ---- provider defaults
-default_base()     { case "$1" in anthropic) echo https://api.anthropic.com;; nvidia) echo https://integrate.api.nvidia.com;; ollama) echo http://localhost:11434;; llamacpp) echo http://localhost:8080;; esac; }
-default_model()    { case "$1" in anthropic) echo claude-haiku-5-5;; nvidia) echo meta/muse-glimmer-30b;; ollama) echo qwen3:30b;; llamacpp) echo qwen-local;; esac; }
+# require <name>: the model id and the address are never assumed; a missing one stops the run
+require()          { if [[ -z "${!1:-}" ]]; then echo "$1 is not set: give it in the environment or in the preset" >&2; exit 1; fi; }
 default_ctx()      { case "$1" in anthropic) echo 200000;; *) echo 16000;; esac; }
 default_rpm()      { case "$1" in anthropic) echo 300;; nvidia) echo 10;; ollama|llamacpp) echo 0;; esac; }
 default_thinking() { case "$1" in ollama) echo minimal;; *) echo "";; esac; }
@@ -75,23 +77,21 @@ check_provider TARGET_PROVIDER "$TARGET_PROVIDER"
 JUDGE_PROVIDER="${JUDGE_PROVIDER:-$TARGET_PROVIDER}"
 check_provider JUDGE_PROVIDER "$JUDGE_PROVIDER"
 
-TARGET_MODEL="${TARGET_MODEL:-$(default_model "$TARGET_PROVIDER")}"
-TARGET_BASE="${TARGET_BASE:-$(default_base "$TARGET_PROVIDER")}"
+require TARGET_MODEL
+require TARGET_BASE
 TARGET_BASE="${TARGET_BASE%/}"
 TARGET_CTX_TOKENS="${TARGET_CTX_TOKENS:-$(default_ctx "$TARGET_PROVIDER")}"
 TARGET_RPM="${TARGET_RPM:-$(default_rpm "$TARGET_PROVIDER")}"
 TARGET_THINKING="${TARGET_THINKING-$(default_thinking "$TARGET_PROVIDER")}"
+TARGET_MODEL_NAME="${TARGET_MODEL_NAME:-}"
 
-if [[ "$JUDGE_PROVIDER" == "$TARGET_PROVIDER" ]]; then
-  JUDGE_MODEL="${JUDGE_MODEL:-$TARGET_MODEL}"
-  JUDGE_BASE="${JUDGE_BASE:-$TARGET_BASE}"
-else
-  JUDGE_MODEL="${JUDGE_MODEL:-$(default_model "$JUDGE_PROVIDER")}"
-  JUDGE_BASE="${JUDGE_BASE:-$(default_base "$JUDGE_PROVIDER")}"
-fi
+require JUDGE_MODEL
+require JUDGE_BASE
+JUDGE_BASE="${JUDGE_BASE%/}"
 JUDGE_CTX_TOKENS="${JUDGE_CTX_TOKENS:-$(default_ctx "$JUDGE_PROVIDER")}"
 JUDGE_RPM="${JUDGE_RPM:-$(default_rpm "$JUDGE_PROVIDER")}"
 JUDGE_THINKING="${JUDGE_THINKING-$(default_thinking "$JUDGE_PROVIDER")}"
+JUDGE_MODEL_NAME="${JUDGE_MODEL_NAME:-}"
 
 COMPACTION_CTX_TOKENS="${COMPACTION_CTX_TOKENS:-65536}"   # context of the compaction group only
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-300}"                  # per model request, and warm-up
@@ -197,8 +197,8 @@ check_model judge "$JUDGE_PROVIDER" "$JUDGE_BASE" "$JUDGE_API_KEY" "$JUDGE_MODEL
 mkdir -p "$LOG_DIR"
 echo "Log: $LOG_FILE"
 echo "Preset: $([[ "$PRESET" == none ]] && echo none || basename "$PRESET")"
-echo "Target: $TARGET_PROVIDER $TARGET_MODEL  thinking: ${TARGET_THINKING:-default}  ctx: $TARGET_CTX_TOKENS  rpm: $TARGET_RPM"
-echo "Judge:  $JUDGE_PROVIDER $JUDGE_MODEL  thinking: ${JUDGE_THINKING:-default}  ctx: $JUDGE_CTX_TOKENS  rpm: $JUDGE_RPM  key: $JUDGE_KEY_LABEL"
+echo "Target: $TARGET_PROVIDER $TARGET_MODEL${TARGET_MODEL_NAME:+ as $TARGET_MODEL_NAME}  thinking: ${TARGET_THINKING:-default}  ctx: $TARGET_CTX_TOKENS  rpm: $TARGET_RPM"
+echo "Judge:  $JUDGE_PROVIDER $JUDGE_MODEL${JUDGE_MODEL_NAME:+ as $JUDGE_MODEL_NAME}  thinking: ${JUDGE_THINKING:-default}  ctx: $JUDGE_CTX_TOKENS  rpm: $JUDGE_RPM  key: $JUDGE_KEY_LABEL"
 echo "Compaction ctx: $COMPACTION_CTX_TOKENS  groups: $TEST_GROUPS  tests: ${TESTS:-all}  trials: $TRIALS  max trials: $MAX_TRIALS  timeout: ${TIMEOUT_SECONDS}s  case timeout cap: ${CASE_TIMEOUT_SECONDS}s  parallelism: $PARALLELISM"
 
 # ---- eval settings
@@ -255,6 +255,8 @@ else
   [[ -z "$JUDGE_API_KEY" ]] || export_secret EVAL_JUDGE_OPENAI_APIKEY "$JUDGE_API_KEY"
 fi
 
+[[ -z "$TARGET_MODEL_NAME" ]] || EVAL_ARGS+=(-Deval.target.modelName="$TARGET_MODEL_NAME")
+[[ -z "$JUDGE_MODEL_NAME" ]] || EVAL_ARGS+=(-Deval.judge.modelName="$JUDGE_MODEL_NAME")
 [[ "$SYSTEM_PROMPT_EXTRA" == none ]] || export_secret EVAL_SYSTEMPROMPT_EXTRA "$SYSTEM_PROMPT_EXTRA"
 [[ -z "$TESTS" ]] || EVAL_ARGS+=(-Dtest="$TESTS")
 

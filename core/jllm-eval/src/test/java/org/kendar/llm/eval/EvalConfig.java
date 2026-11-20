@@ -31,6 +31,8 @@ public final class EvalConfig {
     private ModelEndpoint fast;
     private String judgeKind;
     private String fastKind;
+    private String targetModelName;
+    private String judgeModelName;
     private LocalSettings local;
     private int connectTimeoutSeconds;
     private int warmupTimeoutSeconds;
@@ -80,6 +82,13 @@ public final class EvalConfig {
     public ModelEndpoint fast() { return fast; }
     public String judgeKind() { return judgeKind; }
     public String fastKind() { return fastKind; }
+    /**
+     * Name of the target model in results, reports, baselines and history ({@code eval.target.modelName}); the
+     * model id sent to the server when unset. Lets a server alias ({@code qwen-local}) be reported as the real model.
+     */
+    public String targetModelName() { return targetModelName; }
+    /** Name of the judge model in results and reports ({@code eval.judge.modelName}); the model id when unset. */
+    public String judgeModelName() { return judgeModelName; }
     public LocalSettings local() { return local; }
     public int connectTimeoutSeconds() { return connectTimeoutSeconds; }
     public int warmupTimeoutSeconds() { return warmupTimeoutSeconds; }
@@ -211,6 +220,15 @@ public final class EvalConfig {
         resolveTarget();
         resolveJudge();
         resolveFast();
+        targetModelName = modelName("eval.target.modelName", target);
+        judgeModelName = modelName("eval.judge.modelName", judge);
+    }
+
+    /** The override, else the endpoint's model id; blank when there is no endpoint (already an error). */
+    private String modelName(String key, ModelEndpoint endpoint) {
+        String v = str(key, false);
+        if (v != null) return v;
+        return endpoint == null ? "" : endpoint.model();
     }
 
     private void resolveEmbedding() {

@@ -186,7 +186,7 @@ public final class Suite {
     private static synchronized LlmJudge judge() {
         if (judge == null) {
             EvalRun run = EvalRun.get();
-            judge = new LlmJudge(EvalModels.judge(), run.config().judge().model(), run.config().selfGraded(),
+            judge = new LlmJudge(EvalModels.judge(), run.config().judgeModelName(), run.config().selfGraded(),
                     run.config().outputDir().resolve("judge-cache"));
         }
         return judge;

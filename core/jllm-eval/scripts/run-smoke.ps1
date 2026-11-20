@@ -14,8 +14,10 @@
 #
 # Per role (TARGET_* / JUDGE_*):
 #   *_PROVIDER   anthropic | nvidia | ollama | llamacpp (JUDGE_PROVIDER defaults to TARGET_PROVIDER)
-#   *_MODEL      model id (judge: the target model on the same provider, else the provider default)
-#   *_BASE       machine address (scheme://host[:port]); the script adds the API path /v1
+#   *_MODEL      model id; required, never assumed
+#   *_MODEL_NAME name of the model in results, reports, baselines and history; empty = *_MODEL
+#                (e.g. TARGET_MODEL=qwen-local, TARGET_MODEL_NAME=Qwen3.6-35B for a server alias)
+#   *_BASE       machine address (scheme://host[:port]); required, never assumed; the script adds the API path /v1
 #   *_CTX_TOKENS context tokens
 #   *_RPM        requests per minute; 0 = unpaced
 #   *_THINKING   minimal|low|medium|high; empty = the model's default (ollama defaults to minimal)
@@ -94,10 +96,10 @@ function Find-JavaHome {
 
 # ---- provider defaults
 $providerDefaults = @{
-    anthropic = @{ Base = 'https://api.anthropic.com'; Model = 'claude-haiku-5-5'; Ctx = '200000'; Rpm = '300'; Thinking = ''; Par = '20'; KeyEnv = 'ANTHROPIC_API_KEY' }
-    nvidia    = @{ Base = 'https://integrate.api.nvidia.com'; Model = 'meta/muse-glimmer-30b'; Ctx = '16000'; Rpm = '10'; Thinking = ''; Par = '2'; KeyEnv = 'NVIDIA_API_KEY' }
-    ollama    = @{ Base = 'http://localhost:11434'; Model = 'qwen3:30b'; Ctx = '16000'; Rpm = '0'; Thinking = 'minimal'; Par = '1'; KeyEnv = '' }
-    llamacpp  = @{ Base = 'http://localhost:8080'; Model = 'qwen-local'; Ctx = '16000'; Rpm = '0'; Thinking = ''; Par = '1'; KeyEnv = '' }
+    anthropic = @{ Ctx = '200000'; Rpm = '300'; Thinking = ''; Par = '20'; KeyEnv = 'ANTHROPIC_API_KEY' }
+    nvidia    = @{ Ctx = '16000'; Rpm = '10'; Thinking = ''; Par = '2'; KeyEnv = 'NVIDIA_API_KEY' }
+    ollama    = @{ Ctx = '16000'; Rpm = '0'; Thinking = 'minimal'; Par = '1'; KeyEnv = '' }
+    llamacpp  = @{ Ctx = '16000'; Rpm = '0'; Thinking = ''; Par = '1'; KeyEnv = '' }
 }
 function Test-Provider([string]$Name, [string]$Value) {
     if (-not $providerDefaults.ContainsKey($Value)) { Fail "${Name}: must be anthropic, nvidia, ollama or llamacpp (got '$Value')" }
@@ -111,18 +113,26 @@ Test-Provider 'JUDGE_PROVIDER' $JUDGE_PROVIDER
 $td = $providerDefaults[$TARGET_PROVIDER]
 $jd = $providerDefaults[$JUDGE_PROVIDER]
 
-$TARGET_MODEL = Get-Setting 'TARGET_MODEL' $td.Model
-$TARGET_BASE = (Get-Setting 'TARGET_BASE' $td.Base).TrimEnd('/')
+# The model id and the address are never assumed: a missing one stops the run.
+function Get-Required([string]$Name) {
+    $v = Get-Setting $Name ''
+    if ([string]::IsNullOrEmpty($v)) { Fail "$Name is not set: give it in the environment or in the preset" }
+    return $v
+}
+$TARGET_MODEL = Get-Required 'TARGET_MODEL'
+$TARGET_BASE = (Get-Required 'TARGET_BASE').TrimEnd('/')
 $TARGET_CTX_TOKENS = Get-Setting 'TARGET_CTX_TOKENS' $td.Ctx
 $TARGET_RPM = Get-Setting 'TARGET_RPM' $td.Rpm
 $TARGET_THINKING = Get-Setting 'TARGET_THINKING' $td.Thinking -AllowEmpty
+$TARGET_MODEL_NAME = Get-Setting 'TARGET_MODEL_NAME' ''
 
 $sameProvider = $JUDGE_PROVIDER -eq $TARGET_PROVIDER
-$JUDGE_MODEL = Get-Setting 'JUDGE_MODEL' $(if ($sameProvider) { $TARGET_MODEL } else { $jd.Model })
-$JUDGE_BASE = (Get-Setting 'JUDGE_BASE' $(if ($sameProvider) { $TARGET_BASE } else { $jd.Base })).TrimEnd('/')
+$JUDGE_MODEL = Get-Required 'JUDGE_MODEL'
+$JUDGE_BASE = (Get-Required 'JUDGE_BASE').TrimEnd('/')
 $JUDGE_CTX_TOKENS = Get-Setting 'JUDGE_CTX_TOKENS' $jd.Ctx
 $JUDGE_RPM = Get-Setting 'JUDGE_RPM' $jd.Rpm
 $JUDGE_THINKING = Get-Setting 'JUDGE_THINKING' $jd.Thinking -AllowEmpty
+$JUDGE_MODEL_NAME = Get-Setting 'JUDGE_MODEL_NAME' ''
 
 $COMPACTION_CTX_TOKENS = Get-Setting 'COMPACTION_CTX_TOKENS' '65536'   # context of the compaction group only
 $TIMEOUT_SECONDS = Get-Setting 'TIMEOUT_SECONDS' '300'                 # per model request, and warm-up
@@ -224,8 +234,8 @@ $testsShown = if ($TESTS) { $TESTS } else { 'all' }
 Write-Host "Log: $LogFile"
 Write-Host "Preset: $(if ($Preset -eq 'none') { 'none' } else { Split-Path $Preset -Leaf })"
 Write-Host "JAVA_HOME: $JAVA_HOME"
-Write-Host "Target: $TARGET_PROVIDER $TARGET_MODEL  thinking: $(if ($TARGET_THINKING) { $TARGET_THINKING } else { 'default' })  ctx: $TARGET_CTX_TOKENS  rpm: $TARGET_RPM"
-Write-Host "Judge:  $JUDGE_PROVIDER $JUDGE_MODEL  thinking: $(if ($JUDGE_THINKING) { $JUDGE_THINKING } else { 'default' })  ctx: $JUDGE_CTX_TOKENS  rpm: $JUDGE_RPM  key: $judgeKeyLabel"
+Write-Host "Target: $TARGET_PROVIDER $TARGET_MODEL$(if ($TARGET_MODEL_NAME) { " as $TARGET_MODEL_NAME" })  thinking: $(if ($TARGET_THINKING) { $TARGET_THINKING } else { 'default' })  ctx: $TARGET_CTX_TOKENS  rpm: $TARGET_RPM"
+Write-Host "Judge:  $JUDGE_PROVIDER $JUDGE_MODEL$(if ($JUDGE_MODEL_NAME) { " as $JUDGE_MODEL_NAME" })  thinking: $(if ($JUDGE_THINKING) { $JUDGE_THINKING } else { 'default' })  ctx: $JUDGE_CTX_TOKENS  rpm: $JUDGE_RPM  key: $judgeKeyLabel"
 Write-Host "Compaction ctx: $COMPACTION_CTX_TOKENS  groups: $TEST_GROUPS  tests: $testsShown  trials: $TRIALS  max trials: $MAX_TRIALS  timeout: ${TIMEOUT_SECONDS}s  case timeout cap: ${CASE_TIMEOUT_SECONDS}s  parallelism: $PARALLELISM"
 
 # ---- eval settings
@@ -281,6 +291,8 @@ if ($JUDGE_PROVIDER -eq 'anthropic') {
     if ($judgeApiKey) { $secretEnv['EVAL_JUDGE_OPENAI_APIKEY'] = $judgeApiKey }
 }
 
+if ($TARGET_MODEL_NAME) { $evalArgs += "-Deval.target.modelName=$TARGET_MODEL_NAME" }
+if ($JUDGE_MODEL_NAME) { $evalArgs += "-Deval.judge.modelName=$JUDGE_MODEL_NAME" }
 if ($SYSTEM_PROMPT_EXTRA -ne 'none') { $secretEnv['EVAL_SYSTEMPROMPT_EXTRA'] = $SYSTEM_PROMPT_EXTRA }
 if ($TESTS) { $evalArgs += "-Dtest=$TESTS" }
 

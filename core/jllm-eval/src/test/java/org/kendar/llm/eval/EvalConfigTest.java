@@ -22,6 +22,20 @@ class EvalConfigTest {
     }
 
     @Test
+    void modelNamesDefaultToTheIdsAndCanBeOverridden() {
+        EvalConfig d = load(map(), map("ANTHROPIC_API_KEY", "sk-test-1"));
+        assertEquals("claude-haiku-5-5", d.targetModelName());
+        assertEquals("claude-sonnet-5-5", d.judgeModelName());
+        EvalConfig o = load(map("eval.target.modelName", "Qwen3.6-35B"),
+                map("ANTHROPIC_API_KEY", "sk-test-1", "EVAL_JUDGE_MODELNAME", "Sonnet"));
+        assertEquals("Qwen3.6-35B", o.targetModelName());
+        assertEquals("claude-haiku-5-5", o.target().model());
+        assertEquals("Sonnet", o.judgeModelName());
+        assertEquals("claude-sonnet-5-5", o.judge().model());
+        assertFalse(o.selfGraded());
+    }
+
+    @Test
     void commandLineBeatsEnvironmentBeatsFile() {
         EvalConfig c = load(map("eval.trials", "7"), map("EVAL_TRIALS", "5", "ANTHROPIC_API_KEY", "k-1234"));
         assertEquals(7, c.trials());

@@ -23,14 +23,16 @@ The script checks that each endpoint answers and serves the model before startin
 
 ### Providers
 
-| Provider | API | Key | Default base | Default model |
-|---|---|---|---|---|
-| `anthropic` | Anthropic | required | `https://api.anthropic.com` | `claude-haiku-5-5` |
-| `nvidia` | OpenAI-compatible (NVIDIA NIM) | required | `https://integrate.api.nvidia.com` | `meta/muse-glimmer-30b` |
-| `ollama` | OpenAI-compatible | always `none` | `http://localhost:11434` | `qwen3:30b` |
-| `llamacpp` | OpenAI-compatible (llama.cpp server) | always `none` | `http://localhost:8080` | `qwen-local` |
+| Provider | API | Key | Usual base |
+|---|---|---|---|
+| `anthropic` | Anthropic | required | `https://api.anthropic.com` |
+| `nvidia` | OpenAI-compatible (NVIDIA NIM) | required | `https://integrate.api.nvidia.com` |
+| `ollama` | OpenAI-compatible | always `none` | `http://localhost:11434` |
+| `llamacpp` | OpenAI-compatible (llama.cpp server) | always `none` | `http://localhost:8080` |
 
-`*_BASE` is the machine address only (`scheme://host[:port]`); the script adds the API path `/v1`.
+`TARGET_BASE`, `TARGET_MODEL`, `JUDGE_BASE` and `JUDGE_MODEL` are required: the script never assumes an address or a
+model and stops naming the missing one. `*_BASE` is the machine address only (`scheme://host[:port]`); the script
+adds the API path `/v1`.
 
 ### Presets (`scripts/envs/*.env`)
 
@@ -44,8 +46,8 @@ contain keys: the script refuses any `*API_KEY*` line.
 | `anthropic-sonnet.env` | Sonnet 5.5, medium effort | Sonnet 5.5 |
 | `nvidia.env` | NVIDIA NIM muse-glimmer-30b | same model (self-graded) |
 | `nvidia-judge-anthropic.env` | NVIDIA NIM muse-glimmer-30b | Haiku 5.5 |
-| `ollama.env` | Ollama qwen3:30b, thinking minimal | same model (self-graded) |
-| `llamacpp-qwen-judge-sonnet.env` | llama.cpp `qwen-local` (Qwen 27B) at `http://192.168.1.96:17001` | Sonnet 5.5, medium effort |
+| `ollama.env` | Ollama qwen3:30b reported as `Qwen3.6-35B`, thinking minimal | same model (self-graded) |
+| `llamacpp-qwen-judge-sonnet.env` | llama.cpp `qwen-local`, reported as `Qwen3.6-35B`, at `http://192.168.1.96:17001` | Sonnet 5.5, medium effort |
 
 To add a setup, copy a preset and change it.
 
@@ -68,8 +70,9 @@ Per role, prefix `TARGET_` or `JUDGE_`:
 | Setting | Meaning |
 |---|---|
 | `*_PROVIDER` | `anthropic`, `nvidia`, `ollama` or `llamacpp`. Target default `anthropic`; judge default = target provider. |
-| `*_MODEL` | Model id. Judge default: the target model on the same provider, else the provider default. |
-| `*_BASE` | Machine address, without `/v1`. |
+| `*_MODEL` | Model id. Required. |
+| `*_MODEL_NAME` | Name of the model in results, reports, baselines and history; empty = `*_MODEL`. For a server alias: `TARGET_MODEL=qwen-local`, `TARGET_MODEL_NAME=Qwen3.6-35B` (`eval.target.modelName`, `eval.judge.modelName`). |
+| `*_BASE` | Machine address, without `/v1`. Required. |
 | `*_CTX_TOKENS` | Context tokens (`anthropic` 200000, others 16000). Must not exceed what the server allocates. |
 | `*_RPM` | Requests per minute; `0` = unpaced (`anthropic` 300, `nvidia` 10, others 0). |
 | `*_THINKING` | `minimal`, `low`, `medium` or `high`; empty = the model's default (`ollama` defaults to `minimal`). |
@@ -155,6 +158,7 @@ object descriptions, exception messages, connection-check output and `run.json`.
 | Key | Meaning |
 |---|---|
 | `eval.target` | `anthropic`, `remote.<name>` or `local.<strong\|alt\|small>`. |
+| `eval.target.modelName` | Name of the target model in results, reports, baselines, history and the results folder; default the model id. The id is still sent to the server and recorded as `targetModelId` in `run.json`. |
 | `eval.anthropic.baseUrl` | Anthropic API address. |
 | `eval.anthropic.model` | Model identifier. Defaults to `claude-haiku-5-5`. |
 | `eval.anthropic.contextTokens` | Context size used by the harness. |
@@ -167,6 +171,7 @@ object descriptions, exception messages, connection-check output and `run.json`.
 | `eval.remote.<name>.smallModel` | `true` to use the harness small-model prompt. |
 | `eval.remote.<name>.timeoutSeconds` | Request timeout. |
 | `eval.judge` | `anthropic` (default) or `openai`. |
+| `eval.judge.modelName` | Name of the judge in results and reports; default the judge model id (recorded as `judgeModelId`). |
 | `eval.judge.anthropic.model` | Judge model when the judge is `anthropic`. It uses the `eval.anthropic.*` address and key. |
 | `eval.judge.openai.baseUrl`, `.model`, `.contextTokens`, `.timeoutSeconds` | Judge endpoint when the judge is `openai`. |
 | `eval.fast` | Fast model: `target` (default), `anthropic` or `remote.<name>`. |
