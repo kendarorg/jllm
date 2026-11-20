@@ -102,8 +102,8 @@ During the run the log shows the planned number of case runs and, after each one
 `progress <done>/<planned> done, <to do> to do: <passed> passed, <failed> failed`, plus `not run` for cases whose
 group was skipped or stopped early. The count follows the JUnit selection (`TEST_GROUPS`, `TESTS`).
 
-Each run adds a recap to `eval-results/history/` and a row to `eval-results/history/INDEX.md`. Only `INDEX.md` is
-tracked by git; the per-run files are ignored.
+Each run adds a recap to `eval-results/history/` and a row to `eval-results/history/INDEX.md`. The Markdown files
+(`INDEX.md` and each `<date>_<model>.md` recap) are tracked by git; the `.json` recaps are ignored.
 
 ## Quick start
 
@@ -189,7 +189,7 @@ object descriptions, exception messages, connection-check output and `run.json`.
 | `eval.systemPrompt.extra` | Text added to the system prompt of every case (empty by default). The smoke script sets, by default when the target is `nvidia`, a reminder to call tools through the structured interface, because some hosted models write a tool call as plain text; `SYSTEM_PROMPT_EXTRA=none` turns it off. A case's own `systemPrompt` setup replaces it. Because it changes the prompt under test, results with and without it are not comparable. |
 | `eval.updateBaseline` | `true` stores this run as the model baseline (`<model>/baselines/<model>.json`) once the report is written; the report still compares against the previous baseline first. Default `false`: runs are compared with the stored baseline, which stays as it is. Store a baseline only from a full run (all cases, the trial count you will compare with). |
 | `eval.caseTimeoutSeconds` | Cap on each user turn of a case, in seconds. `0` (default) keeps each case's own timeout. The smoke scripts set `300` (`CASE_TIMEOUT_SECONDS`, defaults to `TIMEOUT_SECONDS`), which also caps the `4-strategies` sessions (they declare 1800): on a slow model set `CASE_TIMEOUT_SECONDS=1800` for those runs. |
-| `eval.outputDir` | Results folder (git-ignored, survives `mvn clean`). Layout: `<model>/run-<timestamp>/` with `run.json`, `<feature>/<case>/<strategy>/result.json` and traces, plus `report.md` and `summary.json` written when the run ends; `<model>/baselines/`; `summary/merged.md` compares the latest run of every model; `history/` keeps one compact recap per run, `<date>_<model>.md` and `.json`, plus `INDEX.md` (not git-ignored: commit it to keep the eval history). |
+| `eval.outputDir` | Results folder (git-ignored, survives `mvn clean`). Layout: `<model>/run-<timestamp>/` with `run.json`, `<feature>/<case>/<strategy>/result.json` and traces, plus `report.md` and `summary.json` written when the run ends; `<model>/baselines/`; `summary/merged.md` compares the latest run of every model; `history/` keeps one compact recap per run, `<date>_<model>.md` and `.json`, plus `INDEX.md` (the `.md` files are not git-ignored: commit them to keep the eval history; the `.json` recaps are). |
 
 ## Embedding model
 

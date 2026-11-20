@@ -86,6 +86,12 @@ All modules are available on Maven Central under the group `org.kendar.llm`.
 `mvn test` (or any later phase) runs the tests with JaCoCo and writes the aggregated report to
 [docs/coverage](docs/coverage/README.md) (Markdown index, committed); the HTML report goes to `docs/coverage/html/` and is git-ignored.
 
+## Evaluation
+
+[jllm-eval](core/jllm-eval/README.md) runs the harness features against real models, graded by checks and an LLM
+judge. Every run is recorded in the [eval history](core/jllm-eval/eval-results/history/INDEX.md): one row per run
+(model, judge, pass rate, pass^k, tokens per trial, comparison with the baseline) linking to the run's recap.
+
 ## Documentation
 
 | For | Start here |
