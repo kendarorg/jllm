@@ -52,4 +52,22 @@ class SecretMaskingTest {
         assertEquals("a *** b ***", s.mask("a " + SECRET + " b " + SECRET));
         assertNull(s.mask(null));
     }
+
+    @Test
+    void placeholderKeysAreNotSecrets() {
+        Secrets s = new Secrets(List.of("none", "x", SECRET));
+        assertEquals("none of them, ***", s.mask("none of them, " + SECRET));
+    }
+
+    @Test
+    void maskJsonKeepsTheJsonValid() throws Exception {
+        String secret = "nabcdefgh-123";
+        Secrets s = new Secrets(List.of(secret));
+        ObjectMapper m = new ObjectMapper();
+        // a newline followed by "abcdefgh-123" serializes as \nabcdefgh-123: text, not the secret
+        String text = "line\nabcdefgh-123 and " + secret;
+        String json = s.maskJson(m.writeValueAsString(Map.of("t", text)));
+        assertEquals("line\nabcdefgh-123 and ***", m.readTree(json).get("t").asText());
+        assertEquals("{\"t\":\"\\\\***\"}", s.maskJson(m.writeValueAsString(Map.of("t", "\\" + secret))));
+    }
 }

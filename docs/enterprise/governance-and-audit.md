@@ -32,7 +32,8 @@ builder.beforeToolCall(ctx -> policy.allows(ctx.tool(), ctx.input())
        .afterToolCall(ctx -> { audit.record(ctx.chatId(), ctx.tool(), ctx.input(), ctx.isError()); return HookResult.allow(); });
 ```
 
-A denial reaches the model as `Denied by a hook: <reason>`, so it can adapt.
+A denial reaches the model as `Denied by a hook: <reason>`, followed by an instruction not to reach the same result
+another way (no other tool, no shell command) and to report the denial to the user.
 
 ## Rules in configuration
 

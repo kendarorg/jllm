@@ -63,16 +63,29 @@ public final class History {
         return runFolder.startsWith("run-") ? runFolder.substring(4) : runFolder;
     }
 
-    /** Rewrites INDEX.md from the recap json files, oldest first. */
+    /** Row of the index, from its link {@code [<recap>.md](<recap>.md)}. */
+    private static final java.util.regex.Pattern ROW = java.util.regex.Pattern.compile(
+            "^\\|.*\\[([^\\]]+)\\.md]\\(\\1\\.md\\) \\|\\s*$");
+
+    /**
+     * Rewrites INDEX.md, oldest first: one row per recap json file, plus the rows of the previous index whose json is
+     * not here (only the Markdown is committed, so a fresh clone has the rows but not the json files).
+     */
     public static Path rebuildIndex(Path historyDir) throws IOException {
         List<Path> files = new ArrayList<>();
         try (Stream<Path> s = Files.list(historyDir)) {
             s.filter(p -> p.getFileName().toString().endsWith(".json")).sorted().forEach(files::add);
         }
-        StringBuilder sb = new StringBuilder("# Eval history\n\n");
-        sb.append("| start | end | model | target | judge | cases | pass rate | pass^k | tokens/trial | vs baseline | recap |\n");
-        sb.append("|---|---|---|---|---|---|---|---|---|---|---|\n");
+        java.util.TreeMap<String, String> rows = new java.util.TreeMap<>();
+        Path index = historyDir.resolve("INDEX.md");
+        if (Files.exists(index)) {
+            for (String line : Files.readAllLines(index, StandardCharsets.UTF_8)) {
+                java.util.regex.Matcher m = ROW.matcher(line);
+                if (m.matches()) rows.put(m.group(1), line.strip() + "\n");
+            }
+        }
         for (Path f : files) {
+            StringBuilder sb = new StringBuilder();
             JsonNode s = ResultLoader.MAPPER.readTree(f.toFile());
             JsonNode r = s.path("run");
             JsonNode o = s.path("overall");
@@ -92,8 +105,12 @@ public final class History {
                     .append(" | ").append(Math.round(o.path("tokens").path("perTrial").asDouble()))
                     .append(" | ").append(delta).append(" | [").append(base).append(".md](").append(base)
                     .append(".md) |\n");
+            rows.put(base, sb.toString());
         }
-        Path index = historyDir.resolve("INDEX.md");
+        StringBuilder sb = new StringBuilder("# Eval history\n\n");
+        sb.append("| start | end | model | target | judge | cases | pass rate | pass^k | tokens/trial | vs baseline | recap |\n");
+        sb.append("|---|---|---|---|---|---|---|---|---|---|---|\n");
+        rows.values().forEach(sb::append);
         Files.writeString(index, sb.toString(), StandardCharsets.UTF_8);
         return index;
     }

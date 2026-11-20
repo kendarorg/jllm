@@ -235,7 +235,9 @@ public final class ReportBuilder {
 
     static void write(Path file, JsonNode node) {
         try {
-            writeText(file, OUT.writeValueAsString(node));
+            Files.createDirectories(file.toAbsolutePath().getParent());
+            Files.writeString(file, EvalRun.activeSecrets().maskJson(OUT.writeValueAsString(node)),
+                    StandardCharsets.UTF_8);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }

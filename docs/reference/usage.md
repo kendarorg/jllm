@@ -337,8 +337,13 @@ searches, the compact JSON of the input for other tools. The first `(` separates
 the load, naming the rule (`permissions.deny[2]`). Order: `deny`, then `ask`, then `allow`; the first match wins.
 
 - `deny` applies in every mode, including `auto`, and a per-chat grant cannot override it. The model sees
-  `Denied by permission rule: <rule>` as a tool error. Sub-agents use the same rules. A deny rule without an argument
+  `Denied by permission rule: <rule>` as a tool error, followed by an instruction not to work around it with another
+  tool and to report it to the user instead. Sub-agents use the same rules. A deny rule without an argument
   pattern also removes the tool from the list sent to the model.
+- A `deny` rule on `write_file` or `edit_file` also denies a `bash` command that writes a matching path: output
+  redirection (`>`, `>>`, `2>`), `tee`, `touch`, `cp`/`mv` destinations, `dd of=`, `sed -i`, and the PowerShell
+  cmdlets `Out-File`, `Set-Content`, `Add-Content`, `New-Item`, `Copy-Item`, `Move-Item`. It is a guard rail on the
+  command text (variables and scripts are not followed): use an isolating sandbox for real containment.
 - `ask` forces the approval question; `allow` skips it in `default`, `edit` and `plan` modes (it never overrides `deny`,
   and plan-mode confinement still applies).
 - Settings only: no flag changes the rules. `/permissions` lists them.

@@ -12,11 +12,16 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
-/** Describes the run for every later step. Written as {@code run.json} in the run's output folder. */
+/**
+ * Describes the run for every later step. Written as {@code run.json} in the run's output folder. {@code targetModel}
+ * and {@code judgeModel} are the reported names ({@code eval.target.modelName}, {@code eval.judge.modelName});
+ * {@code targetModelId} and {@code judgeModelId} are the ids sent to the servers.
+ */
 public record RunMetadata(String targetType, String targetName, String targetModel, String quantization,
                           int contextTokens, boolean smallModel, String serverVersion, String judgeType,
                           String judgeModel, String fastModel, boolean selfGraded, String startTime,
-                          String gitCommit, Map<String, Long> warmupMillis, int trials) {
+                          String gitCommit, Map<String, Long> warmupMillis, int trials, String targetModelId,
+                          String judgeModelId) {
 
     public static RunMetadata of(EvalConfig c, ConnectionCheck.Result check, Instant start) {
         ModelEndpoint t = c.target();
@@ -28,16 +33,16 @@ public record RunMetadata(String targetType, String targetName, String targetMod
         };
         Map<String, Long> warm = new LinkedHashMap<>();
         check.warmupMillis().forEach((k, v) -> warm.put(k.name().toLowerCase(), v));
-        return new RunMetadata(c.targetKind().name().toLowerCase(), c.targetName(), t.model(), quant,
-                t.contextTokens(), t.smallModel(), server, c.judgeKind(), c.judge().model(), c.fast().model(),
-                c.selfGraded(), start.toString(), readGitCommit(), warm, c.trials());
+        return new RunMetadata(c.targetKind().name().toLowerCase(), c.targetName(), c.targetModelName(), quant,
+                t.contextTokens(), t.smallModel(), server, c.judgeKind(), c.judgeModelName(), c.fast().model(),
+                c.selfGraded(), start.toString(), readGitCommit(), warm, c.trials(), t.model(), c.judge().model());
     }
 
     /** Writes run.json (secrets masked) and returns its path. */
     public Path write(Path dir, Secrets secrets) throws IOException {
         Files.createDirectories(dir);
         ObjectMapper m = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
-        String json = secrets.mask(m.writeValueAsString(this));
+        String json = secrets.maskJson(m.writeValueAsString(this));
         Path file = dir.resolve("run.json");
         Files.writeString(file, json, StandardCharsets.UTF_8);
         return file;

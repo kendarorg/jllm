@@ -1571,6 +1571,20 @@ public class AgentLoop {
         return result;
     }
 
+    /**
+     * A hook or rule denial with the instruction not to reach the same result another way: models otherwise retry a
+     * denied write through the shell ({@code echo x > .env}).
+     */
+    static String noWorkaround(String denial, HarnessTool tool, String name, JsonNode input) {
+        String path = input != null && input.hasNonNull("path") ? input.get("path").asText().trim() : "";
+        String what = path.isEmpty() ? "This " + name + " call"
+                : (tool != null && tool.kind() == ToolKind.READ_ONLY ? "Reading " : "Writing ") + path;
+        String d = denial.strip();
+        String sep = d.endsWith(".") || d.endsWith("!") || d.endsWith("?") ? " " : ". ";
+        return d + sep + what + " is not permitted by any means (no other tool, no shell command); report this to the "
+                + "user instead.";
+    }
+
     /** Outcome of {@link #authorize}: {@code denial} is null when the call may run. */
     private record Authz(String denial, HookResult pre, JsonNode input) {
     }
@@ -1638,9 +1652,11 @@ public class AgentLoop {
             decision = Decision.DENY;
             sink.emit("approval_unavailable", mapper.createObjectNode().put("tool", name));
         }
-        if (pre.denied()) return new Authz("Denied by a hook: " + pre.denyReason(), pre, input);
+        if (pre.denied()) {
+            return new Authz(noWorkaround("Denied by a hook: " + pre.denyReason(), tool, name, input), pre, input);
+        }
         if (rule != null && rule.kind() == PermissionRules.Kind.DENY) {
-            return new Authz("Denied by permission rule: " + rule.rule(), pre, input);
+            return new Authz(noWorkaround("Denied by permission rule: " + rule.rule(), tool, name, input), pre, input);
         }
         // a host shell is not jailed like the file tools: a command line climbing out of the work dir is refused
         String command = commandOf(name, input);

@@ -47,4 +47,18 @@ class HistoryTest {
         String json = Files.readString(hist.resolve("20261117-143000_qwen3.6-27b.json"));
         assertTrue(json.contains("\"commit\" : \"abc\"") && json.contains("\"contextTokens\" : 65536"));
     }
+
+    @Test
+    void indexKeepsTheRowsOfRecapsWhoseJsonIsNotHere() throws Exception {
+        Path hist = tmp.resolve("history");
+        History.record(fakeRun("run-20261101-090000", "claude-haiku-5-5", 0.9), hist);
+        // a fresh clone: the Markdown is committed, the json is not
+        Files.delete(hist.resolve("20261101-090000_claude-haiku-5-5.json"));
+        History.record(fakeRun("run-20261117-143000", "qwen3.6-27b", 0.75), hist);
+
+        String index = Files.readString(hist.resolve("INDEX.md"));
+        assertTrue(index.contains("[20261101-090000_claude-haiku-5-5.md](20261101-090000_claude-haiku-5-5.md)"), index);
+        assertTrue(index.indexOf("claude-haiku-5-5") < index.indexOf("qwen3.6-27b"), index);
+        assertEquals(1, index.split("20261117-143000_qwen3.6-27b.md\\]").length - 1, index);
+    }
 }

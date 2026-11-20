@@ -254,7 +254,7 @@ public final class TrialRunner {
         doc.put("events", trace.events());
         doc.put("requests", trace.requests());
         Path file = traceDir.resolve("trial-" + trial + ".json");
-        Files.writeString(file, EvalRun.activeSecrets().mask(MAPPER.writeValueAsString(doc)), StandardCharsets.UTF_8);
+        Files.writeString(file, EvalRun.activeSecrets().maskJson(MAPPER.writeValueAsString(doc)), StandardCharsets.UTF_8);
         return file;
     }
 

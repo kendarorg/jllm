@@ -103,7 +103,7 @@ public final class CaseExecutor {
                 return m;
             }).toList());
             doc.put("run", metadata);
-            Files.writeString(dir.resolve("result.json"), EvalRun.activeSecrets().mask(MAPPER.writeValueAsString(doc)),
+            Files.writeString(dir.resolve("result.json"), EvalRun.activeSecrets().maskJson(MAPPER.writeValueAsString(doc)),
                     StandardCharsets.UTF_8);
         } catch (IOException e) {
             throw new UncheckedIOException(e);

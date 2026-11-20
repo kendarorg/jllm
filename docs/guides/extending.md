@@ -190,7 +190,8 @@ message twice in a row, the run ends `UNVERIFIED` (a sub-agent reports status `u
 that assumed the main agent should check `ctx.agent()`. A test run needs no code: `hooks.stop` in the settings
 ([USAGE](../reference/usage.md#verify-on-stop)) registers a `CommandStopHook`. An LLM judge is a plugin `STOP` hook that asks the
 fast model and returns `continueWith` with its objection. `AgentLoop.changedInRun(chatId, agent)` tells a hook
-whether a tool that changes things ran in the run. A `PRE_TOOL` denial is reported to the model as `Denied by a hook: <reason>`.
+whether a tool that changes things ran in the run. A `PRE_TOOL` denial is reported to the model as `Denied by a hook: <reason>`, followed by an
+instruction not to work around it with another tool and to report it to the user instead.
 
 ```java
 builder.beforeToolCall(ctx -> ctx.tool().equals("bash") && ctx.input().path("command").asText().contains("rm -rf")

@@ -152,7 +152,8 @@ class ToolCatalogTest {
                 .hook(HookEvent.PRE_TOOL, c -> c.parent() != null ? HookResult.deny("no scripts") : HookResult.allow())
                 .build();
 
-        assertEquals(List.of("ERR:Denied by a hook: no scripts"), outer(run(h, "go")));
+        assertEquals(List.of("ERR:Denied by a hook: no scripts. Reading a.txt is not permitted by any means (no other "
+                + "tool, no shell command); report this to the user instead."), outer(run(h, "go")));
     }
 
     @Test

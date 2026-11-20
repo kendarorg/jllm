@@ -16,7 +16,9 @@ import java.util.regex.PatternSyntaxException;
  * deny, ask, allow; the first match wins.
  * <p>
  * A rule on {@code write_file} also covers the other tools that create files from their {@code path} argument
- * ({@code web_download}): denying file writes cannot be bypassed by another tool that writes files.
+ * ({@code web_download}): denying file writes cannot be bypassed by another tool that writes files. A deny rule on
+ * {@code write_file} or {@code edit_file} also denies a {@code bash} command that writes a matching path (redirection,
+ * {@code tee}, {@code cp}, PowerShell {@code Set-Content} and the like, see {@code ShellWrites}).
  * <p>
  * A regex on a shell command line is a guard rail, not a security boundary (quoting, variables, scripts): use an
  * isolating sandbox executor for real containment.
@@ -32,6 +34,13 @@ public final class PermissionRules {
     /** @param argFolded the argument pattern, case-insensitive: used for paths on Windows */
     private record Rule(Kind kind, String text, Pattern tool, Pattern arg, Pattern argFolded) {
         boolean matches(String toolName, JsonNode input, Path workDir, boolean windows) {
+            if (kind == Kind.DENY && coversShellWrites(tool, toolName)) {
+                for (String target : shellWriteTargets(input)) {
+                    if (arg == null) return true;
+                    String value = normalizePath(target, workDir, windows);
+                    if ((windows ? argFolded : arg).matcher(value).find()) return true;
+                }
+            }
             if (!coversTool(tool, toolName)) return false;
             if (arg == null) return true;
             boolean path = isPathTool(toolName) && input != null && input.hasNonNull("path");
@@ -141,6 +150,20 @@ public final class PermissionRules {
     private static boolean coversTool(Pattern tool, String toolName) {
         return tool.matcher(toolName).matches()
                 || FILE_CREATORS.contains(toolName) && tool.matcher("write_file").matches();
+    }
+
+    /**
+     * A deny rule on {@code write_file} or {@code edit_file} (and not on the shell itself) also covers the files a
+     * {@code bash} command writes: denying a file write cannot be bypassed by {@code echo x > file}.
+     */
+    private static boolean coversShellWrites(Pattern tool, String toolName) {
+        return "bash".equals(toolName) && !tool.matcher("bash").matches()
+                && (tool.matcher("write_file").matches() || tool.matcher("edit_file").matches());
+    }
+
+    private static List<String> shellWriteTargets(JsonNode input) {
+        if (input == null || !input.hasNonNull("command")) return List.of();
+        return org.kendar.llm.harness.sandbox.ShellWrites.targets(input.get("command").asText());
     }
 
     private static boolean isPathTool(String tool) {

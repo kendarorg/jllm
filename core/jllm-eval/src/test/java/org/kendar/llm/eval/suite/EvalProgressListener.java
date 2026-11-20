@@ -93,6 +93,7 @@ public final class EvalProgressListener implements TestExecutionListener {
     @Override
     public void testPlanExecutionFinished(TestPlan plan) {
         if (planned.get() > 0) EvalLog.info(line("progress final"));
+        org.kendar.llm.eval.EvalRun.finish();
     }
 
     private String line(String prefix) {
