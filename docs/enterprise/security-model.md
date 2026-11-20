@@ -53,8 +53,11 @@ It does not protect against code already inside the container, and it has no TLS
 
 ## 3. Network egress
 
-- `web_fetch` and `web_download` ask before contacting a host, although they are read-only. The user may grant a host
-  and its subdomains for one chat. A redirect to another host asks again; https to http redirects are refused.
+![Per-host approval in jllm-web: allow once, allow the host and subdomains for this chat, or reject](../images/tools_auth_web.png)
+
+- `web_fetch` and `web_download` ask before contacting a host. The user may grant a host
+  and its subdomains for one chat. `web_download` writes a file, so it is also gated like `write_file` (approval,
+  plan-mode scratch copy), and a `write_file` permission rule covers it too. A redirect to another host asks again; https to http redirects are refused.
 - An invalid TLS certificate asks separately, for that one call and host only.
 - `web_search` and `wikipedia_search` call fixed hosts.
 - MCP servers and REST APIs are reachable only if listed in the settings.
@@ -82,6 +85,11 @@ after repeated failed sign-ins. It does not terminate TLS; put it behind your re
 
 - **Prompt injection is not solved.** The controls above limit what an injected instruction can do; they do not stop a
   model from being persuaded. Treat every tool result as untrusted and keep write and network tools behind approval.
+- Skills, instruction files, agent prompts and the free text of the settings are scanned when loaded for hidden
+  Unicode, injection phrasing and download-and-run or exfiltration patterns. A finding is logged and shown to the
+  user (never stored nor sent to the model), but the file is **loaded anyway**: the scan is a heuristic warning, not
+  a filter ([Suspicious content](../reference/usage.md#suspicious-content-in-loaded-files)). Review shared skills and
+  project instruction files like code.
 - MCP stdio servers run as child processes of the JVM user, outside any sandbox.
 - Model providers receive whatever is in the context. Choose the provider and its data terms yourself, or use a local
   OpenAI-compatible endpoint.

@@ -153,10 +153,15 @@ ignored.
 | `smallModel` | default `false`: append the small-model rules (`prompts/small-model.md`) to the system prompt; `--small-model` sets it |
 | `sandbox.tempDir`, `sandbox.timeoutSeconds` | scratch root; default shell timeout (the tool caps it at 600 s) |
 | `sandbox.backend`, `sandbox.localFallback`, `sandbox.docker.*` | `local` (default) or `docker`; fall back to local when docker is missing (default `true`); `binary`, `image`, `memory`, `cpus`, `pidsLimit`, `user`, `network`, `mode` (`oneshot` or `daemon`, a long-running container), `remote`, `remoteHost` (docker on another machine). See [SANDBOX](../guides/sandbox.md). CLI and web: `--sandbox`, `--docker-image`, `--docker-mode`, `--docker-remote`, `--docker-remote-host` |
+| `sandbox.shell` | local backend: shell of the `bash` tool (`cmd`, `powershell`, `pwsh`, `bash`, `zsh`, `sh` or a path); default the OS one (`cmd` on Windows, `zsh` on macOS, `bash` elsewhere). See [SANDBOX](../guides/sandbox.md) |
 | `sandbox.outputLogMaxBytes` | default `51200`: cap of the spill log written when a `bash` output exceeds the kept 50 KB tail; `0` = unlimited. A capped log ends with `[log truncated at N bytes]` and the tool result says `log (itself truncated)` |
+| `instructionFiles` | default `["KENDAR.md", "AGENTS.md", "CLAUDE.md"]`, in that order, relative to the directory the harness runs in; `~` is the user home. Missing files are skipped, and so is a file with the same content as one already read (e.g. `CLAUDE.md` a symlink to `AGENTS.md`). A list in any settings layer replaces the default completely; `[]` loads none. A project with only `AGENTS.md` or only `CLAUDE.md` gets it with no configuration. See [SKILLS §2](../guides/skills.md#2-instruction-files) |
 | `files.maxReadBytes` | default `1000000`: the most text one `read_file` returns and the largest file `edit_file` changes (`grep` skips larger files); `<= 0` = default |
+| `files.scopedInstructions` | default `true`: when a file tool (`read_file`, `write_file`, `edit_file`, `ls`, `glob`, `grep`, `grep_code`) works on a path inside the work dir, the files with the `instructionFiles` names found in each directory from the work dir down to that path are added to the conversation, once per chat. See [SKILLS §3](../guides/skills.md#3-directory-scoped-instruction-files). `false` turns it off |
+| `files.scopedInstructionsDepth` | default `8`: directory levels below the work dir looked at for scoped instruction files; deeper directories are ignored |
 | `web.fetchMaxBytes` | default `5242880` (5 MB): largest response body `web_fetch` reads; `<= 0` = default |
 | `context.noiseCommands` | default `true`: after a run, shell commands that add no information (`mkdir`, `rm`, `cd`, ...) are replaced in the context by a stub, see [INTERNALS §9](internals.md#noise-commands). `false` turns it off |
+| `context.todos` | default `true`: offer `todo_write` and `todo_read` with every context strategy (`false` hides them, except with `scope`), plus a short system-prompt section about them. The list is saved per chat and agent in the `StateStore` (`<history>/<chat>/state/todos-<agent>.json` in the CLI and web), so it survives a resume. The `scope` strategy always offers them, whatever this setting, and also shows the list in every request ([CACHES §5](caches.md#5-scope-strategy)) |
 | `context.deferCompactionOnThinkingOverflow` | Anthropic extended thinking, default `false`. Compaction rewrites history, which voids the signed thinking blocks (API 400 "Invalid `signature` in `thinking` block"). `false`: finished turns lose their thinking blocks; if compaction fires in the middle of a tool loop, thinking is switched off for the rest of that turn. `true`: compaction is skipped while the turn in progress holds thinking blocks, so thinking stays on but the prompt can exceed the budget until the turn ends. **This can incur increased charges** (larger prompts, and a rewrite after the turn invalidates the prompt cache) |
 | `context.*` | [CACHES](caches.md); `context.strategy` is `compaction`, `mnemonic` or `scope`; `context.scope.*` are the thresholds of `scope` ([CACHES §5](caches.md#5-scope-strategy)) |
 | `output.toolMaxChars` | tool output kept in the context; the rest is cut with `[truncated N chars]` (the head is kept, the tail for `bash`) |
@@ -175,6 +180,39 @@ Both are read from `~/.jllm/` and the project `.jllm/`: for `SYSTEM.md` the proj
 After the prompt come, as before, the small-model rules, instruction files and strategy notes. Builder:
 `systemPrompt(addendum)`, `systemPromptReplace(text)`.
 
+### Suspicious content in loaded files
+
+Skills, instruction files (also the directory-scoped ones), agent `promptFile`s, the system prompt additions and the
+free text of every settings layer (`description`, `prompt`, `systemPrompt`, `instructions` values at any depth) are
+untrusted: a shared repository or a downloaded skill can carry text aimed at the model. Each is scanned when it is
+loaded, and **loaded unchanged** whatever is found; the scan only reports. It looks for:
+
+| Kind | What |
+|---|---|
+| `HIDDEN_UNICODE` | zero-width characters (U+200B-U+200D, U+2060), U+FEFF not at the start of the file, bidi controls (U+202A-U+202E, U+2066-U+2069), Unicode tag characters (U+E0000-U+E007F) and other invisible format characters. Not: soft hyphen, LRM/RLM, a joiner inside an emoji, an emoji flag sequence |
+| `PROMPT_INJECTION` | "ignore all previous instructions", "disregard your instructions", "you are now a/an/DAN", "new system prompt", "do not tell the user", "without telling the user", "reveal/print/send your system prompt / API key / token / credentials / .env" |
+| `REMOTE_EXECUTION` | `curl`/`wget` piped into a shell or interpreter, `bash <(curl ...)`, `iex`/`Invoke-Expression` with a download, `iwr ... \| iex` |
+| `ENCODED_BLOB` | a base64 run of 200+ characters |
+| `DATA_URL` | a `data:` URL |
+| `SECRET_URL` | a URL with a secret in its query or a secret-named variable (`$GITHUB_TOKEN`), or a URL with a secret word (token, password, API key, .env, ...) and a send verb (`send`, `post`, `upload`, `curl`, ...) on the same line |
+
+The patterns are kept narrow so that normal documentation passes: a `curl` example not piped into a shell, "ignore the
+build directory", "get your API key at https://...". They are the `INJECTION` and `REMOTE_EXECUTION` lists of
+`org.kendar.llm.harness.safety.ContentScanner`, one entry per pattern. At most 20 findings per file are reported.
+
+A file with findings is logged once, with a `WARN` naming the file, the line, the kind and a short excerpt (invisible
+characters shown as `<U+200B>`, secret-looking values as `<redacted>`, a base64 run only by its length). The user is
+told too; the warning is a message, never stored with a chat, in the history nor sent to the model:
+
+- **Startup files** (settings, skills, instruction files, agent prompts, system prompt additions): reported once per
+  process. The CLI prints them under the startup lines (`[content warning] <file>: ...`, one line per finding); the
+  web page reads `GET /api/content-warnings` when it loads and shows them in a banner until dismissed. Embedders:
+  create a `ContentWarnings`, pass it to `HarnessSettings.loadLayered(...)` and `builder.contentWarnings(...)`, then
+  read `harness.contentWarnings()`.
+- **Scoped instruction files**, loaded during a chat: a transient `content_warning` event (seq 0, never buffered nor
+  replayed), once per file and chat. The CLI prints it like the startup ones; the web shows it as a notice in the
+  chat, gone on reload.
+
 ### Authentication
 
 Model clients and HTTP MCP servers can take an `AuthProvider` (package `org.kendar.llm.harness.auth`) instead of a
@@ -187,7 +225,7 @@ the store's lock, re-read first, rotated refresh token saved with a compare-and-
 A provider login is an `OAuthLogin` (name, `login(UserInteraction)`, optionally `login(ui, RedirectTarget)`,
 `authProvider(store, principalId)`), usually `AuthCodeLogin` or `DeviceCodeLogin` plus endpoints, registered as a
 `java.util.ServiceLoader` service. The clients take it with `AnthropicModelClient.authProvider(...)` /
-`OpenAiCompatModelClient.authProvider(...)`; it is not selectable from the settings file. No provider login is shipped.
+`OpenAiCompatModelClient.authProvider(...)` / `OpenAiResponsesModelClient.authProvider(...)`; it is not selectable from the settings file. No provider login is shipped.
 
 OAuth of MCP servers and REST APIs (per user or shared, with login-required tool results) and the `tokenStore`
 section: see [MCP](../guides/mcp.md#oauth).
@@ -206,13 +244,49 @@ own login (the reply is a link to open); other logins are reserved to the admini
 
 ### Providers and temperature
 
-`providers` is a list of named model definitions (`name`, `type` = `anthropic` | `openai` | `gemini` | `grok` | `qwen` | `llamacpp` |
+`providers` is a list of named model definitions (`name`, `type` = `anthropic` | `openai` | `openaiGpt62` | `gemini` | `grok` | `qwen` | `llamacpp` |
 `ollama`, `baseUrl`, `apiKey`, `model`, `maxTokens`, `maxRetries`, `timeoutSeconds`, `requireApiKey`,
-`useMaxCompletionTokens`, `contextTokens`, `smallModel`, `temperature`, `order`, `thinking`, `stream`). The old names `anthropic`, `openai`, `gemini`, `grok`, `qwen`,
+`useMaxCompletionTokens`, `contextTokens`, `smallModel`, `temperature`, `order`, `thinking`, `stream`). The old names `anthropic`, `openai`, `openaiGpt62`, `gemini`, `grok`, `qwen`,
 `llamacpp`, `ollama` stay valid without a definition. `gemini` uses Google's OpenAI-compatible endpoint
 (`https://generativelanguage.googleapis.com/v1beta/openai`, default model `gemini-2.5-pro`, key from
 `GEMINI_API_KEY`); native Gemini features (image input, Vertex) are not supported.
 `grok` uses xAI's OpenAI-compatible endpoint (`https://api.x.ai/v1`, default model `grok-4`, key from `GROK_API_KEY`).
+
+#### `openaiGpt62` (OpenAI Responses API)
+
+GPT-6.2 (`gpt-6.2-sol`, `gpt-6.2-astra`) accepts Chat Completions, but calls tools only through the Responses API, so
+the `openai` type cannot run the agent loop on it. `openaiGpt62` uses `OpenAiResponsesModelClient`
+(`POST <baseUrl>/responses`, default `https://api.openai.com/v1`, default model `gpt-6.2-sol`, key from
+`OPENAIGPT62_API_KEY`, else `OPENAI_API_KEY`). The name is case-insensitive.
+
+```json
+{"name": "gpt62", "type": "openaiGpt62", "model": "gpt-6.2-sol", "thinking": "medium"}
+```
+
+Prompt caching. GPT-6.2 puts the top-level `instructions` after `input` and bills them as uncached input on every
+request. The client therefore:
+
+- never sends `instructions`: `pinnedSystem` and `extraSystem` go first in `input` as two `developer` messages, so a
+  change of the policy prompt keeps the pinned part cached;
+- sends the tools in the request order with `strict: false`. Tool definitions are part of the cached prefix: adding a
+  tool group mid-chat (`request_tool_group`, a tool named by the user) invalidates the whole cache once;
+- does not send `prompt_cache_key` (not needed from GPT-5.6 on);
+- runs stateless (`store: false`, `include: ["reasoning.encrypted_content"]`). Each reasoning item is kept in the log
+  as a `thinking` block (summary text in `thinking`, the raw item in `openai_reasoning`) and passed back unchanged and
+  in order. The Anthropic client never sends these blocks.
+
+Other differences from `openai`:
+
+- `temperature` is never sent (GPT-6.2 rejects it); a value on the provider or agent type is ignored.
+- `thinking` is sent as `reasoning.effort`; `minimal` becomes `low` (GPT-6.2 has no `minimal`/`none`). A reasoning
+  summary (`summary: auto`) is requested for display; a 400 that names it, or the effort, gets a retry without it.
+- Usage: `input_tokens_details.cached_tokens` is reported as cache-read tokens.
+
+Context strategies. Reasoning items are ordinary `thinking` blocks, so compaction, masking and `stripThinking` treat
+them as they treat Claude's. Any rewrite of earlier history (summary, mask, cleared tool results) loses the cache from
+that point, and the Responses API then ignores the reasoning items after the edit: the model re-derives its reasoning
+for the rest of the turn (no error, possibly lower quality). The encrypted content is long base64 text, which inflates
+the character-based size estimate; the per-agent calibration against measured usage corrects most of it.
 
 - CLI: `--provider <name>` picks one; `--model`, `--base-url`, `--api-key` override it for the session only. With an
   unknown name, or `--model` alone, they define a `custom (session)` entry that is never written to the settings file.
@@ -234,13 +308,14 @@ own login (the reply is a link to open); other logins are reserved to the admini
 - An agent type may set `"provider": "<name>"` (wins over an inline `model`), `"temperature"` and `"thinking"`.
 - `temperature` (0 to 2) is resolved agent type, then provider, then unset; unset means nothing is sent.
   `explore` uses 0.2 and `plan` 0.3. OpenAI-compatible clients send it, and retry once without it if the server
-  rejects it. **The Anthropic client never sends it:** current Claude models and the current API version reject
+  rejects it. `openaiGpt62` never sends it. **The Anthropic client never sends it:** current Claude models and the current API version reject
   `temperature`, so a value set on an Anthropic provider is ignored.
 - `thinking` (`minimal` | `low` | `medium` | `high`) sets the reasoning effort, on a provider and on an agent type.
   Resolved request, then agent type, then provider, then unset; unset leaves the client's own default (Anthropic:
   no thinking, OpenAI-compatible: nothing sent).
   - Anthropic: extended-thinking budget of 2048 (`low`), 8192 (`medium`) or 16384 (`high`) tokens; `minimal` turns
     thinking off. `max_tokens` is raised to fit the budget, and a forced `toolChoice` is ignored while thinking is on.
+  - `openaiGpt62`: sent as `reasoning.effort`; `minimal` is `low`.
   - OpenAI-compatible (openai, gemini, grok, qwen, llamacpp, ollama): sent as `reasoning_effort`; `minimal` is `minimal`, or `none`
     on Ollama. A server that rejects it gets a retry: `minimal`/`none` steps down to `low`, anything else is
     dropped, and a warning is logged. The run continues.
@@ -262,8 +337,13 @@ searches, the compact JSON of the input for other tools. The first `(` separates
 the load, naming the rule (`permissions.deny[2]`). Order: `deny`, then `ask`, then `allow`; the first match wins.
 
 - `deny` applies in every mode, including `auto`, and a per-chat grant cannot override it. The model sees
-  `Denied by permission rule: <rule>` as a tool error. Sub-agents use the same rules. A deny rule without an argument
+  `Denied by permission rule: <rule>` as a tool error, followed by an instruction not to work around it with another
+  tool and to report it to the user instead. Sub-agents use the same rules. A deny rule without an argument
   pattern also removes the tool from the list sent to the model.
+- A `deny` rule on `write_file` or `edit_file` also denies a `bash` command that writes a matching path: output
+  redirection (`>`, `>>`, `2>`), `tee`, `touch`, `cp`/`mv` destinations, `dd of=`, `sed -i`, and the PowerShell
+  cmdlets `Out-File`, `Set-Content`, `Add-Content`, `New-Item`, `Copy-Item`, `Move-Item`. It is a guard rail on the
+  command text (variables and scripts are not followed): use an isolating sandbox for real containment.
 - `ask` forces the approval question; `allow` skips it in `default`, `edit` and `plan` modes (it never overrides `deny`,
   and plan-mode confinement still applies).
 - Settings only: no flag changes the rules. `/permissions` lists them.
@@ -289,7 +369,7 @@ edit followed by a test run is not a loop unless the edit is identical each time
 ### Verify on stop
 
 A `STOP` hook can refuse to let an agent finish: it returns `HookResult.continueWith(message)`, the agent gets
-"The stop check failed. Fix the problem and finish again." plus the message, and goes on. After
+"The stop check failed. Fix the problem and finish again. If it cannot be fixed with what you have, stop and say what is missing; do not invent files or content." plus the message, and goes on. After
 `loop.verify.maxReentries` (default 3) re-entries, or when the same message comes back twice in a row, the run ends
 `unverified` (a sub-agent reports status `unverified` with its answer). Not run in plan mode or after a cancel.
 
@@ -438,6 +518,8 @@ waits `delayMs` before retry `attempt` of `max`; it is followed by the normal ev
 | `verify_failed` | `agent`, `attempt`, `message`: a `STOP` hook sent the agent back to work |
 | `tool_call` | `id`, `name`, `input` |
 | `tool_result` | `id`, `name`, `isError`, `output` (cut at `eventMaxChars`) |
+| `instructions_loaded` | `file`, `dir` (relative to the work dir): a directory-scoped instruction file was added to the conversation |
+| `content_warning` | `file`, `findings` (`line`, `kind`, `excerpt`), `agent`: suspicious content in a file just loaded, see [Suspicious content](#suspicious-content-in-loaded-files). `seq` 0: live only, never replayed nor stored |
 | `approval_request` | `id`, `chatId`, `type` (`tool`, `context`, `continue`, `stuck`, `host`, ...), `title`, `preview`, `proposed`, `agent` |
 | `classifier` | `tool`, `verdict` |
 | `compaction` | compaction: `tier`, `cleared`/`estimatedTokens`; mnemonic: `kind`, `masked`, `savedTokens`, `estimatedTokens`; scope: `strategy`, `estimatedTokens` |
@@ -465,6 +547,7 @@ user's edited text as `edited`.
 | `contextTokens(chatId)`, `contextBudget()`, `contextStrategy()` | context state |
 | `cost(session)` | estimated USD with `builder.pricing(new HarnessPricing(in, out, cacheRead, cacheWrite))` (per million tokens) |
 | `tools()`, `sources()`, `skills()` | runtime toggles of tools, MCP/REST sources, skills |
+| `contentWarnings()` | files loaded at startup with suspicious content, to show the user ([Suspicious content](#suspicious-content-in-loaded-files)) |
 | `workDir(chatId)`, `scratchDir(chatId)`, `sandbox()` | directories |
 | `builder.stateStore(...)` | where tool grants and todo lists are kept (default in memory; the CLI and web use files) |
 | `subAgentRuns()` | audit log of sub-agent runs |

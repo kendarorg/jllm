@@ -4,9 +4,9 @@ import {reactive} from 'vue';
 
 const EVENTS = ['run_started', 'text', 'tool_call', 'tool_result', 'approval_request', 'usage', 'compaction',
   'warning', 'error', 'cancelled', 'run_finished', 'plan_ready', 'login', 'login_required', 'stuck', 'verify_failed',
-  'text_delta', 'text_reset'];
-// streaming deltas carry seq 0: shown live, never replayed (the final 'text' event is)
-const TRANSIENT = new Set(['text_delta', 'text_reset']);
+  'text_delta', 'text_reset', 'content_warning'];
+// seq 0, shown live, never replayed: streaming deltas (the final 'text' event is) and content warnings
+const TRANSIENT = new Set(['text_delta', 'text_reset', 'content_warning']);
 
 let uid = 0;
 const nextKey = () => ++uid;
@@ -32,7 +32,16 @@ export const store = reactive({
   set tab(v) { if (this.chatId) this.tabs[this.chatId] = v; },
   focusTurn: null,      // turn index the History tab asked the Chat tab to scroll to
   resumeOffer: null,    // {chatId, title}: the chat this browser had open last time, offered instead of opened
+  contentWarnings: [],  // files loaded at startup with suspicious content: shown until dismissed, never stored
 });
+
+/** A content warning ({file, findings: [{line, kind, excerpt}]}) as text: the file, then one line per finding. */
+export function contentWarningText(w) {
+  return 'Suspicious content in ' + w.file + (w.agent ? ' (' + w.agent + ')' : '') + ', loaded anyway; check the file:\n'
+    + (w.findings || []).map(f => '  line ' + f.line + ' ' + f.kind + ': ' + f.excerpt).join('\n');
+}
+
+export const dismissContentWarnings = () => { store.contentWarnings = []; };
 
 const LAST_CHAT = 'jllm.lastChat';
 function remember(id) {
@@ -297,6 +306,7 @@ function handleEvent(ev) {
     case 'compaction': addMsg('notice', 'Context compacted (tier ' + (d.tier ?? d.kind ?? '?') + ')'); break;
     case 'plan_ready': addMsg('notice', d.message); break;
     case 'warning': addMsg('notice', d.message); break;
+    case 'content_warning': addMsg('notice', contentWarningText(d)); break;
     case 'login': addMsg(d.ok ? 'notice' : 'error', d.message + (d.ok ? ' — resend or steer ("retry") to go on.' : '')); toast(d.message, d.ok ? '' : 'error'); break;
     case 'login_required': addConnect(d.source); break;
     case 'error': streamClose(); addMsg('error', d.message); break;
@@ -366,6 +376,7 @@ async function poll() {
 
 export async function init() {
   try { store.commands = await api('/api/chat/commands'); } catch (e) { /* optional */ }
+  try { store.contentWarnings = await api('/api/content-warnings'); } catch (e) { /* optional */ }
   await loadSessions();   // no chat is opened until the user picks one
   const last = remembered();
   const known = last && store.sessions.find(s => s.chatId === last);

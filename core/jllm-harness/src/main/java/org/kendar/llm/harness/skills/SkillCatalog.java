@@ -1,5 +1,6 @@
 package org.kendar.llm.harness.skills;
 
+import org.kendar.llm.harness.safety.ContentWarnings;
 import org.kendar.llm.harness.settings.SkillSettings;
 import org.kendar.llm.harness.settings.SkillText;
 import org.slf4j.Logger;
@@ -27,13 +28,23 @@ public final class SkillCatalog {
     private final Map<String, Skill> skills = new LinkedHashMap<>();
     private final Set<String> disabled = ConcurrentHashMap.newKeySet();
 
-    /** Skills whose file is missing are logged and left out. @throws IllegalArgumentException on duplicate names */
-    public SkillCatalog(List<SkillSettings> settings) {
+    /**
+     * Skills whose file is missing are logged and left out. Each skill file is read once here and scanned for
+     * suspicious content, reported to {@code warnings}; it is loaded unchanged whatever is found.
+     *
+     * @throws IllegalArgumentException on duplicate names
+     */
+    public SkillCatalog(List<SkillSettings> settings, ContentWarnings warnings) {
         for (SkillSettings s : settings) {
             Path path = Path.of(s.path());
             if (!Files.isRegularFile(path)) {
                 log.warn("Skill '{}' skipped: {} not found", s.name(), path);
                 continue;
+            }
+            try {
+                warnings.check(path.toString(), Files.readString(path, StandardCharsets.UTF_8));
+            } catch (IOException | RuntimeException e) {
+                log.warn("Cannot scan skill file {}: {}", path, e.getMessage());
             }
             String description = s.description() != null ? s.description() : frontMatterDescription(path);
             if (skills.putIfAbsent(s.name(), new Skill(s.name(), description,

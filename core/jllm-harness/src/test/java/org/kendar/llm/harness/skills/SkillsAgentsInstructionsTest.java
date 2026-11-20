@@ -38,7 +38,7 @@ class SkillsAgentsInstructionsTest {
         Path pdf = write("pdf.md", "---\ndescription: Work with PDFs\n---\nUse pdftotext.");
         SkillCatalog catalog = new SkillCatalog(List.of(
                 new SkillSettings("pdf", null, pdf.toString()),
-                new SkillSettings("gone", "x", base.resolve("missing.md").toString())));
+                new SkillSettings("gone", "x", base.resolve("missing.md").toString())), new org.kendar.llm.harness.safety.ContentWarnings());
         SkillTool tool = new SkillTool(catalog);
 
         assertEquals(1, catalog.all().size(), "a skill with a missing file is skipped");
@@ -81,6 +81,69 @@ class SkillsAgentsInstructionsTest {
 
         assertEquals("Instructions from KENDAR.md:\nBe brief.\n\nInstructions from EXTRA.md:\nUse Java.", out);
         assertEquals("", InstructionLoader.load(List.of()));
+    }
+
+    @Test
+    void defaultInstructionFilesAreKendarAgentsClaudeInThatOrder() throws Exception {
+        assertEquals(List.of("KENDAR.md", "AGENTS.md", "CLAUDE.md"), HarnessSettings.empty().instructionFiles());
+        Path file = Files.writeString(base.resolve("settings.json"), "{}");
+        assertEquals(HarnessSettings.DEFAULT_INSTRUCTION_FILES, HarnessSettings.load(file).instructionFiles());
+
+        write("CLAUDE.md", "Claude rules.");
+        write("AGENTS.md", "Agents rules.");
+        write("KENDAR.md", "Kendar rules.");
+        String out = InstructionLoader.load(inBase(HarnessSettings.DEFAULT_INSTRUCTION_FILES));
+
+        assertEquals("Instructions from KENDAR.md:\nKendar rules.\n\nInstructions from AGENTS.md:\nAgents rules."
+                + "\n\nInstructions from CLAUDE.md:\nClaude rules.", out);
+    }
+
+    @Test
+    void aProjectWithOnlyAgentsOrOnlyClaudeGetsItsInstructions() throws Exception {
+        write("AGENTS.md", "Only agents.");
+        assertEquals("Instructions from AGENTS.md:\nOnly agents.",
+                InstructionLoader.load(inBase(HarnessSettings.DEFAULT_INSTRUCTION_FILES)));
+
+        Files.delete(base.resolve("AGENTS.md"));
+        write("CLAUDE.md", "Only claude.");
+        assertEquals("Instructions from CLAUDE.md:\nOnly claude.",
+                InstructionLoader.load(inBase(HarnessSettings.DEFAULT_INSTRUCTION_FILES)));
+    }
+
+    @Test
+    void anExplicitListReplacesTheDefault() throws Exception {
+        Path file = Files.writeString(base.resolve("settings.json"), "{\"instructionFiles\":[\"RULES.md\"]}");
+        assertEquals(List.of("RULES.md"), HarnessSettings.load(file).instructionFiles());
+        Files.writeString(file, "{\"instructionFiles\":[]}");
+        assertEquals(List.of(), HarnessSettings.load(file).instructionFiles());
+    }
+
+    @Test
+    void aFileWithTheSameContentAsOneAlreadyLoadedIsSkipped() throws Exception {
+        write("KENDAR.md", "Same rules.");
+        write("AGENTS.md", "Same rules.\n");
+        write("CLAUDE.md", "Other rules.");
+
+        String out = InstructionLoader.load(inBase(HarnessSettings.DEFAULT_INSTRUCTION_FILES));
+
+        assertEquals("Instructions from KENDAR.md:\nSame rules.\n\nInstructions from CLAUDE.md:\nOther rules.", out);
+    }
+
+    @Test
+    void aSymlinkToAnotherInstructionFileIsSkipped() throws Exception {
+        Path agents = write("AGENTS.md", "Linked rules.");
+        try {
+            Files.createSymbolicLink(base.resolve("CLAUDE.md"), agents);
+        } catch (UnsupportedOperationException | java.io.IOException | SecurityException e) {
+            org.junit.jupiter.api.Assumptions.abort("symlinks cannot be created here: " + e);
+        }
+
+        assertEquals("Instructions from AGENTS.md:\nLinked rules.",
+                InstructionLoader.load(inBase(HarnessSettings.DEFAULT_INSTRUCTION_FILES)));
+    }
+
+    private List<String> inBase(List<String> names) {
+        return names.stream().map(n -> base.resolve(n).toString()).toList();
     }
 
     @Test

@@ -86,7 +86,20 @@ final class Renderer {
             }
             case "steer_queued" -> out.accept(color(DIM, "[queued " + clean(d.path("kind").asText()) + "] " + clean(d.path("text").asText())));
             case "steer_applied" -> out.accept(color(DIM, "[applied] " + clean(d.path("text").asText())));
+            case "instructions_loaded" -> out.accept(color(DIM, "[instructions] " + clean(d.path("file").asText())));
+            case "content_warning" -> contentWarning(d);
             default -> { }
+        }
+    }
+
+    /** Suspicious content in a loaded file: the file, then one line per finding. Shown only, never stored. */
+    private void contentWarning(JsonNode d) {
+        out.accept(color(YELLOW, "[content warning] " + clean(d.path("file").asText())
+                + ": suspicious content, loaded anyway; check the file"
+                + (d.hasNonNull("agent") ? " (" + clean(d.path("agent").asText()) + ")" : "")));
+        for (JsonNode f : d.path("findings")) {
+            out.accept(color(YELLOW, "  line " + f.path("line").asInt() + " " + clean(f.path("kind").asText()) + ": "
+                    + clean(f.path("excerpt").asText()).replace('\n', ' ')));
         }
     }
 

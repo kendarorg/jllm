@@ -6,7 +6,7 @@ import java.util.Map;
 /** Command line parsing: {@code --key value}, {@code --key=value} and the bare boolean flags. */
 final class CliArgs {
 
-    static final String USAGE = "Usage: Main [--provider anthropic|openai|gemini|grok|qwen|llamacpp|ollama] [--model M] [--base-url U] "
+    static final String USAGE = "Usage: Main [--provider anthropic|openai|openaiGpt62|gemini|grok|qwen|llamacpp|ollama] [--model M] [--base-url U] "
             + "[--api-key K] [--mode plan|edit|auto] [--workdir DIR] [--prompt TEXT] "
             + "[--system-prompt TEXT] [--max-turns N] [--context-tokens TOKENS] [--search-api-key BRAVE_KEY] "
             + "[--settings FILE] [--context-strategy compaction|mnemonic|scope] [--max-tokens TOKENS] [--small-model] "

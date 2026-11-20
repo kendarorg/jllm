@@ -7,6 +7,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.kendar.llm.harness.HarnessConfig;
 import org.kendar.llm.harness.context.*;
 import org.kendar.llm.harness.context.compaction.ContextManager;
+import org.kendar.llm.harness.todo.TodoStore;
+import org.kendar.llm.harness.todo.TodoTools;
 import org.kendar.llm.harness.tools.HarnessTool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,8 +28,10 @@ import java.util.function.Function;
  *   <li>clear the bodies of old tool results</li>
  *   <li>summarize the older turns</li>
  * </ol>
- * The first user message of the chat is never compacted, and the todo list lives outside the transcript: it is added
- * to every request and cannot be lost. The request is measured as a whole (system prompt, tool schemas, messages)
+ * The first user message of the chat is never compacted, and the todo list lives outside the transcript: a snapshot
+ * is appended to the latest user message of the log at the start of every turn and whenever the list changes, so it
+ * cannot be lost. Earlier messages are never touched again, which keeps the prompt cache and the signatures of
+ * thinking blocks valid. The request is measured as a whole (system prompt, tool schemas, messages)
  * minus a reserve for the answer. A provider overflow gets one forced, more aggressive pass.
  */
 public class ScopeStrategy implements ContextStrategy {
@@ -38,8 +42,10 @@ public class ScopeStrategy implements ContextStrategy {
     static final String CLEARED = "[tool result cleared to save context]";
     static final String ACK = "Understood.";
     private static final String SUMMARY_PREFIX = "[Summary of the earlier conversation]";
-    /** Rough size of the first line of an offload pointer (marker, path, size). */
-    private static final int POINTER_HEADER_CHARS = 150;
+    static final String TODO_OPEN = "<todo_list>\n";
+    static final String TODO_CLOSE = "</todo_list>";
+    /** Rough size of the first line of an offload pointer (marker, path, size, search hint). */
+    private static final int POINTER_HEADER_CHARS = 220;
     /** Outside a forced pass, the tool rounds of the turn in progress are summarized only when they hold this much. */
     private static final long MIN_TURN_CUT_TOKENS = 3000;
 
@@ -109,16 +115,18 @@ public class ScopeStrategy implements ContextStrategy {
         this.todos = todos;
         this.options = options;
         this.offload = offload;
-        this.tools = TodoTools.create(todos, mapper);
+        this.tools = TodoTools.create(todos, mapper, true);
     }
 
     public static String systemAddendum() {
         return """
             # Task list
             
-            For work with 3 or more steps, keep a task list with todo_write (send the complete list \
-            each time, at most one item in_progress, mark items completed as soon as they are done). The \
-            current list is shown to you with every request; todo_read returns it. Large tool results may be \
+            For work with 3 or more steps, or when the user asks you to track the work, write a task list \
+            with todo_write before the first step and keep it current (send the complete list each time, at \
+            most one item in_progress, mark items completed as soon as they are done). The list survives \
+            context compaction, so it is where the plan and the progress of long work must live. It is shown \
+            to you at the start of every turn and whenever it changes; todo_read returns it. Large tool results may be \
             offloaded to a file: the result then names the file, read it with read_file when you need more.""";
     }
 
@@ -150,9 +158,10 @@ public class ScopeStrategy implements ContextStrategy {
                 changed = shrink(t, budget, options.offloadChars(), config.keepRecentTurns(), false);
             }
         }
-        ArrayNode view = withTodos(t);
+        boolean pinned = pinTodos(t);
+        ArrayNode view = t.log();
         tokens.sent(t.chatId(), t.agentKey(), view.toString().length() + ContextManager.fixedChars(t.prefix()));
-        return new ContextView(view, changed, changed);
+        return new ContextView(view, changed, changed || pinned);
     }
 
     @Override
@@ -160,7 +169,9 @@ public class ScopeStrategy implements ContextStrategy {
         // the estimate was too low: trust it less from now on
         tokens.overflowed(t.chatId(), t.agentKey());
         boolean changed = shrink(t, 0, options.overflowOffloadChars(), 1, true);
-        return changed ? new ContextView(withTodos(t), true, true) : null;
+        if (!changed) return null;
+        pinTodos(t);
+        return new ContextView(t.log(), true, true);
     }
 
     @Override
@@ -313,10 +324,17 @@ public class ScopeStrategy implements ContextStrategy {
         return pointer(path, text, options.previewChars());
     }
 
-    /** @param preview characters kept at each end */
+    /**
+     * The offload pointer. Its first line (kept when the result is later cleared) says the preview is partial and
+     * how large the file is, so the model searches it before concluding that something is absent.
+     *
+     * @param preview characters kept at each end
+     */
     String pointer(String path, String text, int preview) {
         int p = Math.min(preview, text.length() / 2);
-        return OFFLOADED + path + " (" + text.length() + " chars); read it with read_file if you need more.]\n"
+        long lines = text.chars().filter(c -> c == '\n').count() + 1;
+        return OFFLOADED + path + " (" + text.length() + " chars, " + lines + " lines); only the first and last " + p
+                + " chars are shown: grep it or read_file it with offset before concluding something is absent.]\n"
                 + text.substring(0, p) + "\n[...]\n" + text.substring(text.length() - p);
     }
 
@@ -397,24 +415,45 @@ public class ScopeStrategy implements ContextStrategy {
 
     // ---- todos --------------------------------------------------------------------------------------------------
 
-    /** The messages of the request: the log with the todo list appended to the last user message; the log is not changed. */
-    private ArrayNode withTodos(ContextTurn t) {
+    /**
+     * Appends a snapshot of the todo list to the latest user message of the log when the turn in progress holds none
+     * or an outdated one. Only the newest message changes: what was sent before stays byte for byte the same.
+     *
+     * @return true if the log changed
+     */
+    private boolean pinTodos(ContextTurn t) {
         String list = TodoStore.render(todos.read(t.chatId(), t.agentKey()));
         ArrayNode msgs = t.log();
-        if (list == null || msgs.isEmpty()) return msgs;
+        if (list == null || msgs.isEmpty()) return false;
+        String block = TODO_OPEN + list + TODO_CLOSE;
+        if (block.equals(latestTodos(msgs))) return false;
         JsonNode last = msgs.get(msgs.size() - 1);
-        if (!"user".equals(last.path("role").asText())) return msgs;
-        ObjectNode copy = last.deepCopy();
-        ArrayNode blocks = mapper.createArrayNode();
-        JsonNode c = copy.path("content");
-        if (c.isTextual()) blocks.addObject().put("type", "text").put("text", c.asText());
-        else if (c.isArray()) blocks.addAll((ArrayNode) c);
-        blocks.addObject().put("type", "text").put("text", "<todo_list>\n" + list + "</todo_list>");
-        copy.set("content", blocks);
-        ArrayNode out = mapper.createArrayNode();
-        for (int i = 0; i < msgs.size() - 1; i++) out.add(msgs.get(i));
-        out.add(copy);
-        return out;
+        if (!"user".equals(last.path("role").asText())) return false;
+        ObjectNode msg = (ObjectNode) last;
+        ArrayNode blocks;
+        JsonNode c = msg.path("content");
+        if (c.isArray()) {
+            blocks = (ArrayNode) c;
+        } else {
+            blocks = mapper.createArrayNode();
+            if (c.isTextual()) blocks.addObject().put("type", "text").put("text", c.asText());
+            msg.set("content", blocks);
+        }
+        blocks.addObject().put("type", "text").put("text", block);
+        return true;
+    }
+
+    /** The newest todo snapshot of the turn in progress, null when it has none. */
+    private static String latestTodos(ArrayNode msgs) {
+        for (int i = msgs.size() - 1; i >= cutIndex(msgs, 1); i--) {
+            JsonNode c = msgs.get(i).path("content");
+            if (!"user".equals(msgs.get(i).path("role").asText()) || !c.isArray()) continue;
+            for (int k = c.size() - 1; k >= 0; k--) {
+                String text = c.get(k).path("text").asText("");
+                if ("text".equals(c.get(k).path("type").asText()) && text.startsWith(TODO_OPEN)) return text;
+            }
+        }
+        return null;
     }
 
     // ---- turns --------------------------------------------------------------------------------------------------

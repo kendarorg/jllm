@@ -235,7 +235,7 @@ public final class FlowEngine {
             FlowContext c = new FlowContext(rec.runId, rec.user, rec.input);
             c.requests(rec.requestData);
             Registry.ActionCall call = new Registry.ActionCall(rec.runId, rec.pending.path("stage").asText(), c, payload,
-                    q -> {
+                    Json.M.createObjectNode(), q -> {
                         throw new FlowException(FlowException.Kind.REQUEST, "A helper may not ask questions");
                     });
             JsonNode answer;
@@ -635,7 +635,7 @@ public final class FlowEngine {
                 }
                 return a.path("value");
             };
-            return new Registry.ActionCall(ctx.runId(), id, ctx, taskResult, asker);
+            return new Registry.ActionCall(ctx.runId(), id, ctx, taskResult, render(step.path("with")), asker);
         }
 
         JsonNode callAction(String name, String id, String key, JsonNode step, JsonNode taskResult) {
@@ -656,7 +656,7 @@ public final class FlowEngine {
             String scope = step.path("scope").asText(FlowLibrary.PERSONAL);
             if (!rec.children.has(childKey)) {
                 if (name == null) { // a Java chooser may name the flow, but only from the declared set
-                    String picked = javaChoose(id, key, step);
+                    String picked = javaChoose(id, key, step).outcome();
                     boolean allowed = false;
                     for (JsonNode n : step.path("allowed")) allowed |= n.asText().equals(picked);
                     if (!allowed) {
@@ -901,6 +901,7 @@ public final class FlowEngine {
             String by = s.path("by").asText();
             String outcome;
             String decidedBy = by;
+            JsonNode detail = rec.decisionDetails.get(key);
             if (rec.decisions.has(key)) { // replay: never ask again
                 outcome = rec.decisions.get(key).asText();
                 decidedBy = rec.deciders.has(key) ? rec.deciders.get(key).asText() : "recorded";
@@ -915,8 +916,12 @@ public final class FlowEngine {
                     String valid = a.path("value").asText();
                     raw = valid;
                     decidedBy = "user:" + a.path("by").asText();
+                } else if (by.equals("java")) {
+                    Registry.Choice c = guard(id, () -> javaChoose(id, key, s));
+                    raw = c.outcome();
+                    detail = c.detail();
                 } else {
-                    raw = guard(id, () -> by.equals("java") ? javaChoose(id, key, s) : llmChoose(s));
+                    raw = guard(id, () -> llmChoose(s));
                 }
                 outcome = raw == null ? "" : raw.trim();
             }
@@ -934,10 +939,12 @@ public final class FlowEngine {
             }
             rec.decisions.put(key, outcome);
             if (!rec.deciders.has(key)) rec.deciders.put(key, decidedBy);
+            if (detail != null && !rec.decisionDetails.has(key)) rec.decisionDetails.set(key, detail);
             ctx.addDecision(new FlowContext.Decision(id, s.path("question").asText(""), outcome, decidedBy,
-                    Json.M.createObjectNode()));
+                    detail == null ? Json.M.createObjectNode() : detail));
             ObjectNode d = Json.M.createObjectNode();
             d.put("outcome", outcome).put("decidedBy", decidedBy).put("target", target);
+            if (detail != null) d.set("detail", detail);
             log(id, "decision", s.path("question").asText(""), d);
             return target;
         }
@@ -948,11 +955,13 @@ public final class FlowEngine {
             return c;
         }
 
-        String javaChoose(String id, String key, JsonNode s) {
+        /** The chooser's outcome, with its explanation when it gives one. */
+        Registry.Choice javaChoose(String id, String key, JsonNode s) {
             Registry.Chooser c = registry.chooser(s.path("chooser").asText());
             if (c == null) throw new FlowException(FlowException.Kind.PERMISSION, "Chooser is not available");
             try {
-                return c.choose(call(id, key, s, null));
+                if (c instanceof Registry.ExplainingChooser e) return e.explain(call(id, key, s, null));
+                return new Registry.Choice(c.choose(call(id, key, s, null)), null);
             } catch (FlowException | WaitSignal e) {
                 throw e;
             } catch (Exception e) {

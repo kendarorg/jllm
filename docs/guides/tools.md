@@ -22,9 +22,9 @@ What the model can call, how tools are grouped, selected per chat and gated. To 
 | `skill` | Skills | READ_ONLY | `name` | only when skills are configured ([SKILLS](skills.md)) |
 | `task` | Agents | READ_ONLY | `prompts[≤8]`, `subagent_type?` | sub-agent fan-out; main agent only |
 | `request_tool_group` | Agents | READ_ONLY | `groups[]` | only while groups are missing; main agent only |
-| `history_recall` | Memory | READ_ONLY | `id?`, `query?`, `file?`, `scope?`, `offset?` | mnemonic strategy only ([CACHES §4](../reference/caches.md#4-mnemonic-strategy)) |
-| `todo_write` | Todo | READ_ONLY | `todos[]` (`id?`, `content`, `status`) | scope strategy only: replaces the whole list, at most one `in_progress`; emits the `todos` event ([CACHES §5](../reference/caches.md#5-scope-strategy)) |
-| `todo_read` | Todo | READ_ONLY | none | scope strategy only: the current list |
+| `history_recall` | Memory | READ_ONLY | `id?`, `query?`, `file?`, `scope?`, `offset?` | `id` + `query` searches inside that text (matching lines with offsets); mnemonic strategy only ([CACHES §4](../reference/caches.md#4-mnemonic-strategy)) |
+| `todo_write` | Todo | READ_ONLY | `todos[]` (`id?`, `content`, `status`) | every strategy unless `context.todos: false` (always with scope): replaces the whole list, at most one `in_progress`; emits the `todos` event ([CACHES §5](../reference/caches.md#5-scope-strategy)) |
+| `todo_read` | Todo | READ_ONLY | none | like `todo_write`: the current list |
 | `mcp__<server>__<tool>` | `Mcp/<server>` | READ_ONLY if `readOnly`, else OTHER | server schema | [MCP](mcp.md) |
 | `<api>__<operationId>` | `Rest/<api>` | READ_ONLY for GET/HEAD, else OTHER | built from the spec | [MCP §3](mcp.md#3-rest-apis-openapi) |
 
@@ -169,7 +169,7 @@ with `interactive=false` (the built-in main and sub-agent loops are both interac
 | `sandbox.outputLogMaxBytes` (settings) | 51200 | cap of the spill log of a long `bash` output; `0` = unlimited |
 | `storage.maxBytes` | -1 (no limit) | total size of a chat storage (web: the work dir of the chat; CLI: `<project>/.jllm/scratchpad/<chatId>/`). A write by `write_file`, `edit_file` or `web_download` that would exceed it fails and creates no file. Project files edited by the model in the CLI are outside the chat storage and are not counted; writes made by a shell command are not counted until the next start |
 | REST response | 20000 | `RestApiToolProvider` |
-| `history_recall` page | 12000 (`mnemonic.recallMaxChars`) | per call, continue with `offset` |
+| `history_recall` page | 12000 (`mnemonic.recallMaxChars`) | per call, continue with `offset`; the first page of a longer text says how much is left and to search it with `{"id", "query"}` |
 | `context.scope.offloadChars` | 20000 | `scope` strategy: a larger result is offloaded to a file, head and tail stay (applies after the `toolMaxChars` cut) |
 
 ## Document readers

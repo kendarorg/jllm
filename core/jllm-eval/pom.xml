@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.kendar.llm</groupId>
+        <artifactId>jllm</artifactId>
+        <version>${revision}</version>
+        <relativePath>../../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>jllm-eval</artifactId>
+    <packaging>jar</packaging>
+    <name>jllm-eval</name>
+    <description>Test-only module: evaluates the harness with real language models. Built only with -Peval.</description>
+
+    <properties>
+        <!-- test groups to run: smoke, full, strategy, compaction, unit (no model needed) -->
+        <groups>smoke,unit</groups>
+        <!-- test classes run concurrently when run.parallelism > 1; cases of one class stay sequential -->
+        <run.parallelism>1</run.parallelism>
+        <run.parallel.enabled>false</run.parallel.enabled>
+        <run.parallel.classes>same_thread</run.parallel.classes>
+        <maven.deploy.skip>true</maven.deploy.skip>
+        <central-publish.skip>true</central-publish.skip>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.kendar.llm</groupId>
+            <artifactId>jllm-harness</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- TestExecutionListener API for the progress log (EvalProgressListener) -->
+        <dependency>
+            <groupId>org.junit.platform</groupId>
+            <artifactId>junit-platform-launcher</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.kendar.llm</groupId>
+            <artifactId>jllm-test-support</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.kendar.llm</groupId>
+            <artifactId>jllm-pdf</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.kendar.llm</groupId>
+            <artifactId>jllm-docs</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.kendar.llm</groupId>
+            <artifactId>jllm-js</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.graalvm.polyglot</groupId>
+            <artifactId>polyglot</artifactId>
+            <version>${graalvm.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.graalvm.polyglot</groupId>
+            <artifactId>js</artifactId>
+            <version>${graalvm.version}</version>
+            <type>pom</type>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.kendar.llm</groupId>
+            <artifactId>jllm-workflows</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.microsoft.onnxruntime</groupId>
+            <artifactId>onnxruntime</artifactId>
+            <version>1.20.0</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <parameters>true</parameters>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.5.2</version>
+                <configuration>
+                    <groups>${groups}</groups>
+                    <!-- one fork; sequential unless run.parallelism > 1 (JUnit runs whole classes concurrently) -->
+                    <forkCount>1</forkCount>
+                    <reuseForks>true</reuseForks>
+                    <parallel>none</parallel>
+                    <threadCount>1</threadCount>
+                    <trimStackTrace>true</trimStackTrace>
+                    <failIfNoSpecifiedTests>false</failIfNoSpecifiedTests>
+                    <properties>
+                        <configurationParameters>
+                            junit.jupiter.execution.parallel.enabled=${run.parallel.enabled}
+                            junit.jupiter.execution.parallel.mode.default=same_thread
+                            junit.jupiter.execution.parallel.mode.classes.default=${run.parallel.classes}
+                            junit.jupiter.execution.parallel.config.strategy=fixed
+                            junit.jupiter.execution.parallel.config.fixed.parallelism=${run.parallelism}
+                            junit.jupiter.execution.parallel.config.fixed.max-pool-size=${run.parallelism}
+                        </configurationParameters>
+                    </properties>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

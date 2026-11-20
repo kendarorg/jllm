@@ -19,7 +19,7 @@ Micrometer. Java 21, Jackson, JDK `HttpClient`, jsoup, swagger-parser, slf4j-api
   with handoff notes and offers `history_recall`. `scope` measures the whole request, offloads large tool results to
   disk, never compacts the first user message and keeps a `todo_write` task list outside the transcript.
 - **Sub-agents**: `task` tool with `general`, `explore`, `plan` and custom types; they inherit the caller's mode.
-- **Extensions**: settings file, hooks around agents, model calls and tool calls, plugins, skills, `KENDAR.md`
+- **Extensions**: settings file, hooks around agents, model calls and tool calls, plugins, skills, `KENDAR.md` / `AGENTS.md` / `CLAUDE.md` (also per directory)
   instruction files, slash commands and numbered menus.
 - **Persistence**: in memory or as files under `.jllm/history`; ports for your own stores. Tool grants and todo
   lists go through the `StateStore` port (`<history>/<chat>/state/*.json` in the CLI and web).
@@ -54,7 +54,8 @@ h.start(chatId, "List the files in the workspace");
 ```
 
 Providers: `ModelClients.anthropic(...)`, `ModelClients.from(LlmSettings, mapper)` for any OpenAI-compatible endpoint
-(openai, gemini, grok, qwen, llamacpp, vLLM) and `ModelClients.ollama("llama3.1", mapper)` for a local Ollama
+(openai, gemini, grok, qwen, llamacpp, vLLM; `openaigpt62` gives `OpenAiResponsesModelClient`, the Responses API
+client GPT-6.2 needs for tool calls) and `ModelClients.ollama("llama3.1", mapper)` for a local Ollama
 (`http://localhost:11434/v1`, no key). On the command line: `--provider ollama --model qwen3:8b`
 (`--base-url` for a remote Ollama). Ollama's OpenAI endpoint cannot set the context size per request: if long chats
 get truncated, raise it on the Ollama side (`OLLAMA_CONTEXT_LENGTH`, or `num_ctx` in a Modelfile) and keep
@@ -131,6 +132,20 @@ AgentHarness h = AgentHarness.builder()
   ```json
   {"execution": {"maxParallel": 4}}
   ```
+- `sandbox.shell` (local backend): the shell the `bash` tool runs. Unset: the OS one (`cmd` on Windows, `zsh` on
+  macOS, `bash` elsewhere). `cmd` runs `cmd /c`, `powershell`/`pwsh` run `-NoProfile -NonInteractive -Command`, any
+  other name or path runs `<shell> -c`. The `bash` tool description tells the model which shell and syntax it has.
+
+  ```json
+  {"sandbox": {"shell": "pwsh"}}
+  ```
+  ```json
+  {"sandbox": {"shell": "/bin/bash"}}
+  ```
+  ```json
+  {"sandbox": {"shell": "/bin/zsh"}}
+  ```
+  Windows (PowerShell 7), Linux/Unix (bash), macOS (zsh). A Docker backend always runs `sh -c` in the container.
 - `execution.useContextStack` (default `true`): a sub-agent continues the parent's request prefix (same pinned text,
   system prompt and tool list; role text and task go in its first message) so the parent's KV cache is reused and still
   valid when the sub-agent returns. The agent type's tool restrictions are applied when a call is executed. `false`
@@ -251,7 +266,8 @@ never compacted; see [CACHES §5](../../docs/reference/caches.md#5-scope-strateg
 
 The strategy offers `todo_write` (the complete list, at most one `in_progress`) and `todo_read`; both are `READ_ONLY`.
 The list is kept per chat and agent in the `StateStore`, added to the last user message of every request (never to the
-stored log) and sent to front ends as the `todos` event.
+stored log) and sent to front ends as the `todos` event. The tools live in `org.kendar.llm.harness.todo`;
+The other strategies offer them too unless `context.todos: false` (saved the same way, read back with `todo_read`).
 
 ```json
 "context": {"strategy": "scope",

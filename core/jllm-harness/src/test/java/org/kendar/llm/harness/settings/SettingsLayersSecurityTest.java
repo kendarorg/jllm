@@ -43,7 +43,8 @@ class SettingsLayersSecurityTest {
     }
 
     private HarnessSettings load(ProjectMcpTrust.Prompt prompt) {
-        return HarnessSettings.loadLayered(new FileSettingsSource(null, project), project, k -> null, prompt, trust, warnings::add);
+        return HarnessSettings.loadLayered(new FileSettingsSource(null, project), project, k -> null, prompt, trust, warnings::add,
+                new org.kendar.llm.harness.safety.ContentWarnings());
     }
 
     @Test
@@ -124,6 +125,7 @@ class SettingsLayersSecurityTest {
         write(explicit, STDIO);
         write(project.resolve(".jllm/settings.json"), "{}");
         assertEquals(2, HarnessSettings.loadLayered(new FileSettingsSource(explicit, project), project, k -> null, ProjectMcpTrust.Prompt.NONE, trust,
-                warnings::add).mcpServers().size());
+                warnings::add,
+                new org.kendar.llm.harness.safety.ContentWarnings()).mcpServers().size());
     }
 }

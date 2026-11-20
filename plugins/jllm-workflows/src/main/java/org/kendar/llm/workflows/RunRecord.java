@@ -25,6 +25,8 @@ public final class RunRecord {
     public final ObjectNode results = Json.M.createObjectNode();
     public final ObjectNode decisions = Json.M.createObjectNode();
     public final ObjectNode deciders = Json.M.createObjectNode();
+    /** Why a chooser decided as it did (for example a gate's value and reason), by step key. */
+    public final ObjectNode decisionDetails = Json.M.createObjectNode();
     public final ObjectNode answers = Json.M.createObjectNode();
     /** Nesting: the parent step that started this run, how deep it is, the depth it may not exceed, flows above it. */
     public String parentRunId;
@@ -65,6 +67,7 @@ public final class RunRecord {
         j.set("results", results);
         j.set("decisions", decisions);
         j.set("deciders", deciders);
+        j.set("decisionDetails", decisionDetails);
         j.set("answers", answers);
         j.set("failures", failures);
         o.set("history", history);
@@ -89,6 +92,9 @@ public final class RunRecord {
         r.results.setAll((ObjectNode) o.path("journal").path("results"));
         r.decisions.setAll((ObjectNode) o.path("journal").path("decisions"));
         r.deciders.setAll((ObjectNode) o.path("journal").path("deciders"));
+        if (o.path("journal").path("decisionDetails").isObject()) {
+            r.decisionDetails.setAll((ObjectNode) o.path("journal").get("decisionDetails"));
+        }
         r.answers.setAll((ObjectNode) o.path("journal").path("answers"));
         r.failures.setAll((ObjectNode) o.path("journal").path("failures"));
         r.history = (ArrayNode) o.path("history");

@@ -8,8 +8,13 @@ import java.util.concurrent.ConcurrentHashMap;
 /** Java actions, Java choosers and the model gateway, all looked up by registered name only. */
 public final class Registry {
 
-    /** What an action sees: the whole context, plus run and step identity for idempotence. */
-    public record ActionCall(String runId, String stepId, FlowContext context, JsonNode taskResult, Asker asker) {
+    /**
+     * What an action sees: the whole context, plus run and step identity for idempotence.
+     *
+     * @param params the step's {@code with} object, its text values rendered; an empty object when the step has none
+     */
+    public record ActionCall(String runId, String stepId, FlowContext context, JsonNode taskResult, JsonNode params,
+                             Asker asker) {
         /** Asks a person; returns the recorded answer at once, or pauses the run and runs the action again later. */
         public JsonNode ask(Question q) {
             return asker.ask(q);
@@ -49,6 +54,20 @@ public final class Registry {
     public interface Chooser {
         /** Must return one of the declared outcomes. */
         String choose(ActionCall call) throws Exception;
+    }
+
+    /** A chooser's outcome and why it was chosen; the engine journals the detail with the decision. */
+    public record Choice(String outcome, JsonNode detail) {
+    }
+
+    /** A chooser that also explains its choice. */
+    public interface ExplainingChooser extends Chooser {
+        Choice explain(ActionCall call) throws Exception;
+
+        @Override
+        default String choose(ActionCall call) throws Exception {
+            return explain(call).outcome();
+        }
     }
 
     /** The model, seen as a plain function; the host supplies the real one (agents, tools, permissions). */

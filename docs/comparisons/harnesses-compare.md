@@ -178,7 +178,7 @@ Basis: OpenCode side from memory (sst/opencode, TypeScript on Bun), not verified
 | Context | Auto-compaction and pruning of old tool output. | Three strategies: `compaction`, `mnemonic`, `scope`. |
 | *Sessions* | *Persistent, child sessions for subagents, share links, fork.* | *Flat `messages.jsonl`; save, resume, copy; no fork.* |
 | Undo | Git snapshot based undo/redo of file changes and messages. | `/undo` restores files; checkpoints. |
-| *Instructions* | *`AGENTS.md`, global and project config.* | *`KENDAR.md` instruction files, layered settings, system prompt files.* |
+| *Instructions* | *`AGENTS.md`, global and project config.* | *`KENDAR.md`, `AGENTS.md`, `CLAUDE.md` instruction files (also per directory), layered settings, system prompt files.* |
 | Extensibility | JS/TS plugins, custom tools, custom commands (markdown), hooks, themes, formatters. | Java `HarnessPlugin`, hooks, skills, slash commands. No prompt templates, formatters or themes. |
 | *Run modes* | *TUI, `run` (non-interactive), server, ACP, GitHub integration.* | *CLI chat, `--prompt`, web.* |
 | Loop detection | "Doom loop" check on repeated identical tool calls. | `maxTurns`, interactive "continue?" question, stuck detection. |
@@ -218,7 +218,7 @@ Basis: Qwen Code side from memory (QwenLM/qwen-code, a TypeScript CLI forked fro
 | *REST APIs as tools* | *No* | *OpenAPI operations as tools.* |
 | Context | `/compress` summarization, session save and resume. | Three strategies: `compaction`, `mnemonic`, `scope`. |
 | *Checkpoints* | *Git-based checkpoints and restore.* | *Checkpoints, `/undo` for files.* |
-| Instructions | `QWEN.md` context files. | `KENDAR.md` instruction files, system prompt files. |
+| Instructions | `QWEN.md` context files. | `KENDAR.md`, `AGENTS.md`, `CLAUDE.md` instruction files (also per directory), system prompt files. |
 | *Extensibility* | *Custom commands, extensions, hooks, IDE integration.* | *Java `HarnessPlugin`, hooks, skills, slash commands.* |
 | Run modes | Interactive, headless with JSON output. | CLI chat, `--prompt`, web. |
 | *Embedding* | *Node SDK, not designed as a JVM library.* | *Java library with ports for stores, sandbox, approvals and metrics.* |
@@ -288,7 +288,7 @@ Basis: Claude Code (Anthropic) side from memory, not verified against current do
 | REST APIs as tools | No (via MCP). | OpenAPI operations as tools. |
 | *Context* | *Auto-compaction, `/compact`.* | *Three strategies: `compaction`, `mnemonic`, `scope`.* |
 | Sessions | Resume, continue, fork; checkpoints with `/rewind`. | Flat `messages.jsonl`; save, resume, copy; `/undo`, checkpoints; no fork. |
-| *Instructions* | *`CLAUDE.md` (user, project, local), auto-memory.* | *`KENDAR.md` instruction files, system prompt files.* |
+| *Instructions* | *`CLAUDE.md` (user, project, local), auto-memory.* | *`KENDAR.md`, `AGENTS.md`, `CLAUDE.md` instruction files (also per directory), system prompt files.* |
 | Extensibility | Hooks, skills, slash commands, sub-agent definitions, plugins and marketplaces. | Java `HarnessPlugin`, hooks, skills, slash commands. |
 | *Run modes* | *Interactive TUI, `-p` headless with `json`/`stream-json` output.* | *CLI chat, `--prompt`, web.* |
 | Embedding | Agent SDK (TypeScript, Python), not a JVM library. | Java library with ports for stores, sandbox, approvals and metrics. |

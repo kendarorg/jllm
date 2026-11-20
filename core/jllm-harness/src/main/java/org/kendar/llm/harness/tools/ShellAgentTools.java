@@ -17,11 +17,17 @@ public class ShellAgentTools implements HarnessToolSet {
         this.config = config;
     }
 
+    /** The shell syntax lives here, not in the system prompt: a chat without the tool hears nothing about a shell. */
+    static String description(SandboxExecutor sandbox) {
+        String d = "Run a shell command in the working directory (also usable for python scripts). In plan mode it runs "
+                + "in the scratch directory and must not change the working directory.";
+        String shell = sandbox.shellDescription();
+        return shell == null || shell.isBlank() ? d : d + " " + shell;
+    }
+
     @Override
     public List<HarnessTool> tools() {
-        return List.of(new SimpleTool("bash",
-                "Run a shell command in the working directory (also usable for python scripts). In plan mode it runs "
-                        + "in the scratch directory and must not change the working directory.",
+        return List.of(new SimpleTool("bash", description(sandbox),
                 SimpleTool.schema(
                         "command", "Command line to execute",
                         "timeout_seconds:integer?", "Timeout in seconds (default from config)"),

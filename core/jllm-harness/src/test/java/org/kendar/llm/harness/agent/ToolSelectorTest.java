@@ -139,4 +139,22 @@ class ToolSelectorTest {
         }
         assertTrue(prompt.contains("web_search"));
     }
+
+    @Test
+    void aToolNamedByTheUserEnablesItsGroup() {
+        var all = List.of(t("big_report", "Sample"), t("read_file", "Files"), t("web_fetch", "Web"));
+        assertEquals(java.util.Set.of("Sample"),
+                ToolSelector.namedGroups("Call big_report again", all, java.util.Set.of("Files")));
+        assertTrue(ToolSelector.namedGroups("the big_report_v2 tool", all, java.util.Set.of("Files")).isEmpty(),
+                "only a whole name counts");
+        assertTrue(ToolSelector.namedGroups("use read_file", all, java.util.Set.of("Files")).isEmpty(),
+                "already enabled");
+        assertTrue(ToolSelector.namedGroups("call big_report", all, null).isEmpty(), "every tool is offered already");
+    }
+
+    @Test
+    void theCatalogueCarriesABriefDescription() {
+        assertEquals("a b c", ToolSelector.brief(" a\n  b\tc ", 20));
+        assertEquals("abcdefg...", ToolSelector.brief("abcdefghijklmnop", 10));
+    }
 }

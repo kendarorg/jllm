@@ -3,11 +3,13 @@
 Browser front end for [jllm-harness](../core/jllm-harness/README.md): a Spring Boot application with a REST + SSE API and a
 Vue 3 chat UI. The Spring layer is a thin adapter; all agent logic lives in the framework-free harness.
 
+![Chat with tool calls and a confirmation before web_download](../docs/images/chat_web.png)
+
 ## Build and run
 
 ```sh
 mvn -pl jllm-web -am package
-java -jar jllm-web/target/jllm-web-1.1.0-jllm.jar --provider anthropic --jllm.webauth-dir=runConfig/webauth
+java -jar jllm-web/target/jllm-web-1.2.0-jllm.jar --provider anthropic --jllm.webauth-dir=runConfig/webauth
 ```
 
 Then open <http://localhost:8080>. The UI is plain static files in `src/main/resources/static`: Vue 3 as an ES module
@@ -22,7 +24,7 @@ flags as the CLI, without the prefix: `--provider openai`, `--sandbox docker`, `
 
 | Property | Default | Meaning |
 |---|---|---|
-| `jllm.provider` | `anthropic` | `anthropic`, `openai`, `gemini`, `grok`, `qwen`, `llamacpp`, `ollama` |
+| `jllm.provider` | `anthropic` | `anthropic`, `openai`, `openaiGpt62`, `gemini`, `grok`, `qwen`, `llamacpp`, `ollama` |
 | `jllm.api-key` | `<PROVIDER>_API_KEY` env var | API key |
 | `jllm.model` | per provider | model name |
 | `jllm.base-url` | per provider | endpoint override |
@@ -112,6 +114,9 @@ jllm.auth.oidc.default-role=user                       # required (and must exis
   `password` answers 404 on `/auth/oidc/*`. `/api/logout` ends the local session only.
 
 ### Roles
+
+![Role editor: approval mode, allow/ask/deny per tool pattern, tool grants](../docs/images/roles_web.png)
+
 - `tools`: tool-name patterns, `*` matching any run of characters: `"read_file"`, `"mcp__docs__*"` (a whole MCP
   server, also tools it adds later), `"billing__*"` (a REST API), `["*"]` (everything).
 - `readOnly`: optional; `true` keeps only read-only tools. `approval`: optional; `"off"` turns approval prompts off,

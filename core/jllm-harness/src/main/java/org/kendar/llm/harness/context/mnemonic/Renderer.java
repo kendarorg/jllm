@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.kendar.llm.harness.context.compaction.ContextManager;
 import org.kendar.llm.harness.context.mnemonic.MnemonicState.Mask;
 import org.kendar.llm.harness.context.mnemonic.MnemonicState.Segment;
 
@@ -42,8 +43,31 @@ final class Renderer {
             }
         }
         List<JsonNode> applied = applied(log, st, start);
-        applied.forEach(out::add);
+        for (int k = 0; k < applied.size(); k++) out.add(withValidReasoning(applied.get(k), start + k, seg));
         return out;
+    }
+
+    /**
+     * Anthropic binds a thinking block's signature to the content before it as it was when the block was made. A new
+     * segment head replaces that content entirely, so the blocks of the tail made before it are left out; the
+     * decisions only grow, so a block once left out stays out. A mask is not handled here: the log must stay
+     * append-only apart from the masked block, and the model client asks the API to drop the blocks a mask voids.
+     */
+    private static JsonNode withValidReasoning(JsonNode msg, int index, Segment seg) {
+        if (!"assistant".equals(Messages.role(msg)) || !msg.path("content").isArray()) return msg;
+        boolean any = false;
+        for (JsonNode b : msg.path("content")) any |= Messages.isThinking(b);
+        if (!any || !rewrittenBefore(index, seg)) return msg;
+        ObjectNode copy = msg.deepCopy();
+        ArrayNode kept = copy.putArray("content");
+        for (JsonNode b : msg.path("content")) if (!Messages.isThinking(b)) kept.add(b);
+        if (kept.isEmpty()) kept.addObject().put("type", "text").put("text", ContextManager.REASONING_OMITTED);
+        return copy;
+    }
+
+    /** True when a segment head replaced the content before message {@code index} after it was appended. */
+    static boolean rewrittenBefore(int index, Segment seg) {
+        return seg != null && seg.logSize() > index;
     }
 
     /** Messages {@code start..} of the log with their masks applied, aligned with the log indexes. */

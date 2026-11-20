@@ -12,6 +12,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.util.Optional;
 import java.util.function.IntFunction;
 import java.util.function.IntPredicate;
 import java.util.function.Supplier;
@@ -133,6 +134,7 @@ final class StreamingCall {
         HttpRequest request = build.get();
         boolean authRetried = false;
         int attempt = 0;
+        RetryBudget budget = new RetryBudget();
         while (true) {
             try {
                 HttpResponse<InputStream> resp = cancel.sendStreaming(http, request);
@@ -156,7 +158,9 @@ final class StreamingCall {
                             listener.onReset();
                         }
                         attempt++;
-                        long delay = Math.min(30_000L, backoffBaseMs << attempt);
+                        long delay = budget.reserve(attempt, backoffBaseMs, Optional.empty())
+                                .orElseThrow(() -> new ModelException(e.getMessage()
+                                        + " (retry wait budget of " + RetryBudget.MAX_WAIT_MS + " ms exhausted)", e));
                         log.warn("Model stream broke ({}): retry {} in {} ms", e.getMessage(), attempt, delay);
                         cancel.retrying(0, attempt, maxRetries, delay);
                         cancel.sleep(delay);
@@ -173,11 +177,14 @@ final class StreamingCall {
                     continue;
                 }
                 if (!retryableStatus.test(status) || attempt >= maxRetries) {
-                    throw new ModelException(httpError.apply(status) + ": " + truncate(text));
+                    throw new ModelException(httpError.apply(status) + ": " + truncate(text) + rateLimitHint(resp));
                 }
-                long delayMs = resp.headers().firstValue("retry-after").map(StreamingCall::parseSeconds)
-                        .orElse(Math.min(30_000L, backoffBaseMs << attempt));
                 attempt++;
+                long delayMs = budget.reserve(attempt, backoffBaseMs,
+                                resp.headers().firstValue("retry-after").map(StreamingCall::parseSeconds))
+                        .orElseThrow(() -> new ModelException(httpError.apply(status) + ": " + truncate(text) + rateLimitHint(resp)
+                                + " (retry wait budget of " + RetryBudget.MAX_WAIT_MS + " ms exhausted)"));
+                log.warn("{} - retry {} in {} ms{}", httpError.apply(status), attempt, delayMs, rateLimitHint(resp));
                 cancel.retrying(status, attempt, maxRetries, delayMs);
                 cancel.sleep(delayMs);
             } catch (InterruptedException e) {
@@ -187,7 +194,9 @@ final class StreamingCall {
                 if (cancel.isCancelled()) throw new ModelCancelledException();
                 if (attempt >= maxRetries) throw new ModelException(callFailed + e.getMessage(), e);
                 attempt++;
-                long netDelay = Math.min(30_000L, backoffBaseMs << attempt);
+                long netDelay = budget.reserve(attempt, backoffBaseMs, Optional.empty())
+                        .orElseThrow(() -> new ModelException(callFailed + e.getMessage()
+                                + " (retry wait budget of " + RetryBudget.MAX_WAIT_MS + " ms exhausted)", e));
                 cancel.retrying(0, attempt, maxRetries, netDelay);
                 try {
                     cancel.sleep(netDelay);
@@ -211,6 +220,21 @@ final class StreamingCall {
         } catch (IOException ignored) {
             // best effort: the reader fails and sees the cancel
         }
+    }
+
+    /**
+     * The headers a provider uses to say when to come back ({@code retry-after}, {@code x-ratelimit-*}), as a suffix
+     * for an error message: {@code " [retry-after=30, x-ratelimit-reset-requests=12s]"}; empty when there are none.
+     */
+    static String rateLimitHint(java.net.http.HttpResponse<?> resp) {
+        StringBuilder sb = new StringBuilder();
+        resp.headers().map().forEach((k, v) -> {
+            String n = k.toLowerCase(java.util.Locale.ROOT);
+            if (n.equals("retry-after") || n.startsWith("x-ratelimit") || n.startsWith("ratelimit")) {
+                sb.append(sb.isEmpty() ? " [" : ", ").append(n).append('=').append(String.join("|", v));
+            }
+        });
+        return sb.isEmpty() ? "" : sb + "]";
     }
 
     private static long parseSeconds(String v) {

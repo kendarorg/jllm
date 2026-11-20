@@ -12,6 +12,7 @@ import org.kendar.llm.harness.context.compaction.ContextManager;
 import org.kendar.llm.harness.llm.ModelClient;
 import org.kendar.llm.harness.permission.ApprovalService;
 import org.kendar.llm.harness.state.InMemoryStateStore;
+import org.kendar.llm.harness.todo.TodoStore;
 
 import java.nio.file.Files;
 import java.nio.file.Path;

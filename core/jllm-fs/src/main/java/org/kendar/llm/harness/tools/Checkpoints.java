@@ -249,7 +249,10 @@ public final class Checkpoints {
         if (turn == null) return;
         Path work = ctx.workDir().toAbsolutePath().normalize();
         Path abs = file.toAbsolutePath().normalize();
-        if (!abs.startsWith(work) || abs.startsWith(work.resolve(".jllm"))) return; // scratch dir or our own data
+        if (!abs.startsWith(work) || abs.startsWith(work.resolve(".jllm"))) return; // outside the project or our own data
+        // the scratch dir of the agent: with the local layout it lies inside the work dir, and it is never undone
+        Path scratch = ctx.scratchDir() == null ? null : ctx.scratchDir().toAbsolutePath().normalize();
+        if (scratch != null && !scratch.equals(work) && abs.startsWith(scratch)) return;
         String rel = work.relativize(abs).toString().replace('\\', '/');
         Set<String> seen = touched.computeIfAbsent(ctx.chatId(), k -> ConcurrentHashMap.newKeySet());
         if (!seen.add(rel)) return;

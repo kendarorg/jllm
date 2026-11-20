@@ -57,7 +57,7 @@ class MnemonicSelectionTest {
                 .withoutStandardTools().settings(mnemonic).build();
         assertInstanceOf(MnemonicStrategy.class, h.contextStrategy());
         String chat = h.sessions().create(null).chatId();
-        assertEquals(MnemonicStrategy.NOT_USED, h.commands().execute(chat, "/compact").output());
+        assertTrue(h.commands().execute(chat, "/compact").output().contains(MnemonicStrategy.NOTHING_TO_MASK));
         assertTrue(h.commands().execute(chat, "/status").output().contains("context strategy: mnemonic"));
 
         AgentHarness byConfig = AgentHarness.builder().modelClient(new ScriptedModel())
@@ -149,8 +149,8 @@ class MnemonicSelectionTest {
         MnemonicState st = new MnemonicState();
         st.frontier = 7;
         st.masks.add(new MnemonicState.Mask(7, "h", 0, MnemonicState.TOOL_RESULT, "r1",
-                com.fasterxml.jackson.databind.node.TextNode.valueOf("[masked: x]"), 10));
-        st.segments.add(new MnemonicState.Segment(9, "h9", 0, "h0", "notes", "index"));
+                com.fasterxml.jackson.databind.node.TextNode.valueOf("[masked: x]"), 10, 8));
+        st.segments.add(new MnemonicState.Segment(9, "h9", 0, "h0", "notes", "index", null, null, 10));
         store.save("chat/1", "agent", st);
         MnemonicState back = store.load("chat/1", "agent");
         assertEquals(7, back.frontier);

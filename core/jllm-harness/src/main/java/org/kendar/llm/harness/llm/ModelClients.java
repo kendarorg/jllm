@@ -12,7 +12,7 @@ public final class ModelClients {
 
     /**
      * The client for {@code settings.name()}: {@code anthropic}, or any other name for an OpenAI-compatible
-     * endpoint (openai, qwen, llamacpp, ollama, ...). For {@code anthropic} the connection fields are taken from
+     * endpoint (openai, qwen, llamacpp, ollama, ...), {@code openaigpt62} for the OpenAI Responses API. For {@code anthropic} the connection fields are taken from
      * the settings and the rest from {@link AnthropicSettings#defaults}.
      */
     public static ModelClient from(LlmSettings settings, ObjectMapper mapper) {
@@ -23,6 +23,7 @@ public final class ModelClients {
                     settings.model(), settings.maxTokens(), settings.maxRetries(), d.cacheTtl(), d.thinkingBudget(),
                     settings.timeoutSeconds(), d.citations()), mapper);
         }
+        if (name.equals(OpenAiResponsesModelClient.PROVIDER)) return new OpenAiResponsesModelClient(settings, mapper);
         return new OpenAiCompatModelClient(settings, mapper);
     }
 

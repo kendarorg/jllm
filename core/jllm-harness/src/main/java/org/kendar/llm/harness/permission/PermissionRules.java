@@ -15,6 +15,11 @@ import java.util.regex.PatternSyntaxException;
  * tools, {@code url} for web_fetch, {@code query} for searches, the compact JSON for other tools). Evaluation order is
  * deny, ask, allow; the first match wins.
  * <p>
+ * A rule on {@code write_file} also covers the other tools that create files from their {@code path} argument
+ * ({@code web_download}): denying file writes cannot be bypassed by another tool that writes files. A deny rule on
+ * {@code write_file} or {@code edit_file} also denies a {@code bash} command that writes a matching path (redirection,
+ * {@code tee}, {@code cp}, PowerShell {@code Set-Content} and the like, see {@code ShellWrites}).
+ * <p>
  * A regex on a shell command line is a guard rail, not a security boundary (quoting, variables, scripts): use an
  * isolating sandbox executor for real containment.
  */
@@ -29,7 +34,14 @@ public final class PermissionRules {
     /** @param argFolded the argument pattern, case-insensitive: used for paths on Windows */
     private record Rule(Kind kind, String text, Pattern tool, Pattern arg, Pattern argFolded) {
         boolean matches(String toolName, JsonNode input, Path workDir, boolean windows) {
-            if (!tool.matcher(toolName).matches()) return false;
+            if (kind == Kind.DENY && coversShellWrites(tool, toolName)) {
+                for (String target : shellWriteTargets(input)) {
+                    if (arg == null) return true;
+                    String value = normalizePath(target, workDir, windows);
+                    if ((windows ? argFolded : arg).matcher(value).find()) return true;
+                }
+            }
+            if (!coversTool(tool, toolName)) return false;
             if (arg == null) return true;
             boolean path = isPathTool(toolName) && input != null && input.hasNonNull("path");
             String value = path ? normalizePath(input.get("path").asText(), workDir, windows)
@@ -40,6 +52,9 @@ public final class PermissionRules {
 
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(PermissionRules.class);
     private static final boolean WINDOWS = System.getProperty("os.name", "").toLowerCase().startsWith("windows");
+
+    /** Tools that create a file from their {@code path} argument, like {@code write_file}. */
+    private static final java.util.Set<String> FILE_CREATORS = java.util.Set.of("web_download");
 
     private static final PermissionRules NONE = new PermissionRules(List.of());
 
@@ -119,7 +134,7 @@ public final class PermissionRules {
     /** True if a deny rule without argument pattern covers the tool: it is not even offered to the model. */
     public boolean hides(String toolName) {
         for (Rule r : rules) {
-            if (r.kind() == Kind.DENY && r.arg() == null && r.tool().matcher(toolName).matches()) return true;
+            if (r.kind() == Kind.DENY && r.arg() == null && coversTool(r.tool(), toolName)) return true;
         }
         return false;
     }
@@ -131,9 +146,29 @@ public final class PermissionRules {
         return out;
     }
 
+    /** The tool pattern matches the tool, or matches {@code write_file} and the tool creates files like it. */
+    private static boolean coversTool(Pattern tool, String toolName) {
+        return tool.matcher(toolName).matches()
+                || FILE_CREATORS.contains(toolName) && tool.matcher("write_file").matches();
+    }
+
+    /**
+     * A deny rule on {@code write_file} or {@code edit_file} (and not on the shell itself) also covers the files a
+     * {@code bash} command writes: denying a file write cannot be bypassed by {@code echo x > file}.
+     */
+    private static boolean coversShellWrites(Pattern tool, String toolName) {
+        return "bash".equals(toolName) && !tool.matcher("bash").matches()
+                && (tool.matcher("write_file").matches() || tool.matcher("edit_file").matches());
+    }
+
+    private static List<String> shellWriteTargets(JsonNode input) {
+        if (input == null || !input.hasNonNull("command")) return List.of();
+        return org.kendar.llm.harness.sandbox.ShellWrites.targets(input.get("command").asText());
+    }
+
     private static boolean isPathTool(String tool) {
         return switch (tool) {
-            case "read_file", "write_file", "edit_file" -> true;
+            case "read_file", "write_file", "edit_file", "web_download" -> true;
             default -> false;
         };
     }
@@ -200,7 +235,7 @@ public final class PermissionRules {
     static String mainArgument(String tool, JsonNode input) {
         String field = switch (tool) {
             case "bash" -> "command";
-            case "read_file", "write_file", "edit_file" -> "path";
+            case "read_file", "write_file", "edit_file", "web_download" -> "path";
             case "web_fetch" -> "url";
             case "web_search", "wikipedia_search" -> "query";
             default -> null;

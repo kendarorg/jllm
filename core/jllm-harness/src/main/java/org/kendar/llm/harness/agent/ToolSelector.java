@@ -43,6 +43,30 @@ public class ToolSelector {
         return out;
     }
 
+    /**
+     * Groups outside {@code enabled} with a tool the user names verbatim ("call big_report"): the user asked for it,
+     * so it is offered without the model having to request its group. Empty when {@code enabled} is null (all tools).
+     */
+    public static Set<String> namedGroups(String userText, Collection<HarnessTool> all, Set<String> enabled) {
+        Set<String> out = new TreeSet<>();
+        if (enabled == null) return out;
+        for (HarnessTool t : all) {
+            if (t.group() == null || enabled.contains(t.group()) || out.contains(t.group())) continue;
+            if (java.util.regex.Pattern.compile("(?<![\\w-])" + java.util.regex.Pattern.quote(t.name()) + "(?![\\w-])")
+                    .matcher(userText).find()) {
+                out.add(t.group());
+            }
+        }
+        return out;
+    }
+
+    /** One line of a tool's description for a catalogue: whitespace collapsed, cut at {@code max} chars. */
+    static String brief(String description, int max) {
+        if (description == null) return "";
+        String s = description.replaceAll("\\s+", " ").strip();
+        return s.length() <= max ? s : s.substring(0, max - 3) + "...";
+    }
+
     /** The tools of the given groups (null = all), in the order they were given (the registry's stable order). */
     public List<HarnessTool> forGroups(Set<String> groups, Collection<HarnessTool> all) {
         List<HarnessTool> tools = new ArrayList<>(all);
@@ -55,7 +79,11 @@ public class ToolSelector {
         StringBuilder catalogue = new StringBuilder();
         for (HarnessTool t : tools) {
             if (t.group() != null && groups.add(t.group())) catalogue.append("- ").append(t.group()).append('\n');
-            catalogue.append("    ").append(t.name()).append('\n');
+            // the description tells the selector what a tool is for (a skill's name says nothing of what it does)
+            catalogue.append("    ").append(t.name());
+            String brief = brief(t.description(), 160);
+            if (!brief.isEmpty()) catalogue.append(": ").append(brief);
+            catalogue.append('\n');
         }
         try {
             String answer = model.simpleComplete(

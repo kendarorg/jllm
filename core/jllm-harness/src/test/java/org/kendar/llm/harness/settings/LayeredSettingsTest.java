@@ -63,6 +63,7 @@ class LayeredSettingsTest {
 
     private static HarnessSettings load(Path explicit, Path project) {
         return HarnessSettings.loadLayered(new FileSettingsSource(explicit, project), project, k -> null, null,
-                new FileProjectMcpTrust(project.resolve("trust.json")), w -> { });
+                new FileProjectMcpTrust(project.resolve("trust.json")), w -> { },
+                new org.kendar.llm.harness.safety.ContentWarnings());
     }
 }

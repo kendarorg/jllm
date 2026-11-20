@@ -129,6 +129,25 @@ class MnemonicFixesTest {
     }
 
     @Test
+    void fitDropsReasoningBehindTheRewrittenHead() {
+        SegmentSwitcher sw = new SegmentSwitcher(MAPPER);
+        ArrayNode view = log();
+        user(view, "first");
+        for (int i = 0; i < 6; i++) readPair(view, i);
+        for (JsonNode m : view) {
+            if ("assistant".equals(m.path("role").asText())) {
+                ((ArrayNode) m.get("content")).insertObject(0).put("type", "thinking").put("thinking", "t")
+                        .put("signature", "sig");
+            }
+        }
+        ArrayNode out = sw.fit(view, 2_500);
+        assertTrue(out.size() < view.size());
+        assertFalse(out.toString().contains("\"thinking\""), "a signature bound to the old prefix is a 400");
+        assertTrue(view.toString().contains("\"thinking\""), "the view itself is not changed");
+        assertEquals(view.toString(), sw.fit(view, 1_000_000).toString(), "a view that fits keeps its reasoning");
+    }
+
+    @Test
     void anOverflowSwitchTrimsTheNotesRequestEvenWhenTheEstimateFits() {
         ScriptedModel model = notesModel();
         ArrayNode log = log();

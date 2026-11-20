@@ -55,6 +55,17 @@ final class MaskPlanner {
     }
 
     /**
+     * Manual compaction (/compact): every maskable block from {@code from} up to the latest user turn, which is kept
+     * as it is. The age and recent-token protections do not apply: the user asked for the context to shrink now.
+     */
+    List<Mask> manual(ArrayNode log, MnemonicState st, int from) {
+        int lastUser = lastPlainUser(log);
+        List<Mask> chosen = new ArrayList<>();
+        for (int i = Math.max(from, 0); i < lastUser; i++) chosen.addAll(candidates(log, st, i, true));
+        return chosen;
+    }
+
+    /**
      * Emergency: the newest tool results alone leave no room for the response. Masks the largest results of the
      * trailing tool-result message, protection ignored, but only if that frees at least {@code needed}.
      */
@@ -98,7 +109,7 @@ final class MaskPlanner {
                         + Messages.callSummary(use) + " -> ~" + Messages.tokens(text) + " tokens, " + MARKER + id + "]";
                 TextNode r = TextNode.valueOf(receipt);
                 long saved = size - Messages.tokens(r);
-                if (saved > 0) out.add(new Mask(i, hash, k, MnemonicState.TOOL_RESULT, id, r, saved));
+                if (saved > 0) out.add(new Mask(i, hash, k, MnemonicState.TOOL_RESULT, id, r, saved, log.size()));
             } else if ("tool_use".equals(type) && b.path("input").isObject()) {
                 String id = "a" + id(hash, k);
                 ObjectNode input = (ObjectNode) b.path("input");
@@ -113,12 +124,12 @@ final class MaskPlanner {
                     any = true;
                 }
                 long saved = Messages.tokens(input) - Messages.tokens(replaced);
-                if (any && saved > 0) out.add(new Mask(i, hash, k, MnemonicState.TOOL_INPUT, id, replaced, saved));
+                if (any && saved > 0) out.add(new Mask(i, hash, k, MnemonicState.TOOL_INPUT, id, replaced, saved, log.size()));
             } else if (Messages.isThinking(b) && limits.dropOldThinking() && earlierUserTurn && nonThinking > 0) {
                 // reasoning may only be dropped from earlier user turns, never from the open tool-use chain
                 long size = Messages.tokens(b);
                 if (size < limits.minMaskTokens()) continue;
-                out.add(new Mask(i, hash, k, MnemonicState.THINKING, "t" + id(hash, k), null, size));
+                out.add(new Mask(i, hash, k, MnemonicState.THINKING, "t" + id(hash, k), null, size, log.size()));
             }
         }
         return out;

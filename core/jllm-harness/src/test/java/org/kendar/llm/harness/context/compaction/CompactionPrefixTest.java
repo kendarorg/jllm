@@ -21,7 +21,7 @@ class CompactionPrefixTest {
         ArrayNode m = MAPPER.createArrayNode();
         for (int i = 1; i <= turns; i++) {
             m.addObject().put("role", "user").putArray("content").addObject().put("type", "text")
-                    .put("text", "q" + i + " " + "p".repeat(200));
+                    .put("text", "q" + i + " " + "p".repeat(1200));
             m.addObject().put("role", "assistant").putArray("content").addObject().put("type", "text").put("text", "a" + i);
         }
         return m;

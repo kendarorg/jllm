@@ -49,9 +49,9 @@ function subAgent(run) {
   return n;
 }
 
-/** A turn starts at a plain user message (not a tool_result carrier). */
-const isTurnStart = m => m.role === 'user'
-  && (typeof m.content === 'string' || (m.content || []).some(b => b.type === 'text'));
+/** A turn starts at a plain user message (not a tool_result carrier, which may also hold a todo snapshot). */
+const isTurnStart = m => m.role === 'user' && (typeof m.content === 'string'
+  || ((m.content || []).length > 0 && m.content.every(b => b.type === 'text')));
 
 export function buildTree(chat, runs, completedOnly) {
   const runsByTool = {};

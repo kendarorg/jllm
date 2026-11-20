@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- No output: tests that check a log line attach their own appender. -->
+<configuration>
+    <statusListener class="ch.qos.logback.core.status.NopStatusListener"/>
+    <logger name="org.kendar.llm.harness.safety" level="WARN"/>
+    <root level="OFF"/>
+</configuration>

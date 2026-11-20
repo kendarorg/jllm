@@ -112,10 +112,10 @@ class CancellationTest {
     @Test
     void backoffSleepIsAborted() throws Exception {
         status = 500;
-        assertCancelsFast(anthropic(5, 60_000), 700);
+        assertCancelsFast(anthropic(5, 5_000), 700);
         assertEquals(1, hits.get());
         hits.set(0);
-        assertCancelsFast(openai(5, 60_000), 700);
+        assertCancelsFast(openai(5, 5_000), 700);
         assertEquals(1, hits.get());
     }
 

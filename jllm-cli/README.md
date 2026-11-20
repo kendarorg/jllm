@@ -3,6 +3,8 @@
 Terminal front end for [jllm-harness](../core/jllm-harness/README.md): an interactive chat, or a single `--prompt`, over the
 standard tools. One class, `org.kendar.llm.cli.Main`, packaged as a shaded runnable jar.
 
+![Session with untrusted tool output and inline host and write approvals](../docs/images/chat_cli.png)
+
 ## Build and run
 
 ```sh
@@ -16,7 +18,7 @@ The API key comes from `--api-key` or the `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`
 ## Flags
 
 ```text
-Main [--provider anthropic|openai|gemini|grok|qwen|llamacpp|ollama] [--model M] [--base-url U] [--api-key K]
+Main [--provider anthropic|openai|openaiGpt62|gemini|grok|qwen|llamacpp|ollama] [--model M] [--base-url U] [--api-key K]
      [--mode default|plan|edit|auto] [--workdir DIR] [--prompt TEXT] [--settings FILE] [--system-prompt TEXT] [--system-prompt-file FILE] [--system-prompt-replace FILE]
      [--max-turns N] [--context-tokens TOKENS] [--max-tokens TOKENS]
      [--context-strategy compaction|mnemonic|scope] [--search-api-key BRAVE_KEY] [--small-model]
@@ -27,8 +29,8 @@ Main [--provider anthropic|openai|gemini|grok|qwen|llamacpp|ollama] [--model M] 
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--provider` | settings `defaultProvider`, else `anthropic` | a provider name from the settings `providers` list, or a built-in: `anthropic`, `openai`, `gemini`, `grok`, `qwen`, `llamacpp`, `ollama` |
-| `--model` | per provider (`claude-sonnet-5-5`, `gpt-4.1`, `qwen3-coder-plus`, `local`, `llama3.1`) | model name; overrides the named provider for this session only |
+| `--provider` | settings `defaultProvider`, else `anthropic` | a provider name from the settings `providers` list, or a built-in: `anthropic`, `openai`, `openaiGpt62`, `gemini`, `grok`, `qwen`, `llamacpp`, `ollama` |
+| `--model` | per provider (`claude-sonnet-5-5`, `gpt-4.1`, `gpt-6.2-sol`, `qwen3-coder-plus`, `local`, `llama3.1`) | model name; overrides the named provider for this session only |
 | `--base-url` | per provider | endpoint (OpenAI-compatible URLs include `/v1`) |
 | `--api-key` | `<PROVIDER>_API_KEY` env var | `ASK_TOKEN` asks for it on startup |
 | `--mode` | `default` | initial [permission mode](../core/jllm-harness/README.md#modes-working-directory-and-scratch-directory) |
@@ -92,6 +94,8 @@ During a run the CLI prints:
 | `[plan] ...` | `plan_ready` (suggests `/edit`) |
 | `[cancelled]` | `cancelled` |
 | `[queued steer]`, `[applied] ...` | `steer_queued`, `steer_applied` |
+| `[instructions] sub/AGENTS.md` | `instructions_loaded` (a directory-scoped instruction file was added) |
+| `[content warning] <file>: ...` | `content_warning` and the startup list: suspicious content in a loaded file (loaded anyway), one line per finding. Shown only, never stored |
 
 Approvals show the tool and a preview, then `Allow? [y/N/a=allow for this chat]`: `y` allows once, `a` allows the tool
 for the rest of the chat (sub-agents included), anything else rejects.

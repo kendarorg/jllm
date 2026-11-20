@@ -195,11 +195,45 @@ public class AgentLoop {
         return this;
     }
 
+    /** Harness tools offered in every request next to the context strategy's (the todo tools when enabled). */
+    private volatile List<HarnessTool> harnessTools = List.of();
+
+    public AgentLoop harnessTools(java.util.Collection<HarnessTool> tools) {
+        this.harnessTools = List.copyOf(tools);
+        return this;
+    }
+
+    /** Tools offered whatever the tool groups: the context strategy's and the harness's. */
+    private List<HarnessTool> fixedTools() {
+        List<HarnessTool> ctx = context.tools();
+        if (harnessTools.isEmpty()) return ctx;
+        List<HarnessTool> all = new ArrayList<>(ctx);
+        all.addAll(harnessTools);
+        return all;
+    }
+
     public AgentLoop builtinFileTools(java.util.Collection<HarnessTool> tools) {
         java.util.Set<HarnessTool> s = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
         s.addAll(tools);
         this.builtinFileTools = s;
         return this;
+    }
+
+    /** Adds the instruction files of the directories the file tools work in; null = off. */
+    private volatile org.kendar.llm.harness.instructions.ScopedInstructions scopedInstructions;
+
+    public AgentLoop scopedInstructions(org.kendar.llm.harness.instructions.ScopedInstructions scoped) {
+        this.scopedInstructions = scoped;
+        return this;
+    }
+
+    /** Per chat: the scoped instruction files whose suspicious content was already reported (once per chat). */
+    private final java.util.Map<String, java.util.Set<String>> contentWarned =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Drops what is kept in memory about the scoped files of a chat (the chat was deleted). */
+    public void forgetContentWarnings(String chatId) {
+        if (chatId != null) contentWarned.remove(chatId);
     }
 
     private static final java.util.Set<String> SCRIPT_REFUSED = java.util.Set.of("run_js", "bash", "sub_agent",
@@ -270,7 +304,7 @@ public class AgentLoop {
                 HarnessTool tool = byName.get(name);
                 // the list is the agent's of this turn; a tool disabled or removed since (/tools, /mcp) is refused now
                 if (tool == null || scriptRefused(tool)
-                        || !(registry.all().contains(tool) || context.tools().contains(tool))) {
+                        || !(registry.all().contains(tool) || fixedTools().contains(tool))) {
                     throw new org.kendar.llm.harness.tools.ToolCatalog.ToolCallException(
                             "Unknown or unavailable tool '" + name + "'");
                 }
@@ -577,16 +611,20 @@ public class AgentLoop {
     }
 
     /**
-     * The tool set is chosen once, on the chat's first message, and stored; it only grows through
-     * request_tool_group. Keeping it stable keeps the prompt prefix (and the model's KV cache) intact.
+     * The tool set is chosen once, on the chat's first message, and stored; it only grows, through
+     * request_tool_group or a user message naming a tool it lacks. Keeping it stable keeps the prompt prefix (and the
+     * model's KV cache) intact.
      */
     private List<HarnessTool> chatTools(String chatId, String userText) {
         if (!sessions.hasToolGroups(chatId)) {
             sessions.setToolGroups(chatId, toolSelector.selectGroups(userText, registry.all()));
+        } else if (userText != null && !userText.isBlank()) {
+            java.util.Set<String> named = ToolSelector.namedGroups(userText, registry.all(), sessions.toolGroups(chatId));
+            if (!named.isEmpty()) sessions.addToolGroups(chatId, named);
         }
         List<HarnessTool> tools = new ArrayList<>(toolSelector.forGroups(sessions.toolGroups(chatId), registry.all()));
-        tools.addAll(context.tools());
-        if (requestToolGroup != null && !requestToolGroup.missing(chatId).isEmpty()) tools.add(requestToolGroup);
+        tools.addAll(fixedTools());
+        if (requestToolGroup != null && requestToolGroup.offered(chatId)) tools.add(requestToolGroup);
         tools.add(subAgentTool);
         // the user's tool filter: applied to every tool offered to the model, including the ones added above
         org.kendar.llm.harness.auth.UserPolicy policy = identity.policyOf(chatId);
@@ -731,7 +769,7 @@ public class AgentLoop {
             extra = systemPrompt + modeNote(pm, pctx);
             pinned = sessions.pinnedPrefix(session);
             java.util.Set<String> contextTools = new java.util.HashSet<>();
-            context.tools().forEach(t -> contextTools.add(t.name()));
+            fixedTools().forEach(t -> contextTools.add(t.name()));
             frame = new StackFrame(extra, t -> {
                 if (contextTools.contains(t.name())) return true;
                 if (t == subAgentTool || t == requestToolGroup) return false;
@@ -745,7 +783,7 @@ public class AgentLoop {
                             .filter(t -> agentType == null || agentType.tools().isEmpty()
                                     || agentType.tools().contains(t.name()))
                             .toList()));
-            tools.addAll(context.tools());
+            tools.addAll(fixedTools());
             // the user's tool filter, as for the main agent (the stack branch inherits the filtered list)
             org.kendar.llm.harness.auth.UserPolicy policy = identity.policyOf(chatId);
             tools.removeIf(t -> !policy.allows(t));
@@ -764,7 +802,8 @@ public class AgentLoop {
         EventSink errors = (type, data) -> {
             if ("approval_unavailable".equals(type)) {
                 if (denied != null) denied.add(data.path("tool").asText("a tool"));
-            } else if ("approval_request".equals(type) || "login_required".equals(type)) parentSink.emit(type, data);
+            } else if ("approval_request".equals(type) || "login_required".equals(type)
+                    || org.kendar.llm.harness.safety.ContentWarnings.EVENT.equals(type)) parentSink.emit(type, data);
             else if ("error".equals(type)) failure[0] = data.path("message").asText("sub-agent failed");
             else if ("warning".equals(type)) warning[0] = data.path("message").asText(null);
             else if ("usage".equals(type)) {
@@ -838,29 +877,24 @@ public class AgentLoop {
     }
 
     /**
-     * The shell description, only when this chat's user may run the shell tool: a user without it (e.g. run_js only)
-     * must not be told about cmd.exe or bash, or the model claims and tries a shell it does not have.
+     * Date, OS, directories and permission mode: after the cached system prefix. The shell is described by the bash
+     * tool itself, so a chat without it (policy, chat toggle, deny rule) is never told about one.
      */
-    private String shellNote(String chatId) {
-        HarnessTool shell = registry.get("bash");
-        boolean usable = shell != null && identity.policyOf(chatId).allows(shell)
-                && sessions.chatAllowsTool(chatId, "bash");
-        if (usable) return sandbox.shellEnvironment();
-        return "OS: " + System.getProperty("os.name") + ". There is no shell tool in this chat: do not claim or "
-                + "suggest shell commands.";
-    }
-
-    /** Date, OS and shell, directories and permission mode: after the cached system prefix. */
     private String modeNote(PermissionMode mode, ToolContext ctx) {
         String scratch = "\n\nToday's date: " + LocalDate.now()
-                + "\n" + shellNote(ctx.chatId())
+                + "\nOS: " + System.getProperty("os.name") + " " + System.getProperty("os.version") + "."
                 + "\nWorking directory (project files go here, relative paths resolve here): "
                 + sandbox.displayPath(ctx.workDir())
                 + "\nScratch directory (only for throwaway files, never for deliverables): "
                 + sandbox.displayPath(ctx.scratchDir());
         return switch (mode) {
-            case PLAN -> "\n\nMode: PLAN. Investigate and write a plan; do not change the working directory ("
-                    + sandbox.displayPath(ctx.workDir()) + "), treat it as read-only. Shell commands run in the scratch directory." + scratch;
+            case PLAN -> "\n\nMode: PLAN. Investigate read-only and write a plan; do not change the working directory ("
+                    + sandbox.displayPath(ctx.workDir()) + "). Do not call write_file or edit_file to carry out the request:"
+                    + " the changes it asks for are steps of the plan, done only after the user approves (a write would"
+                    + " only reach a scratch copy, never the project). Shell commands run in the scratch directory."
+                    + " The answer is the plan: numbered steps naming each file and what changes in it, the risks or"
+                    + " open questions, and a closing request for the user's approval. Never report a file as created"
+                    + " or changed." + scratch;
             case EDIT -> "\n\nMode: EDIT. File edits are applied without asking; shell commands may ask." + scratch;
             case AUTO -> "\n\nMode: AUTO. Tool calls run without asking." + scratch;
             default -> "\n\nMode: DEFAULT. Tool calls that change things ask the user first." + scratch;
@@ -990,6 +1024,7 @@ public class AgentLoop {
         String agentName = label == null ? HookContext.MAIN : label;
         String changeKey = changeKey(chatId, agentName);
         changed.remove(changeKey);
+        rejectedCalls.remove(changeKey);
         int[] stopAttempts = {0};
         boolean turnHadThinking = false; // a thinking block of this turn is in the log
         boolean thinkingOff = false;     // history was rewritten mid-turn: their signatures are void, stop thinking
@@ -1019,8 +1054,9 @@ public class AgentLoop {
             if (view.logChanged() && persist) sessions.saveMessages(chatId, messages);
             if (view.changed()) {
             }
+            // checked on what is sent: a strategy may leave reasoning out of the view without touching the log
             if (turnHadThinking && !thinkingOff && !org.kendar.llm.harness.context.compaction.ContextManager
-                    .currentTurnHasThinking(messages)) {
+                    .currentTurnHasThinking(view.messages())) {
                 thinkingOff = true;
                 sink.emit("warning", mapper.createObjectNode().put("message",
                         "Context compacted mid-turn: thinking is off for the rest of this turn"));
@@ -1186,6 +1222,7 @@ public class AgentLoop {
                             stopAttempts, stuck);
                     if (checked == null) continue;
                     changed.remove(changeKey);
+                    rejectedCalls.remove(changeKey);
                     return new LoopResult(finalText, checked);
                 }
             }
@@ -1225,6 +1262,7 @@ public class AgentLoop {
                 if (persist) sessions.saveMessages(chatId, messages);
                 return new LoopResult(finalText, Outcome.STUCK);
             }
+            addScopedInstructions(messages, toolUses, results, byName, tctx, sink, label, chatId);
             if (persist) sessions.saveMessages(chatId, messages);
             // every tool_use has its tool_result: a safe boundary for the user's steering messages
             injectSteering(inbox, messages, sink, chatId, persist);
@@ -1234,7 +1272,20 @@ public class AgentLoop {
     }
 
     /** Opens the user message that re-enters the loop after a STOP hook vetoed the stop. */
-    static final String VERIFY_NOTE = "The stop check failed. Fix the problem and finish again.";
+    static final String VERIFY_NOTE = "The stop check failed. Fix the problem and finish again. If it cannot be fixed "
+            + "with what you have, stop and say what is missing; do not invent files or content.";
+
+    /** Result of a call the user rejected. */
+    public static final String REJECTED = "User rejected. Do not retry. Tell the user and ask how to proceed.";
+    /** Result of a call identical to one the user rejected earlier in the run: the user is not asked again. */
+    public static final String REJECTED_AGAIN = "User already rejected. Do not retry. Tell the user and ask how to proceed.";
+
+    /** Calls (tool name + input) the user rejected in the current run, per chat + agent name. */
+    private final Map<String, java.util.Set<String>> rejectedCalls = new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static String rejectedKey(String chatId, String label) {
+        return changeKey(chatId, label == null ? HookContext.MAIN : label);
+    }
 
     /** Agents (chat + agent name) in which a tool that changes things ran during the current run. */
     private final java.util.Set<String> changed = java.util.concurrent.ConcurrentHashMap.newKeySet();
@@ -1400,6 +1451,53 @@ public class AgentLoop {
         return true;
     }
 
+    /**
+     * After the built-in file tools worked on paths inside the work dir: appends to the tool results the instruction
+     * files of the directories down to those paths that the conversation does not hold yet. Appended, not put in the
+     * system prompt, so the cached prefix is kept; the model sees them on its next request.
+     */
+    private void addScopedInstructions(ArrayNode messages, List<JsonNode> toolUses, ArrayNode results,
+                                       Map<String, HarnessTool> byName, ToolContext ctx, EventSink sink, String label,
+                                       String chatId) {
+        org.kendar.llm.harness.instructions.ScopedInstructions scoped = scopedInstructions;
+        if (scoped == null || ctx.files() != null || toolUses.isEmpty()) return; // remote files: nothing on this disk
+        java.util.Set<String> failed = new java.util.HashSet<>();
+        for (JsonNode r : results) {
+            if (r.path("is_error").asBoolean(false)) failed.add(r.path("tool_use_id").asText());
+        }
+        List<String> paths = new ArrayList<>();
+        for (JsonNode use : toolUses) {
+            HarnessTool t = byName.get(use.path("name").asText());
+            if (t == null || !builtinFileTools.contains(t) || failed.contains(use.path("id").asText())) continue;
+            // plan mode: a write went to the scratch dir, not to the project
+            if (t.kind() != ToolKind.READ_ONLY && ctx.readOnlyWork()) continue;
+            paths.add(org.kendar.llm.harness.instructions.ScopedInstructions.pathOf(t.name(), use.path("input")));
+        }
+        if (paths.isEmpty()) return;
+        List<org.kendar.llm.harness.instructions.ScopedInstructions.Block> added;
+        try {
+            added = scoped.discover(ctx.workDir(), paths, messages);
+        } catch (RuntimeException e) {
+            log.warn("Cannot look up scoped instruction files: {}", e.toString());
+            return;
+        }
+        for (var b : added) {
+            results.addObject().put("type", "text").put("text", b.render());
+            ObjectNode ev = mapper.createObjectNode().put("file", b.file()).put("dir", b.dir());
+            if (label != null) ev.put("agent", label);
+            sink.emit("instructions_loaded", ev);
+            if (!b.findings().isEmpty() && contentWarned
+                    .computeIfAbsent(chatId, k -> java.util.concurrent.ConcurrentHashMap.newKeySet()).add(b.file())) {
+                // loaded unchanged; the user is told, the log gets a warning, nothing is stored or sent to the model
+                org.kendar.llm.harness.safety.ContentWarnings.logWarning(b.file(), b.findings());
+                ObjectNode warn = new org.kendar.llm.harness.safety.ContentWarnings.Warning(b.file(), b.findings())
+                        .toJson(mapper);
+                if (label != null) warn.put("agent", label);
+                sink.emit(org.kendar.llm.harness.safety.ContentWarnings.EVENT, warn);
+            }
+        }
+    }
+
     private void appendUserText(ArrayNode messages, String text) {
         ObjectNode m = messages.addObject();
         m.put("role", "user");
@@ -1473,6 +1571,20 @@ public class AgentLoop {
         return result;
     }
 
+    /**
+     * A hook or rule denial with the instruction not to reach the same result another way: models otherwise retry a
+     * denied write through the shell ({@code echo x > .env}).
+     */
+    static String noWorkaround(String denial, HarnessTool tool, String name, JsonNode input) {
+        String path = input != null && input.hasNonNull("path") ? input.get("path").asText().trim() : "";
+        String what = path.isEmpty() ? "This " + name + " call"
+                : (tool != null && tool.kind() == ToolKind.READ_ONLY ? "Reading " : "Writing ") + path;
+        String d = denial.strip();
+        String sep = d.endsWith(".") || d.endsWith("!") || d.endsWith("?") ? " " : ". ";
+        return d + sep + what + " is not permitted by any means (no other tool, no shell command); report this to the "
+                + "user instead.";
+    }
+
     /** Outcome of {@link #authorize}: {@code denial} is null when the call may run. */
     private record Authz(String denial, HookResult pre, JsonNode input) {
     }
@@ -1540,14 +1652,33 @@ public class AgentLoop {
             decision = Decision.DENY;
             sink.emit("approval_unavailable", mapper.createObjectNode().put("tool", name));
         }
-        if (pre.denied()) return new Authz("Denied by a hook: " + pre.denyReason(), pre, input);
+        if (pre.denied()) {
+            return new Authz(noWorkaround("Denied by a hook: " + pre.denyReason(), tool, name, input), pre, input);
+        }
         if (rule != null && rule.kind() == PermissionRules.Kind.DENY) {
-            return new Authz("Denied by permission rule: " + rule.rule(), pre, input);
+            return new Authz(noWorkaround("Denied by permission rule: " + rule.rule(), tool, name, input), pre, input);
+        }
+        // a host shell is not jailed like the file tools: a command line climbing out of the work dir is refused
+        String command = commandOf(name, input);
+        if (command != null && ctx.files() == null) {
+            java.nio.file.Path cwd = ctx.readOnlyWork() && ctx.scratchDir() != null ? ctx.scratchDir() : ctx.workDir();
+            String escaping = org.kendar.llm.harness.sandbox.ShellPaths.escapingPath(command, cwd, ctx.workDir(),
+                    ctx.scratchDir());
+            if (escaping != null) {
+                return new Authz(org.kendar.llm.harness.tools.FileSystemAgentTools.escapes(escaping).getMessage(), pre,
+                        input);
+            }
         }
         if (decision == Decision.DENY) return new Authz("Denied by permission policy (mode " + mode + ")", pre, input);
         if (decision == Decision.ASK) {
+            String key = rejectedKey(ctx.chatId(), label);
+            String call = name + "\u0000" + input;
+            java.util.Set<String> seen = rejectedCalls.get(key);
+            // the user said no to this exact call already: asking again would only repeat the question
+            if (seen != null && seen.contains(call)) return new Authz(REJECTED_AGAIN, pre, input);
             if (!approve(tool, input, ctx, sink, cancelled, label)) {
-                return new Authz("The user rejected this tool call", pre, input);
+                rejectedCalls.computeIfAbsent(key, k -> java.util.concurrent.ConcurrentHashMap.newKeySet()).add(call);
+                return new Authz(REJECTED, pre, input);
             }
             approvals.grantCommand(ctx.chatId(), name, commandOf(name, input));
         }
@@ -1565,13 +1696,13 @@ public class AgentLoop {
         }
     }
 
-    /** The shell command line of a bash call, else null: only commands are granted verbatim. */
     /** The work-dir-relative directory a file-writing call targets, or null when none can be offered or granted. */
     private static String writeDirOf(HarnessTool tool, JsonNode input, ToolContext ctx) {
         if (tool.kind() != ToolKind.FILE_EDIT || ctx.readOnlyWork() || ctx.files() != null || input == null) return null;
         return ApprovalService.writeDirOf(ctx.workDir(), input.path("path").asText(null));
     }
 
+    /** The shell command line of a bash call, else null: only commands are granted verbatim. */
     private static String commandOf(String toolName, JsonNode input) {
         return "bash".equals(toolName) && input != null && input.hasNonNull("command")
                 ? input.get("command").asText() : null;

@@ -202,7 +202,7 @@ class ContextManagerFixesTest {
     void manualCompactSummarizesFromTheLogBeforeToolResultsAreCleared() {
         ArrayNode m = MAPPER.createArrayNode();
         user(m, "q1");
-        toolRound(m, "t1", "RESULT-ONE " + "z".repeat(500));
+        toolRound(m, "t1", "RESULT-ONE " + "z".repeat(3000));
         user(m, "q2");
         toolRound(m, "t2", "r");
         model.simpleReplies.add("S");
@@ -221,7 +221,7 @@ class ContextManagerFixesTest {
         ArrayNode m = MAPPER.createArrayNode();
         for (int i = 1; i <= 4; i++) {
             user(m, "q" + i + " " + "p".repeat(1200));
-            toolRound(m, "t" + i, "RESULT-" + i + " " + "z".repeat(500));
+            toolRound(m, "t" + i, "RESULT-" + i + " " + "z".repeat(3000));
         }
         model.simpleReplies.add("S");
 
@@ -295,7 +295,7 @@ class ContextManagerFixesTest {
         ArrayNode m = MAPPER.createArrayNode();
         for (int i = 1; i <= 4; i++) {
             user(m, "q" + i);
-            toolRound(m, "t" + i, "z".repeat(500));
+            toolRound(m, "t" + i, "z".repeat(3000));
         }
         // messages alone (~700 tokens) are under the 1020 ceiling; with 900 tokens of system text they are not, and
         // clearing the old results (tier 1) is not enough
@@ -368,5 +368,99 @@ class ContextManagerFixesTest {
 
         assertFalse(manager(cfg).compactInherited("c", m, new int[]{2}, null, new Events(), u -> { }, null));
         assertEquals(before, m.toString());
+    }
+
+    @Test
+    void anUpdateThatDropsTheObjectiveGetsItBackFromThePriorSummary() {
+        ArrayNode span = MAPPER.createArrayNode();
+        user(span, "[Summary of the earlier conversation]\n## Objective\n- Rename methods, ticket TKT-1.\n\n"
+                + "## Work State\n### Completed\n- Alpha\n\n## Relevant Files\n- a.java");
+        assistant(span, "ok");
+        String updated = "## Requirements\n- prefix calc\n\n## Work State\n### Completed\n- Alpha\n- Beta";
+
+        String out = ContextManager.withKeptSections(updated, span);
+
+        assertTrue(out.startsWith("## Objective\n- Rename methods, ticket TKT-1."), out);
+        assertFalse(out.contains("a.java"), "only the dropped section is copied back");
+        assertEquals(1, out.split("## Work State", -1).length - 1, "a present section is not duplicated");
+        assertEquals(updated, ContextManager.withKeptSections(updated, MAPPER.createArrayNode()),
+                "a first summary has nothing to copy from");
+    }
+
+    private static ArrayNode priorSummary(String facts) {
+        ArrayNode span = MAPPER.createArrayNode();
+        user(span, "[Summary of the earlier conversation]\n## Objective\n- Ship the report.\n\n## User-Stated Facts\n"
+                + facts + "\n\n## Work State\n### Completed\n- Alpha");
+        assistant(span, "ok");
+        return span;
+    }
+
+    @Test
+    void anUpdateThatDropsAUserFactGetsItBack() {
+        ArrayNode span = priorSummary("- Reviewer is Priya Raman\n- The audit window code is WIN-208");
+        String updated = "## Objective\n- Ship the report.\n\n## User-Stated Facts\n- **The audit window code is WIN-208.**\n"
+                + "- Deadline: Friday\n\n## Work State\n### Completed\n- Alpha\n- Beta";
+
+        ContextManager.Kept k = ContextManager.keptSections(updated, span, 10_000);
+
+        assertEquals("## Objective\n- Ship the report.\n\n## User-Stated Facts\n- **The audit window code is WIN-208.**\n"
+                + "- Deadline: Friday\n- Reviewer is Priya Raman\n\n## Work State\n### Completed\n- Alpha\n- Beta",
+                k.summary(), "the dropped fact goes back at the end of its section; a repeated one (other markup) is "
+                        + "not duplicated");
+        assertTrue(k.droppedFacts().isEmpty());
+        assertEquals(k.summary(), ContextManager.withKeptSections(updated, span));
+    }
+
+    @Test
+    void aFactTheUpdateReplacedIsNotRestored() {
+        ArrayNode span = priorSummary("- Reviewer is Priya Raman\n- Deadline: Thursday\n- Port = 8080");
+        String updated = "## User-Stated Facts\n- The reviewer is Sam Lee\n- deadline: Friday\n- port=9090\n\n"
+                + "## Objective\n- Ship the report.\n\n## Work State\n- Alpha";
+
+        ContextManager.Kept k = ContextManager.keptSections(updated, span, 10_000);
+
+        assertEquals(updated, k.summary(), "same label, new value: the update replaced the fact");
+        assertEquals("reviewer", ContextManager.label(ContextManager.normalised("- The reviewer is Sam Lee")));
+        assertNull(ContextManager.label("a fact with no label at all"));
+    }
+
+    @Test
+    void factsThatDoNotFitTheSummarySizeAreDroppedButTheCompactionGoesOn() {
+        ArrayNode span = priorSummary("- First fact is one\n- Second fact is a much longer value\n- Third fact is three");
+        String updated = "## Objective\n- Ship.\n\n## User-Stated Facts\n- Newest fact is four\n\n## Work State\n- Alpha";
+        int room = "- First fact is one".length() + 1 + "- Third fact is three".length() + 1;
+
+        ContextManager.Kept k = ContextManager.keptSections(updated, span, updated.length() + room);
+
+        assertTrue(k.summary().contains("- Newest fact is four\n- First fact is one\n- Third fact is three\n\n## Work"),
+                "oldest first, each fact that still fits: " + k.summary());
+        assertEquals(List.of("- Second fact is a much longer value"), k.droppedFacts());
+        assertTrue(k.summary().length() <= updated.length() + room);
+
+        ContextManager.Kept none = ContextManager.keptSections(updated, span, 10);
+        assertEquals(updated, none.summary(), "an update already over the size is kept as it is");
+        assertEquals(3, none.droppedFacts().size());
+    }
+
+    @Test
+    void manyUserFactsNeverBlockACompaction() {
+        StringBuilder facts = new StringBuilder();
+        for (int i = 0; i < 2000; i++) facts.append("- Fact number ").append(i).append(" is value ").append(i).append('\n');
+        model.simpleHandler = u -> "## Objective\n- Ship.\n\n## User-Stated Facts\n- Fresh fact is new\n\n## Work State\n- A";
+        ArrayNode m = MAPPER.createArrayNode();
+        user(m, "[Summary of the earlier conversation]\n## User-Stated Facts\n" + facts.toString().strip());
+        assistant(m, "ok");
+        for (int i = 0; i < 4; i++) {
+            user(m, "request " + i + " " + "x".repeat(3000));
+            assistant(m, "done " + i);
+        }
+
+        CompactResult r = manager(small()).compactNow(m, null, u -> { });
+
+        assertTrue(r.changed(), r.toString());
+        String summary = m.get(0).path("content").get(0).path("text").asText();
+        assertTrue(summary.contains("- Fresh fact is new\n- Fact number 0 is value 0\n"), "oldest first");
+        assertFalse(summary.contains("- Fact number 1999 is value 1999"), "what does not fit is dropped");
+        assertTrue(summary.length() < ContextManager.SUMMARY_CHARS + 100, "within the summary size: " + summary.length());
     }
 }

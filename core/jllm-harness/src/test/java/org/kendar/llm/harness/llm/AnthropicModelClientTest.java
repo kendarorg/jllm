@@ -26,6 +26,7 @@ class AnthropicModelClientTest {
     private HttpServer server;
     private final Queue<String> bodies = new ConcurrentLinkedQueue<>();
     private final Queue<String> keys = new ConcurrentLinkedQueue<>();
+    private final List<String> betas = new java.util.concurrent.CopyOnWriteArrayList<>();
     private final AtomicInteger calls = new AtomicInteger();
     private volatile int[] statuses = {200};
     private volatile String retryAfter = null;
@@ -40,6 +41,7 @@ class AnthropicModelClientTest {
             bodies.add(new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
             keys.add(ex.getRequestHeaders().getFirst("x-api-key") + "|"
                     + ex.getRequestHeaders().getFirst("anthropic-version"));
+            betas.add(String.valueOf(ex.getRequestHeaders().getFirst("anthropic-beta")));
             int st = statuses[Math.min(n, statuses.length - 1)];
             byte[] out = (st == 200 ? okBody : "{\"type\":\"error\"}").getBytes(StandardCharsets.UTF_8);
             ex.getResponseHeaders().add("content-type", "application/json");
@@ -107,6 +109,58 @@ class AnthropicModelClientTest {
     }
 
     @Test
+    void replayedSignedReasoningAsksTheApiToDropVoidedBlocks() throws Exception {
+        AnthropicModelClient c = new AnthropicModelClient(new AnthropicSettings("k-123",
+                "http://127.0.0.1:" + server.getAddress().getPort(), "claude-haiku-5-5", 2048, 0, "1h", 0, 10, false),
+                mapper, 1);
+        ArrayNode inTurn = msgs("[{\"role\":\"user\",\"content\":\"a\"},"
+                + "{\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"\",\"signature\":\"s\"},"
+                + "{\"type\":\"tool_use\",\"id\":\"1\",\"name\":\"x\",\"input\":{}}]},"
+                + "{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"1\",\"content\":\"r\"}]}]");
+        c.complete(new ModelRequest("", "", inTurn, List.of(), 0));
+        assertEquals("adaptive", lastBody().at("/thinking/type").asText());
+        assertEquals("drop_block", lastBody().at("/thinking/block_binding/prefix_mismatch_behavior").asText());
+        assertEquals(AnthropicModelClient.BINDING_BETA, betas.get(betas.size() - 1));
+
+        c.complete(new ModelRequest("", "", msgs("[{\"role\":\"user\",\"content\":\"a\"}]"), List.of(), 0));
+        assertTrue(lastBody().path("thinking").isMissingNode(), "no reasoning replayed: nothing to bind");
+        assertEquals("null", betas.get(betas.size() - 1));
+
+        ArrayNode unsigned = msgs(inTurn.toString().replace(",\"signature\":\"s\"", ""));
+        c.complete(new ModelRequest("", "", unsigned, List.of(), 0));
+        assertTrue(lastBody().path("thinking").isMissingNode(), "a server without signatures gets no beta field");
+    }
+
+    @Test
+    void currentModelsGetTheLevelAsEffortNotAsABudget() {
+        assertTrue(AnthropicModelClient.usesEffort("claude-sonnet-5-5"));
+        assertTrue(AnthropicModelClient.usesEffort("claude-haiku-5-5"));
+        assertTrue(AnthropicModelClient.usesEffort("claude-opus-4-6"));
+        assertTrue(AnthropicModelClient.usesEffort("claude-fable-5-2"));
+        assertFalse(AnthropicModelClient.usesEffort("claude-haiku-4-5"));
+        assertFalse(AnthropicModelClient.usesEffort("claude-sonnet-4-5-20250929"));
+        assertEquals("medium", AnthropicModelClient.effort(ThinkingLevel.MEDIUM));
+        assertEquals("low", AnthropicModelClient.effort(ThinkingLevel.MINIMAL));
+    }
+
+    @Test
+    void theLastMessageCarriesACacheBreakpointWithoutTouchingTheLog() throws Exception {
+        AnthropicModelClient c = client(0, false, 0);
+        ArrayNode m = msgs("[{\"role\":\"user\",\"content\":\"a\"},"
+                + "{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"x\",\"input\":{}}]},"
+                + "{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"t1\",\"content\":\"r\"},"
+                + "{\"type\":\"text\",\"text\":\"\"}]}]");
+        String before = m.toString();
+        ArrayNode sent = c.withMessageBreakpoint(m);
+        assertEquals("ephemeral", sent.at("/2/content/0/cache_control/type").asText(), "skips the empty text block");
+        assertTrue(sent.at("/0/content").isTextual());
+        assertEquals(before, m.toString(), "the log is not changed");
+        ArrayNode plain = c.withMessageBreakpoint(msgs("[{\"role\":\"user\",\"content\":\"hello\"}]"));
+        assertEquals("ephemeral", plain.at("/0/content/0/cache_control/type").asText());
+        assertEquals("hello", plain.at("/0/content/0/text").asText());
+    }
+
+    @Test
     void parsesResponseAndSendsHeadersAndCacheControl() throws Exception {
         ModelResponse r = client(0, true, 0).complete(req(null, false));
         assertEquals("end_turn", r.stopReason());
@@ -119,6 +173,26 @@ class AnthropicModelClientTest {
         assertEquals("1h", b.at("/system/1/cache_control/ttl").asText());
         assertEquals("ephemeral", b.at("/tools/1/cache_control/type").asText());
         assertTrue(b.path("tool_choice").isMissingNode(), "no tool_choice by default");
+    }
+
+    @Test
+    void anEmptySystemIsLeftOutInsteadOfSentAsAnEmptyCachedBlock() throws Exception {
+        // the API answers 400 "cache_control cannot be set for empty text blocks"
+        client(0, true, 0).simpleComplete("", "Reply with the single word OK.", 16);
+        assertTrue(lastBody().path("system").isMissingNode(), lastBody().toString());
+
+        client(0, true, 0).simpleComplete("   ", "again", 16);
+        assertTrue(lastBody().path("system").isMissingNode(), lastBody().toString());
+    }
+
+    @Test
+    void aBlankPinnedPartIsDroppedAndTheCacheBreakpointMovesToTheExtraPart() throws Exception {
+        client(0, true, 0).complete(new ModelRequest("", "EXTRA", msgs("[{\"role\":\"user\",\"content\":\"a\"}]"),
+                java.util.List.of(), 100));
+        JsonNode sys = lastBody().get("system");
+        assertEquals(1, sys.size());
+        assertEquals("EXTRA", sys.get(0).get("text").asText());
+        assertEquals("ephemeral", sys.get(0).at("/cache_control/type").asText());
     }
 
     @Test

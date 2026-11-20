@@ -40,7 +40,7 @@ final class ProviderChooser {
                 a.getOrDefault("base-url", from.baseUrl()), a.getOrDefault("api-key", from.apiKey()),
                 a.getOrDefault("model", from.model()), from.maxTokens() != null ? from.maxTokens() : maxTokens,
                 from.maxRetries(), from.timeoutSeconds(), from.requireApiKey(), from.useMaxCompletionTokens(),
-                from.contextTokens(), from.smallModel(), from.temperature(), null, from.thinking());
+                from.contextTokens(), from.smallModel(), from.temperature(), null, from.thinking(), from.stream());
         catalog.setCustom(merged);
         return new ProviderChoice(catalog.client(ProviderCatalog.CUSTOM), ProviderCatalog.CUSTOM,
                 catalog.find(ProviderCatalog.CUSTOM));

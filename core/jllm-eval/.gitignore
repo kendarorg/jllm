@@ -1,0 +1,7 @@
+eval-models/
+# eval results: ignored, except the history and each model's baselines
+eval-results/*
+!eval-results/*/
+eval-results/*/*
+!eval-results/*/baselines/
+!eval-results/history/**

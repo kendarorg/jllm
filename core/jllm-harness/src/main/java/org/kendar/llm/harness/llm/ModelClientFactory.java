@@ -6,7 +6,7 @@ import java.util.Locale;
 
 /**
  * Builds the {@link ModelClient} for a provider name, shared by every front end (CLI, web).
- * Providers: anthropic, openai, gemini, grok, qwen, llamacpp, ollama. Null/blank arguments fall back to the provider defaults.
+ * Providers: anthropic, openai, openaiGpt62, gemini, grok, qwen, llamacpp, ollama. Null/blank arguments fall back to the provider defaults.
  */
 public final class ModelClientFactory {
 
@@ -23,7 +23,7 @@ public final class ModelClientFactory {
     public static ModelClient create(String provider, String apiKey, String baseUrl, String model, int maxTokens,
                                      ObjectMapper mapper) {
         String p = provider == null || provider.isBlank() ? "anthropic" : provider.trim().toLowerCase(Locale.ROOT);
-        String key = blank(apiKey) ? System.getenv(p.toUpperCase(Locale.ROOT) + "_API_KEY") : apiKey;
+        String key = blank(apiKey) ? envKey(p) : apiKey;
         if (p.equals("anthropic")) {
             AnthropicSettings d = AnthropicSettings.defaults(key);
             return ModelClients.anthropic(new AnthropicSettings(key, blank(baseUrl) ? d.baseUrl() : baseUrl,
@@ -33,6 +33,8 @@ public final class ModelClientFactory {
         LlmSettings s = switch (p) {
             case "openai" -> new LlmSettings("openai", "https://api.openai.com/v1", key, "gpt-4.1", 8192, 5, 600,
                     true, true);
+            case OpenAiResponsesModelClient.PROVIDER -> new LlmSettings(OpenAiResponsesModelClient.PROVIDER,
+                    "https://api.openai.com/v1", key, OpenAiResponsesModelClient.DEFAULT_MODEL, 8192, 5, 600, true, true);
             case "gemini" -> new LlmSettings("gemini", "https://generativelanguage.googleapis.com/v1beta/openai", key,
                     "gemini-2.5-pro", 8192, 5, 600, true, false);
             case "grok" -> new LlmSettings("grok", "https://api.x.ai/v1", key,
@@ -43,11 +45,18 @@ public final class ModelClientFactory {
             case "llamacpp" -> new LlmSettings("llamacpp", "http://localhost:8080/v1", key == null ? "" : key,
                     "local", 8192, 2, 1800, false, false);
             default -> throw new IllegalArgumentException("Unknown provider '" + p
-                    + "' (expected anthropic | openai | gemini | grok | qwen | llamacpp | ollama)");
+                    + "' (expected anthropic | openai | openaiGpt62 | gemini | grok | qwen | llamacpp | ollama)");
         };
         return ModelClients.from(new LlmSettings(s.name(), blank(baseUrl) ? s.baseUrl() : baseUrl, s.apiKey(),
                 blank(model) ? s.model() : model, maxTokens, s.maxRetries(), s.timeoutSeconds(),
                 s.requireApiKey(), s.useMaxCompletionTokens()), mapper);
+    }
+
+    /** {@code <PROVIDER>_API_KEY}; {@code openaiGpt62} falls back to {@code OPENAI_API_KEY}. */
+    static String envKey(String type) {
+        String key = System.getenv(type.toUpperCase(Locale.ROOT) + "_API_KEY");
+        if (blank(key) && type.equals(OpenAiResponsesModelClient.PROVIDER)) key = System.getenv("OPENAI_API_KEY");
+        return key;
     }
 
     private static boolean blank(String s) {

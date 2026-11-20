@@ -14,6 +14,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -24,6 +25,7 @@ import java.util.UUID;
 public class OpenAiCompatModelClient implements ModelClient {
 
     private static final Logger log = LoggerFactory.getLogger(OpenAiCompatModelClient.class);
+    private static final String LLAMACPP = "llamacpp";
 
     private final LlmSettings cfg;
     private final ObjectMapper mapper;
@@ -244,18 +246,7 @@ public class OpenAiCompatModelClient implements ModelClient {
     @Override
     public String simpleComplete(String system, String user, int maxTokens, Double temperature,
                                  java.util.function.Consumer<Usage> usageSink) {
-        ArrayNode messages = mapper.createArrayNode();
-        ObjectNode m = messages.addObject();
-        m.put("role", "user");
-        m.put("content", user);
-        ModelRequest request = new ModelRequest(system, "", messages, java.util.List.of(), maxTokens);
-        ModelResponse r = complete(temperature == null ? request : request.withTemperature(temperature));
-        if (usageSink != null && r.usage() != null) usageSink.accept(r.usage());
-        StringBuilder sb = new StringBuilder();
-        for (JsonNode b : r.content()) {
-            if ("text".equals(b.path("type").asText())) sb.append(b.path("text").asText());
-        }
-        return sb.toString();
+        return SimpleCompletion.run(this, system, user, maxTokens, temperature, usageSink);
     }
 
     // ---------------------------------------------------------------- request translation
@@ -270,6 +261,11 @@ public class OpenAiCompatModelClient implements ModelClient {
         }
         if (req.thinkingLevel() != null) {
             body.put("reasoning_effort", req.thinkingLevel().reasoningEffort(cfg.name()));
+            // llama.cpp does not map reasoning_effort for every model: Qwen-style chat templates turn thinking off
+            // through this template variable
+            if (req.thinkingLevel() == ThinkingLevel.MINIMAL && LLAMACPP.equals(cfg.name())) {
+                body.putObject("chat_template_kwargs").put("enable_thinking", false);
+            }
         }
 
         ArrayNode out = body.putArray("messages");
@@ -542,6 +538,7 @@ public class OpenAiCompatModelClient implements ModelClient {
         boolean authRetried = false;
 
         int attempt = 0;
+        RetryBudget budget = new RetryBudget();
         while (true) {
             try {
                 HttpResponse<String> resp = cancel.send(http, request);
@@ -557,13 +554,16 @@ public class OpenAiCompatModelClient implements ModelClient {
                 }
                 boolean retryable = status == 429 || status >= 500;
                 if (!retryable || attempt >= cfg.maxRetries()) {
-                    throw new ModelException(cfg.name() + " API error " + status + ": " + truncate(resp.body()));
+                    throw new ModelException(cfg.name() + " API error " + status + ": " + truncate(resp.body())
+                            + StreamingCall.rateLimitHint(resp));
                 }
-                long delayMs = resp.headers().firstValue("retry-after")
-                        .map(OpenAiCompatModelClient::parseSeconds)
-                        .orElse(Math.min(30_000L, backoffBaseMs << attempt));
-                log.warn("{} API {} - retry {} in {} ms", cfg.name(), status, attempt + 1, delayMs);
                 attempt++;
+                long delayMs = budget.reserve(attempt, backoffBaseMs,
+                                resp.headers().firstValue("retry-after").map(OpenAiCompatModelClient::parseSeconds))
+                        .orElseThrow(() -> new ModelException(cfg.name() + " API error " + status + ": "
+                                + truncate(resp.body()) + StreamingCall.rateLimitHint(resp) + " (retry wait budget of " + RetryBudget.MAX_WAIT_MS
+                                + " ms exhausted)"));
+                log.warn("{} API {} - retry {} in {} ms{}", cfg.name(), status, attempt, delayMs, StreamingCall.rateLimitHint(resp));
                 cancel.retrying(status, attempt, cfg.maxRetries(), delayMs);
                 cancel.sleep(delayMs);
             } catch (InterruptedException e) {
@@ -574,7 +574,9 @@ public class OpenAiCompatModelClient implements ModelClient {
                     throw new ModelException(cfg.name() + " API call failed: " + e.getMessage(), e);
                 }
                 attempt++;
-                long netDelay = Math.min(30_000L, backoffBaseMs << attempt);
+                long netDelay = budget.reserve(attempt, backoffBaseMs, Optional.empty())
+                        .orElseThrow(() -> new ModelException(cfg.name() + " API call failed: " + e.getMessage()
+                                + " (retry wait budget of " + RetryBudget.MAX_WAIT_MS + " ms exhausted)", e));
                 cancel.retrying(0, attempt, cfg.maxRetries(), netDelay);
                 try {
                     cancel.sleep(netDelay);

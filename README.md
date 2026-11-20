@@ -23,6 +23,42 @@ h.subscribe(chatId, 0, ev -> push(ev));          // text, tool_call, approval_re
 h.start(chatId, "Why was invoice 4711 charged twice?");
 ```
 
+## See it
+
+<table>
+<tr>
+<td align="center" valign="top" width="50%">
+<a href="docs/images/flows_web.png"><img src="docs/images/flows_web.png" alt="Flow editor in jllm-web: plan, implement, review, gate, test, rework" width="300"></a><br>
+<b>Deterministic flows</b><br>
+A process as a graph of steps; the engine walks the path, the model works inside each step (<a href="docs/guides/workflow.md">flows</a>)
+</td>
+<td align="center" valign="top" width="50%">
+<a href="docs/images/chat_web.png"><img src="docs/images/chat_web.png" alt="Web chat with tool calls and a confirmation for web_download" width="300"></a><br>
+<b>Governed tool calls</b><br>
+Every call is visible; calls acting on untrusted content ask first
+</td>
+</tr>
+<tr>
+<td align="center" valign="top" width="50%">
+<a href="docs/images/tools_auth_web.png"><img src="docs/images/tools_auth_web.png" alt="Approval dialog for web access to en.wikipedia.org" width="300"></a><br>
+<b>Human approval</b><br>
+Example: the agent asks before contacting a new host
+</td>
+<td align="center" valign="top" width="50%">
+<a href="docs/images/roles_web.png"><img src="docs/images/roles_web.png" alt="Role editor: allow, ask or deny per tool pattern" width="300"></a><br>
+<b>Roles and tool permissions</b><br>
+Allow, ask or deny per tool pattern
+</td>
+</tr>
+<tr>
+<td align="center" valign="top" colspan="2">
+<a href="docs/images/chat_cli.png"><img src="docs/images/chat_cli.png" alt="jllm-cli session with tool calls and inline approvals" width="300"></a><br>
+<b>Same runtime in the terminal</b><br>
+Untrusted tool output tagged, approvals inline (<a href="jllm-cli/README.md">jllm-cli</a>)
+</td>
+</tr>
+</table>
+
 ## Why enterprises pick it
 
 | | |
@@ -85,6 +121,12 @@ All modules are available on Maven Central under the group `org.kendar.llm`.
 
 `mvn test` (or any later phase) runs the tests with JaCoCo and writes the aggregated report to
 [docs/coverage](docs/coverage/README.md) (Markdown index, committed); the HTML report goes to `docs/coverage/html/` and is git-ignored.
+
+## Evaluation
+
+[jllm-eval](core/jllm-eval/README.md) runs the harness features against real models, graded by checks and an LLM
+judge. Every run is recorded in the [eval history](core/jllm-eval/eval-results/history/INDEX.md): one row per run
+(model, judge, pass rate, pass^k, tokens per trial, comparison with the baseline) linking to the run's recap.
 
 ## Documentation
 

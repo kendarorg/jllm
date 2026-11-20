@@ -112,8 +112,24 @@ class ContextManagerCompactionTest {
     }
 
     @Test
+    void manualCompactLeavesATinyConversationAlone() {
+        ArrayNode m = MAPPER.createArrayNode();
+        user(m, "Remember the vault code 7391-KITE");
+        m.addObject().put("role", "assistant").putArray("content").addObject().put("type", "text").put("text", "Got it");
+        user(m, "Thanks, reply OK");
+        String before = m.toString();
+
+        CompactResult r = manager.compactNow(m, null, null);
+
+        assertFalse(r.changed());
+        assertEquals(before, m.toString());
+        assertTrue(model.simpleUserPrompts.isEmpty(), "no model call for a few tokens");
+        assertTrue(r.message().startsWith("Nothing worth compacting"), r.message());
+    }
+
+    @Test
     void manualCompactSummarizesEvenUnderBudgetAndKeepsLastTurn() {
-        ArrayNode m = conversation(10, 10); // far under budget
+        ArrayNode m = conversation(1200, 10); // far under budget, but enough to be worth a summary
         model.simpleReplies.add("MANUAL-SUMMARY");
         String lastTurn = m.get(m.size() - 1).toString();
 

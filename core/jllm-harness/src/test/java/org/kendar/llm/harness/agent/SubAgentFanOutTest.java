@@ -163,7 +163,7 @@ class SubAgentFanOutTest {
         rig.loop.run(chatId, "go", ev, () -> false);
 
         var subMessages = subRequests(rig).get(1).messages();
-        assertTrue(subMessages.get(subMessages.size() - 1).toString().contains("The user rejected this tool call"));
+        assertTrue(subMessages.get(subMessages.size() - 1).toString().contains(AgentLoop.REJECTED));
     }
 
     private static List<Recorded> subRequests(Rig rig) {

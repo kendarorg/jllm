@@ -20,6 +20,11 @@ public final class DocumentReaders {
         for (String ext : reader.extensions()) byExtension.put(ext.toLowerCase(Locale.ROOT), reader);
     }
 
+    /** @return the registered extensions (lower case, no dot), sorted */
+    public List<String> extensions() {
+        return byExtension.keySet().stream().sorted().toList();
+    }
+
     /** @return the reader for the extension, or null */
     public DocumentReader get(String extension) {
         return byExtension.get(extension.toLowerCase(Locale.ROOT));

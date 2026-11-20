@@ -23,11 +23,12 @@ public class AgentService {
     private static final Logger log = LoggerFactory.getLogger(AgentService.class);
     private static final int MAX_BUFFERED_EVENTS = 2000;
     /**
-     * Streaming deltas: delivered live with seq 0, never buffered, so a reconnecting client is not replayed thousands
-     * of pieces; it gets the final {@code text} event instead.
+     * Delivered live with seq 0, never buffered nor replayed. Streaming deltas, so a reconnecting client is not
+     * replayed thousands of pieces (it gets the final {@code text} event instead), and {@code content_warning}: a
+     * message to the user about a file just loaded, never kept anywhere.
      */
     public static final java.util.Set<String> TRANSIENT_EVENTS = java.util.Set.of("text_delta", "thinking_delta",
-            "text_reset");
+            "text_reset", org.kendar.llm.harness.safety.ContentWarnings.EVENT);
 
     public static class RunAlreadyActiveException extends RuntimeException {
         public RunAlreadyActiveException(String chatId) {
@@ -316,7 +317,12 @@ public class AgentService {
             run.running = true;
         }
         try {
-            return loop.compact(chatId, focus);
+            CompactResult r = loop.compact(chatId, focus);
+            if (r.changed()) {
+                publish(run, "compaction", mapper.createObjectNode().put("tier", 2).put("manual", true)
+                        .put("tokensBefore", r.tokensBefore()).put("estimatedTokens", r.tokensAfter()));
+            }
+            return r;
         } finally {
             run.running = false;
         }

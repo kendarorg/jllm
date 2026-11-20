@@ -9,4 +9,6 @@ Rules:
 - Use these sections, omit one that has nothing to say: ## Objective, ## State (done / in progress / blocked),
   ## Decisions, ## Open items, ## Files.
 - Carry forward only requests that are still unanswered.
+- Keep every value the user stated or you reported from a tool (codes, ids, names, numbers, hosts, dates) word for
+  word, with its recall id: a value written as "already given" has to be recalled before it can be used again.
 - Do not continue the task, do not call tools, no preamble.

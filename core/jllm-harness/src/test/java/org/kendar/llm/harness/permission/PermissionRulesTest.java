@@ -52,7 +52,8 @@ class PermissionRulesTest {
         rig.loop.run(chat, "go", new Events(), () -> false);
 
         assertEquals(0, runs.get());
-        assertEquals("Denied by permission rule: bash(.*git push.*)", lastResult(rig, 1));
+        assertEquals("Denied by permission rule: bash(.*git push.*). This bash call is not permitted by any means (no "
+                + "other tool, no shell command); report this to the user instead.", lastResult(rig, 1));
     }
 
     @Test

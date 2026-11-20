@@ -9,6 +9,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.Optional;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -24,6 +25,8 @@ public class AnthropicModelClient implements ModelClient {
 
     private static final Logger log = LoggerFactory.getLogger(AnthropicModelClient.class);
     private static final String API_VERSION = "2023-06-01";
+    /** Beta that allows {@code thinking.block_binding} (drop reasoning whose prefix changed instead of a 400). */
+    static final String BINDING_BETA = "thinking-binding-controls-2026-08-01";
 
     private final AnthropicSettings props;
     private final ObjectMapper mapper;
@@ -82,7 +85,8 @@ public class AnthropicModelClient implements ModelClient {
         } catch (IOException e) {
             throw new ModelException("Cannot serialize request", e);
         }
-        JsonNode json = StreamingCall.run(http, () -> request(payload), auth, cancel, listener, props.maxRetries(),
+        boolean binding = bindsThinking(body);
+        JsonNode json = StreamingCall.run(http, () -> request(payload, binding), auth, cancel, listener, props.maxRetries(),
                 backoffBaseMs, s -> s == 429 || s == 529 || s >= 500, s -> "Anthropic API error " + s,
                 "Anthropic API call failed: ", () -> this::assemble);
         return toResponse(json);
@@ -250,25 +254,21 @@ public class AnthropicModelClient implements ModelClient {
 
     @Override
     public String simpleComplete(String system, String user, int maxTokens, java.util.function.Consumer<Usage> usageSink) {
-        ArrayNode messages = mapper.createArrayNode();
-        ObjectNode m = messages.addObject();
-        m.put("role", "user");
-        m.put("content", user);
-        ModelResponse r = complete(new ModelRequest(system, "", messages, java.util.List.of(), maxTokens));
-        if (usageSink != null && r.usage() != null) usageSink.accept(r.usage());
-        StringBuilder sb = new StringBuilder();
-        for (JsonNode b : r.content()) {
-            if ("text".equals(b.path("type").asText())) sb.append(b.path("text").asText());
-        }
-        return sb.toString();
+        return SimpleCompletion.run(this, system, user, maxTokens, null, usageSink);
     }
 
     ObjectNode buildBody(ModelRequest req) {
         ObjectNode body = mapper.createObjectNode();
         body.put("model", props.model());
 
-        int thinking = req.thinkingLevel() != null ? req.thinkingLevel().anthropicBudget() : props.thinkingBudget();
+        boolean effortModel = usesEffort(props.model());
+        int thinking = effortModel ? 0
+                : req.thinkingLevel() != null ? req.thinkingLevel().anthropicBudget() : props.thinkingBudget();
         int maxTokens = req.maxTokens() > 0 ? req.maxTokens() : props.maxTokens();
+        if (effortModel && req.thinkingLevel() != null) {
+            // these models think adaptively and reject budget_tokens: the level becomes the effort
+            body.putObject("output_config").put("effort", effort(req.thinkingLevel()));
+        }
         if (thinking >= 1024) {
             maxTokens = Math.max(maxTokens, thinking + 1024);
             ObjectNode t = body.putObject("thinking");
@@ -277,17 +277,24 @@ public class AnthropicModelClient implements ModelClient {
         }
         body.put("max_tokens", maxTokens);
 
-        ArrayNode system = body.putArray("system");
-        ObjectNode pinned = system.addObject();
-        pinned.put("type", "text");
-        pinned.put("text", req.pinnedSystem());
-        ObjectNode last = pinned;
+        // the API rejects an empty text block (and a cache_control on one): leave blank parts out, and the whole
+        // system field when both are blank (e.g. a plain "reply OK" connection check)
+        ArrayNode system = mapper.createArrayNode();
+        ObjectNode last = null;
+        if (req.pinnedSystem() != null && !req.pinnedSystem().isBlank()) {
+            last = system.addObject();
+            last.put("type", "text");
+            last.put("text", req.pinnedSystem());
+        }
         if (req.extraSystem() != null && !req.extraSystem().isBlank()) {
             last = system.addObject();
             last.put("type", "text");
             last.put("text", req.extraSystem());
         }
-        cacheControl(last);
+        if (last != null) {
+            cacheControl(last);
+            body.set("system", system);
+        }
 
         if (req.tools() != null && !req.tools().isEmpty()) {
             ArrayNode tools = body.putArray("tools");
@@ -299,11 +306,87 @@ public class AnthropicModelClient implements ModelClient {
                 lastTool.set("input_schema", t.inputSchema());
             }
             cacheControl(lastTool);
-            applyToolChoice(body, req, thinking >= 1024);
+            // effort models always think (adaptively): forced tool use is rejected with it
+            applyToolChoice(body, req, effortModel || thinking >= 1024);
         }
         ArrayNode msgs = withoutFinishedThinking(req.messages());
-        body.set("messages", props.citations() ? withSearchResults(msgs) : msgs);
+        if (effortModel && hasSignedThinking(msgs)) {
+            // a context strategy may rewrite content before replayed reasoning (a mnemonic mask): the API then drops
+            // the voided blocks instead of rejecting the request (400 "bound to a different conversation")
+            body.putObject("thinking").put("type", "adaptive").putObject("block_binding")
+                    .put("prefix_mismatch_behavior", "drop_block");
+        }
+        body.set("messages", withMessageBreakpoint(props.citations() ? withSearchResults(msgs) : msgs));
         return body;
+    }
+
+    /** True when a replayed thinking block carries an Anthropic signature (other servers send none). */
+    static boolean hasSignedThinking(ArrayNode messages) {
+        for (JsonNode m : messages) {
+            if (!m.path("content").isArray()) continue;
+            for (JsonNode b : m.path("content")) {
+                String t = b.path("type").asText();
+                if ("redacted_thinking".equals(t)
+                        || ("thinking".equals(t) && !b.path("signature").asText("").isEmpty())) return true;
+            }
+        }
+        return false;
+    }
+
+    private static final java.util.regex.Pattern EFFORT_MODELS =
+            java.util.regex.Pattern.compile("claude-(fable|mythos)\\b.*|claude-[a-z]+-(4-[6-9]|[5-9])\\b.*");
+
+    /**
+     * True for the models that think adaptively and take {@code output_config.effort} (Opus/Sonnet 4.6 and later,
+     * every 5.x, Fable, Mythos); the older ones take an extended-thinking budget instead.
+     */
+    static boolean usesEffort(String model) {
+        return model != null && EFFORT_MODELS.matcher(model).matches();
+    }
+
+    /** The effort of a level; thinking cannot be turned off on these models, so the minimal level is the lowest. */
+    static String effort(ThinkingLevel level) {
+        return switch (level) {
+            case MINIMAL, LOW -> "low";
+            case MEDIUM -> "medium";
+            case HIGH -> "high";
+        };
+    }
+
+    /**
+     * Copy of the messages with a cache breakpoint on the last block that can carry one. Without it only the system
+     * prompt and the tools are cached and the whole conversation is sent uncached on every request; with it each
+     * request writes the prefix that the next one reads (the API looks back up to 20 blocks for the previous one).
+     */
+    ArrayNode withMessageBreakpoint(ArrayNode messages) {
+        if (messages.isEmpty()) return messages;
+        int last = messages.size() - 1;
+        ObjectNode msg = (ObjectNode) messages.get(last).deepCopy();
+        JsonNode c = msg.path("content");
+        ArrayNode blocks;
+        if (c.isTextual()) {
+            if (c.asText().isBlank()) return messages;
+            blocks = mapper.createArrayNode();
+            blocks.addObject().put("type", "text").put("text", c.asText());
+            msg.set("content", blocks);
+        } else if (c.isArray()) {
+            blocks = (ArrayNode) c;
+        } else {
+            return messages;
+        }
+        for (int i = blocks.size() - 1; i >= 0; i--) {
+            JsonNode b = blocks.get(i);
+            String t = b.path("type").asText();
+            // reasoning cannot carry one, nor can an empty text block
+            if ("thinking".equals(t) || "redacted_thinking".equals(t)) continue;
+            if ("text".equals(t) && b.path("text").asText("").isBlank()) continue;
+            cacheControl((ObjectNode) b);
+            ArrayNode out = mapper.createArrayNode();
+            for (int k = 0; k < last; k++) out.add(messages.get(k));
+            out.add(msg);
+            return out;
+        }
+        return messages;
     }
 
     /**
@@ -320,15 +403,24 @@ public class AnthropicModelClient implements ModelClient {
             }
         }
         ArrayNode out = null;
-        for (int i = 0; i < cut; i++) {
+        for (int i = 0; i < messages.size(); i++) {
             JsonNode m = messages.get(i);
             if (!"assistant".equals(m.path("role").asText()) || !m.path("content").isArray()) continue;
             ArrayNode kept = mapper.createArrayNode();
+            boolean anyForeign = false;
             for (JsonNode b : m.get("content")) {
                 String t = b.path("type").asText();
-                if (!"thinking".equals(t) && !"redacted_thinking".equals(t)) kept.add(b);
+                boolean thinking = "thinking".equals(t) || "redacted_thinking".equals(t);
+                // reasoning of another provider (GPT-6.2) has no Anthropic signature: never sent
+                boolean foreign = thinking && b.has(OpenAiResponsesModelClient.REASONING_FIELD);
+                anyForeign |= foreign;
+                if (!(thinking && (i < cut || foreign))) kept.add(b);
             }
-            if (kept.size() == m.get("content").size() || kept.isEmpty()) continue;
+            if (kept.size() == m.get("content").size()) continue;
+            if (kept.isEmpty()) {
+                if (!anyForeign) continue;
+                kept.addObject().put("type", "text").put("text", "(reasoning omitted)");
+            }
             if (out == null) out = messages.deepCopy();
             ((ObjectNode) out.get(i)).set("content", kept);
         }
@@ -430,11 +522,17 @@ public class AnthropicModelClient implements ModelClient {
         if ("1h".equals(props.cacheTtl())) cc.put("ttl", "1h");
     }
 
-    private HttpRequest request(String payload) {
+    /** True when the body sets {@code thinking.block_binding}, which needs {@link #BINDING_BETA}. */
+    static boolean bindsThinking(JsonNode body) {
+        return body.path("thinking").has("block_binding");
+    }
+
+    private HttpRequest request(String payload, boolean binding) {
         HttpRequest.Builder rb = HttpRequest.newBuilder(URI.create(props.baseUrl().replaceAll("/+$", "") + "/v1/messages"))
                 .timeout(Duration.ofSeconds(Math.max(1, props.timeoutSeconds())))
                 .header("content-type", "application/json")
                 .header("anthropic-version", API_VERSION);
+        if (binding) rb.header("anthropic-beta", BINDING_BETA);
         if (auth != null) {
             try {
                 auth.headers().forEach(rb::header);
@@ -454,11 +552,13 @@ public class AnthropicModelClient implements ModelClient {
         } catch (IOException e) {
             throw new ModelException("Cannot serialize request", e);
         }
-        java.util.function.Supplier<HttpRequest> build = () -> request(payload);
+        boolean binding = bindsThinking(body);
+        java.util.function.Supplier<HttpRequest> build = () -> request(payload, binding);
         HttpRequest request = build.get();
         boolean authRetried = false;
 
         int attempt = 0;
+        RetryBudget budget = new RetryBudget();
         while (true) {
             try {
                 HttpResponse<String> resp = cancel.send(http, request);
@@ -474,13 +574,16 @@ public class AnthropicModelClient implements ModelClient {
                 }
                 boolean retryable = status == 429 || status == 529 || status >= 500;
                 if (!retryable || attempt >= props.maxRetries()) {
-                    throw new ModelException("Anthropic API error " + status + ": " + truncate(resp.body()));
+                    throw new ModelException("Anthropic API error " + status + ": " + truncate(resp.body())
+                            + StreamingCall.rateLimitHint(resp));
                 }
-                long delayMs = resp.headers().firstValue("retry-after")
-                        .map(AnthropicModelClient::parseSeconds)
-                        .orElse(Math.min(30_000L, backoffBaseMs << attempt));
-                log.warn("Anthropic API {} — retry {} in {} ms", status, attempt + 1, delayMs);
                 attempt++;
+                long delayMs = budget.reserve(attempt, backoffBaseMs,
+                                resp.headers().firstValue("retry-after").map(AnthropicModelClient::parseSeconds))
+                        .orElseThrow(() -> new ModelException("Anthropic API error " + status + ": "
+                                + truncate(resp.body()) + StreamingCall.rateLimitHint(resp) + " (retry wait budget of " + RetryBudget.MAX_WAIT_MS
+                                + " ms exhausted)"));
+                log.warn("Anthropic API {} — retry {} in {} ms{}", status, attempt, delayMs, StreamingCall.rateLimitHint(resp));
                 cancel.retrying(status, attempt, props.maxRetries(), delayMs);
                 cancel.sleep(delayMs);
             } catch (InterruptedException e) {
@@ -491,7 +594,9 @@ public class AnthropicModelClient implements ModelClient {
                     throw new ModelException("Anthropic API call failed: " + e.getMessage(), e);
                 }
                 attempt++;
-                long netDelay = Math.min(30_000L, backoffBaseMs << attempt);
+                long netDelay = budget.reserve(attempt, backoffBaseMs, Optional.empty())
+                        .orElseThrow(() -> new ModelException("Anthropic API call failed: " + e.getMessage()
+                                + " (retry wait budget of " + RetryBudget.MAX_WAIT_MS + " ms exhausted)", e));
                 cancel.retrying(0, attempt, props.maxRetries(), netDelay);
                 try {
                     cancel.sleep(netDelay);

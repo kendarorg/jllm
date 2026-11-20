@@ -192,7 +192,8 @@ class ModesScratchContextTest {
         model.simpleReplies.add("FIRST");
         model.simpleReplies.add("SECOND");
         ContextManager cm = new ContextManager(c, model, new ApprovalService(5), MAPPER);
-        ArrayNode m = conversation(3, 50);
+        // above the size a summary is worth asking for (ContextManager.MIN_SUMMARY_SOURCE_TOKENS)
+        ArrayNode m = conversation(3, 2000);
 
         cm.compactNow(m, null, u -> { });
         m.addObject().put("role", "user").putArray("content").addObject().put("type", "text").put("text", "q9");

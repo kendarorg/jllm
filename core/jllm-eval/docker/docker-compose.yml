@@ -1,0 +1,28 @@
+# llama.cpp server for jllm-eval, run by hand (never started or stopped by the eval).
+#   cd core/jllm-eval/docker
+#   docker compose --env-file strong.env up -d      # load one model
+#   docker compose --env-file alt.env up -d --force-recreate   # switch model
+#   docker compose down                              # when finished
+# One model, one request slot. Adjust models/ and cache/ paths in common.env.
+services:
+  llama:
+    image: ${LLAMA_IMAGE}
+    container_name: jllm-eval-llama
+    restart: "no"
+    ports:
+      - "${LLAMA_PORT:-8080}:8080"
+    volumes:
+      - ${MODELS_DIR}:/models:ro
+      - ${CACHE_DIR}:/cache
+    environment:
+      LLAMA_CACHE: /cache
+    command: >
+      -m /models/${MODEL_FILE} --alias ${MODEL_ALIAS} -c ${CTX_TOKENS}
+      --parallel 1 --host 0.0.0.0 --port 8080 -ngl 999 ${EXTRA_ARGS:-}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

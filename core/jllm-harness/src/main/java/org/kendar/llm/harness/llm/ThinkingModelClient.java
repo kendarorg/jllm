@@ -1,6 +1,9 @@
 package org.kendar.llm.harness.llm;
 
-/** Fills in a default {@link ThinkingLevel} on requests that carry none. */
+/**
+ * Fills in a default {@link ThinkingLevel} on requests that carry none. Helper calls ({@code simpleComplete}) carry
+ * their own level (off), so the default does not reach them.
+ */
 public final class ThinkingModelClient implements ModelClient {
 
     private final ModelClient delegate;
@@ -33,18 +36,19 @@ public final class ThinkingModelClient implements ModelClient {
 
     @Override
     public String simpleComplete(String system, String user, int maxTokens) {
-        return delegate.simpleComplete(system, user, maxTokens);
+        return simpleComplete(system, user, maxTokens, null, null);
     }
 
     @Override
     public String simpleComplete(String system, String user, int maxTokens, Double temperature,
                                  java.util.function.Consumer<Usage> usageSink) {
-        return delegate.simpleComplete(system, user, maxTokens, temperature, usageSink);
+        // helper calls set their own level (off): the default here applies to the agent's requests only
+        return SimpleCompletion.run(this, system, user, maxTokens, temperature, usageSink);
     }
 
     @Override
     public String simpleComplete(String system, String user, int maxTokens,
                                  java.util.function.Consumer<Usage> usageSink) {
-        return delegate.simpleComplete(system, user, maxTokens, usageSink);
+        return simpleComplete(system, user, maxTokens, null, usageSink);
     }
 }

@@ -31,7 +31,7 @@ import java.util.concurrent.TimeUnit;
  * Command line front end: an interactive chat (or a single {@code --prompt}) over the standard tools.
  *
  * <pre>
- * java -cp ... org.kendar.llm.harness.Main [--provider anthropic|openai|gemini|grok|qwen|llamacpp|ollama] [--model M]
+ * java -cp ... org.kendar.llm.harness.Main [--provider anthropic|openai|openaiGpt62|gemini|grok|qwen|llamacpp|ollama] [--model M]
  *     [--base-url U] [--api-key K] [--mode plan|edit|auto] [--workdir DIR] [--prompt TEXT]
  *     [--settings FILE] [--system-prompt TEXT] [--system-prompt-file FILE] [--system-prompt-replace FILE] [--max-turns N] [--context-tokens TOKENS]
  *     [--search-api-key BRAVE_KEY] [--context-strategy compaction|mnemonic|scope] [--max-tokens TOKENS] [--small-model]
@@ -79,7 +79,19 @@ public final class Main {
         else System.err.println(s);
     }
 
+    /** Registers the cleanup run when the process ends; tests replace it to run the cleanup themselves. */
+    static java.util.function.Consumer<Runnable> atExit = r -> Runtime.getRuntime().addShutdownHook(new Thread(r));
+
+    /** Opens the terminal for the command names and the history file (null: plain input); tests replace it. */
+    static java.util.function.BiFunction<List<String>, Path, Term> terminal = Term::open;
+
     public static void main(String[] argv) throws Exception {
+        run(argv);
+        System.exit(0);
+    }
+
+    /** The whole command line session; returns when it ends (main then exits the process). */
+    static void run(String[] argv) throws Exception {
         Map<String, String> a = CliArgs.parse(argv);
         if (a.containsKey("help")) {
             System.out.println(CliArgs.USAGE);
@@ -95,6 +107,8 @@ public final class Main {
         // global ~/.jllm/settings.json, then project .jllm/settings.json, then --settings; later wins
         // a stdio MCP server defined only by the project file starts a local process: ask once (answer remembered)
         boolean canAsk = !a.containsKey("prompt") && System.in.available() == 0;
+        // suspicious content in the loaded files: logged, and printed once the terminal is open
+        var contentWarnings = new org.kendar.llm.harness.safety.ContentWarnings();
         HarnessSettings settings = HarnessSettings.loadLayered(
                 new org.kendar.llm.harness.settings.FileSettingsSource(
                         a.containsKey("settings") ? Path.of(a.get("settings")) : null, projectDir),
@@ -104,7 +118,7 @@ public final class Main {
                         : "the MCP server '" + server + "'") + ", which runs the local command:\n  " + cmd
                         + "\nRun it?") : null,
                 org.kendar.llm.harness.settings.FileProjectMcpTrust.user(),
-                org.slf4j.LoggerFactory.getLogger(Main.class)::warn);
+                org.slf4j.LoggerFactory.getLogger(Main.class)::warn, contentWarnings);
         var promptFiles = org.kendar.llm.harness.instructions.SystemPromptFiles.load(projectDir);
         String promptReplace = a.containsKey("system-prompt-replace")
                 ? org.kendar.llm.harness.instructions.SystemPromptFiles.readFile(Path.of(a.get("system-prompt-replace")))
@@ -155,11 +169,12 @@ public final class Main {
                         CliArgs.num(a, "pricing.output-per-million"), CliArgs.num(a, "pricing.cache-read-per-million"),
                         CliArgs.num(a, "pricing.cache-write-per-million")))
                 .objectMapper(mapper)
+                .contentWarnings(contentWarnings)
                 .discoverPlugins()
                 .build();
         List<String> names = new java.util.ArrayList<>(harness.commands().list().stream().map(SlashCommands.Info::name).toList());
         names.add("/expand");
-        term = a.containsKey("prompt") ? null : Term.open(names, cwdSandbox.historyRoot().resolve("cli-history"));
+        term = a.containsKey("prompt") ? null : terminal.apply(names, cwdSandbox.historyRoot().resolve("cli-history"));
         renderer = new Renderer(Main::say, Main::sayErr, term != null);
         say("project dir: " + harness.sandbox().location() + (settings.dockerSandbox()
                 ? " (shell commands run in docker image " + config.sandbox().docker().image()
@@ -167,6 +182,10 @@ public final class Main {
                 : " (no isolation: shell commands run as you, plan mode cannot stop them writing here)"));
         say("scratch dir: " + cwdSandbox.scratchRoot());
         say("history dir: " + cwdSandbox.historyRoot());
+        // shown, never stored: not part of any chat
+        for (var w : harness.contentWarnings()) {
+            renderer.render(new AgentEvent(0, org.kendar.llm.harness.safety.ContentWarnings.EVENT, w.toJson(mapper)));
+        }
         PermissionMode initialMode = PermissionMode.parse(a.get("mode"));
         BlockingQueue<AgentEvent> events = new LinkedBlockingQueue<>();
         Chat chat = new Chat();
@@ -193,15 +212,15 @@ public final class Main {
             say("resumed chat " + openId);
             ResumeChooser.replay(harness, openId, term == null ? System.out : new Term.Tail(term));
         }
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+        atExit.accept(() -> {
             harness.cancel(chat.id);
             harness.close();
             historyLock.close();
-        }));
+        });
 
         if (a.containsKey("prompt")) {
             runTurn(harness, chat.id, a.get("prompt"), events, in);
-            System.exit(0);
+            return;
         }
         say("agent-harness chat " + chat.id + " (type /help for commands, /exit to quit; /cancel or ctrl+c stops a run)");
         if (term != null) startTerminalUi(harness, chat, choice.name(), in);
@@ -240,7 +259,6 @@ public final class Main {
             }
             runTurn(harness, chat.id, line, events, in);
         }
-        System.exit(0);
     }
 
     /** Chat and id of the approval the CLI is asking about now, or null. */

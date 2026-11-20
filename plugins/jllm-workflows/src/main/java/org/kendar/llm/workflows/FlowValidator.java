@@ -1,6 +1,7 @@
 package org.kendar.llm.workflows;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import org.kendar.llm.harness.gate.GateResultsHandler;
 
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -142,6 +143,7 @@ public final class FlowValidator {
                     errs.add(id + k + " must be a whole number >= 0");
                 }
             }
+            if (s.has("with") && !s.get("with").isObject()) errs.add(id + "'with' must be an object");
             if (flow.doc().path("unattended").asBoolean(false)) checkUnattended(id, type, s, reg, errs);
             switch (type) {
                 case "task" -> {
@@ -154,9 +156,15 @@ public final class FlowValidator {
                     if (reg != null && reg.action(s.path("action").asText("")) == null) {
                         errs.add(id + "action '" + s.path("action").asText() + "' is not registered");
                     }
+                    if (BuiltinActions.RUN_COMMAND.equals(s.path("action").asText())) checkRunCommand(id, s, errs);
                     needNext(steps, s, id, errs);
                 }
-                case "decide" -> checkDecide(steps, s, id, reg, errs);
+                case "decide" -> {
+                    checkDecide(steps, s, id, reg, errs);
+                    if ("java".equals(s.path("by").asText()) && BuiltinActions.GATE.equals(s.path("chooser").asText())) {
+                        checkGate(steps, flow, s, id, errs);
+                    }
+                }
                 case "call" -> {
                     if (!s.has("flow") && !(s.has("chooser") && s.path("allowed").isArray())) {
                         errs.add(id + "call needs 'flow', or 'chooser' with an 'allowed' list");
@@ -216,6 +224,45 @@ public final class FlowValidator {
             }
             default -> {
             }
+        }
+    }
+
+    /** A gate is built here, so a bad configuration fails when the flow is saved, not during a run. */
+    private static void checkGate(JsonNode steps, FlowDef flow, JsonNode s, String id, List<String> errs) {
+        JsonNode with = s.path("with");
+        if (!with.isObject()) {
+            errs.add(id + "gate needs a 'with' object");
+            return;
+        }
+        String from = with.path("from").asText("").trim();
+        String[] parts = from.split("[.]");
+        boolean fromOk = with.path("from").isTextual() && (parts[0].equals("input")
+                || parts[0].equals("steps") && parts.length > 1 && (flow.steps().has(parts[1]) || steps.has(parts[1])));
+        if (!fromOk) errs.add(id + "gate 'from' must be input or steps.<step>, not '" + from + "'");
+        GateResultsHandler gate;
+        try {
+            gate = new GateResultsHandler(GateResultsHandler.Config.fromJson(with));
+        } catch (IllegalArgumentException e) {
+            errs.add(id + "gate: " + e.getMessage());
+            return;
+        }
+        for (String r : gate.responses()) {
+            if (!s.path("outcomes").has(r)) errs.add(id + "gate response '" + r + "' is not a declared outcome");
+        }
+    }
+
+    private static void checkRunCommand(String id, JsonNode s, List<String> errs) {
+        JsonNode with = s.path("with");
+        if (!with.path("command").isTextual() || with.path("command").asText().isBlank()) {
+            errs.add(id + "run-command needs a 'command' in 'with'");
+        }
+        JsonNode t = with.path("timeoutSeconds");
+        if (!t.isMissingNode() && !(t.isNumber() && t.asDouble() > 0)) {
+            errs.add(id + "run-command timeoutSeconds must be a positive number");
+        }
+        JsonNode l = with.path("tailLines");
+        if (!l.isMissingNode() && !(l.isInt() && l.asInt() >= 0)) {
+            errs.add(id + "run-command tailLines must be a whole number >= 0");
         }
     }
 

@@ -55,7 +55,8 @@ class HooksTest {
 
         List<AgentEvent> events = runTurn(h, "go");
 
-        assertEquals("Denied by a hook: not today", toolOutput(events));
+        assertEquals("Denied by a hook: not today. This act call is not permitted by any means (no other tool, no shell "
+                + "command); report this to the user instead.", toolOutput(events));
         assertTrue(ran.isEmpty());
     }
 

@@ -92,7 +92,7 @@ class ThinkingLevelTest {
 
     @Test
     void anthropicMapsLevelToBudgetAndMinimalIsOff() {
-        AnthropicModelClient c = new AnthropicModelClient(AnthropicSettings.defaults("k"), mapper);
+        AnthropicModelClient c = new AnthropicModelClient(budgetModel(), mapper);
 
         JsonNode low = c.buildBody(req().withThinkingLevel(ThinkingLevel.LOW));
         assertEquals("enabled", low.path("thinking").path("type").asText());
@@ -117,12 +117,27 @@ class ThinkingLevelTest {
 
     @Test
     void forcedToolChoiceIsSuppressedWhenThinkingIsOn() {
-        AnthropicModelClient c = new AnthropicModelClient(AnthropicSettings.defaults("k"), mapper);
+        AnthropicModelClient c = new AnthropicModelClient(budgetModel(), mapper);
         ModelRequest r = new ModelRequest("p", "", mapper.createArrayNode(), List.of(tool()), 0, "any", false)
                 .withThinkingLevel(ThinkingLevel.MEDIUM);
         assertEquals("auto", c.buildBody(r).path("tool_choice").path("type").asText());
         assertEquals("any", c.buildBody(r.withThinkingLevel(ThinkingLevel.MINIMAL))
                 .path("tool_choice").path("type").asText());
+    }
+
+    @Test
+    void effortModelsThinkAlwaysSoForcedToolUseIsNeverSent() {
+        AnthropicModelClient c = new AnthropicModelClient(AnthropicSettings.defaults("k"), mapper);
+        ModelRequest r = new ModelRequest("p", "", mapper.createArrayNode(), List.of(tool()), 0, "any", false);
+        JsonNode body = c.buildBody(r.withThinkingLevel(ThinkingLevel.MINIMAL));
+        assertEquals("auto", body.path("tool_choice").path("type").asText());
+        assertEquals("low", body.path("output_config").path("effort").asText());
+        assertFalse(body.has("thinking"), "budget_tokens is a 400 on these models");
+    }
+
+    /** A model before adaptive thinking: it takes a thinking budget. */
+    private static AnthropicSettings budgetModel() {
+        return new AnthropicSettings("k", "https://api.anthropic.com", "claude-haiku-4-5", 8192, 5, "1h", 0, 600, true);
     }
 
     @Test
@@ -172,6 +187,57 @@ class ThinkingLevelTest {
         new ThinkingModelClient(inner, ThinkingLevel.LOW).complete(new ModelRequest("p", "", m, List.of(), 10));
 
         assertEquals(List.of(ThinkingLevel.MEDIUM, ThinkingLevel.HIGH, ThinkingLevel.LOW), seen);
+    }
+
+    @Test
+    void helperCallsTurnThinkingOffOverTheDefault() throws Exception {
+        new ThinkingModelClient(openAi("llamacpp"), ThinkingLevel.HIGH).simpleComplete("s", "u", 16);
+        assertEquals("minimal", body(0).path("reasoning_effort").asText());
+        assertFalse(body(0).path("chat_template_kwargs").path("enable_thinking").asBoolean(true));
+
+        openAi("openai").simpleComplete("s", "u", 16);
+        assertEquals("minimal", body(1).path("reasoning_effort").asText());
+        assertFalse(body(1).has("chat_template_kwargs"), "only llama.cpp takes the template variable");
+    }
+
+    @Test
+    void llamaCppAgentRequestsKeepTheTemplateDefault() {
+        assertFalse(openAi("llamacpp").buildBody(req().withThinkingLevel(ThinkingLevel.LOW)).has("chat_template_kwargs"));
+        assertFalse(openAi("llamacpp").buildBody(req()).has("chat_template_kwargs"));
+    }
+
+    @Test
+    void helperReplyCutBeforeAnyTextIsRetriedOnceWithMoreTokens() {
+        List<ModelRequest> seen = new ArrayList<>();
+        ScriptedModel inner = new ScriptedModel();
+        inner.handler = r -> {
+            seen.add(r);
+            if (seen.size() > 1) return text("ok");
+            ArrayNode c = mapper.createArrayNode();
+            c.addObject().put("type", "thinking").put("thinking", "long reasoning");
+            return new ModelResponse(c, "max_tokens", new Usage(10, 256, 0, 0));
+        };
+        List<Usage> usage = new ArrayList<>();
+        String answer = new ThinkingModelClient(inner, ThinkingLevel.LOW).simpleComplete("s", "u", 256, usage::add);
+
+        assertEquals("ok", answer);
+        assertEquals(2, seen.size());
+        assertEquals(256, seen.get(0).maxTokens());
+        assertEquals(256 * SimpleCompletion.RETRY_FACTOR, seen.get(1).maxTokens());
+        assertEquals(ThinkingLevel.MINIMAL, seen.get(1).thinkingLevel());
+        assertEquals(2, usage.size(), "both requests are accounted");
+    }
+
+    @Test
+    void helperReplyWithTextOrCutForOtherReasonsIsNotRetried() {
+        AtomicInteger n = new AtomicInteger();
+        ScriptedModel inner = new ScriptedModel();
+        inner.handler = r -> {
+            n.incrementAndGet();
+            return new ModelResponse(mapper.createArrayNode(), "end_turn", new Usage(1, 1, 0, 0));
+        };
+        assertEquals("", new ThinkingModelClient(inner, ThinkingLevel.LOW).simpleComplete("s", "u", 16));
+        assertEquals(1, n.get());
     }
 
     @Test

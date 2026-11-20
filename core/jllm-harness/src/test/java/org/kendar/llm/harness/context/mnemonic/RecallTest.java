@@ -176,4 +176,68 @@ class RecallTest {
         String tail = tool.execute(toolContext(), json("{'query':'marker108Value'}"));
         assertFalse(tail.contains("(message 18,"), tail);
     }
+
+    @Test
+    void idWithQuerySearchesInsideThatText() throws Exception {
+        ArrayNode log = log();
+        MnemonicStrategy s = maskedStrategy(log, new InMemorySubAgentRunLog());
+        HarnessTool tool = s.tools().get(0);
+        String id = s.state(CHAT, AGENT).masks.get(0).id();
+        String text = fileText(0);
+
+        String hit = tool.execute(toolContext(), json("{'id':'" + id + "','query':'int marker0value'}"));
+        assertTrue(hit.startsWith("1 matching line(s) for 'int marker0value' in " + id), hit);
+        assertTrue(hit.contains("> line 2, offset " + text.indexOf("class F0") + ": class F0 { int marker0Value; }"), hit);
+        assertTrue(hit.contains("  line 1, offset 0: // src/F0.java"), "one line of context before: " + hit);
+        assertTrue(hit.contains("  line 3, offset "), "one line of context after: " + hit);
+        assertNotEquals(text, hit, "the query is not ignored when an id is given");
+
+        String variant = tool.execute(toolContext(), json("{'id':'" + id + "','query':'billing export | src/F0'}"));
+        assertTrue(variant.contains("> line 1, offset 0: // src/F0.java"), variant);
+
+        String none = tool.execute(toolContext(), json("{'id':'" + id + "','query':'billing export'}"));
+        assertTrue(none.startsWith("No match for 'billing export' in " + id + " (" + text.length() + " chars"), none);
+        assertTrue(none.contains("\"offset\": 0"), none);
+
+        String many = tool.execute(toolContext(), json("{'id':'" + id + "','query':'lorem ipsum'}"));
+        assertTrue(many.contains("more matching line(s) after line"), "hits beyond the cap are announced: " + many);
+    }
+
+    @Test
+    void idWithQueryAlsoSearchesASubAgentTranscript() throws Exception {
+        InMemorySubAgentRunLog runs = new InMemorySubAgentRunLog();
+        ArrayNode transcript = log();
+        user(transcript, "find the config loader");
+        assistant(transcript, "It is SettingsLoader in settings/Loader.java");
+        runs.record(new SubAgentRunData("run-1", CHAT, "task1", "find it", MAPPER.writeValueAsString(transcript.get(0))
+                + "\n" + MAPPER.writeValueAsString(transcript.get(1)), "SettingsLoader", "ok", 0, 0, 0, 0,
+                Instant.now()));
+        HarnessTool tool = maskedStrategy(log(), runs).tools().get(0);
+
+        String hit = tool.execute(toolContext(), json("{'id':'run-1','query':'loader.java'}"));
+        assertTrue(hit.contains("assistant: It is SettingsLoader in settings/Loader.java"), hit);
+        assertTrue(tool.execute(toolContext(), json("{'id':'nope','query':'x'}")).startsWith("Unknown recall id nope"));
+    }
+
+    @Test
+    void theFirstPageOfALongTextSaysItIsPartial() {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < 3000; i++) sb.append("line ").append(i).append('\n');
+        String text = sb.toString();
+
+        String first = HistoryRecallTool.page(text, 0, "r1", 10_000);
+        String tail = first.substring(10_000);
+        assertEquals(text.substring(0, 10_000), first.substring(0, 10_000));
+        int pages = (text.length() + 9_999) / 10_000;
+        assertTrue(tail.contains("page 1 of " + pages + ": " + (text.length() - 10_000) + " more chars, ~"), tail);
+        assertTrue(tail.contains("lines not shown"), tail);
+        assertTrue(tail.contains("{\"id\": \"r1\", \"query\": \"…\"} before concluding something is absent"), tail);
+        assertTrue(tail.contains("{\"id\": \"r1\", \"offset\": 10000}"), tail);
+
+        String second = HistoryRecallTool.page(text, 10_000, "r1", 10_000);
+        assertFalse(second.contains("page 1 of"), "the hint is only on the first page");
+        assertTrue(second.endsWith("more chars: {\"id\": \"r1\", \"offset\": 20000}]"), second);
+        assertEquals(text.substring(0, 50), HistoryRecallTool.page(text.substring(0, 50), 0, "r1", 10_000),
+                "a text that fits has no tail");
+    }
 }

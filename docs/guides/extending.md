@@ -37,7 +37,7 @@ External tools without code: [MCP and REST APIs](mcp.md). Instructions without c
 
 ## Jars to import
 
-All artifacts: group `org.kendar.llm`, version `1.1.0-jllm` (`mvn install` from the root puts them in the local
+All artifacts: group `org.kendar.llm`, version `1.2.0-jllm` (`mvn install` from the root puts them in the local
 repository; JDK 21).
 
 | Artifact | Contains | Import when |
@@ -57,19 +57,19 @@ A plugin jar (loaded from the plugin directory by the CLI and the web app):
 <dependency>
     <groupId>org.kendar.llm</groupId>
     <artifactId>jllm-commons</artifactId>
-    <version>1.1.0-jllm</version>
+    <version>1.2.0-jllm</version>
     <scope>provided</scope>
 </dependency>
 <dependency>
     <groupId>org.kendar.llm</groupId>
     <artifactId>jllm-harness</artifactId>
-    <version>1.1.0-jllm</version>
+    <version>1.2.0-jllm</version>
     <scope>test</scope>
 </dependency>
 <dependency>
     <groupId>org.kendar.llm</groupId>
     <artifactId>jllm-test-support</artifactId>
-    <version>1.1.0-jllm</version>
+    <version>1.2.0-jllm</version>
     <scope>test</scope>
 </dependency>
 ```
@@ -184,13 +184,14 @@ chain (each hook sees the previous rewrite); added context is joined with newlin
 lines; a hook that throws is logged and skipped.
 
 **Verify on stop.** A `STOP` hook that returns `HookResult.continueWith(message)` keeps the agent working: the loop
-appends "The stop check failed. Fix the problem and finish again." and the message as a user message, sends
+appends "The stop check failed. Fix the problem and finish again. If it cannot be fixed with what you have, stop and say what is missing; do not invent files or content." and the message as a user message, sends
 `verify_failed`, and calls the model again. After `loop.verify.maxReentries` (default 3) re-entries, or the same
 message twice in a row, the run ends `UNVERIFIED` (a sub-agent reports status `unverified`). Existing `STOP` hooks
 that assumed the main agent should check `ctx.agent()`. A test run needs no code: `hooks.stop` in the settings
 ([USAGE](../reference/usage.md#verify-on-stop)) registers a `CommandStopHook`. An LLM judge is a plugin `STOP` hook that asks the
 fast model and returns `continueWith` with its objection. `AgentLoop.changedInRun(chatId, agent)` tells a hook
-whether a tool that changes things ran in the run. A `PRE_TOOL` denial is reported to the model as `Denied by a hook: <reason>`.
+whether a tool that changes things ran in the run. A `PRE_TOOL` denial is reported to the model as `Denied by a hook: <reason>`, followed by an
+instruction not to work around it with another tool and to report it to the user instead.
 
 ```java
 builder.beforeToolCall(ctx -> ctx.tool().equals("bash") && ctx.input().path("command").asText().contains("rm -rf")
@@ -410,7 +411,8 @@ builder.contextStrategy(deps -> new SlidingWindowStrategy(deps.config(), deps.ma
 
 `deps` gives `config`, `model`, `summaryModel` (fast or main), `approvals`, `mapper`, `metrics`, `subAgentRuns`.
 Built-in kinds are `COMPACTION`, `MNEMONIC` and `SCOPE` (`context.scope.*`, `builder.scopeOptions(...)`); the todo
-tools of `SCOPE` come from `tools()`, a pattern to reuse for a strategy that needs tools of its own.
+tools of `SCOPE` come from `tools()`, a pattern to reuse for a strategy that needs tools of its own. They are built by
+`org.kendar.llm.harness.todo.TodoTools`, which the harness also offers with any strategy unless `context.todos` is false.
 
 Contract:
 
@@ -528,7 +530,7 @@ public interface SandboxExecutor {
     Path workDir(String chatId);          // root of the file tools' jail
     Path location();
     default Path scratchDir(String chatId, String agentId);
-    default String shellEnvironment();    // told to the model (OS, shell)
+    default String shellDescription();    // appended to the bash tool description (shell syntax)
     default void deleteWorkDir(String chatId);
     default FileBackend files(String chatId, String agentId);  // null: the file tools use workDir on the host
     default String displayPath(Path p);   // how the model and the user see a path
