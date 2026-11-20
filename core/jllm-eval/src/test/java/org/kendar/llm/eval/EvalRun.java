@@ -85,7 +85,7 @@ public final class EvalRun {
     void summarize() {
         try {
             if (!java.nio.file.Files.isDirectory(outputDir) || !hasResults(outputDir)) return;
-            org.kendar.llm.eval.report.ReportBuilder.build(outputDir, false);
+            org.kendar.llm.eval.report.ReportBuilder.build(outputDir, config.updateBaseline());
             Path history = org.kendar.llm.eval.report.History.record(outputDir, config.outputDir().resolve("history"));
             java.util.List<Path> latest = new java.util.ArrayList<>();
             try (var models = java.nio.file.Files.list(outputDir.getParent().getParent())) {

@@ -18,10 +18,16 @@ import org.kendar.llm.harness.tools.HarnessTool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BooleanSupplier;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Tiered, cheapest-first compaction of the message log. Operates on messages only: the pinned
@@ -644,14 +650,44 @@ public class ContextManager {
 
     /** Sections an update must never lose: the goal, the facts the user gave and where the work stands. */
     static final List<String> KEPT_SECTIONS = List.of("## Objective", "## User-Stated Facts", "## Work State");
+    /** The section whose bullets are merged line by line with the prior summary's (see {@link #keptSections}). */
+    static final String FACTS = "## User-Stated Facts";
+    /** Characters the summary may take: the room every compaction reserves for it ({@link #SUMMARY_TOKENS}). */
+    static final int SUMMARY_CHARS = (int) (SUMMARY_TOKENS * TokenEstimate.CHARS_PER_TOKEN);
+    private static final Pattern BULLET = Pattern.compile("^\\s*(?:[-*+]|\\d+[.)])\\s+(.*)$");
+    /** Label of a fact: the words before the first ': ' or '=', else before the first ' is ' / ' are ' / ' was '. */
+    private static final Pattern LABEL = Pattern.compile("^(.{1,80}?)(?::\\s|:$|\\s*=|\\s+(?:is|are|was|were)\\s)");
+    private static final int MAX_LABEL_WORDS = 8;
+
+    /** An updated summary after {@link #keptSections}, with the prior user facts that did not fit its size. */
+    record Kept(String summary, List<String> droppedFacts) { }
+
+    /** {@link #keptSections} within {@link #SUMMARY_CHARS}; prior facts that do not fit are logged, never fatal. */
+    static String withKeptSections(String summary, ArrayNode span) {
+        Kept k = keptSections(summary, span, SUMMARY_CHARS);
+        if (!k.droppedFacts().isEmpty()) {
+            log.warn("Compaction: {} user-stated fact(s) of the previous summary did not fit the summary size ({} chars) "
+                    + "and were dropped: {}", k.droppedFacts().size(), SUMMARY_CHARS, k.droppedFacts());
+        }
+        return k.summary();
+    }
 
     /**
-     * {@code summary} with every {@link #KEPT_SECTIONS} heading the model dropped while updating an earlier summary
-     * copied back from that summary: a weak model rewriting the checkpoint can omit the goal, which then is lost for
-     * every later turn.
+     * {@code summary} with what the model lost while updating an earlier summary copied back from that summary: a
+     * weak model rewriting the checkpoint can omit the goal, or keep the facts heading with only the newest fact.
+     * <ul>
+     *   <li>every {@link #KEPT_SECTIONS} heading the update dropped comes back whole, in front;</li>
+     *   <li>under {@link #FACTS}, every bullet of the prior section the update does not repeat (normalised: no
+     *   marker, case, markdown emphasis or trailing punctuation) is appended to the section, unless the update
+     *   replaced it: a new bullet with the same label, the words before ': ', '=' or ' is ' ("Reviewer is Priya"
+     *   is replaced by "Reviewer is Sam").</li>
+     * </ul>
+     * Restoring never blocks the compaction: the prior facts are added oldest first (their order in the prior
+     * summary), each one only while the summary stays within {@code maxChars}; those that do not fit are returned
+     * as dropped.
      */
-    static String withKeptSections(String summary, ArrayNode span) {
-        if (!startsWithSummary(span)) return summary;
+    static Kept keptSections(String summary, ArrayNode span, int maxChars) {
+        if (!startsWithSummary(span)) return new Kept(summary, List.of());
         String prior = text(span.get(0)).substring(SUMMARY_PREFIX.length());
         StringBuilder missing = new StringBuilder();
         for (String heading : KEPT_SECTIONS) {
@@ -659,7 +695,86 @@ public class ContextManager {
             String section = section(prior, heading);
             if (section != null) missing.append(section).append("\n\n");
         }
-        return missing.isEmpty() ? summary : missing + summary;
+        String out = missing.isEmpty() ? summary : missing + summary;
+        if (!hasHeading(summary, FACTS)) return new Kept(out, List.of());
+        List<String> lost = lostFacts(section(prior, FACTS), section(summary, FACTS));
+        if (lost.isEmpty()) return new Kept(out, List.of());
+        List<String> restored = new ArrayList<>();
+        List<String> dropped = new ArrayList<>();
+        int room = maxChars - out.length();
+        for (String fact : lost) {
+            if (fact.length() + 1 <= room) {
+                restored.add(fact);
+                room -= fact.length() + 1;
+            } else {
+                dropped.add(fact);
+            }
+        }
+        return new Kept(restored.isEmpty() ? out : appendToSection(out, FACTS, restored), dropped);
+    }
+
+    /** Bullets of {@code prior} that {@code updated} neither repeats nor replaces, in their order, stripped. */
+    private static List<String> lostFacts(String prior, String updated) {
+        if (prior == null) return List.of();
+        Set<String> facts = new HashSet<>();
+        Set<String> labels = new HashSet<>();
+        for (String b : bullets(updated)) {
+            String n = normalised(b);
+            facts.add(n);
+            String l = label(n);
+            if (l != null) labels.add(l);
+        }
+        List<String> lost = new ArrayList<>();
+        for (String b : bullets(prior)) {
+            String n = normalised(b);
+            if (n.isEmpty() || facts.contains(n)) continue;
+            String l = label(n);
+            if (l != null && labels.contains(l)) continue;
+            lost.add(b.strip());
+        }
+        return lost;
+    }
+
+    private static List<String> bullets(String section) {
+        List<String> out = new ArrayList<>();
+        if (section == null) return out;
+        for (String line : section.split("\n")) if (BULLET.matcher(line).matches()) out.add(line);
+        return out;
+    }
+
+    /** A bullet without its marker, markdown emphasis, case, extra spaces and trailing punctuation. */
+    static String normalised(String bullet) {
+        Matcher m = BULLET.matcher(bullet);
+        String s = m.matches() ? m.group(1) : bullet;
+        s = s.replace("**", "").replace("`", "").toLowerCase(Locale.ROOT).replaceAll("\\s+", " ").strip();
+        return s.replaceAll("[.;,]+$", "").strip();
+    }
+
+    /** The label of a normalised fact without a leading "the"; null when it has none or it is too long. */
+    static String label(String fact) {
+        Matcher m = LABEL.matcher(fact);
+        if (!m.find()) return null;
+        String l = m.group(1).strip().replaceFirst("^the ", "");
+        if (l.isEmpty() || l.split(" ").length > MAX_LABEL_WORDS) return null;
+        return l;
+    }
+
+    /** {@code text} with {@code lines} added at the end of its {@code heading} section, before the next heading. */
+    private static String appendToSection(String text, String heading, List<String> lines) {
+        List<String> all = new ArrayList<>(List.of(text.split("\n", -1)));
+        int start = -1;
+        for (int i = 0; i < all.size(); i++) {
+            if (all.get(i).strip().equals(heading)) {
+                start = i;
+                break;
+            }
+        }
+        int end = start + 1;
+        while (end < all.size() && !all.get(end).startsWith("## ")) end++;
+        int at = end;
+        while (at > start + 1 && all.get(at - 1).isBlank()) at--;
+        all.addAll(at, lines);
+        return String.join("\n", all);
     }
 
     private static boolean hasHeading(String text, String heading) {

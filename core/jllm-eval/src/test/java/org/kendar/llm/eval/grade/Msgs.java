@@ -38,6 +38,19 @@ final class Msgs {
         return sb.toString();
     }
 
+    /** The message without its thinking blocks (a copy; the message itself when it has none). */
+    static JsonNode withoutThinking(JsonNode msg) {
+        JsonNode c = msg.path("content");
+        if (!c.isArray()) return msg;
+        var copy = msg.deepCopy();
+        var blocks = (com.fasterxml.jackson.databind.node.ArrayNode) copy.get("content");
+        for (int i = blocks.size() - 1; i >= 0; i--) {
+            String type = blocks.get(i).path("type").asText("");
+            if (type.equals("thinking") || type.equals("redacted_thinking")) blocks.remove(i);
+        }
+        return copy;
+    }
+
     static boolean masked(JsonNode msg) {
         String t = text(msg);
         return t.contains(StrategyChecks.MASKED) && t.contains(StrategyChecks.RECALL_MARKER);

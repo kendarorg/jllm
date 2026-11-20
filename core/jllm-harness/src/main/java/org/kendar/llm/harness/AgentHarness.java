@@ -34,6 +34,8 @@ import org.kendar.llm.harness.settings.AgentSettings;
 import org.kendar.llm.harness.settings.HarnessSettings;
 import org.kendar.llm.harness.skills.SkillCatalog;
 import org.kendar.llm.harness.skills.SkillTool;
+import org.kendar.llm.harness.todo.TodoStore;
+import org.kendar.llm.harness.todo.TodoTools;
 import org.kendar.llm.harness.tools.*;
 
 import java.io.IOException;
@@ -61,6 +63,8 @@ public final class AgentHarness {
     private final SkillCatalog skills;
     private final SandboxExecutor sandbox;
     private PermissionRules permissionRules = PermissionRules.none();
+    private org.kendar.llm.harness.safety.ContentWarnings contentWarnings =
+            new org.kendar.llm.harness.safety.ContentWarnings();
     private final SubAgentRunLog subAgentRuns;
     private final ContextStrategy context;
     private final HarnessConfig config;
@@ -449,6 +453,15 @@ public final class AgentHarness {
         return skills;
     }
 
+    /**
+     * The files loaded at startup (settings, skills, instruction files, agent prompts, system prompt additions) in
+     * which suspicious content was found; they were loaded unchanged. For the front ends to show to the user, never
+     * to store with a chat. Files loaded during a chat are told by a {@code content_warning} event instead.
+     */
+    public List<org.kendar.llm.harness.safety.ContentWarnings.Warning> contentWarnings() {
+        return contentWarnings.all();
+    }
+
     /** The active settings permission rules (read-only). */
     public PermissionRules permissionRules() {
         return permissionRules;
@@ -499,6 +512,10 @@ public final class AgentHarness {
         private boolean smallModel;
         private ObjectMapper mapper = new ObjectMapper();
         private HarnessSettings settings = HarnessSettings.empty();
+        /** The file {@link #settings(Path)} read: scanned at {@link #build()}. */
+        private Path settingsFile;
+        private org.kendar.llm.harness.safety.ContentWarnings contentWarnings =
+                new org.kendar.llm.harness.safety.ContentWarnings();
         private final Hooks hooks = new Hooks();
         private final List<CommandSpec> commands = new ArrayList<>();
         private ContextStrategyFactory contextStrategy;
@@ -715,12 +732,25 @@ public final class AgentHarness {
         /** MCP servers and REST APIs to expose as tools; their tools are discovered at {@link #build()}. */
         public Builder settings(HarnessSettings settings) {
             this.settings = settings;
+            this.settingsFile = null;
             return this;
         }
 
         /** Loads the settings file; {@code ${ENV_VAR}} references in it are expanded. */
         public Builder settings(Path file) {
-            return settings(HarnessSettings.load(file));
+            settings(HarnessSettings.load(file));
+            this.settingsFile = file;
+            return this;
+        }
+
+        /**
+         * Where suspicious content found in the loaded files is reported (default: a new one). Pass the instance given
+         * to {@link HarnessSettings#loadLayered} so the settings files are listed too; see
+         * {@link AgentHarness#contentWarnings()}.
+         */
+        public Builder contentWarnings(org.kendar.llm.harness.safety.ContentWarnings warnings) {
+            this.contentWarnings = java.util.Objects.requireNonNull(warnings);
+            return this;
         }
 
         /** Do not register the built-in Files, Shell and Web tools. */
@@ -872,6 +902,7 @@ public final class AgentHarness {
          */
         public AgentHarness build() {
             installPlugins();
+            if (settingsFile != null) scanSettingsFile(settingsFile);
             config = settings.applyTo(config);
             org.kendar.llm.harness.llm.ProviderCatalog providers = new org.kendar.llm.harness.llm.ProviderCatalog(
                     settings.providers(), mapper, config.maxTokens());
@@ -906,7 +937,7 @@ public final class AgentHarness {
             }
             all.removeIf(t -> removedTools.contains(t.name()));
             all.addAll(tools);
-            SkillCatalog skills = new SkillCatalog(settings.skills());
+            SkillCatalog skills = new SkillCatalog(settings.skills(), contentWarnings);
             // registered even without skills: a user policy may bring the user's own (dropped per chat when none)
             if (!skills.isEmpty() || userPolicies != null) all.add(new SkillTool(skills));
             HarnessToolRegistry registry = new HarnessToolRegistry(all, approvalPolicy, replacedTools, nameChecks);
@@ -956,22 +987,32 @@ public final class AgentHarness {
             ContextStrategy context = contextStrategy(new ContextStrategyFactory.Deps(config, modelClient,
                     fast != null ? fast : modelClient, approvals, mapper, metrics, subAgentRunLog), box, sessions);
             context.install(hooks);
+            // todos with any strategy, unless the strategy offers them already (scope)
+            List<HarnessTool> todoTools = settings.todos()
+                    && context.tools().stream().noneMatch(t -> TodoTools.WRITE.equals(t.name()))
+                    ? TodoTools.create(new TodoStore(stateStore, mapper), mapper, false) : List.of();
             ToolSelector selector = new ToolSelector(config, fast != null ? fast : modelClient, mapper);
             RequestToolGroupTool requestToolGroup = new RequestToolGroupTool(registry, sessions, mapper);
             AgentLoop[] ref = new AgentLoop[1];
-            AgentCatalog catalog = agentCatalog(settings, mapper, maxParallel, providers);
+            AgentCatalog catalog = agentCatalog(settings, mapper, maxParallel, providers, contentWarnings);
             if (services.lookup(org.kendar.llm.harness.plugin.OneShotModel.class).isEmpty()) {
                 services.publish(org.kendar.llm.harness.plugin.OneShotModel.class,
                         new org.kendar.llm.harness.agent.AgentOneShotModel(catalog, modelClient, fast, () -> ref[0], sessions));
             }
             SubAgentTool subAgentTool = new SubAgentTool(() -> ref[0], mapper, catalog, maxParallel != 1);
-            String instructions = InstructionLoader.load(settings.instructionFiles());
+            List<InstructionLoader.Loaded> instructionFiles = InstructionLoader.read(settings.instructionFiles());
+            instructionFiles.forEach(l -> contentWarnings.report(l.path().toString(), l.findings()));
+            // SYSTEM.md / APPEND_SYSTEM.md / --system-prompt*: the embedder joined them, the files are not known here
+            if (systemPromptReplace != null) contentWarnings.check("system prompt replacement", systemPromptReplace);
+            contentWarnings.check("system prompt addition", systemPrompt);
+            String instructions = InstructionLoader.render(instructionFiles);
             String prompt = (systemPromptReplace != null ? systemPromptReplace : basePrompt())
                     + (smallModel || settings.isSmallModel() ? "\n\n" + Prompts.load("small-model.md") : "")
                     + (systemPrompt.isBlank() ? "" : "\n\n" + systemPrompt)
                     + (context.kind() == ContextStrategyKind.MNEMONIC ? "\n\n" + MnemonicStrategy.systemAddendum() : "")
                     + (context.kind() == ContextStrategyKind.SCOPE
                     ? "\n\n" + org.kendar.llm.harness.context.scope.ScopeStrategy.systemAddendum() : "")
+                    + (todoTools.isEmpty() ? "" : "\n\n" + TodoTools.systemAddendum())
                     // last, under their own heading: small models skip a rule buried among the defaults
                     + (instructions.isBlank() ? "" : "\n\n## User instructions\n\nThe user's standing instructions. "
                     + "Follow them in every answer, also when the request does not mention them; they override the "
@@ -981,6 +1022,11 @@ public final class AgentHarness {
                     requestToolGroup, subAgentRunLog, mapper, metrics, prompt, hooks,
                     fast == null ? null : new ToolClassifier(fast, mapper));
             loop.builtinFileTools(fileTools);
+            loop.harnessTools(todoTools);
+            if (settings.scopedInstructions()) {
+                loop.scopedInstructions(new org.kendar.llm.harness.instructions.ScopedInstructions(
+                        settings.instructionFiles(), settings.scopedInstructionsDepth(), instructionFiles));
+            }
             loop.identity(identity);
             ref[0] = loop;
             // verify-on-stop from the settings: after the hooks added in code and by plugins
@@ -1009,6 +1055,7 @@ public final class AgentHarness {
             AgentHarness harness = new AgentHarness(service, sessions, registry, sources, skills, box,
                     subAgentRunLog, context, config, pricing);
             harness.permissionRules = permissionRules;
+            harness.contentWarnings = contentWarnings;
             harness.services = services;
             harness.providers = providers;
             harness.checkpoints = harnessCheckpoints;
@@ -1020,6 +1067,7 @@ public final class AgentHarness {
                 context.forget(id);
                 approvals.forget(id);
                 loop.forgetTaint(id);
+                loop.forgetContentWarnings(id);
                 quota.forget(id);
             });
             // a login started from the web ended: tell the chat it was started from
@@ -1048,7 +1096,7 @@ public final class AgentHarness {
                 case SCOPE -> new org.kendar.llm.harness.context.scope.ScopeStrategy(deps.config(),
                         new ContextManager(deps.config(), deps.summaryModel(), deps.approvals(), deps.mapper(),
                                 deps.metrics()), deps.mapper(),
-                        new org.kendar.llm.harness.context.scope.TodoStore(stateStore, deps.mapper()), settings.scopeOptions(scopeOptions),
+                        new TodoStore(stateStore, deps.mapper()), settings.scopeOptions(scopeOptions),
                         offloadSink(box));
                 case COMPACTION, CUSTOM -> new CompactionStrategy(new ContextManager(deps.config(), deps.summaryModel(),
                         deps.approvals(), deps.mapper(), deps.metrics()), deps.config(), deps.mapper());
@@ -1078,13 +1126,15 @@ public final class AgentHarness {
         }
 
         private static AgentCatalog agentCatalog(HarnessSettings settings, ObjectMapper mapper, int maxParallel,
-                                                  org.kendar.llm.harness.llm.ProviderCatalog providers) {
+                                                  org.kendar.llm.harness.llm.ProviderCatalog providers,
+                                                  org.kendar.llm.harness.safety.ContentWarnings warnings) {
             List<AgentDefinition> defs = new ArrayList<>();
             for (AgentSettings a : settings.agents()) {
                 String prompt = a.prompt();
                 if ((prompt == null || prompt.isBlank()) && a.promptFile() != null) {
                     try {
                         prompt = Files.readString(Path.of(a.promptFile()), StandardCharsets.UTF_8);
+                        warnings.check(Path.of(a.promptFile()).toString(), prompt);
                     } catch (IOException e) {
                         throw new UncheckedIOException("Cannot read prompt file of agent " + a.name(), e);
                     }
@@ -1097,6 +1147,16 @@ public final class AgentHarness {
                         a.temperature(), a.thinking()));
             }
             return new AgentCatalog(defs);
+        }
+
+        /** The free text of a settings file read by {@link #settings(Path)}; an unreadable file was refused already. */
+        private void scanSettingsFile(Path file) {
+            try {
+                contentWarnings.report(file.toString(), org.kendar.llm.harness.safety.ContentScanner.scanSettings(
+                        file.toString(), mapper.readTree(file.toFile())));
+            } catch (IOException | RuntimeException e) {
+                LOG.warn("Cannot scan settings {}: {}", file, e.getMessage());
+            }
         }
 
         private static String basePrompt() {

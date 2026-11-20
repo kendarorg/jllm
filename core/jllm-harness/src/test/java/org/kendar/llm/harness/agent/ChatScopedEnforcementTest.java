@@ -70,7 +70,7 @@ class ChatScopedEnforcementTest {
         Path a = Files.writeString(base.resolve("a.md"), "---\ndescription: skill A\n---\nDo A.");
         Path b = Files.writeString(base.resolve("b.md"), "---\ndescription: skill B\n---\nDo B.");
         SkillTool skill = new SkillTool(new SkillCatalog(List.of(new SkillSettings("a", null, a.toString()),
-                new SkillSettings("b", null, b.toString()))));
+                new SkillSettings("b", null, b.toString())), new org.kendar.llm.harness.safety.ContentWarnings()));
 
         SkillTool view = skill.forChat(n -> !n.equals("b"));
         assertTrue(view.description().contains("a: skill A"));
@@ -99,7 +99,8 @@ class ChatScopedEnforcementTest {
     void skillToolIsDroppedWhenTheChatHasNoSkillLeft() throws Exception {
         Path a = Files.writeString(base.resolve("a.md"), "Do A.");
         Rig rig = new Rig(base);
-        rig.register(new SkillTool(new SkillCatalog(List.of(new SkillSettings("a", "A", a.toString())))),
+        rig.register(new SkillTool(new SkillCatalog(List.of(new SkillSettings("a", "A", a.toString())),
+                        new org.kendar.llm.harness.safety.ContentWarnings())),
                 tool("alpha", "Misc", ToolKind.READ_ONLY, (c, i) -> ""));
         String chat = rig.newChat();
         rig.sessions.setChatToolSet(chat, ChatToolSet.capture(List.of("skill", "alpha"), null, null, List.of("a"))

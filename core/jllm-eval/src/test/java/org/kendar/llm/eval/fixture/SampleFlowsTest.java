@@ -49,7 +49,7 @@ class SampleFlowsTest {
             JsonNode flow = M.readTree(e.getValue().replace('\'', '"'));
             assertEquals(0, api.validate(U, Set.of(), "personal", flow).path("errors").size(), e.getKey());
         }
-        assertEquals(4, api.list(U, Set.of()).size());
+        assertEquals(5, api.list(U, Set.of()).size());
     }
 
     @Test
@@ -68,6 +68,15 @@ class SampleFlowsTest {
         assertEquals("rejected", start("branching", "{\"amount\":5000}").at("/result/decision").asText());
         assertEquals(List.of("amountBand:small", "approve", "amountBand:large", "flagReview", "amountBand:huge"),
                 executions());
+    }
+
+    @Test
+    void gatedFlowReadsTheBooleanNotTheText() throws Exception {
+        assertEquals("approved", start("gated", "{\"approved\":true}").at("/result/decision").asText());
+        assertEquals("review", start("gated", "{\"approved\":false}").at("/result/decision").asText());
+        JsonNode prose = start("gated", "{\"approved\":\"APPROVED\"}");
+        assertEquals("review", prose.at("/result/decision").asText(), prose.toString());
+        assertEquals(List.of("approve", "flagReview", "flagReview"), executions());
     }
 
     @Test

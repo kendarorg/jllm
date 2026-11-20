@@ -382,12 +382,20 @@ public final class Suite {
 
     // ---- strategy sessions -------------------------------------------------------------------------------------
 
-    /** The strategy a trial ran under, read from the tools offered: mnemonic has history_recall, scope todo_write. */
+    /**
+     * The strategy a trial ran under, read from the request: mnemonic has history_recall, scope todo_write and its
+     * system prompt section (with {@code context.todos} any strategy has todo_write).
+     */
     public static ContextStrategyKind detectStrategy(List<RecordedRequest> mainRequests) {
         if (mainRequests.isEmpty()) return null;
-        List<String> tools = mainRequests.get(0).toolNames();
+        RecordedRequest first = mainRequests.get(0);
+        List<String> tools = first.toolNames();
         if (tools.contains("history_recall")) return ContextStrategyKind.MNEMONIC;
-        if (tools.contains("todo_write")) return ContextStrategyKind.SCOPE;
+        String scope = org.kendar.llm.harness.context.scope.ScopeStrategy.systemAddendum();
+        if (tools.contains("todo_write") && (String.valueOf(first.extraSystem()).contains(scope)
+                || String.valueOf(first.pinnedSystem()).contains(scope))) {
+            return ContextStrategyKind.SCOPE;
+        }
         return ContextStrategyKind.COMPACTION;
     }
 

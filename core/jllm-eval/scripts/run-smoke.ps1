@@ -132,6 +132,7 @@ if (($TEST_GROUPS -split ',') -contains 'all') { $TEST_GROUPS = 'smoke,full,stra
 $TESTS = Get-Setting 'TESTS' ''                    # optional comma separated test classes
 $TRIALS = Get-Setting 'TRIALS' '1'
 $MAX_TRIALS = Get-Setting 'MAX_TRIALS' '2'         # cap on trials of any case, including cases that set their own count
+$UPDATE_BASELINE = Get-Setting 'UPDATE_BASELINE' '0'   # 1: store this run as the model baseline
 $IGNORE_TEST_FAILURES = Get-Setting 'IGNORE_TEST_FAILURES' '1'   # 1: failed cases never fail the Maven build
 $PARALLELISM = [int](Get-Setting 'PARALLELISM' $td.Par)   # test classes run at once; 1 = strictly sequential
 # added to the system prompt of every case; 'none' turns it off. Some hosted models write a tool call as text.
@@ -296,6 +297,7 @@ $mvnArgs = @(
     '-Deval.fast=target',
     "-Deval.trials=$TRIALS",
     "-Deval.maxTrials=$MAX_TRIALS",
+    "-Deval.updateBaseline=$(if ($UPDATE_BASELINE -eq '1') { 'true' } else { 'false' })",
     "-Deval.caseTimeoutSeconds=$CASE_TIMEOUT_SECONDS",
     "-Deval.compaction.contextTokens=$COMPACTION_CTX_TOKENS",
     "-Deval.timeout.warmup=$TIMEOUT_SECONDS"

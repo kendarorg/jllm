@@ -8,12 +8,16 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * Three sample workflows as flow definitions. None needs a model: they use Java actions
- * ({@link SampleFlowActions}), a Java chooser, questions to the user and a sub-flow call.
+ * Four sample workflows as flow definitions. None needs a model: they use Java actions
+ * ({@link SampleFlowActions}), a Java chooser, the built-in {@code gate} chooser, questions to the user and a
+ * sub-flow call.
  * <ul>
  *   <li>{@code linear}: input {@code text}; normalizes, counts words, finishes with {@code upper} and {@code words}.</li>
  *   <li>{@code branching}: input {@code amount}; chooses small, large or huge and finishes with
  *       {@code decision} approved, review or rejected.</li>
+ *   <li>{@code gated}: input {@code approved}; the built-in gate reads it as a boolean, never as text: true runs
+ *       {@code approve} and finishes with {@code decision} approved, anything else runs {@code flagReview} and
+ *       finishes with review.</li>
  *   <li>{@code ask-and-call}: asks the order number (pattern {@code A-[0-9]+}) and how to pay back (money or
  *       credit), calls {@code lookup-order}, finishes with {@code order}, {@code how} and {@code status}.</li>
  *   <li>{@code lookup-order}: the sub-flow; input {@code order}; finishes with {@code status}.</li>
@@ -40,6 +44,17 @@ public final class SampleFlows {
               'inreview':{'type':'finish','result':{'decision':'review'}},
               'reject':{'type':'finish','result':{'decision':'rejected'}}}}""";
 
+    public static final String GATED = """
+            {'name':'gated','start':'gate','steps':{
+              'gate':{'type':'decide','by':'java','chooser':'gate','question':'Is it approved?',
+                      'with':{'from':'input','field':'approved','type':'boolean',
+                              'map':{'true':'pass','false':'hold'},'fallback':'hold'},
+                      'outcomes':{'pass':'auto','hold':'review'}},
+              'auto':{'type':'action','action':'approve','next':'approved'},
+              'review':{'type':'action','action':'flagReview','next':'inreview'},
+              'approved':{'type':'finish','result':{'decision':'approved'}},
+              'inreview':{'type':'finish','result':{'decision':'review'}}}}""";
+
     public static final String LOOKUP_ORDER = """
             {'name':'lookup-order','start':'load','steps':{
               'load':{'type':'action','action':'loadOrder','next':'end'},
@@ -61,6 +76,7 @@ public final class SampleFlows {
         Map<String, String> m = new LinkedHashMap<>();
         m.put("linear", LINEAR);
         m.put("branching", BRANCHING);
+        m.put("gated", GATED);
         m.put("ask-and-call", ASK_AND_CALL);
         m.put("lookup-order", LOOKUP_ORDER);
         return m;

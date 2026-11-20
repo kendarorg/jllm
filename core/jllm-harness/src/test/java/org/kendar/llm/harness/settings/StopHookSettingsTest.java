@@ -45,7 +45,8 @@ class StopHookSettingsTest {
     }
 
     private HarnessSettings load(ProjectMcpTrust.Prompt prompt) {
-        return HarnessSettings.loadLayered(new FileSettingsSource(null, project), project, k -> null, prompt, trust, warnings::add);
+        return HarnessSettings.loadLayered(new FileSettingsSource(null, project), project, k -> null, prompt, trust, warnings::add,
+                new org.kendar.llm.harness.safety.ContentWarnings());
     }
 
     @Test

@@ -63,6 +63,17 @@ class RendererTest {
     }
 
     @Test
+    void contentWarningListsTheFileAndEachFinding() {
+        ObjectNode d = node().put("file", "sub/AGENTS.md");
+        d.putArray("findings").add(node().put("line", 3).put("kind", "HIDDEN_UNICODE").put("excerpt", "a<U+200B>b"))
+                .add(node().put("line", 7).put("kind", "REMOTE_EXECUTION").put("excerpt", "curl x | sh"));
+        plain().render(new AgentEvent(0, "content_warning", d));
+        assertEquals(List.of("[content warning] sub/AGENTS.md: suspicious content, loaded anyway; check the file",
+                "  line 3 HIDDEN_UNICODE: a<U+200B>b", "  line 7 REMOTE_EXECUTION: curl x | sh"), out);
+        assertTrue(err.isEmpty());
+    }
+
+    @Test
     void fancyModeColorsAndTagsMessages() {
         fancy().render(ev("retry", node().put("message", "again")));
         assertEquals(Renderer.YELLOW + "[retry] again" + Renderer.RESET, out.get(0));
@@ -77,10 +88,11 @@ class RendererTest {
         r.render(ev("login_required", node().put("source", "gh")));
         r.render(ev("stuck", node().put("message", "loop").put("action", "stop")));
         r.render(ev("verify_failed", node().put("attempt", 2).put("message", "red")));
+        r.render(ev("instructions_loaded", node().put("file", "sub/AGENTS.md").put("dir", "sub/")));
         r.render(ev("unknown_type", node()));
         assertEquals(List.of("[plan] go", "[queued followup] t", "[applied] t",
                 "[login] gh is not connected: run /login gh, then ask to retry", "[stuck] loop (stop)",
-                "[stop check failed, attempt 2] red"), out);
+                "[stop check failed, attempt 2] red", "[instructions] sub/AGENTS.md"), out);
     }
 
     @Test

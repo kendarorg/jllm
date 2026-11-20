@@ -195,11 +195,45 @@ public class AgentLoop {
         return this;
     }
 
+    /** Harness tools offered in every request next to the context strategy's (the todo tools when enabled). */
+    private volatile List<HarnessTool> harnessTools = List.of();
+
+    public AgentLoop harnessTools(java.util.Collection<HarnessTool> tools) {
+        this.harnessTools = List.copyOf(tools);
+        return this;
+    }
+
+    /** Tools offered whatever the tool groups: the context strategy's and the harness's. */
+    private List<HarnessTool> fixedTools() {
+        List<HarnessTool> ctx = context.tools();
+        if (harnessTools.isEmpty()) return ctx;
+        List<HarnessTool> all = new ArrayList<>(ctx);
+        all.addAll(harnessTools);
+        return all;
+    }
+
     public AgentLoop builtinFileTools(java.util.Collection<HarnessTool> tools) {
         java.util.Set<HarnessTool> s = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
         s.addAll(tools);
         this.builtinFileTools = s;
         return this;
+    }
+
+    /** Adds the instruction files of the directories the file tools work in; null = off. */
+    private volatile org.kendar.llm.harness.instructions.ScopedInstructions scopedInstructions;
+
+    public AgentLoop scopedInstructions(org.kendar.llm.harness.instructions.ScopedInstructions scoped) {
+        this.scopedInstructions = scoped;
+        return this;
+    }
+
+    /** Per chat: the scoped instruction files whose suspicious content was already reported (once per chat). */
+    private final java.util.Map<String, java.util.Set<String>> contentWarned =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Drops what is kept in memory about the scoped files of a chat (the chat was deleted). */
+    public void forgetContentWarnings(String chatId) {
+        if (chatId != null) contentWarned.remove(chatId);
     }
 
     private static final java.util.Set<String> SCRIPT_REFUSED = java.util.Set.of("run_js", "bash", "sub_agent",
@@ -270,7 +304,7 @@ public class AgentLoop {
                 HarnessTool tool = byName.get(name);
                 // the list is the agent's of this turn; a tool disabled or removed since (/tools, /mcp) is refused now
                 if (tool == null || scriptRefused(tool)
-                        || !(registry.all().contains(tool) || context.tools().contains(tool))) {
+                        || !(registry.all().contains(tool) || fixedTools().contains(tool))) {
                     throw new org.kendar.llm.harness.tools.ToolCatalog.ToolCallException(
                             "Unknown or unavailable tool '" + name + "'");
                 }
@@ -589,7 +623,7 @@ public class AgentLoop {
             if (!named.isEmpty()) sessions.addToolGroups(chatId, named);
         }
         List<HarnessTool> tools = new ArrayList<>(toolSelector.forGroups(sessions.toolGroups(chatId), registry.all()));
-        tools.addAll(context.tools());
+        tools.addAll(fixedTools());
         if (requestToolGroup != null && requestToolGroup.offered(chatId)) tools.add(requestToolGroup);
         tools.add(subAgentTool);
         // the user's tool filter: applied to every tool offered to the model, including the ones added above
@@ -735,7 +769,7 @@ public class AgentLoop {
             extra = systemPrompt + modeNote(pm, pctx);
             pinned = sessions.pinnedPrefix(session);
             java.util.Set<String> contextTools = new java.util.HashSet<>();
-            context.tools().forEach(t -> contextTools.add(t.name()));
+            fixedTools().forEach(t -> contextTools.add(t.name()));
             frame = new StackFrame(extra, t -> {
                 if (contextTools.contains(t.name())) return true;
                 if (t == subAgentTool || t == requestToolGroup) return false;
@@ -749,7 +783,7 @@ public class AgentLoop {
                             .filter(t -> agentType == null || agentType.tools().isEmpty()
                                     || agentType.tools().contains(t.name()))
                             .toList()));
-            tools.addAll(context.tools());
+            tools.addAll(fixedTools());
             // the user's tool filter, as for the main agent (the stack branch inherits the filtered list)
             org.kendar.llm.harness.auth.UserPolicy policy = identity.policyOf(chatId);
             tools.removeIf(t -> !policy.allows(t));
@@ -768,7 +802,8 @@ public class AgentLoop {
         EventSink errors = (type, data) -> {
             if ("approval_unavailable".equals(type)) {
                 if (denied != null) denied.add(data.path("tool").asText("a tool"));
-            } else if ("approval_request".equals(type) || "login_required".equals(type)) parentSink.emit(type, data);
+            } else if ("approval_request".equals(type) || "login_required".equals(type)
+                    || org.kendar.llm.harness.safety.ContentWarnings.EVENT.equals(type)) parentSink.emit(type, data);
             else if ("error".equals(type)) failure[0] = data.path("message").asText("sub-agent failed");
             else if ("warning".equals(type)) warning[0] = data.path("message").asText(null);
             else if ("usage".equals(type)) {
@@ -1227,6 +1262,7 @@ public class AgentLoop {
                 if (persist) sessions.saveMessages(chatId, messages);
                 return new LoopResult(finalText, Outcome.STUCK);
             }
+            addScopedInstructions(messages, toolUses, results, byName, tctx, sink, label, chatId);
             if (persist) sessions.saveMessages(chatId, messages);
             // every tool_use has its tool_result: a safe boundary for the user's steering messages
             injectSteering(inbox, messages, sink, chatId, persist);
@@ -1413,6 +1449,53 @@ public class AgentLoop {
         sink.emit("steer_applied", mapper.createObjectNode().put("text", text).put("kind", "followup"));
         if (persist) sessions.saveMessages(chatId, messages);
         return true;
+    }
+
+    /**
+     * After the built-in file tools worked on paths inside the work dir: appends to the tool results the instruction
+     * files of the directories down to those paths that the conversation does not hold yet. Appended, not put in the
+     * system prompt, so the cached prefix is kept; the model sees them on its next request.
+     */
+    private void addScopedInstructions(ArrayNode messages, List<JsonNode> toolUses, ArrayNode results,
+                                       Map<String, HarnessTool> byName, ToolContext ctx, EventSink sink, String label,
+                                       String chatId) {
+        org.kendar.llm.harness.instructions.ScopedInstructions scoped = scopedInstructions;
+        if (scoped == null || ctx.files() != null || toolUses.isEmpty()) return; // remote files: nothing on this disk
+        java.util.Set<String> failed = new java.util.HashSet<>();
+        for (JsonNode r : results) {
+            if (r.path("is_error").asBoolean(false)) failed.add(r.path("tool_use_id").asText());
+        }
+        List<String> paths = new ArrayList<>();
+        for (JsonNode use : toolUses) {
+            HarnessTool t = byName.get(use.path("name").asText());
+            if (t == null || !builtinFileTools.contains(t) || failed.contains(use.path("id").asText())) continue;
+            // plan mode: a write went to the scratch dir, not to the project
+            if (t.kind() != ToolKind.READ_ONLY && ctx.readOnlyWork()) continue;
+            paths.add(org.kendar.llm.harness.instructions.ScopedInstructions.pathOf(t.name(), use.path("input")));
+        }
+        if (paths.isEmpty()) return;
+        List<org.kendar.llm.harness.instructions.ScopedInstructions.Block> added;
+        try {
+            added = scoped.discover(ctx.workDir(), paths, messages);
+        } catch (RuntimeException e) {
+            log.warn("Cannot look up scoped instruction files: {}", e.toString());
+            return;
+        }
+        for (var b : added) {
+            results.addObject().put("type", "text").put("text", b.render());
+            ObjectNode ev = mapper.createObjectNode().put("file", b.file()).put("dir", b.dir());
+            if (label != null) ev.put("agent", label);
+            sink.emit("instructions_loaded", ev);
+            if (!b.findings().isEmpty() && contentWarned
+                    .computeIfAbsent(chatId, k -> java.util.concurrent.ConcurrentHashMap.newKeySet()).add(b.file())) {
+                // loaded unchanged; the user is told, the log gets a warning, nothing is stored or sent to the model
+                org.kendar.llm.harness.safety.ContentWarnings.logWarning(b.file(), b.findings());
+                ObjectNode warn = new org.kendar.llm.harness.safety.ContentWarnings.Warning(b.file(), b.findings())
+                        .toJson(mapper);
+                if (label != null) warn.put("agent", label);
+                sink.emit(org.kendar.llm.harness.safety.ContentWarnings.EVENT, warn);
+            }
+        }
     }
 
     private void appendUserText(ArrayNode messages, String text) {

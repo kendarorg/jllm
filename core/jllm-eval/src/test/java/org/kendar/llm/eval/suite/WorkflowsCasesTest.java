@@ -28,6 +28,7 @@ class WorkflowsCasesTest extends SuiteBase {
     @Override
     public List<EvalCase> cases() {
         Fixtures a = Fixtures.create().workflows(), b = Fixtures.create().workflows(), c = Fixtures.create().workflows();
+        Fixtures d = Fixtures.create().workflows();
         return List.of(
                 smoke(WORKFLOWS, "linear-flow-runs-actions")
                         .harness(a.harness()).setup(a.setup())
@@ -44,6 +45,14 @@ class WorkflowsCasesTest extends SuiteBase {
                         .user("Reply with the single word PONG.")
                         .check(executions("largeBranch", b, ex -> ex.contains("amountBand:large") && ex.contains("flagReview")
                                 && !ex.contains("approve"), "large band, flagReview, no approve"))
+                        .check(answerContains("PONG")).build(),
+                full(WORKFLOWS, "gate-reads-boolean-not-prose")
+                        .harness(d.harness()).setup(d.setup())
+                        .action("/flow-start gated", (h, chat) -> h.commands().execute(chat,
+                                "/flow-start gated {\"approved\":\"APPROVED\"}"))
+                        .user("Reply with the single word PONG.")
+                        .check(executions("gateFellBack", d, ex -> ex.contains("flagReview") && !ex.contains("approve"),
+                                "flagReview, no approve (text is not a boolean)"))
                         .check(answerContains("PONG")).build(),
                 full(WORKFLOWS, "failure-unknown-flow-runs-nothing")
                         .harness(c.harness()).setup(c.setup())

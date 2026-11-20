@@ -474,7 +474,7 @@ not replayed them and gets the final `text` instead.
 - `AgentLoop` saves the message log after the user message, after every assistant response, and after every tool-result message. A model call that fails or is denied appends nothing, so the log always stays valid for the next call.
 - Stores: `InMemoryChatSessionStore` (default), `FileChatSessionStore` (`session.json` + `messages.jsonl`, read back on restart, CLI and web). Sub-agent runs: `InMemorySubAgentRunLog`, `FileHistorySubAgentRunLog`.
 - Grants (`approve always`) are saved through the `StateStore` (`<history>/<chat>/state/grants.json` in the CLI and web), so they survive a restart; with the default in-memory store they last for the run. Declined-rewrite markers are runtime state only. None of them is in the context.
-- The `StateStore` also holds the todo lists of the `scope` strategy (`todos-<agent>`). The plan mode is the session `mode`; plan files are in the scratch directory.
+- The `StateStore` also holds the todo lists (`todos-<agent>`) of the `scope` strategy, or of any strategy with `context.todos`. The plan mode is the session `mode`; plan files are in the scratch directory.
 
 ## 12. Sandbox
 
@@ -494,3 +494,23 @@ Plan mode runs the shell from scratch; only Docker can enforce that the workdir 
 `SlashCommands.handles(line)` is checked before `start()`. Built-ins: `/help /clear /new /compact /mode /default /plan /edit /auto /cancel /tools /mcp /apis /skills /back /cost /where /status /chats /resume /title /exit`, plus plugin commands registered through `PluginRegistrar.command`. Menus (`/tools /mcp /apis /skills /mode`) are stateful per chat via `MenuController`; numbers select, Esc, `/back` or `b` goes up. Only `/compact` calls an LLM.
 
 - Steering: after each tool-result round, and when an answer has no tool calls, the loop drains the chat's steering queue (and, only in the second case, one follow-up) into user messages and calls the model again.
+
+## 14. Gate results (`gate.GateResultsHandler`)
+
+A deterministic mapping from a structured result to one response of a closed list; no model call, no side effect, no
+prose read. Built from a `Config(field, type, map, fallback, allowed)`:
+
+- `type`: `BOOLEAN`, `STRING`, `NUMBER` (keys compared by value) or `EXIT_CODE` (whole number).
+- `map`: value as text to response; `*` matches any other value of the right type. Keys must fit the type.
+- `fallback`: the response for a value that is missing, has the wrong type or is not mapped.
+- `allowed`: optional; absent = the map's responses plus the fallback. Every mapped response and the fallback must be
+  allowed, or the constructor throws `IllegalArgumentException`. `Config.fromJson(with)` reads the same fields from a
+  JSON object and ignores others (such as a flow's `from`).
+
+`decide(JsonNode)` reads `field` (dotted; none = the whole value), `decide(int)` takes a process exit code. Both return
+`Result(response, value, fellBack, reason)`; `responses()` is the set of responses the handler can give.
+
+The workflows plugin uses it for its `gate` chooser and journals each `Result` with the decision; its `run-command`
+action runs a command through `sandbox.LocalShell` (the OS default shell) and returns the exit code and output tail
+that an exit-code gate reads. See [the workflow guide](../guides/workflow.md#built-in-gate-and-run-command).
+

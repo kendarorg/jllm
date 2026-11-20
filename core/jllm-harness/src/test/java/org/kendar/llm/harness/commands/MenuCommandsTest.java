@@ -203,6 +203,28 @@ class MenuCommandsTest {
         assertFalse(c.menuActive(chat));
     }
 
+    @Test
+    void webCallersCheckOnlyTheSourcesOfTheirChat() {
+        SlashCommands c = harness.commands();
+        SlashCommands.Caller web = SlashCommands.Caller.web("alice", false);
+        c.captureChatTools(chat);
+
+        assertTrue(c.execute(chat, "/mcp check srv", web).output().startsWith("OK srv"));
+        assertTrue(c.execute(chat, "/mcp check", web).output().startsWith("OK srv"));
+        assertEquals("'other' is not available in this chat", c.execute(chat, "/mcp check other", web).output());
+        assertEquals("'pets' is not available in this chat", c.execute(chat, "/apis check pets", web).output(),
+                "the API was off when the chat started");
+        assertEquals("usage: /mcp enable|disable <name>", c.execute(chat, "/mcp restart srv", web).output());
+
+        String menu = c.execute(chat, "/mcp", web).output();
+        assertTrue(menu.startsWith("MCP servers of this chat"), menu);
+        c.menuInput(chat, String.valueOf(numberOf(menu, "srv")));
+        mcpUp = false;
+        String check = c.menuInput(chat, "2").output();
+        assertTrue(check.startsWith("FAILED srv"), check);
+        assertTrue(enabledTools().contains("mcp__srv__echo"), "a check changes nothing");
+    }
+
     /** Number of the first line that mentions {@code label}. */
     private static int numberOf(String menu, String label) {
         for (String line : menu.split("\n")) {

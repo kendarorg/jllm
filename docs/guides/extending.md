@@ -410,7 +410,8 @@ builder.contextStrategy(deps -> new SlidingWindowStrategy(deps.config(), deps.ma
 
 `deps` gives `config`, `model`, `summaryModel` (fast or main), `approvals`, `mapper`, `metrics`, `subAgentRuns`.
 Built-in kinds are `COMPACTION`, `MNEMONIC` and `SCOPE` (`context.scope.*`, `builder.scopeOptions(...)`); the todo
-tools of `SCOPE` come from `tools()`, a pattern to reuse for a strategy that needs tools of its own.
+tools of `SCOPE` come from `tools()`, a pattern to reuse for a strategy that needs tools of its own. They are built by
+`org.kendar.llm.harness.todo.TodoTools`, which the harness also offers with any strategy unless `context.todos` is false.
 
 Contract:
 

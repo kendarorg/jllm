@@ -90,7 +90,11 @@ new UserPolicy(toolFilter, approval,
 "instructionFiles": ["KENDAR.md", "~/KENDAR.md", "docs/RULES.md"]
 ```
 
-- Read once at `build()`, in order. `~` is the user home. Missing files are skipped (logged at info).
+- Default (no layer sets the key): `KENDAR.md`, `AGENTS.md`, `CLAUDE.md`, in that order. A list replaces the default
+  completely; `[]` loads none.
+- Read once at `build()`, in order. Relative paths are resolved against the directory the harness runs in; `~` is the
+  user home. Missing files are skipped (logged at info), and so is a file with the same content as one already read
+  (for example `CLAUDE.md` as a symlink to `AGENTS.md`).
 - Each file is added as `Instructions from <file name>:\n<text>`.
 - Placed after the base prompt and the builder's `systemPrompt(...)` addendum, inside the cached system block.
 
@@ -105,7 +109,39 @@ flowchart LR
 
 The per-turn note follows the cached text in the same block; see [CACHES §1](../reference/caches.md#1-prompt-cache-layout).
 
-## 3. Agent prompts
+## 3. Directory-scoped instruction files
+
+Instruction files in subdirectories apply when the agent starts working in that part of the tree.
+
+- **Trigger**: a built-in file tool call (`read_file`, `write_file`, `edit_file`, `ls`, `glob`, `grep`, `grep_code`)
+  that succeeded on a path inside the chat work dir. `glob` counts for the literal directory its pattern starts with;
+  `ls`, `grep` and `grep_code` without a path count for the work dir. In plan mode a write goes to the scratch dir and
+  does not count. Remote work dirs (container file backends) are not looked at.
+- **Lookup**: each directory from the work dir down to the target (the path itself when it is a directory, else its
+  parent), at most `files.scopedInstructionsDepth` (default 8) levels below the work dir, is checked for the file names
+  of `instructionFiles` (`~/KENDAR.md` and `docs/RULES.md` give `KENDAR.md` and `RULES.md`). Paths outside the work
+  dir are ignored, and so is a file whose real location is outside it (a symlink out of the work dir).
+- **Skipped**: a file already in the system prompt, a file with the same content as one already loaded, an empty file,
+  and a file the conversation already holds.
+- **Delivery**: each new file is appended to the tool results of that turn as a text block, shallowest directory
+  first, so the model reads it with its next request:
+
+  ```
+  Scoped instructions from src/web/AGENTS.md, for the work under src/web/:
+  <text>
+  ```
+
+  The blocks go into the message log, never into the system prompt: the cached prefix stays the same (see
+  [CACHES §1](../reference/caches.md#1-prompt-cache-layout)). The event `instructions_loaded {file, dir}` is emitted.
+- **Once per chat**: the loaded set is the set of blocks in the chat's saved log, so a resumed chat does not add them
+  again. A block that left the log (summarized by compaction, or undone with a rewind) is added again on the next
+  access below its directory. A file changed after it was loaded is not re-read.
+- **Trust**: the same as the project-level instruction files: the text is added as written, with no trust prompt (it
+  adds instructions, not commands), and is not sanitized like tool output.
+- `files.scopedInstructions: false` turns the feature off; `instructionFiles: []` turns it off too (no names to look
+  for).
+
+## 4. Agent prompts
 
 Sub-agent types (settings `agents`) also carry text: `prompt` inline or `promptFile` (read at startup). It is added to
 that sub-agent's system text only. See [EXTENDING §6](extending.md#6-sub-agent-types).

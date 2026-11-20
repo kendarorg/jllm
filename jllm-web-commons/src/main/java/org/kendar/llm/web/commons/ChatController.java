@@ -282,6 +282,17 @@ public class ChatController {
         return emitter;
     }
 
+    /**
+     * The files loaded at startup (settings, skills, instruction files, agent prompts) with suspicious content: the
+     * page shows them once loaded. Kept in memory only, never part of a chat; files loaded during a chat come as a
+     * {@code content_warning} event on its stream.
+     */
+    @GetMapping("/api/content-warnings")
+    public List<com.fasterxml.jackson.databind.JsonNode> contentWarnings() {
+        return agentService.contentWarnings().stream()
+                .map(w -> (com.fasterxml.jackson.databind.JsonNode) w.toJson(mapper)).toList();
+    }
+
     // ── approvals ─────────────────────────────────────────────────────────────
 
     @GetMapping("/api/chat/{id}/approvals")

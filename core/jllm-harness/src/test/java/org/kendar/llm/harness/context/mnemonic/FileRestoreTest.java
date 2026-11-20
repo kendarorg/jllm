@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.HarnessMetrics;
-import org.kendar.llm.harness.context.scope.TodoStore;
+import org.kendar.llm.harness.todo.TodoStore;
 import org.kendar.llm.harness.session.SubAgentRunLog;
 import org.kendar.llm.harness.state.FileStateStore;
 

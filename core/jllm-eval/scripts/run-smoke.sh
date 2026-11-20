@@ -102,6 +102,7 @@ if [[ ",$TEST_GROUPS," == *,all,* ]]; then TEST_GROUPS="smoke,full,strategy,comp
 TESTS="${TESTS:-}"                  # optional comma separated test classes
 TRIALS="${TRIALS:-1}"
 MAX_TRIALS="${MAX_TRIALS:-2}"       # cap on trials of any case, including cases that set their own count
+UPDATE_BASELINE="${UPDATE_BASELINE:-0}"   # 1: store this run as the model baseline
 IGNORE_TEST_FAILURES="${IGNORE_TEST_FAILURES:-1}"   # 1: failed cases never fail the Maven build
 PARALLELISM="${PARALLELISM:-$(default_par "$TARGET_PROVIDER")}"   # test classes run at once; 1 = strictly sequential
 # added to the system prompt of every case; "none" turns it off. Some hosted models write a tool call as text.
@@ -270,6 +271,7 @@ mvn -B -ntp -f "$REPO_ROOT/pom.xml" -Peval -pl core/jllm-eval -am test \
   -Deval.fast=target \
   -Deval.trials="$TRIALS" \
   -Deval.maxTrials="$MAX_TRIALS" \
+  -Deval.updateBaseline="$([[ "$UPDATE_BASELINE" == 1 ]] && echo true || echo false)" \
   -Deval.caseTimeoutSeconds="$CASE_TIMEOUT_SECONDS" \
   -Deval.compaction.contextTokens="$COMPACTION_CTX_TOKENS" \
   -Deval.timeout.warmup="$TIMEOUT_SECONDS" \

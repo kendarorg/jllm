@@ -83,6 +83,11 @@ after repeated failed sign-ins. It does not terminate TLS; put it behind your re
 
 - **Prompt injection is not solved.** The controls above limit what an injected instruction can do; they do not stop a
   model from being persuaded. Treat every tool result as untrusted and keep write and network tools behind approval.
+- Skills, instruction files, agent prompts and the free text of the settings are scanned when loaded for hidden
+  Unicode, injection phrasing and download-and-run or exfiltration patterns. A finding is logged and shown to the
+  user (never stored nor sent to the model), but the file is **loaded anyway**: the scan is a heuristic warning, not
+  a filter ([Suspicious content](../reference/usage.md#suspicious-content-in-loaded-files)). Review shared skills and
+  project instruction files like code.
 - MCP stdio servers run as child processes of the JVM user, outside any sandbox.
 - Model providers receive whatever is in the context. Choose the provider and its data terms yourself, or use a local
   OpenAI-compatible endpoint.

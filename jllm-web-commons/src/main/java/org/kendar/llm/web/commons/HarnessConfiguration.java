@@ -64,9 +64,11 @@ public class HarnessConfiguration {
         // answers are remembered with a ProjectMcpTrust bean.
         SettingsSource source = settingsSource.getIfAvailable(() ->
                 new FileSettingsSource(settingsFile == null ? null : Path.of(settingsFile), projectDir));
+        // suspicious content in the loaded files: logged, and listed to the users by /api/content-warnings
+        var contentWarnings = new org.kendar.llm.harness.safety.ContentWarnings();
         HarnessSettings settings = HarnessSettings.loadLayered(source, projectDir, System::getenv,
                 ProjectMcpTrust.Prompt.NONE, projectTrust.getIfAvailable(FileProjectMcpTrust::user),
-                org.slf4j.LoggerFactory.getLogger(HarnessConfiguration.class)::warn);
+                org.slf4j.LoggerFactory.getLogger(HarnessConfiguration.class)::warn, contentWarnings);
         var promptFiles = org.kendar.llm.harness.instructions.SystemPromptFiles.load(projectDir);
         String promptReplace = JllmProperties.blankToNull(p.systemPromptReplace()) != null
                 ? org.kendar.llm.harness.instructions.SystemPromptFiles.readFile(Path.of(p.systemPromptReplace()))
@@ -135,6 +137,7 @@ public class HarnessConfiguration {
                 .principalDirectory(identity.principals())
                 .tokenStoreDir(identity.tokenDir())
                 .tokenStore(identity.tokenStore())
+                .contentWarnings(contentWarnings)
                 .discoverPlugins()
                 .build();
         harness.enforceChatRetention(settings.chatRetentionLimit(), null);

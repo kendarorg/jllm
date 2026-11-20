@@ -35,6 +35,10 @@ flowchart TB
 | per-turn note | mode switch, new day, different directory | it is the **last** text of the system block |
 | messages | every turn | appended only (compaction rewrites them; mnemonic renders them deterministically) |
 
+Directory-scoped instruction files ([SKILLS §3](../guides/skills.md#3-directory-scoped-instruction-files)) are found
+while the agent works, after the system prompt is fixed. They are appended as text blocks to the tool results of the
+turn that touched their directory, so they extend the messages like any tool output and the cached prefix is kept.
+
 What this means per provider:
 
 - **Anthropic**: two breakpoints. The tool block is cached on its own; tools + system are cached as a whole. Messages
@@ -172,6 +176,17 @@ flowchart TD
 
 Shortened bodies keep the newest part and start with `[earlier history omitted]`. Plain requests use
 `compaction-system.md` and go to the summary model (fast model if configured).
+
+**Kept sections.** An update the model wrote is checked against the summary it replaces (`withKeptSections`):
+
+- `## Objective`, `## User-Stated Facts` or `## Work State` missing altogether is copied back whole, in front.
+- Under `## User-Stated Facts`, each bullet of the old section that the update does not repeat is appended to the
+  section. Bullets are compared normalised (no list marker, `**`/backticks, case, extra spaces, trailing `.;,`). A bullet
+  is not restored when the update replaced it: a new bullet with the same *label*, the words before the first `: `,
+  `=` or ` is `/` are `/` was ` (leading "the" ignored, at most 8 words): `Reviewer is Sam Lee` replaces
+  `Reviewer is Priya Raman`; `Deadline: Friday` replaces `Deadline: Thursday`.
+- Restoring never blocks a compaction. The summary may take the 3000 tokens reserved for it (10500 chars); old facts are
+  added oldest first (their order in the old summary) while they fit, the rest are dropped with a `WARN` log naming them.
 
 ### Other entry points
 
@@ -328,7 +343,8 @@ masked messages and messages before the current segment.
 
 | Input | Returns |
 |---|---|
-| `{"id": "r…"}` / `a…` / `t…` | the original tool output / tool input / reasoning, paged by `recallMaxChars` (12000); continue with `offset` |
+| `{"id": "r…"}` / `a…` / `t…` | the original tool output / tool input / reasoning, paged by `recallMaxChars` (12000); continue with `offset`. A first page that is not the whole text ends with `…[page 1 of N: X more chars, ~Y lines not shown. Search it with {"id", "query"} before concluding something is absent; next page: {"id", "offset"}]`; later pages with `…[X more chars: {"id", "offset"}]` |
+| `{"id": "r…", "query": "billing export \| audit"}` | search inside that one text (any id kind, also a run id): the lines holding every word of a variant (case-insensitive substring, so `retention days` matches `retention_days`), with one line of context, line number and char offset (continue with `{"id", "offset"}`); at most 20 hits; `No match for '…' in <id> (N chars, L lines)…` otherwise |
 | `{"id": "m…"}` | a whole message |
 | `{"id": "<runId>"}` | prompt, answer and transcript of a sub-agent run (`task` results carry `runId`) |
 | `{"query": "login \| auth flow"}` | up to 8 hits with ids and snippets; ` \| ` separates variants |
@@ -399,7 +415,8 @@ Nothing happens while the messages fit (and with `compaction.auto` off, nothing 
 
 1. **Offload.** A `tool_result` longer than `offloadChars` (20000) is written in full to
    `<scratch>/offload/<tool_use_id>.txt` and replaced in the log by
-   `[Output offloaded to <path> (N chars); read it with read_file if you need more.]` plus `previewChars` (1500) of head and
+   `[Output offloaded to <path> (N chars, L lines); only the first and last P chars are shown: grep it or read_file it with offset before concluding something is absent.]`
+   plus `previewChars` (1500) of head and
    tail. First outside the latest turn, then everywhere. The agent's own scratch directory is readable by the file
    tools in every mode. If the write fails the original stays.
 2. **Clear.** Tool results older than `keepRecentTurns` turns are blanked; an offload pointer is cut back to its first

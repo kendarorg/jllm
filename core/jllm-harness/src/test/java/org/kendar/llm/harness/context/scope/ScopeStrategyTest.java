@@ -14,6 +14,7 @@ import org.kendar.llm.harness.permission.ApprovalService;
 import org.kendar.llm.harness.state.InMemoryStateStore;
 import org.kendar.llm.harness.tools.HarnessTool;
 import org.kendar.llm.harness.tools.ToolContext;
+import org.kendar.llm.harness.todo.TodoStore;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -173,14 +174,38 @@ class ScopeStrategyTest {
         ArrayNode log = MAPPER.createArrayNode();
         user(log, "first");
         assistantToolUse(log, "t1");
-        toolResult(log, "t1", "r".repeat(500));
+        toolResult(log, "t1", "r".repeat(800));
         user(log, "second");
         assistantToolUse(log, "t2");
-        toolResult(log, "t2", "q".repeat(500));
+        toolResult(log, "t2", "q".repeat(800));
+        // 800 chars: the pointer (50 chars at each end and its header) must at least halve a result to be written
         ContextView v = strategy(1_000_000).onOverflow(turn(log));
         assertNotNull(v);
         // the forced pass offloads first, then clears and summarizes: the full text is still on disk
         assertTrue(Files.exists(dir.resolve("offload").resolve("t1.txt")));
         assertTrue(v.logChanged());
+    }
+
+    @Test
+    void theOffloadPointerSaysThePreviewIsPartialAndHowToSearch() {
+        StringBuilder text = new StringBuilder();
+        for (int i = 1; i <= 120; i++) text.append(i < 90 ? "worker line " : "billing export ").append(i).append('\n');
+        String pointer = strategy(2_000).pointer("/s/offload/t9.txt", text.toString(), 100);
+        String first = pointer.substring(0, pointer.indexOf('\n'));
+
+        assertTrue(first.startsWith(ScopeStrategy.OFFLOADED + "/s/offload/t9.txt (" + text.length() + " chars, 121 lines)"),
+                first);
+        assertTrue(first.contains("only the first and last 100 chars are shown"), first);
+        assertTrue(first.contains("grep") && first.contains("read_file") && first.contains("before concluding"), first);
+        assertFalse(pointer.contains("billing export 90\n"), "the middle is not in the preview");
+        // clearing keeps only the first line: the hint survives it
+        ArrayNode log = MAPPER.createArrayNode();
+        user(log, "first request");
+        assistantToolUse(log, "t9");
+        toolResult(log, "t9", pointer);
+        user(log, "second request");
+        user(log, "third request");
+        strategy(2_000).clearOld(log, 1);
+        assertEquals(first, log.get(2).path("content").get(0).path("content").asText());
     }
 }

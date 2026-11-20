@@ -323,7 +323,7 @@ is gone (compaction, `/clear`). The model cannot recall them (`history_recall` d
 |---|---|
 | approval grants | `ApprovalService`, saved in the `StateStore` (`grants`), survive a restart |
 | declined tier-3 sizes | `ContextManager`, memory only |
-| todo list (`scope` strategy) | `StateStore` (`todos-<agent>`); added to each request on a copy, not to the log |
+| todo list (`scope` strategy, or `context.todos`) | `StateStore` (`todos-<agent>`); `scope` adds it to each request on a copy, not to the log |
 | chat title, mode name changes | session row (the mode sentence is in the per-turn note, not the pinned block) |
 | sub-agent transcripts | `SubAgentRunLog` (the parent gets only the answer; mnemonic `history_recall` can read them) |
 | tool output beyond `toolMaxChars` | dropped (`[truncated N chars]`) |

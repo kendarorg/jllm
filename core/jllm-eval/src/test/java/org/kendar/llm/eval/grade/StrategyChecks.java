@@ -58,8 +58,9 @@ public final class StrategyChecks {
     // ---- mnemonic -------------------------------------------------------------------------------------------
 
     /**
-     * Earlier messages stay byte-identical from one request to the next, except messages that became a mask receipt
-     * and boundaries excused by a segment, emergency or manual compaction event (one boundary per event).
+     * Earlier messages stay byte-identical from one request to the next, except messages that became a mask receipt,
+     * messages whose old thinking a mask pass dropped, and boundaries excused by a segment, emergency or manual
+     * compaction event (one boundary per event).
      */
     public static Check mnemonicLogNeverRewritten() {
         String n = "mnemonicLogNeverRewritten";
@@ -80,7 +81,9 @@ public final class StrategyChecks {
                 boolean rewritten = b.size() < a.size();
                 for (int k = 0; k < Math.min(a.size(), b.size()) && !rewritten; k++) {
                     if (a.get(k).equals(b.get(k))) continue;
-                    if (!(Msgs.masked(b.get(k)) && !Msgs.masked(a.get(k)))) rewritten = true;
+                    if (Msgs.masked(b.get(k)) && !Msgs.masked(a.get(k))) continue;
+                    if (Msgs.withoutThinking(a.get(k)).equals(b.get(k))) continue;
+                    rewritten = true;
                 }
                 if (rewritten && ++used > excuses) {
                     return CheckResult.fail(n, "request " + reqs.get(i).index() + " rewrote earlier messages without a compaction");

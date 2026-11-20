@@ -8,42 +8,42 @@
       "agent": "plan",
       "tools": "*",
       "system": "You are a senior software architect.",
-      "prompt": "Application to build:\n{{input.request}}\n\nProduce: requirements, architecture, the list of files/modules, and an ordered implementation plan with acceptance criteria. Do not write code.",
+      "prompt": "Application to build:\n{{input.request}}\n\nProject directory: {{input.projectDir}}\nTest command: {{input.testCommand}}\n\nProduce: requirements, architecture, the list of files/modules, and an ordered implementation plan with acceptance criteria. Do not write code.",
       "answer": "text"
     },
     "implement": {
       "agent": "general",
       "tools": "*",
       "system": "You are a senior developer. Work in the project directory and follow the plan strictly.",
-      "prompt": "Request:\n{{input.request}}\n\nPlan:\n{{steps.plan}}\n\nImplement the application: create and edit the files, add unit tests. Reply with a short summary of what was done.",
+      "prompt": "Request:\n{{input.request}}\n\nProject directory: {{input.projectDir}}\n\nPlan:\n{{steps.plan}}\n\nImplement the application: create and edit the files, add unit tests. Reply with a short summary of what was done.",
       "answer": "text"
     },
     "review": {
       "agent": "plan",
       "tools": "*",
       "system": "You are a strict code reviewer. Inspect the actual files; do not change anything.",
-      "prompt": "Plan:\n{{steps.plan}}\n\nImplementation summary:\n{{steps.implement}}\n\nReview the code in the project against the plan: correctness, missing parts, security, readability. Start your answer with APPROVED or CHANGES NEEDED, then list the issues.",
-      "answer": "text"
+      "prompt": "Plan:\n{{steps.plan}}\n\nImplementation summary:\n{{steps.implement}}\n\nReview the code in {{input.projectDir}} against the plan: correctness, missing parts, security, readability. Reply with only a JSON object: {\"approved\": true or false, \"issues\": [\"...\"]}. approved is true only when nothing must change; issues lists every finding (empty when approved).",
+      "answer": { "approved": "boolean", "issues": "array" }
     },
     "rework": {
       "agent": "general",
       "tools": "*",
       "system": "You are a senior developer fixing review findings.",
-      "prompt": "Plan:\n{{steps.plan}}\n\nReview findings:\n{{steps.review}}\n\nFix every finding in the project files. Reply with a short summary of the changes.",
+      "prompt": "Plan:\n{{steps.plan}}\n\nReview findings:\n{{steps.review.issues}}\n\nFix every finding in the project files in {{input.projectDir}}. Reply with a short summary of the changes.",
       "answer": "text"
     },
     "test": {
       "agent": "general",
       "tools": "*",
-      "system": "You are a QA engineer. Run the real build and tests with your tools.",
-      "prompt": "Plan:\n{{steps.plan}}\n\nBuild the application and run all tests (add missing ones for the acceptance criteria). Report the commands run and the results. Start your answer with PASSED or FAILED.",
+      "system": "You are a QA engineer.",
+      "prompt": "Plan:\n{{steps.plan}}\n\nAdd the tests that are missing for the acceptance criteria in {{input.projectDir}}. The tests are run afterwards with: {{input.testCommand}}\nReply with a short summary of the tests added.",
       "answer": "text"
     },
     "fixtests": {
       "agent": "general",
       "tools": "*",
       "system": "You are a senior developer fixing failing builds and tests.",
-      "prompt": "Test report:\n{{steps.test}}\n\nFix the cause of every failure in the project files. Reply with a short summary.",
+      "prompt": "The command `{{steps.runtests.command}}` in {{input.projectDir}} ended with exit code {{steps.runtests.exitCode}} (timed out: {{steps.runtests.timedOut}}). Last lines of its output:\n{{steps.runtests.tail}}\n\nFix the cause of every failure in the project files. Reply with a short summary.",
       "answer": "text"
     }
   },
@@ -54,27 +54,56 @@
     "gate": {
       "type": "decide",
       "question": "Did the review approve the implementation?",
-      "by": "llm",
-      "agent": "plan",
-      "prompt": "Review result:\n{{steps.review}}",
+      "by": "java",
+      "chooser": "gate",
+      "with": {
+        "from": "steps.review",
+        "field": "approved",
+        "type": "boolean",
+        "map": { "true": "approved", "false": "changes" },
+        "fallback": "changes"
+      },
       "outcomes": { "approved": "test", "changes": "rework" },
       "default": "rework"
     },
     "rework":    { "type": "task", "task": "rework", "next": "review" },
-    "test":      { "type": "task", "task": "test", "next": "testgate" },
+    "test":      { "type": "task", "task": "test", "next": "runtests" },
+    "runtests": {
+      "type": "action",
+      "action": "run-command",
+      "with": {
+        "command": "{{input.testCommand}}",
+        "cwd": "{{input.projectDir}}",
+        "timeoutSeconds": 1800,
+        "tailLines": 80
+      },
+      "next": "testgate"
+    },
     "testgate": {
       "type": "decide",
       "question": "Did build and tests pass?",
-      "by": "llm",
-      "agent": "plan",
-      "prompt": "Test report:\n{{steps.test}}",
+      "by": "java",
+      "chooser": "gate",
+      "with": {
+        "from": "steps.runtests",
+        "field": "exitCode",
+        "type": "exitCode",
+        "map": { "0": "passed", "*": "failed" },
+        "fallback": "failed"
+      },
       "outcomes": { "passed": "done", "failed": "fixtests" },
       "default": "fixtests"
     },
-    "fixtests":  { "type": "task", "task": "fixtests", "next": "test" },
+    "fixtests":  { "type": "task", "task": "fixtests", "next": "runtests" },
     "done": {
       "type": "finish",
-      "result": { "plan": "{{steps.plan}}", "review": "{{steps.review}}", "tests": "{{steps.test}}" }
+      "result": {
+        "plan": "{{steps.plan}}",
+        "review": "{{steps.review}}",
+        "tests": "{{steps.test}}",
+        "testCommand": "{{steps.runtests.command}}",
+        "testOutput": "{{steps.runtests.tail}}"
+      }
     }
   }
 }

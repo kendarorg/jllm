@@ -7,6 +7,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.kendar.llm.harness.HarnessConfig;
 import org.kendar.llm.harness.context.*;
 import org.kendar.llm.harness.context.compaction.ContextManager;
+import org.kendar.llm.harness.todo.TodoStore;
+import org.kendar.llm.harness.todo.TodoTools;
 import org.kendar.llm.harness.tools.HarnessTool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -42,8 +44,8 @@ public class ScopeStrategy implements ContextStrategy {
     private static final String SUMMARY_PREFIX = "[Summary of the earlier conversation]";
     static final String TODO_OPEN = "<todo_list>\n";
     static final String TODO_CLOSE = "</todo_list>";
-    /** Rough size of the first line of an offload pointer (marker, path, size). */
-    private static final int POINTER_HEADER_CHARS = 150;
+    /** Rough size of the first line of an offload pointer (marker, path, size, search hint). */
+    private static final int POINTER_HEADER_CHARS = 220;
     /** Outside a forced pass, the tool rounds of the turn in progress are summarized only when they hold this much. */
     private static final long MIN_TURN_CUT_TOKENS = 3000;
 
@@ -113,7 +115,7 @@ public class ScopeStrategy implements ContextStrategy {
         this.todos = todos;
         this.options = options;
         this.offload = offload;
-        this.tools = TodoTools.create(todos, mapper);
+        this.tools = TodoTools.create(todos, mapper, true);
     }
 
     public static String systemAddendum() {
@@ -322,10 +324,17 @@ public class ScopeStrategy implements ContextStrategy {
         return pointer(path, text, options.previewChars());
     }
 
-    /** @param preview characters kept at each end */
+    /**
+     * The offload pointer. Its first line (kept when the result is later cleared) says the preview is partial and
+     * how large the file is, so the model searches it before concluding that something is absent.
+     *
+     * @param preview characters kept at each end
+     */
     String pointer(String path, String text, int preview) {
         int p = Math.min(preview, text.length() / 2);
-        return OFFLOADED + path + " (" + text.length() + " chars); read it with read_file if you need more.]\n"
+        long lines = text.chars().filter(c -> c == '\n').count() + 1;
+        return OFFLOADED + path + " (" + text.length() + " chars, " + lines + " lines); only the first and last " + p
+                + " chars are shown: grep it or read_file it with offset before concluding something is absent.]\n"
                 + text.substring(0, p) + "\n[...]\n" + text.substring(text.length() - p);
     }
 

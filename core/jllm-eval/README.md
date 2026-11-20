@@ -85,6 +85,7 @@ Shared:
 | `TESTS` | empty | Optional comma separated test classes (`-Dtest`). |
 | `TRIALS` | `1` | Trials per case (`eval.trials`). |
 | `MAX_TRIALS` | `2` | Cap on the trials of any case (`eval.maxTrials`). |
+| `UPDATE_BASELINE` | `0` | `1`: store this run as the model baseline (`eval.updateBaseline`). |
 | `TIMEOUT_SECONDS` | `300` | Per model request, and warm-up. |
 | `CASE_TIMEOUT_SECONDS` | `TIMEOUT_SECONDS` | Cap on each user turn of a case (`eval.caseTimeoutSeconds`). |
 | `COMPACTION_CTX_TOKENS` | `65536` | Context of the `compaction` group (`eval.compaction.contextTokens`). |
@@ -186,6 +187,7 @@ object descriptions, exception messages, connection-check output and `run.json`.
 | `eval.compaction.contextTokens` | Context size for the cases tagged `compaction` only; every other case uses the target's `contextTokens`. Default `65536`. The smoke scripts set it from `COMPACTION_CTX_TOKENS`. |
 | `eval.rateLimit.retries` / `waitSeconds` / `stepSeconds` | On an HTTP 429 from a paced endpoint (one with `maxRpm`) every call to that host pauses for `waitSeconds` (default 10), plus `stepSeconds` (default 5) per further repeat, and the call is repeated, up to `retries` times (default 5: 10 s, 15 s, 20 s, 25 s, 30 s), on top of the harness client's own short retry. |
 | `eval.systemPrompt.extra` | Text added to the system prompt of every case (empty by default). The smoke script sets, by default when the target is `nvidia`, a reminder to call tools through the structured interface, because some hosted models write a tool call as plain text; `SYSTEM_PROMPT_EXTRA=none` turns it off. A case's own `systemPrompt` setup replaces it. Because it changes the prompt under test, results with and without it are not comparable. |
+| `eval.updateBaseline` | `true` stores this run as the model baseline (`<model>/baselines/<model>.json`) once the report is written; the report still compares against the previous baseline first. Default `false`: runs are compared with the stored baseline, which stays as it is. Store a baseline only from a full run (all cases, the trial count you will compare with). |
 | `eval.caseTimeoutSeconds` | Cap on each user turn of a case, in seconds. `0` (default) keeps each case's own timeout. The smoke scripts set `300` (`CASE_TIMEOUT_SECONDS`, defaults to `TIMEOUT_SECONDS`), which also caps the `4-strategies` sessions (they declare 1800): on a slow model set `CASE_TIMEOUT_SECONDS=1800` for those runs. |
 | `eval.outputDir` | Results folder (git-ignored, survives `mvn clean`). Layout: `<model>/run-<timestamp>/` with `run.json`, `<feature>/<case>/<strategy>/result.json` and traces, plus `report.md` and `summary.json` written when the run ends; `<model>/baselines/`; `summary/merged.md` compares the latest run of every model; `history/` keeps one compact recap per run, `<date>_<model>.md` and `.json`, plus `INDEX.md` (not git-ignored: commit it to keep the eval history). |
 

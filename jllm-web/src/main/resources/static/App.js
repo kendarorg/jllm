@@ -1,6 +1,7 @@
 import {onMounted, ref} from 'vue';
 import {api, post} from './api.js';
-import {continueOffer, dismissOffer, dismissToast, init, newChat, shortId, store, toast} from './store.js';
+import {contentWarningText, continueOffer, dismissContentWarnings, dismissOffer, dismissToast, init, newChat, shortId,
+  store, toast} from './store.js';
 import SignIn from './components/SignIn.js';
 import SessionList from './components/SessionList.js';
 import ChatToolbar from './components/ChatToolbar.js';
@@ -58,7 +59,7 @@ export default {
       store.tab = TABS[(n + TABS.length) % TABS.length][0];
       e.preventDefault();
     }
-    return { dismissToast, focusRun, onStarted, workflows, store, TABS, onKey, continueOffer, dismissOffer, newChat, shortId, me, onSignedIn, signOut, view, show,
+    return { contentWarningText, dismissContentWarnings, dismissToast, focusRun, onStarted, workflows, store, TABS, onKey, continueOffer, dismissOffer, newChat, shortId, me, onSignedIn, signOut, view, show,
       onPasswordChanged };
   },
   template: `
@@ -80,6 +81,10 @@ export default {
   <div v-if="me && me.defaultPassword && view !== 'settings'" class="banner banner-info pw-banner" role="alert">
     You are using the default password.
     <button class="btn-sm" @click="view = 'settings'">Change it</button>
+  </div>
+  <div v-if="me && store.contentWarnings.length" class="banner banner-error content-warn-banner" role="alert">
+    <pre v-for="w in store.contentWarnings" :key="w.file">{{ contentWarningText(w) }}</pre>
+    <button class="btn-sm" @click="dismissContentWarnings">Dismiss</button>
   </div>
   <SignIn v-if="me === null" @signed-in="onSignedIn" />
   <SettingsPanel v-if="me && view === 'settings'" :me="me" @password-changed="onPasswordChanged" />

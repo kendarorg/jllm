@@ -76,7 +76,7 @@ class UserSkillsTest {
         Path fake = write("fake.md", "user pdf");
         Path csv = write("csv.md", "harness csv");
         SkillCatalog catalog = new SkillCatalog(List.of(new SkillSettings("pdf", "PDF", pdf.toString()),
-                new SkillSettings("csv", "CSV", csv.toString())));
+                new SkillSettings("csv", "CSV", csv.toString())), new org.kendar.llm.harness.safety.ContentWarnings());
         SkillTool view = new SkillTool(catalog).forChat(name -> !name.equals("csv"),
                 List.of(new UserSkill("pdf", "mine", () -> Files.readString(fake))));
 
@@ -88,7 +88,7 @@ class UserSkillsTest {
 
     @Test
     void ownSkillTextIsReadOnEachLoad() throws Exception {
-        SkillCatalog catalog = new SkillCatalog(List.of());
+        SkillCatalog catalog = new SkillCatalog(List.of(), new org.kendar.llm.harness.safety.ContentWarnings());
         String[] text = {"first"};
         SkillTool view = new SkillTool(catalog).forChat(null, List.of(new UserSkill("notes", "N", () -> {
             if (text[0] == null) throw new java.nio.file.NoSuchFileException("notes");

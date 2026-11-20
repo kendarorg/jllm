@@ -92,6 +92,8 @@ During a run the CLI prints:
 | `[plan] ...` | `plan_ready` (suggests `/edit`) |
 | `[cancelled]` | `cancelled` |
 | `[queued steer]`, `[applied] ...` | `steer_queued`, `steer_applied` |
+| `[instructions] sub/AGENTS.md` | `instructions_loaded` (a directory-scoped instruction file was added) |
+| `[content warning] <file>: ...` | `content_warning` and the startup list: suspicious content in a loaded file (loaded anyway), one line per finding. Shown only, never stored |
 
 Approvals show the tool and a preview, then `Allow? [y/N/a=allow for this chat]`: `y` allows once, `a` allows the tool
 for the rest of the chat (sub-agents included), anything else rejects.

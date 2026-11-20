@@ -138,7 +138,8 @@ class SuiteStructureTest {
         for (EvalCase c : all()) if (plugin(c)) byFeature.computeIfAbsent(c.feature(), k -> new ArrayList<>()).add(c);
         assertEquals(4, byFeature.size(), "pdf, docs, js, workflows");
         byFeature.forEach((f, cases) -> {
-            assertEquals(3, cases.size(), f + " case count");
+            // three cases; a plugin with more ground to cover takes one more
+            assertTrue(cases.size() == 3 || cases.size() == 4, f + " case count: " + cases.size());
             assertEquals(1, cases.stream().filter(c -> c.tag() == EvalCase.Tag.SMOKE).count(), f + " smoke");
             assertEquals(1, cases.stream().filter(c -> c.name().startsWith("failure-")).count(), f + " failure case");
         });

@@ -61,6 +61,14 @@ class SkillsCasesTest extends SuiteBase {
                         .harness(instructions("Always end every answer with the token END-OF-ANSWER-4321."))
                         .user("What color is the sky on a clear day? One short sentence.")
                         .check(answerContains("END-OF-ANSWER-4321")).build(),
+                // a directory-scoped AGENTS.md: loaded when the agent first works under billing/
+                full(SKILLS, "edge-scoped-instruction-file-applied")
+                        .setup(files("billing/AGENTS.md", "Every Java file created under billing/ must start with the "
+                                        + "comment line `// owner: billing-team`.\n",
+                                "billing/Invoice.java", "public class Invoice {\n    public int total() { return 0; }\n}\n"))
+                        .user("Read billing/Invoice.java, then create billing/Refund.java with a public class Refund "
+                                + "that has a method `public int amount()` returning 0.")
+                        .check(fileContains("billing/Refund.java", "// owner: billing-team")).build(),
                 full(SKILLS, "edge-disabled-skill-not-used")
                         .harness(skill("formal-greeting", GREETING, GREETING_BODY))
                         .action("/skills disable formal-greeting", (h, chat) -> h.commands().execute(chat, "/skills disable formal-greeting"))

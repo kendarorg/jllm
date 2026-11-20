@@ -1,4 +1,4 @@
-package org.kendar.llm.harness.context.scope;
+package org.kendar.llm.harness.todo;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;

@@ -122,6 +122,11 @@ Every step has a `type`.
 
 Any step can also set `retries`, `retryWaitMs`, `questions` and `waitMs`.
 
+`with` is an optional object of parameters for the Java action or chooser of the step. Its text values are slots, rendered
+before the call (`"cwd": "{{input.projectDir}}"`); the action reads them as `call.params()`. One registered action
+can so serve many differently configured steps. `with` must be an object; the built-ins below check their parameters
+when the flow is saved.
+
 ### Tasks
 
 A task is a prompt with slots and an enforced answer shape. Tasks live in the `tasks` map of the flow file.
@@ -188,6 +193,9 @@ recorded decision is reused and the model is not asked again.
 
 All three choosers are the same kind of step, so an author can swap one for another without touching the rest of the
 flow.
+
+For a pass/fail turning point prefer `by: java` with the built-in `gate` chooser (see 5) over `by: llm`: it reads one
+typed field of an earlier result (a task's structured answer, an exit code) and never reads prose.
 
 ### Asking people (`ask`)
 
@@ -296,10 +304,78 @@ public class RefundActions implements ActionProvider {
   step identity (`call.runId()`, `call.stepId()`, `call.idempotencyKey()`). It influences the flow only through the
   value it returns; throwing an exception raises a flow error.
 - An `after` action gets the model's answer as `call.taskResult()`.
+- `call.params()` is the step's `with` object, with its slots rendered (an empty object when the step has none).
 - A chooser must return one of the declared outcomes.
 - The same permission and approval rules as for tools apply to actions with side effects; there is no second system.
 - `restrict(action, roles...)` limits an action to roles. This is checked when a flow is saved, including a global flow
   against every role it is shared with.
+
+### Built-in: `gate` and `run-command`
+
+The plugin registers one chooser and one action of its own (`BuiltinActions`), seen by chat, web and command line alike.
+Both are configured by the step's `with`.
+
+**`gate` chooser.** Maps one typed value to an outcome, deterministically (core class
+`org.kendar.llm.harness.gate.GateResultsHandler`).
+
+```json
+"gate": {
+  "type": "decide", "by": "java", "chooser": "gate",
+  "with": {
+    "from": "steps.review", "field": "approved", "type": "boolean",
+    "map": { "true": "approved", "false": "changes" }, "fallback": "changes"
+  },
+  "outcomes": { "approved": "test", "changes": "rework" }, "default": "rework"
+}
+```
+
+| `with` field | Meaning |
+|---|---|
+| `from` | where the value is: `input...` or `steps.<step>...` |
+| `field` | the field to read inside it, dotted for nested objects; absent: the whole value |
+| `type` | `boolean`, `string`, `number` or `exitCode` (a whole number) |
+| `map` | value to outcome; `"*"` matches any other value of the right type |
+| `fallback` | the outcome for a value that is missing, has the wrong type or is not in the map |
+| `allowed` | optional list of permitted outcomes; absent: the map's outcomes plus the fallback |
+
+Text is never interpreted: `"approved": "yes"` is a string, not a boolean, and gives the fallback. Each decision is
+journaled with the value read, whether the fallback was used and the reason, for example
+`field 'approved' = false -> changes`. When the flow is saved the gate is built from its `with`: a bad type or map, a
+`from` that is neither the input nor a step, or an outcome of the gate that the step does not declare is refused then.
+
+An exit-code gate:
+
+```json
+"with": { "from": "steps.runtests", "field": "exitCode", "type": "exitCode",
+          "map": { "0": "passed", "*": "failed" }, "fallback": "failed" }
+```
+
+**`run-command` action.** Runs a command through the platform shell (cmd on Windows, zsh on macOS, bash elsewhere; `shell`
+overrides) and returns `{command, exitCode, timedOut, durationMs, tail}` as the step result.
+
+```json
+"runtests": {
+  "type": "action", "action": "run-command",
+  "with": { "command": "{{input.testCommand}}", "cwd": "{{input.projectDir}}", "timeoutSeconds": 1800, "tailLines": 80 },
+  "next": "testgate"
+}
+```
+
+| `with` field | Meaning |
+|---|---|
+| `command` | required; the command line |
+| `cwd` | working directory (default: the directory of the process) |
+| `timeoutSeconds` | positive number, default 600; past it the command and its children are killed, `timedOut` is true and `exitCode` -1 |
+| `tailLines` | how many last lines of output (stdout and stderr together) to keep, default 50 |
+
+The command runs as the user of the jllm process, with no sandbox: only use it in flows whose authors you trust.
+
+The sample flow `runConfig/flows/develop-app.json` uses both: the review task answers `{approved, issues}` and a gate
+reads `approved`; after the test task, `runtests` runs `input.testCommand` in `input.projectDir`, a gate reads
+`exitCode`, and `fixtests` gets the real output tail. The flow reaches `done` only after a real exit code 0.
+
+A chooser of your own can explain its choice the same way: implement `Registry.ExplainingChooser` and return a
+`Registry.Choice(outcome, detail)`; the detail is journaled with the decision.
 
 ### Actions that ask questions
 

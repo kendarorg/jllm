@@ -27,7 +27,8 @@ import java.util.regex.Pattern;
 /**
  * The settings file of a harness. String values may use {@code ${ENV_VAR}}.
  *
- * @param instructionFiles files (e.g. KENDAR.md) added to the system prompt, in order; missing files are skipped
+ * @param instructionFiles files added to the system prompt, in order; missing files are skipped. Null or absent =
+ *                         {@link #DEFAULT_INSTRUCTION_FILES}; a list replaces the default
  * @param execution        optional concurrency settings
  * @param sandbox          optional scratch directory and shell timeout
  * @param context          optional context window and compaction settings
@@ -175,8 +176,28 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
     /** Default of {@code sandbox.outputLogMaxBytes}: 50 KB. */
     public static final long DEFAULT_SANDBOX_OUTPUT_LOG_MAX_BYTES = 51_200;
 
-    /** @param maxReadBytes largest file the file tools read whole; null or {@code <= 0} = default (1 000 000) */
-    public record FileLimits(Long maxReadBytes) {
+    /**
+     * @param maxReadBytes            largest file the file tools read whole; null or {@code <= 0} = default (1 000 000)
+     * @param scopedInstructions      a file tool call inside the work dir adds the instruction files of the directories
+     *                                down to its path; default true
+     * @param scopedInstructionsDepth directory levels below the work dir looked at for them; null or negative = default
+     *                                ({@code ScopedInstructions.DEFAULT_MAX_DEPTH})
+     */
+    public record FileLimits(Long maxReadBytes, Boolean scopedInstructions, Integer scopedInstructionsDepth) {
+    }
+
+    /** Default of {@code instructionFiles}, in this order. */
+    public static final List<String> DEFAULT_INSTRUCTION_FILES = List.of("KENDAR.md", "AGENTS.md", "CLAUDE.md");
+
+    /** False when {@code files.scopedInstructions} is set to false. */
+    public boolean scopedInstructions() {
+        return files == null || files.scopedInstructions() == null || files.scopedInstructions();
+    }
+
+    /** {@code files.scopedInstructionsDepth}, or its default. */
+    public int scopedInstructionsDepth() {
+        Integer v = files == null ? null : files.scopedInstructionsDepth();
+        return v == null || v < 0 ? org.kendar.llm.harness.instructions.ScopedInstructions.DEFAULT_MAX_DEPTH : v;
     }
 
     /** @param fetchMaxBytes largest response body {@code web_fetch} reads; null or {@code <= 0} = default (5 MB) */
@@ -494,19 +515,22 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
      * @param deferCompactionOnThinkingOverflow Anthropic: do not compact while the turn in progress holds thinking
      *                        blocks (default false: compact and switch thinking off for the rest of the turn). true keeps
      *                        thinking but the prompt may exceed the budget until the turn ends: can increase charges
+     * @param todos           offer {@code todo_write} and {@code todo_read} with any strategy (default true; false hides
+     *                        them, except with the scope strategy, which always offers them)
      */
     public record Context(Integer maxTokens, Integer keepRecentTurns, Boolean auto, Integer keepTokens,
                           Integer buffer, String strategy, Mnemonic mnemonic, Scope scope, Boolean noiseCommands,
-                          Boolean deferCompactionOnThinkingOverflow) {
+                          Boolean deferCompactionOnThinkingOverflow, Boolean todos) {
 
         public Context(Integer maxTokens, Integer keepRecentTurns, Boolean auto, Integer keepTokens,
                        Integer buffer, String strategy, Mnemonic mnemonic, Scope scope, Boolean noiseCommands) {
-            this(maxTokens, keepRecentTurns, auto, keepTokens, buffer, strategy, mnemonic, scope, noiseCommands, null);
+            this(maxTokens, keepRecentTurns, auto, keepTokens, buffer, strategy, mnemonic, scope, noiseCommands, null,
+                    null);
         }
 
         public Context(Integer maxTokens, Integer keepRecentTurns, Boolean auto, Integer keepTokens,
                        Integer buffer, String strategy, Mnemonic mnemonic, Scope scope) {
-            this(maxTokens, keepRecentTurns, auto, keepTokens, buffer, strategy, mnemonic, scope, null, null);
+            this(maxTokens, keepRecentTurns, auto, keepTokens, buffer, strategy, mnemonic, scope, null, null, null);
         }
 
         public Context(Integer maxTokens, Integer keepRecentTurns, Boolean auto, Integer keepTokens, Integer buffer) {
@@ -603,7 +627,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
         Context c = context == null ? new Context(null, null, null, null, null) : context;
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox,
                 new Context(maxTokens, c.keepRecentTurns(), c.auto(), c.keepTokens(), c.buffer(), c.strategy(),
-                        c.mnemonic(), c.scope(), c.noiseCommands(), c.deferCompactionOnThinkingOverflow()), fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
+                        c.mnemonic(), c.scope(), c.noiseCommands(), c.deferCompactionOnThinkingOverflow(), c.todos()), fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
                 toolsWhitelistedEnvVars, files, web, loop, hooks, tokenStore);
     }
 
@@ -613,8 +637,13 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
         Context c = context == null ? new Context(null, null, null, null, null) : context;
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox,
                 new Context(c.maxTokens(), c.keepRecentTurns(), c.auto(), c.keepTokens(), c.buffer(), strategy,
-                        c.mnemonic(), c.scope(), c.noiseCommands(), c.deferCompactionOnThinkingOverflow()), fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
+                        c.mnemonic(), c.scope(), c.noiseCommands(), c.deferCompactionOnThinkingOverflow(), c.todos()), fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins, storage, whitelistedEnvVars,
                 toolsWhitelistedEnvVars, files, web, loop, hooks, tokenStore);
+    }
+
+    /** False only when {@code context.todos} is set to false: by default the todo tools are offered with any strategy. */
+    public boolean todos() {
+        return context == null || !Boolean.FALSE.equals(context.todos());
     }
 
     /** False when {@code context.noiseCommands} is set to false. */
@@ -676,7 +705,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
         mcpServers = mcpServers == null ? List.of() : List.copyOf(mcpServers);
         restApis = restApis == null ? List.of() : List.copyOf(restApis);
         skills = skills == null ? List.of() : List.copyOf(skills);
-        instructionFiles = instructionFiles == null ? List.of() : List.copyOf(instructionFiles);
+        instructionFiles = instructionFiles == null ? DEFAULT_INSTRUCTION_FILES : List.copyOf(instructionFiles);
         agents = agents == null ? List.of() : List.copyOf(agents);
         providers = providers == null ? List.of() : List.copyOf(providers);
         whitelistedEnvVars = org.kendar.llm.harness.util.EnvWhitelist.orAll(whitelistedEnvVars);
@@ -754,10 +783,14 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
      *                   answers); null when there is no project layer
      * @param prompt     asks about what the project defines and was not answered before; null = no one to ask
      * @param trust      where the answers are remembered
+     * @param contents   gets what the {@link org.kendar.llm.harness.safety.ContentScanner} finds in the free text of
+     *                   each layer (descriptions, prompts, see {@code ContentScanner.scanSettings}); the layer is
+     *                   loaded unchanged whatever is found
      */
     public static HarnessSettings loadLayered(SettingsSource source, Path projectDir, Function<String, String> env,
                                               ProjectMcpTrust.Prompt prompt, ProjectMcpTrust trust,
-                                              java.util.function.Consumer<String> warn) {
+                                              java.util.function.Consumer<String> warn,
+                                              org.kendar.llm.harness.safety.ContentWarnings contents) {
         ObjectMapper mapper = mapper(warn);
         JsonNode merged = null;
         List<JsonNode> deny = new ArrayList<>();
@@ -771,6 +804,8 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
                             + (tree == null || tree.isMissingNode() ? "empty" : tree.getNodeType().name().toLowerCase()));
                     continue;
                 }
+                contents.report(layer.origin(),
+                        org.kendar.llm.harness.safety.ContentScanner.scanSettings(layer.origin(), tree));
                 tree = tree.deepCopy();
                 for (JsonNode d : tree.path("permissions").path("deny")) {
                     if (!deny.contains(d)) deny.add(d.deepCopy());

@@ -155,9 +155,13 @@ ignored.
 | `sandbox.backend`, `sandbox.localFallback`, `sandbox.docker.*` | `local` (default) or `docker`; fall back to local when docker is missing (default `true`); `binary`, `image`, `memory`, `cpus`, `pidsLimit`, `user`, `network`, `mode` (`oneshot` or `daemon`, a long-running container), `remote`, `remoteHost` (docker on another machine). See [SANDBOX](../guides/sandbox.md). CLI and web: `--sandbox`, `--docker-image`, `--docker-mode`, `--docker-remote`, `--docker-remote-host` |
 | `sandbox.shell` | local backend: shell of the `bash` tool (`cmd`, `powershell`, `pwsh`, `bash`, `zsh`, `sh` or a path); default the OS one (`cmd` on Windows, `zsh` on macOS, `bash` elsewhere). See [SANDBOX](../guides/sandbox.md) |
 | `sandbox.outputLogMaxBytes` | default `51200`: cap of the spill log written when a `bash` output exceeds the kept 50 KB tail; `0` = unlimited. A capped log ends with `[log truncated at N bytes]` and the tool result says `log (itself truncated)` |
+| `instructionFiles` | default `["KENDAR.md", "AGENTS.md", "CLAUDE.md"]`, in that order, relative to the directory the harness runs in; `~` is the user home. Missing files are skipped, and so is a file with the same content as one already read (e.g. `CLAUDE.md` a symlink to `AGENTS.md`). A list in any settings layer replaces the default completely; `[]` loads none. A project with only `AGENTS.md` or only `CLAUDE.md` gets it with no configuration. See [SKILLS §2](../guides/skills.md#2-instruction-files) |
 | `files.maxReadBytes` | default `1000000`: the most text one `read_file` returns and the largest file `edit_file` changes (`grep` skips larger files); `<= 0` = default |
+| `files.scopedInstructions` | default `true`: when a file tool (`read_file`, `write_file`, `edit_file`, `ls`, `glob`, `grep`, `grep_code`) works on a path inside the work dir, the files with the `instructionFiles` names found in each directory from the work dir down to that path are added to the conversation, once per chat. See [SKILLS §3](../guides/skills.md#3-directory-scoped-instruction-files). `false` turns it off |
+| `files.scopedInstructionsDepth` | default `8`: directory levels below the work dir looked at for scoped instruction files; deeper directories are ignored |
 | `web.fetchMaxBytes` | default `5242880` (5 MB): largest response body `web_fetch` reads; `<= 0` = default |
 | `context.noiseCommands` | default `true`: after a run, shell commands that add no information (`mkdir`, `rm`, `cd`, ...) are replaced in the context by a stub, see [INTERNALS §9](internals.md#noise-commands). `false` turns it off |
+| `context.todos` | default `true`: offer `todo_write` and `todo_read` with every context strategy (`false` hides them, except with `scope`), plus a short system-prompt section about them. The list is saved per chat and agent in the `StateStore` (`<history>/<chat>/state/todos-<agent>.json` in the CLI and web), so it survives a resume. The `scope` strategy always offers them, whatever this setting, and also shows the list in every request ([CACHES §5](caches.md#5-scope-strategy)) |
 | `context.deferCompactionOnThinkingOverflow` | Anthropic extended thinking, default `false`. Compaction rewrites history, which voids the signed thinking blocks (API 400 "Invalid `signature` in `thinking` block"). `false`: finished turns lose their thinking blocks; if compaction fires in the middle of a tool loop, thinking is switched off for the rest of that turn. `true`: compaction is skipped while the turn in progress holds thinking blocks, so thinking stays on but the prompt can exceed the budget until the turn ends. **This can incur increased charges** (larger prompts, and a rewrite after the turn invalidates the prompt cache) |
 | `context.*` | [CACHES](caches.md); `context.strategy` is `compaction`, `mnemonic` or `scope`; `context.scope.*` are the thresholds of `scope` ([CACHES §5](caches.md#5-scope-strategy)) |
 | `output.toolMaxChars` | tool output kept in the context; the rest is cut with `[truncated N chars]` (the head is kept, the tail for `bash`) |
@@ -175,6 +179,39 @@ Both are read from `~/.jllm/` and the project `.jllm/`: for `SYSTEM.md` the proj
 `--system-prompt-replace FILE` replaces (wins over `SYSTEM.md`); `--system-prompt TEXT` still appends and comes last.
 After the prompt come, as before, the small-model rules, instruction files and strategy notes. Builder:
 `systemPrompt(addendum)`, `systemPromptReplace(text)`.
+
+### Suspicious content in loaded files
+
+Skills, instruction files (also the directory-scoped ones), agent `promptFile`s, the system prompt additions and the
+free text of every settings layer (`description`, `prompt`, `systemPrompt`, `instructions` values at any depth) are
+untrusted: a shared repository or a downloaded skill can carry text aimed at the model. Each is scanned when it is
+loaded, and **loaded unchanged** whatever is found; the scan only reports. It looks for:
+
+| Kind | What |
+|---|---|
+| `HIDDEN_UNICODE` | zero-width characters (U+200B-U+200D, U+2060), U+FEFF not at the start of the file, bidi controls (U+202A-U+202E, U+2066-U+2069), Unicode tag characters (U+E0000-U+E007F) and other invisible format characters. Not: soft hyphen, LRM/RLM, a joiner inside an emoji, an emoji flag sequence |
+| `PROMPT_INJECTION` | "ignore all previous instructions", "disregard your instructions", "you are now a/an/DAN", "new system prompt", "do not tell the user", "without telling the user", "reveal/print/send your system prompt / API key / token / credentials / .env" |
+| `REMOTE_EXECUTION` | `curl`/`wget` piped into a shell or interpreter, `bash <(curl ...)`, `iex`/`Invoke-Expression` with a download, `iwr ... \| iex` |
+| `ENCODED_BLOB` | a base64 run of 200+ characters |
+| `DATA_URL` | a `data:` URL |
+| `SECRET_URL` | a URL with a secret in its query or a secret-named variable (`$GITHUB_TOKEN`), or a URL with a secret word (token, password, API key, .env, ...) and a send verb (`send`, `post`, `upload`, `curl`, ...) on the same line |
+
+The patterns are kept narrow so that normal documentation passes: a `curl` example not piped into a shell, "ignore the
+build directory", "get your API key at https://...". They are the `INJECTION` and `REMOTE_EXECUTION` lists of
+`org.kendar.llm.harness.safety.ContentScanner`, one entry per pattern. At most 20 findings per file are reported.
+
+A file with findings is logged once, with a `WARN` naming the file, the line, the kind and a short excerpt (invisible
+characters shown as `<U+200B>`, secret-looking values as `<redacted>`, a base64 run only by its length). The user is
+told too; the warning is a message, never stored with a chat, in the history nor sent to the model:
+
+- **Startup files** (settings, skills, instruction files, agent prompts, system prompt additions): reported once per
+  process. The CLI prints them under the startup lines (`[content warning] <file>: ...`, one line per finding); the
+  web page reads `GET /api/content-warnings` when it loads and shows them in a banner until dismissed. Embedders:
+  create a `ContentWarnings`, pass it to `HarnessSettings.loadLayered(...)` and `builder.contentWarnings(...)`, then
+  read `harness.contentWarnings()`.
+- **Scoped instruction files**, loaded during a chat: a transient `content_warning` event (seq 0, never buffered nor
+  replayed), once per file and chat. The CLI prints it like the startup ones; the web shows it as a notice in the
+  chat, gone on reload.
 
 ### Authentication
 
@@ -476,6 +513,8 @@ waits `delayMs` before retry `attempt` of `max`; it is followed by the normal ev
 | `verify_failed` | `agent`, `attempt`, `message`: a `STOP` hook sent the agent back to work |
 | `tool_call` | `id`, `name`, `input` |
 | `tool_result` | `id`, `name`, `isError`, `output` (cut at `eventMaxChars`) |
+| `instructions_loaded` | `file`, `dir` (relative to the work dir): a directory-scoped instruction file was added to the conversation |
+| `content_warning` | `file`, `findings` (`line`, `kind`, `excerpt`), `agent`: suspicious content in a file just loaded, see [Suspicious content](#suspicious-content-in-loaded-files). `seq` 0: live only, never replayed nor stored |
 | `approval_request` | `id`, `chatId`, `type` (`tool`, `context`, `continue`, `stuck`, `host`, ...), `title`, `preview`, `proposed`, `agent` |
 | `classifier` | `tool`, `verdict` |
 | `compaction` | compaction: `tier`, `cleared`/`estimatedTokens`; mnemonic: `kind`, `masked`, `savedTokens`, `estimatedTokens`; scope: `strategy`, `estimatedTokens` |
@@ -503,6 +542,7 @@ user's edited text as `edited`.
 | `contextTokens(chatId)`, `contextBudget()`, `contextStrategy()` | context state |
 | `cost(session)` | estimated USD with `builder.pricing(new HarnessPricing(in, out, cacheRead, cacheWrite))` (per million tokens) |
 | `tools()`, `sources()`, `skills()` | runtime toggles of tools, MCP/REST sources, skills |
+| `contentWarnings()` | files loaded at startup with suspicious content, to show the user ([Suspicious content](#suspicious-content-in-loaded-files)) |
 | `workDir(chatId)`, `scratchDir(chatId)`, `sandbox()` | directories |
 | `builder.stateStore(...)` | where tool grants and todo lists are kept (default in memory; the CLI and web use files) |
 | `subAgentRuns()` | audit log of sub-agent runs |

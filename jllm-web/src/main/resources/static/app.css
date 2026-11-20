@@ -169,6 +169,8 @@ input[type=file]::file-selector-button {
 .banner-ok    { background: rgba(52,211,153,0.08);  border: 1px solid rgba(52,211,153,0.3);  color: var(--green); }
 .banner-error { background: rgba(248,113,113,0.08); border: 1px solid rgba(248,113,113,0.3); color: var(--red); }
 .banner-info  { background: rgba(108,138,255,0.08); border: 1px solid rgba(108,138,255,0.3); color: var(--accent); }
+.content-warn-banner { margin: 0.5rem 1rem 0; max-height: 40vh; overflow: auto; }
+.content-warn-banner pre { margin: 0 0 0.4rem; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.8rem; }
 
 /* ── Misc ────────────────────────────────────────────────────────────────── */
 

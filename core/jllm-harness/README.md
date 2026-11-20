@@ -19,7 +19,7 @@ Micrometer. Java 21, Jackson, JDK `HttpClient`, jsoup, swagger-parser, slf4j-api
   with handoff notes and offers `history_recall`. `scope` measures the whole request, offloads large tool results to
   disk, never compacts the first user message and keeps a `todo_write` task list outside the transcript.
 - **Sub-agents**: `task` tool with `general`, `explore`, `plan` and custom types; they inherit the caller's mode.
-- **Extensions**: settings file, hooks around agents, model calls and tool calls, plugins, skills, `KENDAR.md`
+- **Extensions**: settings file, hooks around agents, model calls and tool calls, plugins, skills, `KENDAR.md` / `AGENTS.md` / `CLAUDE.md` (also per directory)
   instruction files, slash commands and numbered menus.
 - **Persistence**: in memory or as files under `.jllm/history`; ports for your own stores. Tool grants and todo
   lists go through the `StateStore` port (`<history>/<chat>/state/*.json` in the CLI and web).
@@ -266,7 +266,8 @@ never compacted; see [CACHES §5](../../docs/reference/caches.md#5-scope-strateg
 
 The strategy offers `todo_write` (the complete list, at most one `in_progress`) and `todo_read`; both are `READ_ONLY`.
 The list is kept per chat and agent in the `StateStore`, added to the last user message of every request (never to the
-stored log) and sent to front ends as the `todos` event.
+stored log) and sent to front ends as the `todos` event. The tools live in `org.kendar.llm.harness.todo`;
+The other strategies offer them too unless `context.todos: false` (saved the same way, read back with `todo_read`).
 
 ```json
 "context": {"strategy": "scope",

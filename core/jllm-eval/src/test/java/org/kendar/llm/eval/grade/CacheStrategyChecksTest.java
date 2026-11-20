@@ -178,6 +178,20 @@ class CacheStrategyChecksTest {
                 .event("compaction", "{\"tier\":2,\"manual\":true}");
         is(PASS, Checks.mnemonicLogNeverRewritten(), manual.ctx());
 
+        // a mask pass drops the reasoning of earlier user turns: same message minus its thinking blocks
+        var answer = msg("assistant", "x");
+        answer.putArray("content").addObject().put("type", "text").put("text", "answer");
+        var thinking = answer.deepCopy();
+        thinking.withArray("content").insertObject(0).put("type", "thinking").put("thinking", "").put("signature", "sig");
+        var changed = msg("assistant", "x");
+        changed.putArray("content").addObject().put("type", "text").put("text", "changed");
+        var droppedThinking = Traces.trace().request("s", TOOLS, null, m1, thinking, msg("user", "next"))
+                .request("s", TOOLS, null, m1, answer, msg("user", "next"));
+        is(PASS, Checks.mnemonicLogNeverRewritten(), droppedThinking.ctx());
+        var thinkingAndText = Traces.trace().request("s", TOOLS, null, m1, thinking, msg("user", "next"))
+                .request("s", TOOLS, null, m1, changed, msg("user", "next"));
+        is(FAIL, Checks.mnemonicLogNeverRewritten(), thinkingAndText.ctx());
+
         // the handoff-notes request (handoff merged into the last message) is a side call, not a second rewrite
         var notes = m2.deepCopy();
         notes.withArray("content").addObject().put("type", "text").put("text", SegmentSwitcher.HANDOFF);

@@ -185,10 +185,14 @@ class WebAgentToolsTest {
     }
 
     @Test
-    void bothToolsAreReadOnlyInTheWebGroup() {
+    void fetchAndSearchAreReadOnlyDownloadIsAFileEditInTheWebGroup() {
+        java.util.Map<String, ToolKind> kinds = new java.util.HashMap<>();
         for (HarnessTool t : web.tools()) {
-            assertEquals(ToolKind.READ_ONLY, t.kind());
-            assertEquals("Web", t.group());
+            assertEquals("Web", t.group(), t.name());
+            kinds.put(t.name(), t.kind());
         }
+        assertEquals(ToolKind.READ_ONLY, kinds.get("web_fetch"));
+        assertEquals(ToolKind.READ_ONLY, kinds.get("web_search"));
+        assertEquals(ToolKind.FILE_EDIT, kinds.get("web_download"), "it writes a file: write_file rules cover it");
     }
 }

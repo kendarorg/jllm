@@ -36,7 +36,8 @@
             <groupId>org.kendar.llm</groupId>
             <artifactId>jllm-harness</artifactId>
             <version>${project.version}</version>
-            <scope>test</scope>
+            <!-- the gate handler and the shell; the host provides them -->
+            <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
