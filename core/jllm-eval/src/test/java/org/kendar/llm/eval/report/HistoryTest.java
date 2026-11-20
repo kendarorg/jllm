@@ -49,6 +49,18 @@ class HistoryTest {
     }
 
     @Test
+    void aRunStoredAsBaselineIsListedAsTheBaseline() throws Exception {
+        Path hist = tmp.resolve("history");
+        Path run = fakeRun("run-20261117-143000", "qwen3.6-27b", 0.75);
+        Files.writeString(run.resolve("summary.json"), Files.readString(run.resolve("summary.json"))
+                .replace("\"baseline\":{\"present\":false}", "\"baseline\":{\"present\":false,\"updated\":true}"));
+        History.record(run, hist);
+
+        String index = Files.readString(hist.resolve("INDEX.md"));
+        assertTrue(index.contains("| baseline | [20261117-143000_qwen3.6-27b.md]"), index);
+    }
+
+    @Test
     void indexKeepsTheRowsOfRecapsWhoseJsonIsNotHere() throws Exception {
         Path hist = tmp.resolve("history");
         History.record(fakeRun("run-20261101-090000", "claude-haiku-5-5", 0.9), hist);

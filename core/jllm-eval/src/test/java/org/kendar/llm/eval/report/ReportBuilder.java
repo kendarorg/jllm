@@ -185,8 +185,8 @@ public final class ReportBuilder {
         JsonNode b = s.path("baseline");
         d.h("Baseline");
         if (!b.path("present").asBoolean()) {
-            d.p("No baseline for this model yet" + (b.path("updated").asBoolean() ? "; this run was stored as baseline."
-                    : ". Rerun with the update option to store this run."));
+            d.p(b.path("updated").asBoolean() ? "This run is the baseline of this model: later runs are compared with it."
+                    : "No baseline for this model yet. Rerun with the update option to store this run.");
         } else {
             d.p("Compared with baseline run " + b.path("baselineRun").asText() + ": overall pass rate "
                     + signed(b.path("overallDelta")) + ", tokens/trial " + signed(b.path("tokensPerTrialDelta"))
