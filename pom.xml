@@ -54,7 +54,7 @@
     </modules>
 
     <properties>
-        <revision>1.1.0-jllm</revision>
+        <revision>1.2.0-jllm</revision>
         <central-publish.skip>false</central-publish.skip>
         <graalvm.version>25.5.5.0.3</graalvm.version>
         <maven.compiler.source>21</maven.compiler.source>
