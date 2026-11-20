@@ -290,13 +290,79 @@ SQL, can be plugged in without touching controllers or the harness. File impleme
   identity, governance, observability, deployment, roadmap and limits). `FUTURE.md` was removed.
 - The `jllm-js` plugin's own assembly descriptor was dropped in favour of the shared build.
 
+## 18. Evaluation module (`jllm-eval`)
+A test-only module, outside the default build (`eval` Maven profile), that runs the harness features against real
+models.
+- **Cases:** one suite per feature of `FEATURES.md` (harness core, plugins, prompt-cache layout, context strategies),
+  graded by deterministic checks (files, tool calls, server state) and an LLM judge with rubrics (`no-false-claim`,
+  grounded correctness). Groups `unit`, `smoke`, `full`, `strategy`, `compaction`. Features without cases are listed
+  with their reason; `FRAGILE_CASES.md` names the cases that can fail for reasons unrelated to the feature.
+- **Roles:** target, judge and fast model, each with its own provider, model, endpoint and key; a connection check
+  before the run; a shared `RequestPacer` keeps rpm limits with parallel test classes; a judge cache.
+- **Scripts:** `run-smoke.sh` / `run-smoke.ps1` with presets in `scripts/envs/` (Anthropic, NVIDIA NIM, Ollama,
+  llama.cpp with a Sonnet judge); `docker/llm.sh` / `llm.ps1` deploy a llama.cpp model on a remote GPU host.
+- **Results:** per run `run.json`, per-case results and traces, `report.md` and `summary.json`; per-model baselines
+  (`UPDATE_BASELINE`); a merged comparison of the latest run of every model; secrets masked in all outputs;
+  `*_MODEL_NAME` names a server alias in results.
+- **History:** every run adds a recap to `eval-results/history/` and a row to `INDEX.md` (pass rate, pass^k,
+  tokens per trial, change against the baseline). First baselines, 148 cases: `claude-haiku-5-5` 99.3%,
+  `Qwen3.6-35B` on llama.cpp 98.0% (pass^k 94.6%), both judged by `claude-sonnet-5-5`.
+
+## 19. Fixes found by the eval
+The first runs exposed model-facing wording and guard rails that were then tightened:
+- **Denials:** a hook or permission-rule denial now tells the model not to reach the same result another way and to
+  report the denial; a failed stop check tells it to stop and say what is missing rather than invent content.
+- **Shell writes:** a `deny` rule on `write_file`/`edit_file` also denies a `bash` command writing a matching path
+  (redirection, `tee`, `touch`, `cp`/`mv`, `dd of=`, `sed -i`, PowerShell file cmdlets), via `ShellWrites`.
+  `web_download` is gated like `write_file`.
+- **Plan mode:** a write result says the project file was not changed (the copy went to the scratch dir); a path
+  refusal says the limit holds for every tool, so the model does not retry through the shell.
+- **Truncated output:** offloaded tool output and `history_recall` pages say how much is not shown and to search it
+  before concluding something is absent; `history_recall` `{"id", "query"}` searches inside one text.
+- **Compaction:** an updated summary keeps the `Objective`, `User-Stated Facts` and `Work State` sections and restores
+  dropped facts unless a bullet with the same label replaced them.
+- **Model calls:** `RetryBudget` caps retry sleeps at 10 s per call and errors carry the rate-limit headers;
+  `SimpleCompletion` runs helper calls with thinking off; the Anthropic client uses adaptive thinking with
+  `output_config.effort`, drops reasoning blocks voided by a mask (`block_binding`) and leaves out empty system parts.
+- **Tool groups:** `request_tool_group` lists every group with its tools and stays offered once all are enabled, so the
+  tool list (and the cache) never shrinks.
+
+## 20. Shell, instruction files and todos
+- **Shell:** `sandbox.shell` picks the shell of the `bash` tool (default `cmd` on Windows, `zsh` on macOS, `bash`
+  elsewhere; `sh` in Docker). The shell is described in the `bash` tool description (`shellDescription()`), not in the
+  per-turn note, so a chat without the tool is never told about one. `LocalShell` and `ShellPaths` are shared with the
+  workflows plugin.
+- **Instruction files:** default `KENDAR.md`, `AGENTS.md`, `CLAUDE.md`, duplicates by content skipped.
+  Directory-scoped instruction files (`ScopedInstructions`) are added to the tool results of the turn that first
+  touches their directory, once per chat, keeping the cached prefix (`files.scopedInstructions`,
+  `scopedInstructionsDepth`, event `instructions_loaded`).
+- **Todos:** `todo_write` / `todo_read` moved to `org.kendar.llm.harness.todo` and are offered with every context
+  strategy unless `context.todos: false`.
+
+## 21. Content scanning, GPT-6.2 and workflow gates
+- **Suspicious content:** `safety.ContentScanner` scans skills, instruction files, agent prompts and settings text for
+  hidden Unicode, injection phrasing, download-and-run, encoded blobs, data URLs and secret exfiltration. It only
+  reports: CLI lines, a web banner (`GET /api/content-warnings`) and a live `content_warning` event for scoped files;
+  never stored nor sent to the model.
+- **`openaiGpt62` provider:** `OpenAiResponsesModelClient` on the Responses API, which GPT-6.2 needs for tool calls.
+  System parts sent as two `developer` inputs (no `instructions`) to keep them cached, stateless with encrypted
+  reasoning kept as `thinking` blocks, no `temperature`, `thinking` as `reasoning.effort`.
+- **Gates:** `gate.GateResultsHandler` maps one typed value (boolean, string, number, exit code) to a response of a
+  closed list, never reading prose. The workflows plugin adds `BuiltinActions`: the `gate` chooser and the
+  `run-command` action (exit code and output tail); steps take a `with` object of parameters, checked at save time;
+  `Registry.ExplainingChooser` journals the reason of a choice. The sample `develop-app` flow reaches `done` only after
+  a real test exit code 0.
+- Plan for these items: `evolution.md`.
+
 ## Overall direction
 - **Where it lives:** an embedded component, then a standalone library with a CLI, then a web front end, then a
   plugin host with workflows and pluggable storage.
-- **Model target:** Anthropic, then local llama.cpp/Qwen, then small models.
+- **Model target:** Anthropic, then local llama.cpp/Qwen, then small models, then OpenAI's Responses API (GPT-6.2).
 - **Context management:** three-tier compaction, then opencode-style compaction, then a second strategy that never
   rewrites the log, then a budgeted one with offloading and a task list.
 - **Permissions:** one approval flag, then a mode-by-tool-kind matrix, then sub-agents inheriting the parent's
   permissions, then per-user roles narrowed by each user's own settings.
 - **Hardening:** a full review pass closing jail escapes, races and unbounded reads before adding features.
+- **Verification:** scripted fake models, then a live eval suite against real models with a recorded history and
+  baselines, whose failures drive the wording of what the model is told.
 - **Unchanged throughout:** the prompt-cache prefix must stay byte-stable.

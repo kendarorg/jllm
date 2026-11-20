@@ -106,7 +106,18 @@ During the run the log shows the planned number of case runs and, after each one
 group was skipped or stopped early. The count follows the JUnit selection (`TEST_GROUPS`, `TESTS`).
 
 Each run adds a recap to `eval-results/history/` and a row to `eval-results/history/INDEX.md`. The Markdown files
-(`INDEX.md` and each `<date>_<model>.md` recap) are tracked by git; the `.json` recaps are ignored.
+(`INDEX.md` and each `<date>_<model>.md` recap) are tracked by git; the `.json` recaps are ignored. The index is
+rebuilt from the `.json` recaps present, oldest first, and keeps the rows of recaps whose `.json` is missing (a fresh
+clone has only the Markdown). The `vs baseline` column reads:
+
+| Value | Meaning |
+|---|---|
+| `+1.2 pts` | Overall pass-rate change against the stored baseline of the model. |
+| `+1.2 pts (new baseline)` | As above; this run then replaced the baseline (`UPDATE_BASELINE=1`). |
+| `baseline` | No previous baseline; this run was stored as the first one. |
+| `no baseline` | No baseline stored and this run was not stored either. |
+
+The recap's `Baseline` section says the same in words.
 
 ## Quick start
 
