@@ -18,6 +18,8 @@ A chat a user may not see answers 404, as if it did not exist.
 
 ## The sample implementation (`jllm-web`)
 
+![Role editor in jllm-web](../images/roles_web.png)
+
 - **Password** sign-in with a sliding session cookie; the user's other sessions are revoked on a password change;
   five failed attempts lock a login or address for 30 s, and an unknown login and a wrong password give the same answer.
 - **OpenID Connect**: authorization code with PKCE against one provider (Entra, Keycloak, Okta, Google, ...). Optional

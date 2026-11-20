@@ -53,6 +53,8 @@ It does not protect against code already inside the container, and it has no TLS
 
 ## 3. Network egress
 
+![Per-host approval in jllm-web: allow once, allow the host and subdomains for this chat, or reject](../images/tools_auth_web.png)
+
 - `web_fetch` and `web_download` ask before contacting a host. The user may grant a host
   and its subdomains for one chat. `web_download` writes a file, so it is also gated like `write_file` (approval,
   plan-mode scratch copy), and a `write_file` permission rule covers it too. A redirect to another host asks again; https to http redirects are refused.

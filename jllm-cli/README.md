@@ -3,6 +3,8 @@
 Terminal front end for [jllm-harness](../core/jllm-harness/README.md): an interactive chat, or a single `--prompt`, over the
 standard tools. One class, `org.kendar.llm.cli.Main`, packaged as a shaded runnable jar.
 
+![Session with untrusted tool output and inline host and write approvals](../docs/images/chat_cli.png)
+
 ## Build and run
 
 ```sh

@@ -3,6 +3,8 @@
 Browser front end for [jllm-harness](../core/jllm-harness/README.md): a Spring Boot application with a REST + SSE API and a
 Vue 3 chat UI. The Spring layer is a thin adapter; all agent logic lives in the framework-free harness.
 
+![Chat with tool calls and a confirmation before web_download](../docs/images/chat_web.png)
+
 ## Build and run
 
 ```sh
@@ -112,6 +114,9 @@ jllm.auth.oidc.default-role=user                       # required (and must exis
   `password` answers 404 on `/auth/oidc/*`. `/api/logout` ends the local session only.
 
 ### Roles
+
+![Role editor: approval mode, allow/ask/deny per tool pattern, tool grants](../docs/images/roles_web.png)
+
 - `tools`: tool-name patterns, `*` matching any run of characters: `"read_file"`, `"mcp__docs__*"` (a whole MCP
   server, also tools it adds later), `"billing__*"` (a REST API), `["*"]` (everything).
 - `readOnly`: optional; `true` keeps only read-only tools. `approval`: optional; `"off"` turns approval prompts off,

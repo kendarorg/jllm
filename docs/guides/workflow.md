@@ -7,6 +7,8 @@ decides order, branching, waiting and termination.
 "Deterministic" means deterministic orchestration: the same flow, with the same inputs and the same decisions, walks the
 same path. The model's answers are not deterministic.
 
+![A flow in the jllm-web editor: plan, implement, review, gate, test, with rework loops](../images/flows_web.png)
+
 This page is the practical guide.
 Class names below are real; re-check against `plugins/jllm-workflows` when changing behavior.
 
@@ -440,7 +442,8 @@ Creating and editing global flows is done in the web UI; it is not built on the 
 
 ### Web
 
-`jllm-workflow-web` mounts these endpoints under its plugin path (authentication is done by the host):
+`jllm-workflow-web` mounts these endpoints under its plugin path (authentication is done by the host). The
+[jllm-web](../../jllm-web/README.md) **Flows** page edits flows as a graph on top of them (screenshot at the top of this page).
 
 | Endpoint | Purpose |
 |---|---|
