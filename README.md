@@ -127,7 +127,7 @@ scripts/run-eval.sh                                       # eval module (needs a
 mvn test                                                  # js plugin tests run on the same set
 ```
 
-The release zip ships the same set in `lib-ext/`. Licensing and details: [JS guide](docs/guides/js.md#enabling).
+The release zip ships no GraalJS: `setup.sh` / `setup.ps1`, released next to it, unzip it and download the edition you choose into `lib-ext/`. Licensing and details: [JS guide](docs/guides/js.md#enabling).
 
 > The GraalJS libraries are not in this repository. If they are present in `.graal/`, you downloaded them with
 > `scripts/setup` and accepted the license terms of the chosen edition. After a `graalvm.version` change, run

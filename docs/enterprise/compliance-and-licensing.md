@@ -15,8 +15,8 @@ Spring, JPA or Micrometer in the library. Plugins bring their own dependencies o
 ### Not bundled: GraalJS
 
 The `run_js` tool (`jllm-js`) needs GraalJS, which is not in any jllm jar: `jllm-cli`, `jllm-web` and the plugin declare
-it `provided`, and the release zip ships it in a replaceable `lib-ext/` folder together with a manifest (coordinate and
-SHA-256 per jar). The release scripts re-read the licence of every resolved pom, fail on anything but UPL, MIT, Apache,
+it `provided`, and the release zip ships an empty `lib-ext/` with the manifests of both editions (coordinate and
+SHA-256 per jar); the released `setup` scripts download the edition the operator chooses. The release scripts re-read the licence of every resolved pom, fail on anything but UPL, MIT, Apache,
 BSD or Unicode/ICU (the ICU4J shaded in GraalJS), and fail if a front-end jar contains GraalJS classes. Version caveat:
 from GraalJS 25.1 the central `js` pom declares UPL and MIT and `js-community` is a deprecated alias; earlier `js` poms
 pulled an enterprise artifact under Oracle terms. At the pinned version the non-community isolate (`js-isolate`) still

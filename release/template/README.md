@@ -101,11 +101,25 @@ key is set to anything but `none`, so leave it out of the settings file the web 
 
 ## Contents
 
+```
+Release files (next to each other)         Inside the zip: jllm-<version>/
+jllm-<version>.zip                         ├── jllm-cli.jar, jllm-web.jar
+SHA256SUMS                                 ├── run-cli.sh/.cmd, run-web.sh/.cmd
+setup.sh, setup.ps1                        ├── fetch-graaljs.sh/.cmd/.ps1
+                                           ├── lib-ext/            empty until setup / fetch-graaljs
+                                           │   └── manifests/      graaljs-community / graaljs-oracle
+                                           ├── plugins/            js, pdf, docs, workflows, workflow-web
+                                           ├── settings/settings.json
+                                           ├── webauth/            users/, permissions/
+                                           ├── examples/flows/
+                                           └── application.properties, README.md, LICENSE, NOTICE
+```
+
 | Path | What |
 |---|---|
 | `jllm-cli.jar`, `jllm-web.jar` | the two front ends (they do not contain GraalJS) |
-| `lib-ext/` | the GraalJS libraries of `run_js` (community edition) and their manifest; replaceable, may be empty |
-| `fetch-graaljs.sh`, `.cmd`, `.ps1` | replace the contents of `lib-ext/` with the `community` or `oracle` set from Maven Central |
+| `lib-ext/` | the GraalJS libraries of `run_js`: empty in the zip, filled by `setup` / `fetch-graaljs`; holds the manifests of both editions |
+| `fetch-graaljs.sh`, `.cmd`, `.ps1` | fill or replace `lib-ext/` with the `community` or `oracle` (commercial) set from Maven Central |
 | `plugins/` | `js` (`run_js`), `pdf` and `docs` (document readers), `jllm-workflows`, `jllm-workflow-web` |
 | `settings/settings.json` | enables the plugins above; remove an entry to disable one |
 | `application.properties` | web app properties (provider, model, key); all commented out |
@@ -114,8 +128,9 @@ key is set to anything but `none`, so leave it out of the settings file the web 
 
 ## JavaScript (`run_js`)
 
-`run_js` runs model-written JavaScript in a sandbox. Its engine, GraalJS, is not inside the jars: it is in `lib-ext/`,
-which `run-cli` and `run-web` already put on the class path, so it works as unpacked. With an empty `lib-ext/` both
+`run_js` runs model-written JavaScript in a sandbox. Its engine, GraalJS, is neither inside the jars nor in this zip:
+`setup.sh` / `setup.ps1`, released next to the zip, unzip it, ask the edition (commercial or community; the commercial
+terms are shown and must be accepted) and fill `lib-ext/`, which `run-cli` and `run-web` put on the class path. With an empty `lib-ext/` both
 front ends start normally and `run_js` is simply not offered (one warning in the log says why). To restore the set or
 switch edition: `./fetch-graaljs.sh community` or `./fetch-graaljs.sh oracle` (`fetch-graaljs.cmd` on Windows). It empties
 `lib-ext/*.jar` first, downloads from Maven Central and checks the SHA-256 of every jar. The `oracle` set declares the

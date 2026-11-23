@@ -33,7 +33,7 @@ scripts/run-web.sh --jllm.provider=anthropic                   # Windows: script
 ```
 
 `scripts/setup --edition community` selects the community edition; the default is the commercial one, whose terms setup asks you to accept (see the
-[JS guide](../guides/js.md#licensing)). The release zip carries the set in `lib-ext/`, which its launchers use.
+[JS guide](../guides/js.md#licensing)). The release zip has an empty `lib-ext/`: run the released `setup.sh` / `setup.ps1` next to it to unzip it and download the edition you choose.
 
 ## Browser
 

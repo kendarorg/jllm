@@ -15,7 +15,7 @@ Without them (or without the regex jar) the plugin logs one WARN naming the miss
 harness starts, `run_js` is absent. The `jllm-cli` and `jllm-web` Maven modules declare them `provided`, so their tests
 and an IDE run (tick "include dependencies with provided scope") see the same set the release ships.
 
-- **Release zip**: the jars are in `lib-ext/`, and `run-cli` and `run-web` add that folder to the class path (CLI) or the
+- **Release zip** (layout below): the zip ships an empty `lib-ext/`. `setup.sh` / `setup.ps1`, released next to the zip, unzip it (Linux, macOS, Windows), ask the edition (commercial, with the Oracle terms to accept, or community) and run `fetch-graaljs` for you. `run-cli` and `run-web` add that folder to the class path (CLI) or the
   loader path (web, `-Dloader.path=lib-ext`; the web jar uses the ZIP layout, so `java -jar jllm-web.jar` keeps
   working). An empty `lib-ext/` starts normally with `run_js` off. To swap or restore the set run `fetch-graaljs`
   (`.sh`, `.cmd`, `.ps1`) with `community` or `oracle`: it empties `lib-ext/*.jar`, downloads from Maven Central,
@@ -29,6 +29,33 @@ and an IDE run (tick "include dependencies with provided scope") see the same se
   offered in the prompt. Every module then sees the set as a `provided` dependency, with no profile and no flag; the
   build stops at `validate` with a "not set up" message when the set of the current version is missing, so run setup
   again after a `graalvm.version` change. `scripts/run-cli`, `scripts/run-web` and `scripts/run-eval` use it too.
+Layouts. The release:
+
+```
+Release files (next to each other)         Inside the zip: jllm-<version>/
+jllm-<version>.zip                         ├── jllm-cli.jar, jllm-web.jar
+SHA256SUMS                                 ├── run-cli.sh/.cmd, run-web.sh/.cmd
+setup.sh, setup.ps1                        ├── fetch-graaljs.sh/.cmd/.ps1
+                                           ├── lib-ext/            empty until setup / fetch-graaljs
+                                           │   └── manifests/      graaljs-community / graaljs-oracle
+                                           ├── plugins/            js, pdf, docs, workflows, workflow-web
+                                           ├── settings/settings.json
+                                           ├── webauth/            users/, permissions/
+                                           ├── examples/flows/
+                                           └── application.properties, README.md, LICENSE, NOTICE
+```
+
+A source checkout:
+
+```
+Source checkout (after scripts/setup)
+.graal/                                    git-ignored
+└── <graalvm.version>/
+    ├── graaljs-<edition>.manifest         edition, version, SHA-256 of every jar
+    └── repo/                              Maven layout: jars + poms
+        └── org/kendar/llm/graal/jllm-graal-set/<version>/   gate artifact, written last
+```
+
 - **Embedding the harness**: add `org.graalvm.polyglot:polyglot`, `org.graalvm.polyglot:js` (type `pom`),
   `org.graalvm.regex:regex` and `org.graalvm.polyglot:js-isolate-community` (type `pom`) at the version of the root
   pom (`graalvm.version`). Where the host is a fat jar, keep `META-INF/services` entries merged (shade
@@ -40,8 +67,8 @@ implementation name.
 
 ## Licensing
 
-jllm is Apache 2.0 and does not redistribute GraalJS inside its jars. The release zip carries it in `lib-ext/` under
-the licence each pom declares, listed in `NOTICE` and the manifest. From GraalJS 25.1 the central `js` pom declares
+jllm is Apache 2.0 and does not redistribute GraalJS inside its jars. The release zip does not carry it: `setup` / `fetch-graaljs` download it into `lib-ext/` under
+the licence each pom declares, listed in `NOTICE` and the manifests. From GraalJS 25.1 the central `js` pom declares
 UPL and MIT and `js-community` is a deprecated alias of it; earlier `js` poms pulled an enterprise artifact under
 Oracle terms. The isolate add-on exists in two flavours: `js-isolate-community` (UPL, MIT) and `js-isolate`, whose pom
 declares the GraalVM Free Terms and Conditions. `fetch-graaljs oracle` refuses to run until the operator passes

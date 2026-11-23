@@ -1,24 +1,23 @@
 #!/usr/bin/env bash
-# Builds target/release/jllm-<version>.zip: cli + web + plugins + settings + users + runners + lib-ext (GraalJS).
-# Usage: release/release.sh [--build] [--out DIR] [--graal community|oracle] [--accept-oracle-terms]
-# GraalJS is not inside the front-end jars: it is resolved with release/graaljs and shipped in lib-ext/ (default edition
-# community). The manifests of both editions go to lib-ext/manifests/ for fetch-graaljs; the build fails if a front-end
-# jar contains GraalJS or if a resolved pom declares a licence other than UPL, MIT, Apache, BSD, Unicode/ICU.
+# Builds target/release/jllm-<version>.zip: cli + web + plugins + settings + users + runners + an empty lib-ext, and
+# copies setup.sh / setup.ps1 (release/setup) next to the zip as separate release files.
+# Usage: release/release.sh [--build] [--out DIR]
+# No GraalJS jar is shipped: lib-ext/manifests/ holds the manifests of both editions (resolved with release/graaljs) and
+# the user runs setup.sh / setup.ps1, which unzips the distribution, asks the edition and fetches it with fetch-graaljs.
+# The build fails if a front-end jar contains GraalJS or if a resolved pom declares a licence other than UPL, MIT,
+# Apache, BSD, Unicode/ICU (the Oracle terms are only recorded in the manifest, never accepted here).
 # Without --build it asks whether to build (mvn clean install, with tests); the default is no: package the existing jars.
 set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)  # this script lives in <root>/release
-out="$root/target/release"; build=0; graal=community; accept=""
+out="$root/target/release"; build=0
 while [ $# -gt 0 ]; do
   case $1 in
     --build) build=1;;
     --out) out=$2; shift;;
-    --graal) graal=$2; shift;;
-    --accept-oracle-terms) accept="--accept-terms";;
     *) echo "unknown argument $1" >&2; exit 2;;
   esac
   shift
 done
-case $graal in community) other=oracle;; oracle) other=community;; *) echo "--graal is community or oracle" >&2; exit 2;; esac
 cd "$root"
 if [ "$build" = 0 ]; then
   read -r -p "Build with mvn clean install (tests included)? [y/N] " ans || ans=""
@@ -65,12 +64,13 @@ for j in "$stage/jllm-cli.jar" "$stage/jllm-web.jar"; do
   fi
 done
 mkdir -p "$stage/lib-ext/manifests"
-"$root/release/graaljs/resolve.sh" "$graal" "$stage/lib-ext" $accept
-# the other edition: manifest only (nothing of it is shipped; the operator accepts its terms when running fetch-graaljs)
-tmpother=$(mktemp -d)
-"$root/release/graaljs/resolve.sh" "$other" "$tmpother" --accept-terms
-cp "$tmpother/graaljs-$other.manifest" "$stage/lib-ext/manifests/"; rm -rf "$tmpother"
-cp "$stage/lib-ext/graaljs-$graal.manifest" "$stage/lib-ext/manifests/"
+# manifests only, nothing is shipped: the operator accepts the terms of the oracle edition in setup / fetch-graaljs
+for ed in community oracle; do
+  tmped=$(mktemp -d)
+  "$root/release/graaljs/resolve.sh" "$ed" "$tmped" --accept-terms
+  cp "$tmped/graaljs-$ed.manifest" "$stage/lib-ext/manifests/"; rm -rf "$tmped"
+done
+cp release/setup/setup.sh release/setup/setup.ps1 "$out/"; chmod +x "$out/setup.sh"
 cd "$out"
 if command -v zip >/dev/null; then zip -qr "$name.zip" "$name"
 elif command -v python3 >/dev/null || command -v python >/dev/null; then
@@ -78,4 +78,4 @@ elif command -v python3 >/dev/null || command -v python >/dev/null; then
 else echo "need zip or python to build the archive" >&2; exit 1; fi
 sha256sum "$name.zip" > SHA256SUMS
 echo "built $out/$name.zip"
-echo "publish: gh release create v$version \"$out/$name.zip\" \"$out/SHA256SUMS\" --title \"jllm $version\" --notes-file \"$root/release/template/README.md\""
+echo "publish: gh release create v$version \"$out/$name.zip\" \"$out/SHA256SUMS\" \"$out/setup.sh\" \"$out/setup.ps1\" --title \"jllm $version\" --notes-file \"$root/release/template/README.md\""
