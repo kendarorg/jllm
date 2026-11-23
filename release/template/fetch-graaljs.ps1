@@ -2,7 +2,7 @@
 # Usage: .\fetch-graaljs.ps1 community|oracle [-AcceptOracleTerms]
 # Editions never mix: lib-ext\*.jar is emptied first. A download whose SHA-256 differs from the manifest is deleted and
 # the script fails (lib-ext is left as it was). The oracle set may declare terms (the manifest says so): read them,
-# then pass -AcceptOracleTerms or set JLLM_ACCEPT_ORACLE_TERMS=1. JLLM_MAVEN_REPO overrides the repository URL.
+# then pass -AcceptOracleTerms. JLLM_MAVEN_REPO overrides the repository URL.
 param(
   [Parameter(Mandatory, Position = 0)][ValidateSet('community', 'oracle')][string]$Edition,
   [switch]$AcceptOracleTerms
@@ -16,7 +16,7 @@ if (-not (Test-Path $manifest)) { throw "missing $manifest" }
 $repo = if ($env:JLLM_MAVEN_REPO) { $env:JLLM_MAVEN_REPO } else { 'https://repo1.maven.org/maven2' }
 $lines = @(Get-Content $manifest)
 $terms = ($lines | Where-Object { $_ -like 'terms=*' } | ForEach-Object { $_.Substring(6) } | Select-Object -First 1)
-if ($terms -and -not ($AcceptOracleTerms -or $env:JLLM_ACCEPT_ORACLE_TERMS -eq '1')) {
+if ($terms -and -not $AcceptOracleTerms) {
   [Console]::Error.WriteLine("the $Edition set declares terms you must accept: $terms")
   [Console]::Error.WriteLine('read them, then run again with -AcceptOracleTerms')
   exit 3

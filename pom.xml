@@ -66,6 +66,16 @@
         <plugins.location>${maven.multiModuleProjectDirectory}/target/plugins</plugins.location>
     </properties>
 
+    <repositories>
+        <!-- GraalJS set downloaded by scripts/setup (git-ignored); the gate artifact org.kendar.llm.graal:jllm-graal-set lives here -->
+        <repository>
+            <id>graal-local</id>
+            <url>file://${maven.multiModuleProjectDirectory}/.graal/${graalvm.version}/repo</url>
+            <releases><enabled>true</enabled></releases>
+            <snapshots><enabled>false</enabled></snapshots>
+        </repository>
+    </repositories>
+
     <dependencyManagement>
         <dependencies>
             <dependency>
@@ -87,6 +97,36 @@
 
     <build>
         <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <version>3.5.0</version>
+                <executions>
+                    <execution>
+                        <id>graal-set-present</id>
+                        <phase>validate</phase>
+                        <goals><goal>enforce</goal></goals>
+                        <configuration>
+                            <rules>
+                                <requireFilesExist>
+                                    <files>
+                                        <file>${maven.multiModuleProjectDirectory}/.graal/${graalvm.version}/repo/org/kendar/llm/graal/jllm-graal-set/${graalvm.version}/jllm-graal-set-${graalvm.version}.pom</file>
+                                    </files>
+                                    <message>GraalJS ${graalvm.version} is not set up: run scripts/setup.sh (Windows: scripts\setup.ps1). Run it again after a graalvm.version change.</message>
+                                </requireFilesExist>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <systemPropertyVariables>
+                        <jllm.graal.dir>${maven.multiModuleProjectDirectory}/.graal/${graalvm.version}</jllm.graal.dir>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>

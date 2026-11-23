@@ -38,30 +38,10 @@
             <version>${project.version}</version>
             <scope>test</scope>
         </dependency>
-        <!-- GraalJS is shipped by the release in lib-ext/ (see release/graaljs), never bundled in the plugin jar -->
+        <!-- GraalJS for run_js: provided, never bundled; downloaded by scripts/setup into .graal/, the release ships it in lib-ext/ -->
         <dependency>
-            <groupId>org.graalvm.polyglot</groupId>
-            <artifactId>polyglot</artifactId>
-            <version>${graalvm.version}</version>
-            <scope>provided</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.graalvm.polyglot</groupId>
-            <artifactId>js</artifactId>
-            <version>${graalvm.version}</version>
-            <type>pom</type>
-            <scope>provided</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.graalvm.regex</groupId>
-            <artifactId>regex</artifactId>
-            <version>${graalvm.version}</version>
-            <scope>provided</scope>
-        </dependency>
-        <!-- the isolate of every platform: lets the isolated profile run in the tests (the probe verifies it) -->
-        <dependency>
-            <groupId>org.graalvm.polyglot</groupId>
-            <artifactId>js-isolate-community</artifactId>
+            <groupId>org.kendar.llm.graal</groupId>
+            <artifactId>jllm-graal-set</artifactId>
             <version>${graalvm.version}</version>
             <type>pom</type>
             <scope>provided</scope>
@@ -136,76 +116,4 @@
         </plugins>
     </build>
 
-    <profiles>
-        <!-- -Dgraal.dir=<folder of GraalJS jars> (see scripts/graal-fetch): tests run on the fetched set instead of the
-             provided one, so two copies of the language never meet. Without graal.dir this profile is inactive. -->
-        <profile>
-            <id>graal-dir</id>
-            <activation>
-                <property>
-                    <name>graal.dir</name>
-                </property>
-            </activation>
-            <build>
-                <plugins>
-                    <plugin>
-                        <groupId>org.apache.maven.plugins</groupId>
-                        <artifactId>maven-antrun-plugin</artifactId>
-                        <version>3.1.0</version>
-                        <executions>
-                            <execution>
-                                <id>list-graal-jars</id>
-                                <phase>initialize</phase>
-                                <goals>
-                                    <goal>run</goal>
-                                </goals>
-                                <configuration>
-                                    <exportAntProperties>true</exportAntProperties>
-                                    <target>
-                                        <path id="graal.jar.path">
-                                            <fileset dir="${graal.dir}" includes="*.jar"/>
-                                        </path>
-                                        <pathconvert property="graal.jars" refid="graal.jar.path" pathsep=","/>
-                                    </target>
-                                </configuration>
-                            </execution>
-                        </executions>
-                    </plugin>
-                    <plugin>
-                        <groupId>org.apache.maven.plugins</groupId>
-                        <artifactId>maven-surefire-plugin</artifactId>
-                        <configuration>
-                            <classpathDependencyExcludes>
-                                <classpathDependencyExclude>org.graalvm.polyglot:polyglot</classpathDependencyExclude>
-                                <classpathDependencyExclude>org.graalvm.regex:regex</classpathDependencyExclude>
-                                <classpathDependencyExclude>org.graalvm.js:js-language</classpathDependencyExclude>
-                                <classpathDependencyExclude>org.graalvm.truffle:truffle-api</classpathDependencyExclude>
-                                <classpathDependencyExclude>org.graalvm.truffle:truffle-runtime</classpathDependencyExclude>
-                                <classpathDependencyExclude>org.graalvm.truffle:truffle-compiler</classpathDependencyExclude>
-                                <classpathDependencyExclude>org.graalvm.sdk:collections</classpathDependencyExclude>
-                                <classpathDependencyExclude>org.graalvm.sdk:jniutils</classpathDependencyExclude>
-                                <classpathDependencyExclude>org.graalvm.sdk:nativebridge</classpathDependencyExclude>
-                                <classpathDependencyExclude>org.graalvm.sdk:nativeimage</classpathDependencyExclude>
-                                <classpathDependencyExclude>org.graalvm.sdk:word</classpathDependencyExclude>
-                                <classpathDependencyExclude>org.graalvm.shadowed:icu4j</classpathDependencyExclude>
-                                <classpathDependencyExclude>org.graalvm.shadowed:xz</classpathDependencyExclude>
-                                <classpathDependencyExclude>org.graalvm.js:js-isolate-linux-amd64-community</classpathDependencyExclude>
-                                <classpathDependencyExclude>org.graalvm.js:js-isolate-linux-aarch64-community</classpathDependencyExclude>
-                                <classpathDependencyExclude>org.graalvm.js:js-isolate-darwin-aarch64-community</classpathDependencyExclude>
-                                <classpathDependencyExclude>org.graalvm.js:js-isolate-windows-amd64-community</classpathDependencyExclude>
-                                <classpathDependencyExclude>org.graalvm.js:js-isolate-linux-amd64</classpathDependencyExclude>
-                                <classpathDependencyExclude>org.graalvm.js:js-isolate-linux-aarch64</classpathDependencyExclude>
-                                <classpathDependencyExclude>org.graalvm.js:js-isolate-darwin-aarch64</classpathDependencyExclude>
-                                <classpathDependencyExclude>org.graalvm.js:js-isolate-windows-amd64</classpathDependencyExclude>
-                            </classpathDependencyExcludes>
-                            <additionalClasspathElements>${graal.jars}</additionalClasspathElements>
-                            <systemPropertyVariables>
-                                <jllm.graal.dir>${graal.dir}</jllm.graal.dir>
-                            </systemPropertyVariables>
-                        </configuration>
-                    </plugin>
-                </plugins>
-            </build>
-        </profile>
-    </profiles>
 </project>

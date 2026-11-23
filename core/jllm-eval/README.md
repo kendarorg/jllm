@@ -93,7 +93,6 @@ Shared:
 | `UPDATE_BASELINE` | `0` | `1`: store this run as the model baseline (`eval.updateBaseline`). Always refused from a dirty tree. |
 | `PASS_K` | empty | Comma list of k for pass@k and pass^k (`eval.passK`); empty = `1` and `MAX_TRIALS`. |
 | `DIRTY_TREE` | `warn` | `refuse`, `warn` or `allow` (`eval.dirtyTree`): what to do when tracked files differ from HEAD. |
-| `GRAAL_JS` | `fetch` | `fetch` runs the repository-root `scripts/graal-fetch` (network on first use; edition from `JLLM_GRAAL_EDITION`, default `community`) and runs the tests on that jar set through the `graal-dir` profile; `provided` uses the GraalJS of the Maven build. |
 | `TIMEOUT_SECONDS` | `300` | Per model request, and warm-up. |
 | `CASE_TIMEOUT_SECONDS` | `TIMEOUT_SECONDS` | Cap on each user turn of a case (`eval.caseTimeoutSeconds`). |
 | `COMPACTION_CTX_TOKENS` | `65536` | Context of the `compaction` group (`eval.compaction.contextTokens`). |
@@ -161,7 +160,7 @@ not converted: the loader fails with a message, delete them.
   (description, checks, thresholds and the configuration after the case customisation; code in a case harness
   callback cannot be hashed, the commit and diff hash cover it) and the run metadata.
 - the k list, the dirty-tree policy, and the run_js engine found (`isolated` or `constrained`, edition, version, the
-  `jllm.graal.dir` folder when the fetched set ran).
+  `jllm.graal.dir` folder (`.graal/<version>`, set by `scripts/setup`)).
 
 `eval.dirtyTree` (`DIRTY_TREE` in the smoke scripts): `refuse` stops before the warm-up call and lists the changed
 files; `warn` (default) runs, logs a banner and marks `run.json`, `summary.json` and the report; `allow` runs without a

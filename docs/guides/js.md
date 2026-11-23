@@ -20,11 +20,15 @@ and an IDE run (tick "include dependencies with provided scope") see the same se
   working). An empty `lib-ext/` starts normally with `run_js` off. To swap or restore the set run `fetch-graaljs`
   (`.sh`, `.cmd`, `.ps1`) with `community` or `oracle`: it empties `lib-ext/*.jar`, downloads from Maven Central,
   verifies the SHA-256 of each jar against `lib-ext/manifests/` and deletes the file and fails on a mismatch.
-- **Source checkout**: `scripts/graal-fetch` puts the same set in `.graal/<version>/<edition>/` (marker file written
-  last; `--refetch` to redo; edition by `--edition` or `JLLM_GRAAL_EDITION`). `scripts/run-cli`, `scripts/run-web` and
-  `scripts/run-eval` run the built jars or the eval module on it; `mvn $(scripts/graal-flags.sh) test` (or
-  `-Dgraal.dir=<folder>`) runs the js plugin and eval tests on it: the `graal-dir` profile removes the provided set
-  from the test class path first, so two copies of the language never meet.
+- **Source checkout**: run `scripts/setup` once (`.sh`, `.ps1`, `.cmd`). It reads `graalvm.version` from the root pom,
+  downloads the set into the git-ignored `.graal/<version>/repo` (a Maven layout holding the gate artifact
+  `org.kendar.llm.graal:jllm-graal-set`) with a manifest of SHA-256 sums next to it, deletes the folders of other
+  versions and runs `mvn -DskipTests install` (`--no-build` skips it). The default edition is commercial: setup shows the
+  Oracle GraalVM Free Terms and Conditions URL and asks y/N before any download (`--accept-license` / `-AcceptLicense`
+  accepts silently; without a terminal and without the flag it fails). `--edition community` needs no terms and is never
+  offered in the prompt. Every module then sees the set as a `provided` dependency, with no profile and no flag; the
+  build stops at `validate` with a "not set up" message when the set of the current version is missing, so run setup
+  again after a `graalvm.version` change. `scripts/run-cli`, `scripts/run-web` and `scripts/run-eval` use it too.
 - **Embedding the harness**: add `org.graalvm.polyglot:polyglot`, `org.graalvm.polyglot:js` (type `pom`),
   `org.graalvm.regex:regex` and `org.graalvm.polyglot:js-isolate-community` (type `pom`) at the version of the root
   pom (`graalvm.version`). Where the host is a fat jar, keep `META-INF/services` entries merged (shade
@@ -40,9 +44,18 @@ jllm is Apache 2.0 and does not redistribute GraalJS inside its jars. The releas
 the licence each pom declares, listed in `NOTICE` and the manifest. From GraalJS 25.1 the central `js` pom declares
 UPL and MIT and `js-community` is a deprecated alias of it; earlier `js` poms pulled an enterprise artifact under
 Oracle terms. The isolate add-on exists in two flavours: `js-isolate-community` (UPL, MIT) and `js-isolate`, whose pom
-declares the GraalVM Free Terms and Conditions. `fetch-graaljs oracle` and `scripts/graal-fetch --edition oracle`
-refuse to run until the operator accepts them (`--accept-oracle-terms`, `JLLM_ACCEPT_ORACLE_TERMS=1`): accepting is the
-operator's decision, not jllm's. The release scripts fail on any resolved pom that declares a licence other than UPL,
+declares the GraalVM Free Terms and Conditions. `fetch-graaljs oracle` refuses to run until the operator passes
+`--accept-oracle-terms`; `scripts/setup` asks for them (or takes `--accept-license`) in the default commercial
+edition: accepting is the operator's decision, not jllm's. The community isolate is weaker (no hard memory separation).
+
+Having the downloaded Graal files in `.graal/` is the evidence that the license was accepted: the project does not ship
+them in the repository, so anyone who has them downloaded them with `scripts/setup` and accepted the terms of the chosen
+edition. No marker file, no setting.
+
+The GraalJS libraries are not in this repository. If they are present in `.graal/`, you downloaded them with
+`scripts/setup` and accepted the license terms of the chosen edition. After a `graalvm.version` change, run
+`scripts/setup` again.
+ The release scripts fail on any resolved pom that declares a licence other than UPL,
 MIT, Apache, BSD or Unicode/ICU (the shaded ICU4J), and on a front-end jar that contains GraalJS.
 
 Put the jar (`jllm-js-*.jar`, a thin jar copied to the plugin directory by `mvn install`) in the plugin

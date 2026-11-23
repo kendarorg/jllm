@@ -1,12 +1,15 @@
 ﻿# Resolves the GraalJS jar set of one edition with Maven (release\graaljs\pom.xml) into a folder, re-checks the licence
 # declared by every resolved pom and writes the manifest next to the jars.
-# Usage: release\graaljs\resolve.ps1 -Edition community|oracle -Out DIR [-AcceptTerms]
+# Usage: release\graaljs\resolve.ps1 -Edition community|oracle -Out DIR [-AcceptTerms] [-Repo DIR]
+# -Repo DIR: no flat jars; DIR is replaced by a Maven layout (jars + poms) holding the gate artifact
+# org.kendar.llm.graal:jllm-graal-set:<version> (jllm-graal-set.pom, written last); the manifest goes to -Out.
 # Same rules as resolve.sh: UPL, MIT, Apache, BSD and Unicode/ICU pass, anything else fails; the "GraalVM Free Terms and
 # Conditions" is recorded as terms= and fails unless -AcceptTerms is given. The version is read from the root pom.
 param(
   [Parameter(Mandatory)][ValidateSet('community', 'oracle')][string]$Edition,
   [Parameter(Mandatory)][string]$Out,
-  [switch]$AcceptTerms
+  [switch]$AcceptTerms,
+  [string]$Repo
 )
 $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot
@@ -32,23 +35,33 @@ try {
   }
   if ($terms.Count -gt 0 -and -not $AcceptTerms) {
     throw ("the $Edition set declares terms the operator must accept: " + ($terms -join '; ') +
-      "`nread them, then run again with -AcceptTerms (or JLLM_ACCEPT_ORACLE_TERMS=1 in the fetch scripts)")
+      "`nread them, then run again with -AcceptTerms")
   }
   New-Item -ItemType Directory -Force $Out | Out-Null
-  Get-ChildItem $Out -File | Where-Object { $_.Name -like '*.jar' -or $_.Name -like 'graaljs*.manifest' } | Remove-Item -Force
+  Get-ChildItem $Out -File | Where-Object { $_.Name -like 'graaljs*.manifest' -or (-not $Repo -and $_.Name -like '*.jar') } | Remove-Item -Force
   $lines = @('# jllm GraalJS jar set: <sha256>  <path in Maven Central>', "edition=$Edition", "version=$version")
   if ($terms.Count -gt 0) { $lines += ('terms=' + ($terms -join '; ')) }
   $prefix = (Resolve-Path $work).Path.TrimEnd('\') + '\'
   $count = 0
   foreach ($jar in (Get-ChildItem $work -Recurse -Filter *.jar | Sort-Object FullName)) {
-    Copy-Item $jar.FullName $Out
+    if (-not $Repo) { Copy-Item $jar.FullName $Out }
     $rel = $jar.FullName.Substring($prefix.Length).Replace('\', '/')
     $lines += ((Get-FileHash $jar.FullName -Algorithm SHA256).Hash.ToLower() + '  ' + $rel)
     $count++
   }
+  if ($Repo) {
+    if (Test-Path $Repo) { Remove-Item -Recurse -Force $Repo }
+    New-Item -ItemType Directory -Force $Repo | Out-Null
+    Copy-Item (Join-Path $work '*') $Repo -Recurse -Force
+    $isolate = if ($Edition -eq 'community') { 'js-isolate-community' } else { 'js-isolate' }
+    $gate = Join-Path $Repo "org\kendar\llm\graal\jllm-graal-set\$version"
+    New-Item -ItemType Directory -Force $gate | Out-Null
+    $tpl = [IO.File]::ReadAllText((Join-Path $here 'jllm-graal-set.pom'))
+    [IO.File]::WriteAllText((Join-Path $gate "jllm-graal-set-$version.pom"), $tpl.Replace('@VERSION@', $version).Replace('@ISOLATE@', $isolate))
+  }
   # LF line endings: the .sh fetch script reads the same manifest
   [IO.File]::WriteAllText((Join-Path $Out "graaljs-$Edition.manifest"), (($lines -join "`n") + "`n"))
-  Write-Host "GraalJS $Edition ${version}: $count jars in $Out"
+  Write-Host "GraalJS $Edition ${version}: $count jars in $(if ($Repo) { $Repo } else { $Out })"
 } finally {
   Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
 }

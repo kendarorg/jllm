@@ -29,9 +29,6 @@
 #                folder excluded). refuse stops before the warm-up call and lists the files. A baseline update
 #                (UPDATE_BASELINE=1) from a dirty tree is always refused.
 #   PASS_K       comma list of k for pass@k / pass^k; empty = 1 and MAX_TRIALS. A k above a case's trials is not measured.
-#   GRAAL_JS     fetch (default) | provided: fetch runs scripts/graal-fetch.sh (network on first use; edition from
-#                JLLM_GRAAL_EDITION, default community) and runs the tests on that jar set through the graal-dir
-#                profile; provided uses the GraalJS from the Maven build.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -113,8 +110,6 @@ TRIALS="${TRIALS:-1}"
 DIRTY_TREE="${DIRTY_TREE:-warn}"
 case "$DIRTY_TREE" in refuse|warn|allow) ;; *) echo "DIRTY_TREE must be refuse, warn or allow (got '$DIRTY_TREE')" >&2; exit 1;; esac
 PASS_K="${PASS_K:-}"
-GRAAL_JS="${GRAAL_JS:-fetch}"
-case "$GRAAL_JS" in fetch|provided) ;; *) echo "GRAAL_JS must be fetch or provided (got '$GRAAL_JS')" >&2; exit 1;; esac
 MAX_TRIALS="${MAX_TRIALS:-2}"       # cap on trials of any case, including cases that set their own count
 UPDATE_BASELINE="${UPDATE_BASELINE:-0}"   # 1: store this run as the model baseline
 IGNORE_TEST_FAILURES="${IGNORE_TEST_FAILURES:-1}"   # 1: failed cases never fail the Maven build
@@ -208,19 +203,12 @@ check_model() {
 check_model target "$TARGET_PROVIDER" "$TARGET_BASE" "$TARGET_API_KEY" "$TARGET_MODEL"
 check_model judge "$JUDGE_PROVIDER" "$JUDGE_BASE" "$JUDGE_API_KEY" "$JUDGE_MODEL"
 
-# ---- GraalJS: the fetched set (same Maven pom as the release) replaces the provided one through the graal-dir profile
-GRAAL_DIR=""
-if [[ "$GRAAL_JS" == fetch ]]; then
-  GRAAL_DIR="$("$REPO_ROOT/scripts/graal-fetch.sh" --dir-only)"
-  case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) GRAAL_DIR="$(cygpath -m "$GRAAL_DIR")";; esac
-fi
-
 mkdir -p "$LOG_DIR"
 echo "Log: $LOG_FILE"
 echo "Preset: $([[ "$PRESET" == none ]] && echo none || basename "$PRESET")"
 echo "Target: $TARGET_PROVIDER $TARGET_MODEL${TARGET_MODEL_NAME:+ as $TARGET_MODEL_NAME}  thinking: ${TARGET_THINKING:-default}  ctx: $TARGET_CTX_TOKENS  rpm: $TARGET_RPM"
 echo "Judge:  $JUDGE_PROVIDER $JUDGE_MODEL${JUDGE_MODEL_NAME:+ as $JUDGE_MODEL_NAME}  thinking: ${JUDGE_THINKING:-default}  ctx: $JUDGE_CTX_TOKENS  rpm: $JUDGE_RPM  key: $JUDGE_KEY_LABEL"
-echo "Pinning: dirty tree: $DIRTY_TREE  pass@k: ${PASS_K:-default (1 and max trials)}  GraalJS: ${GRAAL_DIR:-provided}"
+echo "Pinning: dirty tree: $DIRTY_TREE  pass@k: ${PASS_K:-default (1 and max trials)}"
 echo "Compaction ctx: $COMPACTION_CTX_TOKENS  groups: $TEST_GROUPS  tests: ${TESTS:-all}  trials: $TRIALS  max trials: $MAX_TRIALS  timeout: ${TIMEOUT_SECONDS}s  case timeout cap: ${CASE_TIMEOUT_SECONDS}s  parallelism: $PARALLELISM"
 
 # ---- eval settings
@@ -282,7 +270,6 @@ fi
 [[ "$SYSTEM_PROMPT_EXTRA" == none ]] || export_secret EVAL_SYSTEMPROMPT_EXTRA "$SYSTEM_PROMPT_EXTRA"
 [[ -z "$TESTS" ]] || EVAL_ARGS+=(-Dtest="$TESTS")
 [[ -z "$PASS_K" ]] || EVAL_ARGS+=(-Deval.passK="$PASS_K")
-[[ -z "$GRAAL_DIR" ]] || EVAL_ARGS+=(-Dgraal.dir="$GRAAL_DIR")
 
 # ---- run
 set +e

@@ -35,29 +35,10 @@
             <artifactId>jllm-harness</artifactId>
             <version>${project.version}</version>
         </dependency>
-        <!-- GraalJS for run_js: provided, never bundled; the release ships it in lib-ext/ (see release/graaljs) -->
+        <!-- GraalJS for run_js: provided, never bundled; downloaded by scripts/setup into .graal/, the release ships it in lib-ext/ -->
         <dependency>
-            <groupId>org.graalvm.polyglot</groupId>
-            <artifactId>polyglot</artifactId>
-            <version>${graalvm.version}</version>
-            <scope>provided</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.graalvm.polyglot</groupId>
-            <artifactId>js</artifactId>
-            <version>${graalvm.version}</version>
-            <type>pom</type>
-            <scope>provided</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.graalvm.regex</groupId>
-            <artifactId>regex</artifactId>
-            <version>${graalvm.version}</version>
-            <scope>provided</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.graalvm.polyglot</groupId>
-            <artifactId>js-isolate-community</artifactId>
+            <groupId>org.kendar.llm.graal</groupId>
+            <artifactId>jllm-graal-set</artifactId>
             <version>${graalvm.version}</version>
             <type>pom</type>
             <scope>provided</scope>

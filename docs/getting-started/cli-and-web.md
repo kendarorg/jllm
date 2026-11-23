@@ -25,14 +25,14 @@ Flags, startup directories, slash commands and local models: [jllm-cli](../../jl
 ## JavaScript (`run_js`)
 
 The jars do not contain GraalJS: with `java -jar` the `run_js` tool is off (the harness starts, one WARN says why).
-From a source checkout run the same jars with the GraalJS set fetched into `.graal/`:
+From a source checkout run `scripts/setup` once (it downloads the GraalJS set into `.graal/` and builds), then run the same jars on it:
 
 ```sh
 scripts/run-cli.sh --provider anthropic --mode edit            # Windows: scripts\run-cli.cmd
 scripts/run-web.sh --jllm.provider=anthropic                   # Windows: scripts\run-web.cmd
 ```
 
-`JLLM_GRAAL_EDITION=oracle` switches the edition (the oracle set declares terms to accept, see the
+`scripts/setup --edition community` selects the community edition; the default is the commercial one, whose terms setup asks you to accept (see the
 [JS guide](../guides/js.md#licensing)). The release zip carries the set in `lib-ext/`, which its launchers use.
 
 ## Browser

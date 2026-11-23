@@ -3,10 +3,10 @@
 # Usage: ./fetch-graaljs.sh <community|oracle> [--accept-oracle-terms]
 # Editions never mix: lib-ext/*.jar is emptied first. A download whose SHA-256 differs from the manifest is deleted and
 # the script fails (lib-ext is left as it was). The oracle set may declare terms (the manifest says so): read them,
-# then pass --accept-oracle-terms or set JLLM_ACCEPT_ORACLE_TERMS=1. JLLM_MAVEN_REPO overrides the repository URL.
+# then pass --accept-oracle-terms. JLLM_MAVEN_REPO overrides the repository URL.
 set -euo pipefail
 cd "$(dirname "$0")"
-edition=${1:-}; accept=${JLLM_ACCEPT_ORACLE_TERMS:-0}
+edition=${1:-}; accept=0
 [ "${2:-}" = "--accept-oracle-terms" ] && accept=1
 case $edition in community|oracle) ;; *) echo "usage: $0 <community|oracle> [--accept-oracle-terms]" >&2; exit 2;; esac
 manifest="lib-ext/manifests/graaljs-$edition.manifest"

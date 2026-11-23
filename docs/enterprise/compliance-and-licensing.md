@@ -21,7 +21,9 @@ BSD or Unicode/ICU (the ICU4J shaded in GraalJS), and fail if a front-end jar co
 from GraalJS 25.1 the central `js` pom declares UPL and MIT and `js-community` is a deprecated alias; earlier `js` poms
 pulled an enterprise artifact under Oracle terms. At the pinned version the non-community isolate (`js-isolate`) still
 declares the GraalVM Free Terms and Conditions: the shipped set uses `js-isolate-community`, and whoever installs the
-`oracle` set (`fetch-graaljs oracle`) accepts those terms. Who accepts the Oracle terms is the operator. Details:
+`oracle` set (`fetch-graaljs oracle`, or `scripts/setup` in a source checkout) accepts those terms. Who accepts the Oracle terms is the operator.
+The GraalJS libraries are not in this repository. If they are present in `.graal/`, you downloaded them with `scripts/setup`
+and accepted the license terms of the chosen edition. After a `graalvm.version` change, run `scripts/setup` again. Details:
 [js guide](../guides/js.md#licensing), [NOTICE](../../NOTICE).
 
 Generate the authoritative list for your build and feed it to your scanner:

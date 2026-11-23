@@ -28,9 +28,6 @@
 #                folder excluded). refuse stops before the warm-up call and lists the files. A baseline update
 #                (UPDATE_BASELINE=1) from a dirty tree is always refused.
 #   PASS_K       comma list of k for pass@k / pass^k; empty = 1 and MAX_TRIALS. A k above a case's trials is not measured.
-#   GRAAL_JS     fetch (default) | provided: fetch runs scripts\graal-fetch.ps1 (network on first use; edition from
-#                JLLM_GRAAL_EDITION, default community) and runs the tests on that jar set through the graal-dir
-#                profile; provided uses the GraalJS from the Maven build.
 param([string]$Preset = '')
 
 $ErrorActionPreference = 'Stop'
@@ -153,8 +150,6 @@ $TRIALS = Get-Setting 'TRIALS' '1'
 $DIRTY_TREE = Get-Setting 'DIRTY_TREE' 'warn'
 if ($DIRTY_TREE -notin 'refuse', 'warn', 'allow') { Fail "DIRTY_TREE must be refuse, warn or allow (got '$DIRTY_TREE')" }
 $PASS_K = Get-Setting 'PASS_K' '' -AllowEmpty
-$GRAAL_JS = Get-Setting 'GRAAL_JS' 'fetch'
-if ($GRAAL_JS -notin 'fetch', 'provided') { Fail "GRAAL_JS must be fetch or provided (got '$GRAAL_JS')" }
 $MAX_TRIALS = Get-Setting 'MAX_TRIALS' '2'         # cap on trials of any case, including cases that set their own count
 $UPDATE_BASELINE = Get-Setting 'UPDATE_BASELINE' '0'   # 1: store this run as the model baseline
 $IGNORE_TEST_FAILURES = Get-Setting 'IGNORE_TEST_FAILURES' '1'   # 1: failed cases never fail the Maven build
@@ -243,13 +238,6 @@ function Test-Model([string]$Role, [string]$Provider, [string]$Base, [string]$Ke
 Test-Model 'target' $TARGET_PROVIDER $TARGET_BASE $targetApiKey $TARGET_MODEL
 Test-Model 'judge' $JUDGE_PROVIDER $JUDGE_BASE $judgeApiKey $JUDGE_MODEL
 
-# ---- GraalJS: the fetched set (same Maven pom as the release) replaces the provided one through the graal-dir profile
-$GRAAL_DIR = ''
-if ($GRAAL_JS -eq 'fetch') {
-    $GRAAL_DIR = (& (Join-Path $RepoRoot 'scripts\graal-fetch.ps1') -DirOnly | Select-Object -Last 1).ToString().Trim().Replace('\', '/')
-    if (-not $GRAAL_DIR) { Fail 'scripts\graal-fetch.ps1 did not print the GraalJS folder' }
-}
-
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 $testsShown = if ($TESTS) { $TESTS } else { 'all' }
 Write-Host "Log: $LogFile"
@@ -257,7 +245,7 @@ Write-Host "Preset: $(if ($Preset -eq 'none') { 'none' } else { Split-Path $Pres
 Write-Host "JAVA_HOME: $JAVA_HOME"
 Write-Host "Target: $TARGET_PROVIDER $TARGET_MODEL$(if ($TARGET_MODEL_NAME) { " as $TARGET_MODEL_NAME" })  thinking: $(if ($TARGET_THINKING) { $TARGET_THINKING } else { 'default' })  ctx: $TARGET_CTX_TOKENS  rpm: $TARGET_RPM"
 Write-Host "Judge:  $JUDGE_PROVIDER $JUDGE_MODEL$(if ($JUDGE_MODEL_NAME) { " as $JUDGE_MODEL_NAME" })  thinking: $(if ($JUDGE_THINKING) { $JUDGE_THINKING } else { 'default' })  ctx: $JUDGE_CTX_TOKENS  rpm: $JUDGE_RPM  key: $judgeKeyLabel"
-Write-Host "Pinning: dirty tree: $DIRTY_TREE  pass@k: $(if ($PASS_K) { $PASS_K } else { 'default (1 and max trials)' })  GraalJS: $(if ($GRAAL_DIR) { $GRAAL_DIR } else { 'provided' })"
+Write-Host "Pinning: dirty tree: $DIRTY_TREE  pass@k: $(if ($PASS_K) { $PASS_K } else { 'default (1 and max trials)' })"
 Write-Host "Compaction ctx: $COMPACTION_CTX_TOKENS  groups: $TEST_GROUPS  tests: $testsShown  trials: $TRIALS  max trials: $MAX_TRIALS  timeout: ${TIMEOUT_SECONDS}s  case timeout cap: ${CASE_TIMEOUT_SECONDS}s  parallelism: $PARALLELISM"
 
 # ---- eval settings
@@ -318,7 +306,6 @@ if ($JUDGE_MODEL_NAME) { $evalArgs += "-Deval.judge.modelName=$JUDGE_MODEL_NAME"
 if ($SYSTEM_PROMPT_EXTRA -ne 'none') { $secretEnv['EVAL_SYSTEMPROMPT_EXTRA'] = $SYSTEM_PROMPT_EXTRA }
 if ($TESTS) { $evalArgs += "-Dtest=$TESTS" }
 if ($PASS_K) { $evalArgs += "-Deval.passK=$PASS_K" }
-if ($GRAAL_DIR) { $evalArgs += "-Dgraal.dir=$GRAAL_DIR" }
 
 $ignoreFailures = if ($IGNORE_TEST_FAILURES -eq '1') { 'true' } else { 'false' }
 $mvnArgs = @(

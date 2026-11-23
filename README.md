@@ -114,18 +114,25 @@ java -jar jllm-web/target/jllm-web-1.3.0-jllm.jar --provider anthropic          
 
 Set `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`, `GROK_API_KEY`, `QWEN_API_KEY`) first.
 
-The jars do not contain GraalJS, so `run_js` is off in the commands above. For development, `scripts/graal-fetch`
-downloads the GraalJS set into `.graal/<version>/<edition>/` (`community` by default, `JLLM_GRAAL_EDITION=oracle` or
-`--edition oracle` for the other), and these run the built jars or tests on it (`.sh`, `.ps1` and `.cmd` of each):
+The jars do not contain GraalJS, so `run_js` is off in the commands above. For development, run once `scripts/setup`
+(`.sh`, `.ps1`, `.cmd`): it downloads the GraalJS set into the git-ignored `.graal/<graalvm.version>/` (commercial
+edition after you accept the Oracle GraalVM Free Terms and Conditions, or `--accept-license`; `--edition community`
+for the community one) and runs the first build (`--no-build` skips it). Every module then sees GraalJS as a `provided`
+dependency, with no profile and no flag. These run the built jars or the eval module on it (`.sh`, `.ps1` and `.cmd` of each):
 
 ```sh
 scripts/run-cli.sh --provider anthropic --mode edit       # terminal, with run_js
 scripts/run-web.sh --jllm.provider=anthropic              # http://localhost:8080, with run_js
 scripts/run-eval.sh                                       # eval module (needs a model; you run it, not the build)
-mvn $(scripts/graal-flags.sh) test                        # js plugin tests on the fetched set
+mvn test                                                  # js plugin tests run on the same set
 ```
 
 The release zip ships the same set in `lib-ext/`. Licensing and details: [JS guide](docs/guides/js.md#enabling).
+
+> The GraalJS libraries are not in this repository. If they are present in `.graal/`, you downloaded them with
+> `scripts/setup` and accepted the license terms of the chosen edition. After a `graalvm.version` change, run
+> `scripts/setup` again.
+
 
 ## Maven Central
 
