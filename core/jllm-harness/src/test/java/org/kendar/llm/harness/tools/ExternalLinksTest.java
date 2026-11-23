@@ -279,12 +279,12 @@ class ExternalLinksTest {
         Files.writeString(root.resolve("tree/keep/x.txt"), "x");
         assertTrue(JailTestSupport.linkDir(root.resolve("tree/keep/out"), outside));
 
-        PathJail.deleteTree(PathJail.resolve(root, "tree", mode, true));
+        PathJail.deleteTree(PathResolver.resolve(root, "tree", mode, true));
 
         assertFalse(Files.exists(root.resolve("tree"), java.nio.file.LinkOption.NOFOLLOW_LINKS));
         assertEquals(List.of("secret.txt", "sub/inner.txt"), JailTestSupport.files(outside));
         // and a link itself is deleted, not what it points to
-        PathJail.deleteTree(PathJail.resolve(root, "ext", mode, true));
+        PathJail.deleteTree(PathResolver.resolve(root, "ext", mode, true));
         assertFalse(Files.exists(root.resolve("ext"), java.nio.file.LinkOption.NOFOLLOW_LINKS));
         assertEquals(List.of("secret.txt", "sub/inner.txt"), JailTestSupport.files(outside));
     }
@@ -299,12 +299,12 @@ class ExternalLinksTest {
         assertTrue(JailTestSupport.linkFile(root.resolve("flink"), outside.resolve("secret.txt")));
 
         if (mode == ExternalLinks.READ_WRITE) {
-            AtomicFiles.write(PathJail.resolve(root, "flink", mode, true), new byte[]{'o', 'k'});
+            AtomicFiles.write(PathResolver.resolve(root, "flink", mode, true), new byte[]{'o', 'k'});
             assertEquals("ok", Files.readString(outside.resolve("secret.txt")));
             assertTrue(Files.isSymbolicLink(root.resolve("flink")));
         } else {
             assertThrows(IllegalArgumentException.class,
-                    () -> AtomicFiles.write(PathJail.resolve(root, "flink", mode, true), new byte[]{'o', 'k'}));
+                    () -> AtomicFiles.write(PathResolver.resolve(root, "flink", mode, true), new byte[]{'o', 'k'}));
             assertEquals("SECRET outside\n", Files.readString(outside.resolve("secret.txt")));
         }
     }

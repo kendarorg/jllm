@@ -1,10 +1,10 @@
 package org.kendar.llm.harness.tools;
 
+import org.kendar.llm.harness.tools.PathResolver.JailedPath;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.Closeable;
-import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.channels.Channels;
@@ -13,7 +13,6 @@ import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributeView;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.FileAttributeView;
-import java.nio.file.attribute.UserPrincipal;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -46,7 +45,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * The strategy is picked once per real root, by what the file system supports (logged at DEBUG).
  * <p>
  * Links: a link whose target is inside the root is followed: the walk restarts on the resolved components, again
- * without following links (at most {@value #MAX_LINK_HOPS} hops). A dangling link is refused. A link whose target is
+ * without following links (at most {@value PathResolver#MAX_LINK_HOPS} hops). A dangling link is refused. A link whose target is
  * outside the root follows the {@link ExternalLinks} mode of the path ({@code files.externalLinks}): {@code NONE}
  * refuses it, {@code READ} follows it for reads and refuses writes (naming the setting), {@code READ_WRITE} follows
  * it. The walk then restarts from the file system root of the target, still without following links on the way; every
@@ -62,9 +61,7 @@ public final class PathJail {
 
     private static final Logger log = LoggerFactory.getLogger(PathJail.class);
 
-    static final int MAX_LINK_HOPS = 40;
-    static final boolean WINDOWS = File.separatorChar == '\\';
-    private static final OpenOption NOSHARE_DELETE = WINDOWS ? noShareDelete() : null;
+    private static final OpenOption NOSHARE_DELETE = PathResolver.WINDOWS ? noShareDelete() : null;
 
     /** Test seam: runs right before every final open, create, rename and delete. Null in production. */
     static volatile Runnable beforeOpen;
@@ -75,98 +72,7 @@ public final class PathJail {
 
     private static final ConcurrentHashMap<Path, Strategy> STRATEGIES = new ConcurrentHashMap<>();
 
-    /**
-     * A path inside a jail.
-     *
-     * @param root       the jail root, absolute and normalized (not resolved)
-     * @param realRoot   its real path
-     * @param components the names from the root to the file, normalized (no {@code .} or {@code ..}); empty for the root
-     * @param lexical    root + components: what is shown and used for checkpoint and quota keys
-     * @param links      what a link that leaves the root does ({@link ExternalLinks}); links inside are always followed
-     */
-    public record JailedPath(Path root, Path realRoot, List<String> components, Path lexical,
-                              ExternalLinks links) {
-        public JailedPath {
-            if (links == null) links = ExternalLinks.NONE;
-            components = List.copyOf(components);
-        }
-
-        /** The last component, or "" for the root. */
-        public String fileName() {
-            return components.isEmpty() ? "" : components.get(components.size() - 1);
-        }
-
-        /** The entry {@code name} of this directory. */
-        public JailedPath child(String name) {
-            List<String> c = new ArrayList<>(components);
-            c.add(name);
-            return new JailedPath(root, realRoot, c, lexical.resolve(name), links);
-        }
-
-        /** The directory holding this path; the root has none. */
-        public JailedPath parent() {
-            if (components.isEmpty()) return null;
-            return new JailedPath(root, realRoot, components.subList(0, components.size() - 1), lexical.getParent(),
-                    links);
-        }
-
-        @Override
-        public String toString() {
-            return lexical.toString();
-        }
-    }
-
     private PathJail() {
-    }
-
-    // ── resolve ──────────────────────────────────────────────────────────────────────────────
-
-    /**
-     * Resolves {@code path} (relative to {@code rootDir}, or absolute) and refuses one that leaves the root lexically,
-     * or through a link of an existing ancestor unless {@code links} lets the operation follow it.
-     *
-     * @param links the policy for a link whose target is outside the root ({@code files.externalLinks}); a link
-     *              inside is always followed
-     * @param write true when the path is about to be written: {@link ExternalLinks#READ} then refuses it as well
-     * @throws IllegalArgumentException with {@link FileSystemAgentTools#escapes},
-     *                                  {@link FileSystemAgentTools#leavesWorkDir} or
-     *                                  {@link FileSystemAgentTools#linkWriteRefused}
-     */
-    public static JailedPath resolve(Path rootDir, String path, ExternalLinks links, boolean write) {
-        Path root = rootDir.toAbsolutePath().normalize();
-        Path resolved = root.resolve(path).normalize();
-        if (!resolved.startsWith(root)) throw FileSystemAgentTools.escapes(path);
-        Path realRoot;
-        try {
-            realRoot = root.toRealPath();
-        } catch (IOException e) {
-            throw new IllegalArgumentException("Cannot resolve path: " + path, e);
-        }
-        JailedPath jp = new JailedPath(root, realRoot, names(root.relativize(resolved)), resolved, links);
-        // early check: the deepest existing ancestor (links resolved) must be inside
-        try {
-            Path existing = resolved;
-            while (existing != null && !Files.exists(existing, LinkOption.NOFOLLOW_LINKS)) existing = existing.getParent();
-            if (existing != null && !existing.toRealPath().startsWith(realRoot)) checkExternal(path, links, write);
-        } catch (IOException e) {
-            throw new IllegalArgumentException("Cannot resolve path: " + path, e);
-        }
-        return jp;
-    }
-
-    /** Refuses a link that leaves the root when {@code links} does not allow it for this kind of access. */
-    private static void checkExternal(String shown, ExternalLinks links, boolean write) {
-        if (links == null || !links.followsOnRead()) throw FileSystemAgentTools.leavesWorkDir(shown);
-        if (write && !links.followsOnWrite()) throw FileSystemAgentTools.linkWriteRefused(shown);
-    }
-
-    private static List<String> names(Path rel) {
-        List<String> out = new ArrayList<>();
-        for (Path c : rel) {
-            String s = c.toString();
-            if (!s.isEmpty()) out.add(s);
-        }
-        return out;
     }
 
     // ── stat, read ───────────────────────────────────────────────────────────────────────────
@@ -233,7 +139,7 @@ public final class PathJail {
         Set<OpenOption> o = new HashSet<>(options);
         o.add(StandardOpenOption.WRITE);
         try (Located l = locate(jp, false, true, true)) {
-            refuseForeignHardLink(l.dir(), l.name(), jp.lexical().toString());
+            PathResolver.refuseForeignHardLink(l.dir().path().resolve(l.name()), jp.lexical().toString());
             hook();
             return l.dir().open(l.name(), o);
         }
@@ -272,7 +178,7 @@ public final class PathJail {
             BasicFileAttributes a = l.dir().stat(l.name());
             if (a == null) return false;
             hook();
-            l.dir().delete(l.name(), a.isDirectory() && !isLink(a));
+            l.dir().delete(l.name(), a.isDirectory() && !PathResolver.isLink(a));
             return true;
         } catch (NoSuchFileException | NotDirectoryException e) {
             return false;
@@ -283,7 +189,7 @@ public final class PathJail {
     public static void deleteTree(JailedPath jp) throws IOException {
         BasicFileAttributes a = statNoFollow(jp);
         if (a == null) return;
-        if (a.isDirectory() && !isLink(a)) {
+        if (a.isDirectory() && !PathResolver.isLink(a)) {
             for (Entry e : list(jp, false, true)) deleteTree(jp.child(e.name())); // never through a link
         }
         deleteIfExists(jp);
@@ -309,56 +215,12 @@ public final class PathJail {
         }
     }
 
-    // ── classification (not I/O on content) ──────────────────────────────────────────────────
-
-    /**
-     * Where the path lands now: the components below the real root after following the links of its existing part
-     * (a missing tail is appended as written), or null when it leaves the root. A classification for callers that
-     * hide part of the tree (jllm-web hides {@code .jllm}); the I/O itself is still checked by the walk.
-     */
-    public static List<String> realComponents(JailedPath jp) {
-        Path existing = jp.lexical();
-        while (existing != null && !Files.exists(existing)) existing = existing.getParent(); // a dangling link: kept as written
-        if (existing == null) return null;
-        Path real;
-        try {
-            real = existing.toRealPath();
-        } catch (IOException e) {
-            return null;
-        }
-        if (!real.startsWith(jp.realRoot())) return null;
-        List<String> out = names(jp.realRoot().relativize(real));
-        out.addAll(names(existing.relativize(jp.lexical())));
-        return out;
-    }
-
-    /**
-     * The real path of a host path whose ancestors may be links (the deepest existing ancestor resolved, the rest
-     * appended). A classification of paths the harness itself builds; no I/O is done through the result.
-     */
-    public static Path realKey(Path file) {
-        Path abs = file.toAbsolutePath().normalize();
-        Path existing = abs;
-        while (existing != null && !Files.exists(existing)) existing = existing.getParent();
-        if (existing == null) return abs;
-        try {
-            return existing.toRealPath().resolve(existing.relativize(abs)).normalize();
-        } catch (IOException e) {
-            return abs;
-        }
-    }
-
-    /** {@link #realKey} of a jailed path. */
-    public static Path realPath(JailedPath jp) {
-        return realKey(jp.lexical());
-    }
-
     // ── list, walk ───────────────────────────────────────────────────────────────────────────
 
     /** A directory entry: its name and attributes read without following a link. */
     public record Entry(String name, BasicFileAttributes attributes) {
         public boolean isLink() {
-            return PathJail.isLink(attributes);
+            return PathResolver.isLink(attributes);
         }
     }
 
@@ -382,7 +244,7 @@ public final class PathJail {
             try (Located l = locate(jp, false, followFinal, write)) {
                 BasicFileAttributes a = l.dir().stat(l.name());
                 if (a == null) throw new NoSuchFileException(jp.lexical().toString());
-                if (!a.isDirectory() || isLink(a)) throw new NotDirectoryException(jp.lexical().toString());
+                if (!a.isDirectory() || PathResolver.isLink(a)) throw new NotDirectoryException(jp.lexical().toString());
                 try (Dir d = l.dir().child(l.name())) {
                     out = entries(d);
                 }
@@ -480,34 +342,9 @@ public final class PathJail {
         return true;
     }
 
-    /** Whether the attributes (read without following links) are those of a symlink or a Windows junction. */
-    public static boolean isLink(BasicFileAttributes a) {
-        return a.isSymbolicLink() || (WINDOWS && a.isOther() && a.isDirectory());
-    }
-
     static void hook() {
         Runnable h = beforeOpen;
         if (h != null) h.run();
-    }
-
-    // ── hard links ───────────────────────────────────────────────────────────────────────────
-
-    /**
-     * Refuses a write in place of a file with more than one link that another user owns: the link may have been
-     * planted from a file outside the jail. A hard link to a file of the JVM user keeps sharing. Windows: not checked.
-     */
-    static void refuseForeignHardLink(Dir dir, String name, String shown) throws IOException {
-        if (WINDOWS) return;
-        Path p = dir.path().resolve(name);
-        try {
-            if (!(Files.getAttribute(p, "unix:nlink", LinkOption.NOFOLLOW_LINKS) instanceof Integer n) || n <= 1) return;
-            UserPrincipal owner = Files.getOwner(p, LinkOption.NOFOLLOW_LINKS);
-            if (!owner.getName().equals(System.getProperty("user.name"))) {
-                throw new IOException(shown + " is a hard link to a file owned by another user");
-            }
-        } catch (UnsupportedOperationException | IllegalArgumentException | NoSuchFileException e) {
-            // no link count on this file system, or the file does not exist yet
-        }
     }
 
     // ── the walk ─────────────────────────────────────────────────────────────────────────────
@@ -546,28 +383,14 @@ public final class PathJail {
                     String name = comps.get(i);
                     boolean last = i == comps.size() - 1;
                     BasicFileAttributes a = dir.stat(name);
-                    if (a != null && isLink(a) && (!last || followFinal)) {
+                    if (a != null && PathResolver.isLink(a) && (!last || followFinal)) {
                         Path at = dir.path().resolve(name);
-                        Path target = linkTarget(at, shown);
-                        if (!target.equals(at)) { // a Windows reparse point that is not a link resolves to itself
-                            if (++hops > MAX_LINK_HOPS) {
-                                throw new IllegalArgumentException("Too many levels of links: " + shown);
-                            }
-                            List<String> inside = insideComponents(target, jp);
-                            Path nextBase = jp.realRoot();
-                            if (inside == null) {
-                                checkExternal(shown, jp.links(), write);
-                                nextBase = target.getRoot();
-                                if (nextBase == null) throw FileSystemAgentTools.escapes(shown);
-                                inside = names(nextBase.relativize(target));
-                            }
-                            List<String> rest = comps.subList(i + 1, comps.size());
-                            finalFromLink |= rest.isEmpty();
-                            List<String> next = new ArrayList<>(inside);
-                            next.addAll(rest);
-                            if (next.isEmpty()) throw new FileSystemException(shown, null, "Is a directory");
-                            restart = next;
-                            restartBase = nextBase;
+                        PathResolver.Hop hop = PathResolver.followLink(at, comps, i, jp, write, hops, shown);
+                        if (hop != null) { // null: a Windows reparse point that is not a link resolves to itself
+                            hops++;
+                            finalFromLink |= last;
+                            restart = hop.components();
+                            restartBase = hop.base();
                             continue;
                         }
                     }
@@ -595,33 +418,6 @@ public final class PathJail {
             comps = restart;
             base = restartBase;
         }
-    }
-
-    /** The absolute, normalized target of a link (a junction: its real path). */
-    private static Path linkTarget(Path at, String shown) {
-        try {
-            Path t = Files.readSymbolicLink(at);
-            return at.getParent().resolve(t).normalize();
-        } catch (NotLinkException | UnsupportedOperationException e) {
-            try {
-                return at.toRealPath();
-            } catch (IOException e2) {
-                throw new IllegalArgumentException(shown + " is a dangling link");
-            }
-        } catch (IOException e) {
-            throw new IllegalArgumentException("Cannot resolve path: " + shown, e);
-        }
-    }
-
-    /**
-     * The components of {@code target} below the root, or null when it is outside. Only classifies, on the text of the
-     * link: the walk that follows opens the components again without following links, so the target can never be
-     * reached through a link swapped in meanwhile.
-     */
-    private static List<String> insideComponents(Path target, JailedPath jp) {
-        if (target.startsWith(jp.realRoot())) return names(jp.realRoot().relativize(target));
-        if (target.startsWith(jp.root())) return names(jp.root().relativize(target));
-        return null;
     }
 
     static Strategy strategy(Path realRoot) {
@@ -861,7 +657,7 @@ public final class PathJail {
             verifyDir(path);
             BasicFileAttributes a = Files.readAttributes(path.resolve(name), BasicFileAttributes.class,
                     LinkOption.NOFOLLOW_LINKS);
-            if (isLink(a)) throw FileSystemAgentTools.escapes(shown);
+            if (PathResolver.isLink(a)) throw FileSystemAgentTools.escapes(shown);
         }
 
         @Override

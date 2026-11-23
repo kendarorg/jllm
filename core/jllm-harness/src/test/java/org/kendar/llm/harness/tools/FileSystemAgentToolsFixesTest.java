@@ -214,16 +214,16 @@ class FileSystemAgentToolsFixesTest {
     @Test
     void atomicFilesReplacesAndCreates() throws Exception {
         Path f = root.resolve("x.bin");
-        AtomicFiles.write(PathJail.resolve(root, "x.bin", ExternalLinks.NONE, false), new byte[]{1, 2, 3});
-        AtomicFiles.write(PathJail.resolve(root, "x.bin", ExternalLinks.NONE, false), new byte[]{4});
+        AtomicFiles.write(PathResolver.resolve(root, "x.bin", ExternalLinks.NONE, false), new byte[]{1, 2, 3});
+        AtomicFiles.write(PathResolver.resolve(root, "x.bin", ExternalLinks.NONE, false), new byte[]{4});
         assertArrayEquals(new byte[]{4}, Files.readAllBytes(f));
         Path src = root.resolve("src.bin");
         Files.write(src, new byte[]{9, 8});
         try (var in = Files.newInputStream(src)) {
-            AtomicFiles.write(PathJail.resolve(root, "x.bin", ExternalLinks.NONE, false), in);
+            AtomicFiles.write(PathResolver.resolve(root, "x.bin", ExternalLinks.NONE, false), in);
         }
         assertArrayEquals(new byte[]{9, 8}, Files.readAllBytes(f));
-        assertThrows(java.io.IOException.class, () -> AtomicFiles.write(PathJail.resolve(root, ".", ExternalLinks.NONE, false), new byte[]{1}));
+        assertThrows(java.io.IOException.class, () -> AtomicFiles.write(PathResolver.resolve(root, ".", ExternalLinks.NONE, false), new byte[]{1}));
     }
 
     // ── read / edit limits ──────────────────────────────────────────────────────────────────

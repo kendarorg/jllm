@@ -1,7 +1,7 @@
 package org.kendar.llm.harness.tools;
 
 import org.kendar.llm.harness.tools.PathJail.Dir;
-import org.kendar.llm.harness.tools.PathJail.JailedPath;
+import org.kendar.llm.harness.tools.PathResolver.JailedPath;
 import org.kendar.llm.harness.tools.PathJail.Located;
 
 import java.io.IOException;
@@ -150,7 +150,7 @@ public final class AtomicFiles {
 
     /** The target stays locked: its content is replaced by the finished temporary file's. */
     private static void copyTempInPlace(Dir dir, String tmp, String name, JailedPath target) throws IOException {
-        PathJail.refuseForeignHardLink(dir, name, target.lexical().toString());
+        PathResolver.refuseForeignHardLink(dir.path().resolve(name), target.lexical().toString());
         try (SeekableByteChannel in = dir.open(tmp, Set.of(StandardOpenOption.READ));
              SeekableByteChannel out = dir.open(name, Set.of(StandardOpenOption.WRITE, StandardOpenOption.CREATE,
                      StandardOpenOption.TRUNCATE_EXISTING))) {
@@ -165,7 +165,7 @@ public final class AtomicFiles {
     }
 
     private static void inPlace(Dir dir, String name, Content content, JailedPath target) throws IOException {
-        PathJail.refuseForeignHardLink(dir, name, target.lexical().toString());
+        PathResolver.refuseForeignHardLink(dir.path().resolve(name), target.lexical().toString());
         PathJail.hook();
         try (SeekableByteChannel ch = dir.open(name, Set.of(StandardOpenOption.WRITE, StandardOpenOption.CREATE,
                 StandardOpenOption.TRUNCATE_EXISTING))) {
@@ -183,7 +183,7 @@ public final class AtomicFiles {
     }
 
     private static int linkCount(Dir dir, String name) {
-        if (PathJail.WINDOWS) return 1;
+        if (PathResolver.WINDOWS) return 1;
         try {
             Object n = Files.getAttribute(dir.path().resolve(name), "unix:nlink", LinkOption.NOFOLLOW_LINKS);
             return n instanceof Integer i ? i : 1;

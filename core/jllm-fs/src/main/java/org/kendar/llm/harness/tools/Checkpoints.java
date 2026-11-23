@@ -3,7 +3,7 @@ package org.kendar.llm.harness.tools;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.kendar.llm.harness.sandbox.FileBackend;
 
-import org.kendar.llm.harness.tools.PathJail.JailedPath;
+import org.kendar.llm.harness.tools.PathResolver.JailedPath;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -46,7 +46,7 @@ public final class Checkpoints {
     public static boolean isCheckpointPath(Path workDir, JailedPath p) {
         Path dir = workDir.toAbsolutePath().normalize().resolve(DIR);
         if (p.lexical().startsWith(dir)) return true;
-        return PathJail.realPath(p).startsWith(PathJail.realKey(dir));
+        return PathResolver.realPath(p).startsWith(PathResolver.realKey(dir));
     }
 
     /** Whether a container target is inside the checkpoint data of the work dir. */
@@ -65,7 +65,7 @@ public final class Checkpoints {
         long next = 1;
         if (Files.isDirectory(workDir)) {
             try {
-                JailedPath root = PathJail.resolve(workDir, DIR + "/" + chatId, ExternalLinks.NONE, false);
+                JailedPath root = PathResolver.resolve(workDir, DIR + "/" + chatId, ExternalLinks.NONE, false);
                 BasicFileAttributes a = PathJail.stat(root);
                 if (a != null && a.isDirectory()) {
                     for (PathJail.Entry e : PathJail.list(root)) next = Math.max(next, turnNumber(e.name()) + 1);
@@ -265,7 +265,7 @@ public final class Checkpoints {
         try {
             BasicFileAttributes st = PathJail.stat(file);
             if (st != null) {
-                JailedPath backup = PathJail.resolve(work, dir + "/files/" + rel, ExternalLinks.NONE, true);
+                JailedPath backup = PathResolver.resolve(work, dir + "/files/" + rel, ExternalLinks.NONE, true);
                 PathJail.createParentDirectories(backup);
                 BasicFileAttributes old = PathJail.statNoFollow(backup);
                 StorageQuota.Reservation r = quota.reserve(ctx.chatId(), backup.lexical(), old != null ? old.size() : 0,
@@ -282,7 +282,7 @@ public final class Checkpoints {
                     throw e;
                 }
             } else {
-                JailedPath created = PathJail.resolve(work, dir + "/created.txt", ExternalLinks.NONE, true);
+                JailedPath created = PathResolver.resolve(work, dir + "/created.txt", ExternalLinks.NONE, true);
                 PathJail.createParentDirectories(created);
                 synchronized (this) {
                     try (OutputStream out = Channels.newOutputStream(PathJail.openWrite(created,
@@ -327,7 +327,7 @@ public final class Checkpoints {
         }
         JailedPath target;
         try {
-            target = PathJail.resolve(work, p, links, true);
+            target = PathResolver.resolve(work, p, links, true);
         } catch (IllegalArgumentException e) {
             if (String.valueOf(e.getMessage()).contains("is a link that leaves the work dir")) {
                 refused.add(p + " (a link that leaves the work dir; files.externalLinks is " + links.settingValue()
@@ -336,7 +336,7 @@ public final class Checkpoints {
             return null; // invalid path characters, or a link leaving the work dir
         }
         if (target.components().isEmpty() || target.components().get(0).equals(".jllm")) return null;
-        List<String> real = PathJail.realComponents(target);
+        List<String> real = PathResolver.realComponents(target);
         if (real == null && links.followsOnWrite()) return target; // outside the work dir through a link: allowed
         if (real == null || real.isEmpty() || real.get(0).equals(".jllm")) return null;
         return target;
@@ -344,7 +344,7 @@ public final class Checkpoints {
 
     private static boolean isRealDirectory(JailedPath p) throws IOException {
         BasicFileAttributes a = PathJail.statNoFollow(p);
-        return a != null && a.isDirectory() && !PathJail.isLink(a);
+        return a != null && a.isDirectory() && !PathResolver.isLink(a);
     }
 
     /** Restores the files of the last {@code turns} turns that edited files, newest first. */
@@ -354,7 +354,7 @@ public final class Checkpoints {
         List<String> deleted = new ArrayList<>();
         List<String> refused = new ArrayList<>();
         if (!Files.isDirectory(work)) return new UndoResult(0, restored, deleted, List.of());
-        JailedPath root = PathJail.resolve(work, DIR + "/" + chatId, ExternalLinks.NONE, false);
+        JailedPath root = PathResolver.resolve(work, DIR + "/" + chatId, ExternalLinks.NONE, false);
         List<PathJail.Entry> dirs;
         try {
             if (!isRealDirectory(root)) return new UndoResult(0, restored, deleted, List.of());

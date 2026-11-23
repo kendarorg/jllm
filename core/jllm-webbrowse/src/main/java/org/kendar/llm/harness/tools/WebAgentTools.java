@@ -410,7 +410,7 @@ public class WebAgentTools implements HarnessToolSet {
             }
             String shown = in.path("path").asText();
             long max = config.web().downloadMaxBytes();
-            PathJail.JailedPath target = ctx.files() != null ? null : FileSystemAgentTools.jailWrite(ctx, shown);
+            PathResolver.JailedPath target = ctx.files() != null ? null : FileSystemAgentTools.jailWrite(ctx, shown);
             HttpResponse<java.io.InputStream> resp = get(ctx, uri, HttpResponse.BodyHandlers.ofInputStream());
             try (java.io.InputStream body = resp.body()) {
                 if (resp.statusCode() / 100 != 2) throw new IllegalStateException("download failed: HTTP " + resp.statusCode());

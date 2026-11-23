@@ -93,7 +93,7 @@ class ContextManagerFixesTest {
         JsonNode first = m.get(1);
         assertEquals("assistant", first.path("role").asText());
         assertTrue(first.path("content").path(0).path("text").asText()
-                .startsWith(ContextManager.TURN_SUMMARY_PREFIX + "TURN-SUMMARY"));
+                .startsWith(SummaryBuilder.TURN_SUMMARY_PREFIX + "TURN-SUMMARY"));
         assertEquals("tool_use", first.path("content").path(1).path("type").asText());
         assertEquals(3, m.size(), "prompt, newest round (with the summary in front)");
         assertTrue(lastRound.contains(m.get(2).toString()));
@@ -313,8 +313,8 @@ class ContextManagerFixesTest {
 
     @Test
     void fixedTokensCountsSystemTextAndTools() {
-        assertEquals(0, ContextManager.fixedTokens(null));
-        assertEquals(4, ContextManager.fixedTokens(new RequestPrefix("1234", "12345678", null, null, false)));
+        assertEquals(0, TokenEstimator.fixedTokens(null));
+        assertEquals(4, TokenEstimator.fixedTokens(new RequestPrefix("1234", "12345678", null, null, false)));
     }
 
     // ---- 10. thinking ---------------------------------------------------------------------------------------------
@@ -327,11 +327,11 @@ class ContextManagerFixesTest {
         c.addObject().put("type", "thinking").put("thinking", "t").put("signature", "sig");
         c.addObject().put("type", "redacted_thinking").put("data", "d");
 
-        ContextManager.stripThinking(m, true);
+        CutPlanner.stripThinking(m, true);
 
         JsonNode content = m.get(1).path("content");
         assertEquals(1, content.size());
-        assertEquals(ContextManager.REASONING_OMITTED, content.path(0).path("text").asText());
+        assertEquals(CutPlanner.REASONING_OMITTED, content.path(0).path("text").asText());
     }
 
     @Test
@@ -379,12 +379,12 @@ class ContextManagerFixesTest {
         assistant(span, "ok");
         String updated = "## Requirements\n- prefix calc\n\n## Work State\n### Completed\n- Alpha\n- Beta";
 
-        String out = ContextManager.withKeptSections(updated, span);
+        String out = SummaryBuilder.withKeptSections(updated, span);
 
         assertTrue(out.startsWith("## Objective\n- Rename methods, ticket TKT-1."), out);
         assertFalse(out.contains("a.java"), "only the dropped section is copied back");
         assertEquals(1, out.split("## Work State", -1).length - 1, "a present section is not duplicated");
-        assertEquals(updated, ContextManager.withKeptSections(updated, MAPPER.createArrayNode()),
+        assertEquals(updated, SummaryBuilder.withKeptSections(updated, MAPPER.createArrayNode()),
                 "a first summary has nothing to copy from");
     }
 
@@ -402,14 +402,14 @@ class ContextManagerFixesTest {
         String updated = "## Objective\n- Ship the report.\n\n## User-Stated Facts\n- **The audit window code is WIN-208.**\n"
                 + "- Deadline: Friday\n\n## Work State\n### Completed\n- Alpha\n- Beta";
 
-        ContextManager.Kept k = ContextManager.keptSections(updated, span, 10_000);
+        SummaryBuilder.Kept k = SummaryBuilder.keptSections(updated, span, 10_000);
 
         assertEquals("## Objective\n- Ship the report.\n\n## User-Stated Facts\n- **The audit window code is WIN-208.**\n"
                 + "- Deadline: Friday\n- Reviewer is Priya Raman\n\n## Work State\n### Completed\n- Alpha\n- Beta",
                 k.summary(), "the dropped fact goes back at the end of its section; a repeated one (other markup) is "
                         + "not duplicated");
         assertTrue(k.droppedFacts().isEmpty());
-        assertEquals(k.summary(), ContextManager.withKeptSections(updated, span));
+        assertEquals(k.summary(), SummaryBuilder.withKeptSections(updated, span));
     }
 
     @Test
@@ -418,11 +418,11 @@ class ContextManagerFixesTest {
         String updated = "## User-Stated Facts\n- The reviewer is Sam Lee\n- deadline: Friday\n- port=9090\n\n"
                 + "## Objective\n- Ship the report.\n\n## Work State\n- Alpha";
 
-        ContextManager.Kept k = ContextManager.keptSections(updated, span, 10_000);
+        SummaryBuilder.Kept k = SummaryBuilder.keptSections(updated, span, 10_000);
 
         assertEquals(updated, k.summary(), "same label, new value: the update replaced the fact");
-        assertEquals("reviewer", ContextManager.label(ContextManager.normalised("- The reviewer is Sam Lee")));
-        assertNull(ContextManager.label("a fact with no label at all"));
+        assertEquals("reviewer", SummaryBuilder.label(SummaryBuilder.normalised("- The reviewer is Sam Lee")));
+        assertNull(SummaryBuilder.label("a fact with no label at all"));
     }
 
     @Test
@@ -431,14 +431,14 @@ class ContextManagerFixesTest {
         String updated = "## Objective\n- Ship.\n\n## User-Stated Facts\n- Newest fact is four\n\n## Work State\n- Alpha";
         int room = "- First fact is one".length() + 1 + "- Third fact is three".length() + 1;
 
-        ContextManager.Kept k = ContextManager.keptSections(updated, span, updated.length() + room);
+        SummaryBuilder.Kept k = SummaryBuilder.keptSections(updated, span, updated.length() + room);
 
         assertTrue(k.summary().contains("- Newest fact is four\n- First fact is one\n- Third fact is three\n\n## Work"),
                 "oldest first, each fact that still fits: " + k.summary());
         assertEquals(List.of("- Second fact is a much longer value"), k.droppedFacts());
         assertTrue(k.summary().length() <= updated.length() + room);
 
-        ContextManager.Kept none = ContextManager.keptSections(updated, span, 10);
+        SummaryBuilder.Kept none = SummaryBuilder.keptSections(updated, span, 10);
         assertEquals(updated, none.summary(), "an update already over the size is kept as it is");
         assertEquals(3, none.droppedFacts().size());
     }
@@ -462,6 +462,6 @@ class ContextManagerFixesTest {
         String summary = m.get(0).path("content").get(0).path("text").asText();
         assertTrue(summary.contains("- Fresh fact is new\n- Fact number 0 is value 0\n"), "oldest first");
         assertFalse(summary.contains("- Fact number 1999 is value 1999"), "what does not fit is dropped");
-        assertTrue(summary.length() < ContextManager.SUMMARY_CHARS + 100, "within the summary size: " + summary.length());
+        assertTrue(summary.length() < SummaryBuilder.SUMMARY_CHARS + 100, "within the summary size: " + summary.length());
     }
 }

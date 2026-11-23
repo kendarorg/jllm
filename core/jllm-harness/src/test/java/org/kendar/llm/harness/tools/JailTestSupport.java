@@ -21,7 +21,7 @@ final class JailTestSupport {
         } catch (IOException | UnsupportedOperationException | SecurityException e) {
             // not permitted: a junction needs no privilege on Windows
         }
-        if (!PathJail.WINDOWS) return false;
+        if (!PathResolver.WINDOWS) return false;
         try {
             Process p = new ProcessBuilder("cmd", "/c", "mklink", "/J", link.toString(), target.toString())
                     .redirectErrorStream(true).start();

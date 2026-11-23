@@ -7,7 +7,8 @@ import org.kendar.llm.harness.sandbox.FileBackend;
 import org.kendar.llm.harness.tools.AtomicFiles;
 import org.kendar.llm.harness.tools.ExternalLinks;
 import org.kendar.llm.harness.tools.PathJail;
-import org.kendar.llm.harness.tools.PathJail.JailedPath;
+import org.kendar.llm.harness.tools.PathResolver.JailedPath;
+import org.kendar.llm.harness.tools.PathResolver;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -333,7 +334,7 @@ public class FilesApi {
                         if (f.components().size() <= skip) return PathJail.Action.CONTINUE;
                         if (isHidden(f)) return PathJail.Action.SKIP_DIRECTORY;
                         BasicFileAttributes own = PathJail.statNoFollow(f);
-                        if (own == null || PathJail.isLink(own)) return PathJail.Action.CONTINUE; // links are not zipped
+                        if (own == null || PathResolver.isLink(own)) return PathJail.Action.CONTINUE; // links are not zipped
                         String name = String.join("/", f.components().subList(skip, f.components().size()));
                         if (a.isDirectory()) {
                             zip.putNextEntry(new ZipEntry(name + "/"));
@@ -436,7 +437,7 @@ public class FilesApi {
         String r = rel == null ? "" : rel.replace('\\', '/');
         JailedPath p;
         try {
-            p = PathJail.resolve(root, r, ExternalLinks.NONE, false); // the web host never follows a link out of the project
+            p = PathResolver.resolve(root, r, ExternalLinks.NONE, false); // the web host never follows a link out of the project
         } catch (InvalidPathException e) {
             throw new ApiException(400, "Invalid path");
         } catch (IllegalArgumentException e) {
@@ -449,7 +450,7 @@ public class FilesApi {
     /** True when the path is, or lies inside (also through a link), the hidden harness directory of the root. */
     private boolean isHidden(JailedPath p) {
         for (String seg : p.components()) if (HIDDEN_DIR.equalsIgnoreCase(seg)) return true;
-        List<String> real = PathJail.realComponents(p);
+        List<String> real = PathResolver.realComponents(p);
         if (real != null) for (String seg : real) if (HIDDEN_DIR.equalsIgnoreCase(seg)) return true;
         return false;
     }

@@ -6,7 +6,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.kendar.llm.harness.context.ContextTurn;
 import org.kendar.llm.harness.context.ContextView;
 import org.kendar.llm.harness.context.RequestPrefix;
-import org.kendar.llm.harness.context.compaction.ContextManager;
+import org.kendar.llm.harness.context.compaction.CutPlanner;
 import org.kendar.llm.harness.hooks.HookContext;
 import org.kendar.llm.harness.hooks.HookEvent;
 import org.kendar.llm.harness.hooks.HookResult;
@@ -69,7 +69,7 @@ final class ModelTurn {
         var cancelled = req.cancelled();
         var token = run.token;
         // checked on what is sent: a strategy may leave reasoning out of the view without touching the log
-        if (run.turnHadThinking && !run.thinkingOff && !ContextManager.currentTurnHasThinking(view.messages())) {
+        if (run.turnHadThinking && !run.thinkingOff && !CutPlanner.currentTurnHasThinking(view.messages())) {
             run.thinkingOff = true;
             sink.emit("warning", mapper.createObjectNode().put("message",
                     "Context compacted mid-turn: thinking is off for the rest of this turn"));

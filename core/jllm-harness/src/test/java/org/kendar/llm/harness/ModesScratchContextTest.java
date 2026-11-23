@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.context.compaction.ContextManager;
+import org.kendar.llm.harness.context.compaction.CutPlanner;
 import org.kendar.llm.harness.llm.ModelException;
 import org.kendar.llm.harness.permission.ApprovalService;
 import org.kendar.llm.harness.permission.PermissionMode;
@@ -239,8 +240,8 @@ class ModesScratchContextTest {
         HarnessConfig c = config(base).withKeepRecentTurns(1);
         ContextManager cm = new ContextManager(c, new ScriptedModel(), new ApprovalService(5), MAPPER);
         ArrayNode m = conversation(4, 400); // ~110 tokens per turn
-        assertEquals(6, cm.tokenCutIndex(m, 250), "the last two turns fit");
-        assertEquals(0, cm.tokenCutIndex(m, 100_000), "everything fits");
+        assertEquals(6, CutPlanner.tokenCutIndex(m, 250), "the last two turns fit");
+        assertEquals(0, CutPlanner.tokenCutIndex(m, 100_000), "everything fits");
     }
 
     @Test

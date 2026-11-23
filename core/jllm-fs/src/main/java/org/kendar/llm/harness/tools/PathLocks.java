@@ -29,7 +29,7 @@ final class PathLocks {
     }
 
     /** Locks a jailed host file, keyed by the real jail root and the components below it. */
-    static Held lock(PathJail.JailedPath file) {
+    static Held lock(PathResolver.JailedPath file) {
         return lockKey(List.of(file.realRoot(), file.components()));
     }
 

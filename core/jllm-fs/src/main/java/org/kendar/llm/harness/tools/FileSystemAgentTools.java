@@ -2,7 +2,7 @@ package org.kendar.llm.harness.tools;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
-import org.kendar.llm.harness.tools.PathJail.JailedPath;
+import org.kendar.llm.harness.tools.PathResolver.JailedPath;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -84,9 +84,9 @@ public class FileSystemAgentTools implements HarnessToolSet {
     private static JailedPath jail(ToolContext ctx, String path, boolean write) {
         Path scratch = scratchRoot(ctx);
         if (scratch != null && Path.of(path).isAbsolute() && Path.of(path).normalize().startsWith(scratch)) {
-            return PathJail.resolve(scratch, path, ctx.links(), write);
+            return PathResolver.resolve(scratch, path, ctx.links(), write);
         }
-        return PathJail.resolve(ctx.workDir(), path, ctx.links(), write);
+        return PathResolver.resolve(ctx.workDir(), path, ctx.links(), write);
     }
 
     /**
@@ -103,7 +103,7 @@ public class FileSystemAgentTools implements HarnessToolSet {
                 throw new IllegalArgumentException("Plan mode: the working directory is read-only; write under "
                         + scratch + " instead");
             }
-            p = PathJail.resolve(scratch, path, ctx.links(), true);
+            p = PathResolver.resolve(scratch, path, ctx.links(), true);
         }
         if (Checkpoints.isCheckpointPath(ctx.workDir(), p)) {
             throw new IllegalArgumentException("Checkpoint data cannot be written: " + path);
@@ -368,7 +368,7 @@ public class FileSystemAgentTools implements HarnessToolSet {
      * approval prompt shows the file that would change and not the link.
      */
     static String previewHeader(JailedPath p, String shown) {
-        Path real = PathJail.realPath(p);
+        Path real = PathResolver.realPath(p);
         return real.startsWith(p.realRoot()) ? "--- " + shown + "\n"
                 : "--- " + shown + " -> " + real + " (a link that leaves the work dir)\n";
     }
@@ -450,7 +450,7 @@ public class FileSystemAgentTools implements HarnessToolSet {
                 GROUP, ToolKind.READ_ONLY, (ctx, in) -> {
             if (ctx.files() != null) return "ls is not available on a remote work dir; use glob";
             JailedPath dir = in.hasNonNull("path") && !in.path("path").asText().isBlank()
-                    ? jail(ctx, in.path("path").asText()) : PathJail.resolve(ctx.workDir(), ".", ctx.links(), false);
+                    ? jail(ctx, in.path("path").asText()) : PathResolver.resolve(ctx.workDir(), ".", ctx.links(), false);
             if (!PathJail.isDirectory(dir)) return "Not a directory: " + in.path("path").asText();
             List<String> dirs = new ArrayList<>();
             List<String> links = new ArrayList<>();
@@ -488,7 +488,7 @@ public class FileSystemAgentTools implements HarnessToolSet {
                 SimpleTool.schema("pattern", "Glob pattern relative to the work dir"),
                 GROUP, ToolKind.READ_ONLY, (ctx, in) -> {
             if (ctx.files() != null) return RemoteFileTools.glob(ctx, in);
-            JailedPath start = PathJail.resolve(ctx.workDir(), ".", ctx.links(), false);
+            JailedPath start = PathResolver.resolve(ctx.workDir(), ".", ctx.links(), false);
             Path root = start.lexical();
             PathMatcher matcher = globMatcher(in.path("pattern").asText());
             List<String> found = new ArrayList<>();
@@ -513,7 +513,7 @@ public class FileSystemAgentTools implements HarnessToolSet {
             if (ctx.files() != null) return RemoteFileTools.grep(ctx, in);
             Path root = ctx.workDir().toAbsolutePath().normalize();
             JailedPath start = in.hasNonNull("path") ? jail(ctx, in.path("path").asText())
-                    : PathJail.resolve(root, ".", ctx.links(), false);
+                    : PathResolver.resolve(root, ".", ctx.links(), false);
             Pattern pattern = Pattern.compile(in.path("pattern").asText());
             PathMatcher matcher = in.hasNonNull("glob") ? globMatcher(in.path("glob").asText()) : null;
             Path globBase = PathJail.isDirectory(start) ? start.lexical() : start.lexical().getParent();
@@ -568,7 +568,7 @@ public class FileSystemAgentTools implements HarnessToolSet {
             if (ctx.files() != null) return "grep_code is not available on a remote work dir; use glob, grep and read_file";
             Path root = ctx.workDir().toAbsolutePath().normalize();
             JailedPath start = in.hasNonNull("path") ? jail(ctx, in.path("path").asText())
-                    : PathJail.resolve(root, ".", ctx.links(), false);
+                    : PathResolver.resolve(root, ".", ctx.links(), false);
             PathMatcher matcher = in.hasNonNull("glob") ? globMatcher(in.path("glob").asText()) : null;
             Path globBase = PathJail.isDirectory(start) ? start.lexical() : start.lexical().getParent();
             Pattern pattern = in.hasNonNull("pattern") ? Pattern.compile(in.path("pattern").asText()) : null;

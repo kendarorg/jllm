@@ -8,6 +8,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.kendar.llm.harness.HarnessConfig;
 import org.kendar.llm.harness.context.*;
 import org.kendar.llm.harness.context.compaction.ContextManager;
+import org.kendar.llm.harness.context.compaction.CutPlanner;
+import org.kendar.llm.harness.context.compaction.TokenEstimator;
 import org.kendar.llm.harness.todo.TodoStore;
 import org.kendar.llm.harness.todo.TodoTools;
 import org.kendar.llm.harness.tools.HarnessTool;
@@ -145,7 +147,7 @@ public class ScopeStrategy implements ContextStrategy {
         boolean changed = false;
         if (t.lastUsage() != null) tokens.measured(t.chatId(), t.agentKey(), t.lastUsage().contextTokens());
         // rewriting history voids the signed thinking blocks of the turn in progress: optionally wait for it to end
-        boolean defer = config.compaction().deferOnThinkingOverflow() && ContextManager.currentTurnHasThinking(t.log());
+        boolean defer = config.compaction().deferOnThinkingOverflow() && CutPlanner.currentTurnHasThinking(t.log());
         if (config.compaction().auto() && !defer) {
             long real = budget(t.prefix());
             // the budget in the unit of the uncorrected estimate
@@ -160,7 +162,7 @@ public class ScopeStrategy implements ContextStrategy {
         }
         boolean pinned = pinTodos(t);
         ArrayNode view = t.log();
-        tokens.sent(t.chatId(), t.agentKey(), view.toString().length() + ContextManager.fixedChars(t.prefix()));
+        tokens.sent(t.chatId(), t.agentKey(), view.toString().length() + TokenEstimator.fixedChars(t.prefix()));
         return new ContextView(view, changed, changed || pinned);
     }
 
@@ -185,7 +187,7 @@ public class ScopeStrategy implements ContextStrategy {
         ArrayNode beforeClear = t.log().deepCopy();
         int cleared = clearOld(t.log(), 1);
         boolean summarized = summarize(t, focus, beforeClear);
-        if (cleared > 0 || summarized) ContextManager.stripThinking(t.log(), true);
+        if (cleared > 0 || summarized) CutPlanner.stripThinking(t.log(), true);
         return new CompactResult(cleared > 0 || summarized, before, estimate(t.log(), null, null), cleared);
     }
 
@@ -232,7 +234,7 @@ public class ScopeStrategy implements ContextStrategy {
 
     /** The whole request: messages plus the fixed part, or the measured usage (which includes it) when larger. */
     static long estimate(ArrayNode messages, RequestPrefix prefix, org.kendar.llm.harness.llm.Usage last) {
-        long chars = TokenEstimate.tokens(messages.toString().length()) + ContextManager.fixedTokens(prefix);
+        long chars = TokenEstimate.tokens(messages.toString().length()) + TokenEstimator.fixedTokens(prefix);
         return last == null ? chars : Math.max(chars, last.contextTokens());
     }
 
@@ -241,7 +243,7 @@ public class ScopeStrategy implements ContextStrategy {
     private boolean shrink(ContextTurn t, long budget, int offloadChars, int keepTurns, boolean force) {
         boolean changed = trim(t, budget, offloadChars, keepTurns, force);
         // earlier content was rewritten: the thinking signatures bound to it are void
-        if (changed) ContextManager.stripThinking(t.log(), true);
+        if (changed) CutPlanner.stripThinking(t.log(), true);
         return changed;
     }
 
@@ -273,7 +275,7 @@ public class ScopeStrategy implements ContextStrategy {
         // 4. one long turn has no turn boundary to cut at: summarize its older tool rounds (the forced pass of an
         // inherited copy did it already)
         if (!inheritsCopy(t) && (force || estimate(msgs, t.prefix(), null) > budget)) {
-            long room = (force ? scaledBudget(t) : budget) - ContextManager.fixedTokens(t.prefix());
+            long room = (force ? scaledBudget(t) : budget) - TokenEstimator.fixedTokens(t.prefix());
             changed |= manager.cutInsideTurn(msgs, room, t.usageSink(), force ? 0 : MIN_TURN_CUT_TOKENS);
         }
         if (!force && estimate(msgs, t.prefix(), null) > budget) {

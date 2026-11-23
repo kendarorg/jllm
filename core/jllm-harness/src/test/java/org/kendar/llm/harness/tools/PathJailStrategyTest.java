@@ -5,7 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.kendar.llm.harness.tools.PathJail.JailedPath;
+import org.kendar.llm.harness.tools.PathResolver.JailedPath;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -50,7 +50,7 @@ class PathJailStrategyTest {
     }
 
     private static JailedPath at(Path root, String path) {
-        return PathJail.resolve(root, path, ExternalLinks.NONE, false);
+        return PathResolver.resolve(root, path, ExternalLinks.NONE, false);
     }
 
     private static String readString(JailedPath p) throws IOException {
@@ -107,7 +107,7 @@ class PathJailStrategyTest {
             assertTrue(Files.isSymbolicLink(root.resolve("alias.txt")));
             assertEquals("via link", Files.readString(root.resolve("a/b/c.txt")));
             BasicFileAttributes own = PathJail.statNoFollow(at(root, "alias.txt"));
-            assertTrue(PathJail.isLink(own));
+            assertTrue(PathResolver.isLink(own));
             current = "via link";
         }
         if (JailTestSupport.canLinkDirs(tmp)) {
@@ -154,13 +154,13 @@ class PathJailStrategyTest {
         Path root = Files.createDirectories(tmp.resolve("work"));
         Files.writeString(root.resolve("target.txt"), "t");
         String prev = "target.txt";
-        for (int i = 0; i < PathJail.MAX_LINK_HOPS + 5; i++) {
+        for (int i = 0; i < PathResolver.MAX_LINK_HOPS + 5; i++) {
             Files.createSymbolicLink(root.resolve("l" + i), Path.of(prev));
             prev = "l" + i;
         }
         // a short chain works, a chain over the cap is refused
         assertEquals("t", readString(at(root, "l5")));
-        String longest = "l" + (PathJail.MAX_LINK_HOPS + 4);
+        String longest = "l" + (PathResolver.MAX_LINK_HOPS + 4);
         // resolve already refuses it where the file system caps the chain itself; the walk caps it for a path that passed
         assertThrows(IllegalArgumentException.class, () -> readString(at(root, longest)));
         Path abs = root.toAbsolutePath().normalize();
@@ -184,7 +184,7 @@ class PathJailStrategyTest {
 
     @Test
     void aHardLinkOfTheSameOwnerKeepsSharing() throws Exception {
-        assumeTrue(!PathJail.WINDOWS, "the link count is not exposed on Windows: unchanged behaviour");
+        assumeTrue(!PathResolver.WINDOWS, "the link count is not exposed on Windows: unchanged behaviour");
         Path root = Files.createDirectories(tmp.resolve("work"));
         Files.writeString(root.resolve("a.txt"), "v1");
         try {

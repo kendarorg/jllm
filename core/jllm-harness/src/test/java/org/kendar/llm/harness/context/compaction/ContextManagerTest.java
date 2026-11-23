@@ -74,10 +74,10 @@ class ContextManagerTest {
 
         assertEquals("tool_use", m.get(1).get("content").get(0).get("type").asText());
         assertEquals("thinking", m.get(4).get("content").get(0).get("type").asText());
-        assertTrue(ContextManager.currentTurnHasThinking(m));
-        ContextManager.stripThinking(m, true);
+        assertTrue(CutPlanner.currentTurnHasThinking(m));
+        CutPlanner.stripThinking(m, true);
         assertEquals("tool_use", m.get(4).get("content").get(0).get("type").asText());
-        assertEquals(false, ContextManager.currentTurnHasThinking(m));
+        assertEquals(false, CutPlanner.currentTurnHasThinking(m));
     }
 
     @Test
@@ -88,9 +88,9 @@ class ContextManagerTest {
         userText(m, "second");
         toolRound(m, "t2", "r");
 
-        int cut = manager.cutIndex(m, 1);
+        int cut = CutPlanner.cutIndex(m, 1);
 
         assertEquals(3, cut);
-        assertTrue(ContextManager.isPlainUserText(m.get(cut)));
+        assertTrue(CutPlanner.isPlainUserText(m.get(cut)));
     }
 }

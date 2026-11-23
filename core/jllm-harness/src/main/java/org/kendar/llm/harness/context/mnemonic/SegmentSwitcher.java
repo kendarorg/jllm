@@ -6,7 +6,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.kendar.llm.harness.Prompts;
 import org.kendar.llm.harness.context.RequestPrefix;
-import org.kendar.llm.harness.context.compaction.ContextManager;
+import org.kendar.llm.harness.context.compaction.CutPlanner;
 import org.kendar.llm.harness.context.mnemonic.MnemonicState.Mask;
 import org.kendar.llm.harness.context.mnemonic.MnemonicState.Segment;
 import org.kendar.llm.harness.llm.ModelRequest;
@@ -200,7 +200,7 @@ public final class SegmentSwitcher {
         ObjectNode copy = msg.deepCopy();
         ArrayNode kept = copy.putArray("content");
         for (JsonNode b : msg.path("content")) if (!Messages.isThinking(b)) kept.add(b);
-        if (kept.isEmpty()) kept.addObject().put("type", "text").put("text", ContextManager.REASONING_OMITTED);
+        if (kept.isEmpty()) kept.addObject().put("type", "text").put("text", CutPlanner.REASONING_OMITTED);
         return copy;
     }
 

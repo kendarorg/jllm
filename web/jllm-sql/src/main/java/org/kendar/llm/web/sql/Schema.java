@@ -43,7 +43,7 @@ final class Schema {
     static List<String> statements(String script) {
         List<String> out = new ArrayList<>();
         StringBuilder cur = new StringBuilder();
-        for (String line : script.split("\R")) {
+        for (String line : script.split("\\R")) {
             if (line.strip().startsWith("--")) continue;
             cur.append(line).append('\n');
             if (line.stripTrailing().endsWith(";")) {
