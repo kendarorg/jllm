@@ -136,8 +136,13 @@ public class JllmWebAutoConfiguration {
     }
 
     @Bean
-    WebConfig jllmWebConfig(Gate gate, WebAuthentication authentication, ObjectMapper mapper) {
-        return new WebConfig(gate, authentication, mapper);
+    WebConfig jllmWebConfig(Gate gate, WebAuthentication authentication, ObjectMapper mapper, JllmProperties p) {
+        return new WebConfig(gate, authentication, mapper, p.web() != null && p.web().enforceOnLoopback());
+    }
+
+    @Bean
+    SecurityHeadersFilter jllmSecurityHeadersFilter(JllmProperties p) {
+        return new SecurityHeadersFilter(p.web() == null ? null : p.web().contentSecurityPolicy());
     }
 
     @Bean

@@ -201,6 +201,8 @@ with `interactive=false` (the built-in main and sub-agent loops are both interac
 | `web.fetchMaxChars` | 40000 | `web_fetch` body before the context limit |
 | `web.downloadMaxBytes` | 100000000 | largest file `web_download` accepts |
 | `web.fetchMaxBytes` (settings) | 5242880 (5 MB) | largest response body `web_fetch` reads; `<= 0` = default |
+| `web.blockLocalHost` (settings) | `false` | `true`: `web_fetch` and `web_download` refuse loopback, link-local (169.254.169.254), site-local, any-local and IPv6 `fc00::/7` addresses, on the first URL and on every redirect, before the host-approval question. The shipped web release sets it `true` |
+| `web.blockExtraAddresses` (settings) | `[]` | more entries to refuse: IP, CIDR (`10.0.0.0/8`), host name or `*.suffix`; works without `blockLocalHost`. Known gap: the name is resolved by the guard and again by the HTTP client, so a DNS answer that changes in between (rebinding) is not caught; connecting to the checked address is not implemented |
 | `files.maxReadBytes` (settings) | 1000000 | the most text one `read_file` returns and the largest file `edit_file` changes (`grep` skips larger files); `<= 0` = default |
 | `sandbox.outputLogMaxBytes` (settings) | 51200 | cap of the spill log of a long `bash` output; `0` = unlimited |
 | `storage.maxBytes` | -1 (no limit) | total size of a chat storage (web: the work dir of the chat; CLI: `<project>/.jllm/scratchpad/<chatId>/`). A write by `write_file`, `edit_file` or `web_download` that would exceed it fails and creates no file. Project files edited by the model in the CLI are outside the chat storage and are not counted; writes made by a shell command are not counted until the next start |

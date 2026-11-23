@@ -263,7 +263,7 @@ class RemoteExecSandboxExecutorTest {
     private void remoteConfig() {
         var d = config.sandbox().docker();
         config = config.withDocker(new HarnessConfig.Docker(d.binary(), d.image(), d.memory(), d.cpus(), d.pidsLimit(),
-                d.user(), d.network(), "daemon", true, "127.0.0.1"));
+                d.user(), d.network(), "daemon", true, "127.0.0.1", true, "", ""));
     }
 
     @Test

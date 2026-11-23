@@ -35,7 +35,8 @@ final class ToolAssembler {
                     settings.filesMaxReadBytes()).tools());
             all.addAll(fileTools);
             all.addAll(new ShellAgentTools(box, config).tools());
-            all.addAll(new WebAgentTools(config, mapper, quota, settings.webFetchMaxBytes()).tools());
+            all.addAll(new WebAgentTools(config, mapper, quota, settings.webFetchMaxBytes(),
+                    new AddressPolicy(settings.webBlockLocalHost(), settings.webBlockExtraAddresses())).tools());
         }
         all.removeIf(t -> plugins.removedTools.contains(t.name()));
         all.addAll(plugins.tools);

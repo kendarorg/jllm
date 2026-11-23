@@ -1,5 +1,6 @@
 package org.kendar.llm.harness.context.scope;
 
+import org.kendar.llm.harness.context.ClearedResult;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -39,7 +40,6 @@ public class ScopeStrategy implements ContextStrategy {
     private static final Logger log = LoggerFactory.getLogger(ScopeStrategy.class);
 
     static final String OFFLOADED = "[Output offloaded to ";
-    static final String CLEARED = "[tool result cleared to save context]";
     static final String ACK = "Understood.";
     private static final String SUMMARY_PREFIX = "[Summary of the earlier conversation]";
     static final String TODO_OPEN = "<todo_list>\n";
@@ -354,8 +354,8 @@ public class ScopeStrategy implements ContextStrategy {
                     if (nl < 0) continue;
                     ((ObjectNode) block).put("content", text.substring(0, nl));
                     cleared++;
-                } else if (text.length() > CLEARED.length() + 50) {
-                    ((ObjectNode) block).put("content", CLEARED);
+                } else if (text.length() > ClearedResult.TEXT.length() + 50) {
+                    ((ObjectNode) block).put("content", ClearedResult.TEXT);
                     cleared++;
                 }
             }

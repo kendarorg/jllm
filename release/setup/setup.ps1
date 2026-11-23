@@ -9,8 +9,11 @@ param(
   [string]$Dir,
   [ValidateSet('community', 'commercial')][string]$Edition,
   [switch]$AcceptLicense,
-  [string]$Repo
+  [string]$Repo,
+  [ValidateSet('mysql', 'postgres', 'all', 'none')][string]$Sql = 'all'
 )
+# -Sql: the JDBC drivers of the SQL store downloaded into lib-ext\ (default all; SQLite is bundled). MySQL is GPL with the
+# FOSS exception: asked y/N unless -AcceptLicense. At run time only the driver of the jdbc url is used.
 $ErrorActionPreference = 'Stop'
 if ($Repo) { $env:JLLM_MAVEN_REPO = $Repo }
 if (-not $Zip) {
@@ -45,5 +48,11 @@ Push-Location $home_
 try {
   if ($Edition -eq 'commercial') { & (Join-Path $home_ 'fetch-graaljs.ps1') oracle -AcceptOracleTerms }
   else { & (Join-Path $home_ 'fetch-graaljs.ps1') community }
+  if ($Sql -ne 'none') {
+    $sqlArgs = @{ Which = $Sql }
+    if ($AcceptLicense) { $sqlArgs.AcceptLicense = $true }
+    if ($env:JLLM_MAVEN_REPO) { $sqlArgs.BaseUrl = $env:JLLM_MAVEN_REPO }
+    & (Join-Path $home_ 'fetch-sql-driver.ps1') @sqlArgs
+  }
 } finally { Pop-Location }
 Write-Host "jllm is ready in ${home_}: run-cli.cmd or run-web.cmd (Java 21+ needed)"

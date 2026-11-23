@@ -25,7 +25,7 @@ Flags, startup directories, slash commands and local models: [jllm-cli](../../jl
 ## JavaScript (`run_js`)
 
 The jars do not contain GraalJS: with `java -jar` the `run_js` tool is off (the harness starts, one WARN says why).
-From a source checkout run `scripts/setup` once (it downloads the GraalJS set into `.graal/` and builds), then run the same jars on it:
+From a source checkout run `scripts/setup` once (it downloads the GraalJS set into `.downloaded-libs/graal/` and the MySQL/PostgreSQL JDBC drivers into `.downloaded-libs/<db>/`, `--sql none` skips them, and builds), then run the same jars on it:
 
 ```sh
 scripts/run-cli.sh --provider anthropic --mode edit            # Windows: scripts\run-cli.cmd

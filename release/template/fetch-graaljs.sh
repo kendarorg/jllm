@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Replaces the GraalJS jars of lib-ext/ with the set of one edition, downloaded from Maven Central and verified.
 # Usage: ./fetch-graaljs.sh <community|oracle> [--accept-oracle-terms]
-# Editions never mix: lib-ext/*.jar is emptied first. A download whose SHA-256 differs from the manifest is deleted and
+# Editions never mix: lib-ext/*.jar (but not the MySQL driver) is emptied first. A download whose SHA-256 differs from the manifest is deleted and
 # the script fails (lib-ext is left as it was). The oracle set may declare terms (the manifest says so): read them,
 # then pass --accept-oracle-terms. JLLM_MAVEN_REPO overrides the repository URL.
 set -euo pipefail
@@ -39,7 +39,7 @@ while read -r sum path; do
   n=$((n+1))
 done < "$manifest"
 [ "$n" -gt 0 ] || { echo "no jar listed in $manifest" >&2; exit 1; }
-rm -f lib-ext/*.jar lib-ext/graaljs*.manifest
+find lib-ext -maxdepth 1 -type f \( -name '*.jar' ! -name 'mysql-connector-j-*' -o -name 'graaljs*.manifest' \) -delete # the SQL driver stays
 mv "$stage"/*.jar lib-ext/
 cp "$manifest" "lib-ext/graaljs-$edition.manifest"
 echo "GraalJS $edition $(sed -n 's/^version=//p' "$manifest" | tr -d '\r'): $n jars in lib-ext"

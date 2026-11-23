@@ -1,5 +1,6 @@
 package org.kendar.llm.harness.context.compaction;
 
+import org.kendar.llm.harness.context.ClearedResult;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -41,7 +42,6 @@ import java.util.regex.Pattern;
 public class ContextManager {
 
     private static final Logger log = LoggerFactory.getLogger(ContextManager.class);
-    static final String CLEARED = "[tool result cleared to save context]";
     private static final String SUMMARY_PREFIX = "[Summary of the earlier conversation]\n";
     /** Starts the summary of the older tool rounds of the turn in progress (see {@link #compactOverflow}). */
     static final String TURN_SUMMARY_PREFIX = "[Summary of the earlier steps of this request]\n";
@@ -486,8 +486,8 @@ public class ContextManager {
             for (JsonNode block : content) {
                 if (!"tool_result".equals(block.path("type").asText())) continue;
                 String text = block.path("content").isTextual() ? block.path("content").asText() : block.path("content").toString();
-                if (text.length() > CLEARED.length() + 50) {
-                    ((ObjectNode) block).put("content", CLEARED);
+                if (text.length() > ClearedResult.TEXT.length() + 50) {
+                    ((ObjectNode) block).put("content", ClearedResult.TEXT);
                     cleared++;
                 }
             }

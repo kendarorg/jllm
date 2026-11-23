@@ -160,7 +160,7 @@ not converted: the loader fails with a message, delete them.
   (description, checks, thresholds and the configuration after the case customisation; code in a case harness
   callback cannot be hashed, the commit and diff hash cover it) and the run metadata.
 - the k list, the dirty-tree policy, and the run_js engine found (`isolated` or `constrained`, edition, version, the
-  `jllm.graal.dir` folder (`.graal/<version>`, set by `scripts/setup`)).
+  `jllm.graal.dir` folder (`.downloaded-libs/graal/<version>`, set by `scripts/setup`)).
 
 `eval.dirtyTree` (`DIRTY_TREE` in the smoke scripts): `refuse` stops before the warm-up call and lists the changed
 files; `warn` (default) runs, logs a banner and marks `run.json`, `summary.json` and the report; `allow` runs without a

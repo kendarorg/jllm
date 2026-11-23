@@ -2,6 +2,7 @@ package org.kendar.llm.harness.agent;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
+import org.kendar.llm.harness.context.ClearedResult;
 import org.kendar.llm.harness.session.ChatSessionService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -78,21 +79,27 @@ public final class TaintTracker {
         }
     }
 
-    /** Drops the tainted calls whose result is no longer in the log, or was cleared by compaction. */
+    /**
+     * Drops the tainted calls whose result left the log. A result cleared by compaction keeps its taint until the
+     * next user message: the model may still act on what it read before the clearing.
+     */
     void prune(String chatId, ArrayNode messages, boolean newUserMessage) {
         Set<String> ids = taintSet(chatId);
         if (ids.isEmpty()) return;
         boolean changed = newUserMessage && ids.remove(TAINT_RUN);
         Set<String> inContext = new HashSet<>();
+        Set<String> cleared = new HashSet<>();
         for (JsonNode m : messages) {
             for (JsonNode b : m.path("content")) {
-                if ("tool_result".equals(b.path("type").asText())
-                        && !b.path("content").asText("").startsWith("[tool result cleared")) {
-                    inContext.add(b.path("tool_use_id").asText());
+                if ("tool_result".equals(b.path("type").asText())) {
+                    String id = b.path("tool_use_id").asText();
+                    if (ClearedResult.is(b.path("content").asText(""))) cleared.add(id);
+                    else inContext.add(id);
                 }
             }
         }
-        changed |= ids.removeIf(id -> !TAINT_RUN.equals(id) && !inContext.contains(id));
+        changed |= ids.removeIf(id -> !TAINT_RUN.equals(id) && !inContext.contains(id)
+                && !(cleared.contains(id) && !newUserMessage));
         if (changed) save(chatId);
     }
 }

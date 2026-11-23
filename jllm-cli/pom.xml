@@ -35,7 +35,7 @@
             <artifactId>jllm-harness</artifactId>
             <version>${project.version}</version>
         </dependency>
-        <!-- GraalJS for run_js: provided, never bundled; downloaded by scripts/setup into .graal/, the release ships it in lib-ext/ -->
+        <!-- GraalJS for run_js: provided, never bundled; downloaded by scripts/setup into .downloaded-libs/graal/, the release ships it in lib-ext/ -->
         <dependency>
             <groupId>org.kendar.llm.graal</groupId>
             <artifactId>jllm-graal-set</artifactId>

@@ -62,4 +62,20 @@ class PermissionRulesPathTest {
         assertEquals(1, r.describe().size());
         assertEquals("deny  bash(rm)", r.describe().get(0));
     }
+
+    @Test
+    void symlinkIntoDeniedDirIsResolved() throws Exception {
+        java.nio.file.Files.createDirectories(work.resolve("secret"));
+        Path link = work.resolve("shortcut");
+        try {
+            java.nio.file.Files.createSymbolicLink(link, work.resolve("secret"));
+        } catch (UnsupportedOperationException | java.io.IOException | SecurityException e) {
+            org.junit.jupiter.api.Assumptions.assumeTrue(false, "symlinks not supported here: " + e);
+        }
+        for (boolean windows : new boolean[]{false, true}) {
+            assertNotNull(RULES.match("write_file", path("shortcut/new.txt"), work, windows), "new file");
+            assertNotNull(RULES.match("write_file", path("shortcut"), work, windows), "link itself");
+        }
+        assertNull(RULES.match("write_file", path("public/a"), work, false));
+    }
 }

@@ -4,19 +4,23 @@
 # Layout: next to this script jllm-<version>.zip; after setup, jllm-<version>/ holds the jars, run-*.sh/.cmd, plugins/,
 # settings/, webauth/ and lib-ext/ (filled with the chosen GraalJS edition; manifests/ lists the pinned jars).
 # Usage: ./setup.sh [--zip FILE] [--dir DIR] [--edition community|commercial] [--accept-license] [--repo URL]
+#        [--sql mysql|postgres|all|none]
 # - --zip: the distribution (default: the only jllm-*.zip next to this script)
 # - --dir: where to unzip (default: next to the zip)
 # - --edition: skip the question; --accept-license accepts the commercial terms silently
+# - --sql: the JDBC drivers of the SQL store to download into lib-ext/ (default all; SQLite is bundled). MySQL is GPL with the
+#   FOSS exception: asked y/N unless --accept-license. At run time only the driver of the jdbc url is used
 # - --repo: Maven repository the pinned GraalJS jars come from (default Maven Central; SHA-256 checked either way)
 # Needs Java 21+ only to run jllm, not for this script. Without a terminal, give --edition (and --accept-license).
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
-zip=""; dir=""; edition=""; accept=0
+zip=""; dir=""; edition=""; accept=0; sql=all
 while [ $# -gt 0 ]; do
   case $1 in
     --zip) zip=$2; shift;;
     --dir) dir=$2; shift;;
     --edition) case $2 in community) edition=community;; commercial|oracle) edition=oracle;; *) echo "edition is community or commercial" >&2; exit 2;; esac; shift;;
+    --sql) case ${2:-} in mysql|postgres|all|none) sql=$2;; *) echo "--sql is mysql, postgres, all or none" >&2; exit 2;; esac; shift;;
     --accept-license) accept=1;;
     --repo) export JLLM_MAVEN_REPO=$2; shift;;
     *) echo "unknown argument $1" >&2; exit 2;;
@@ -63,4 +67,9 @@ home="$dir/$top"
 chmod +x "$home"/*.sh
 cd "$home"
 if [ "$edition" = oracle ]; then ./fetch-graaljs.sh oracle --accept-oracle-terms; else ./fetch-graaljs.sh community; fi
+if [ "$sql" != none ]; then
+  args=("$sql"); [ "$accept" = 0 ] || args+=(--accept-license)
+  [ -z "${JLLM_MAVEN_REPO:-}" ] || args+=(--base-url "$JLLM_MAVEN_REPO")
+  ./fetch-sql-driver.sh "${args[@]}"
+fi
 echo "jllm is ready in $home: ./run-cli.sh or ./run-web.sh (Java 21+ needed)"

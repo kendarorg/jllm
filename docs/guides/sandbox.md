@@ -107,7 +107,9 @@ Settings file (unset keys keep the defaults):
 | `sandbox.docker.user` | `1000:1000` | user in the container |
 | `sandbox.docker.mode` | `oneshot` | `oneshot` or `daemon` (see below) |
 | `sandbox.docker.remote` | `false` | daemon mode: the docker daemon is on another machine; upload and back up the workspace |
-| `sandbox.docker.remoteHost` | from `DOCKER_HOST` | address where the remote host's published ports are reached |
+| `sandbox.docker.remoteHost` | from `DOCKER_HOST` | address where the remote host's published ports are reached; `https://` prefix = TLS |
+| `sandbox.docker.allowInsecure` | `true` | accept plain http to a non-loopback remote host (WARN logged); `false` refuses it, recommended for shared deployments |
+| `sandbox.docker.trustStore`, `trustStorePassword` | default JDK trust store | PKCS12/JKS file trusted for https daemon URLs |
 
 Command line, winning over the settings file. The CLI and the web application take the same flags
 (`--flag value` or `--flag=value`):
@@ -240,8 +242,16 @@ What changes:
   Executable bits are kept (by a `.jllm-exec` list in the archive).
 - Large projects (`node_modules`, build output, `.git`) are uploaded whole: start the agent from a smaller directory or
   clean first.
-- The port is published on all interfaces of the remote host (`0.0.0.0`) and the traffic is plain HTTP: the token is the
-  only protection, and it and the files can be read by anyone on the path. Use it on a trusted network or tunnel it.
+- The port is published on all interfaces of the remote host (`0.0.0.0`). The daemon itself speaks plain HTTP, so unless
+  something in front of it terminates TLS the token, the commands and the files can be read by anyone on the path.
+  - `remoteHost` may carry a scheme: `"https://docker.example.org"` makes the harness use TLS (JDK default trust store, or
+    `sandbox.docker.trustStore` / `trustStorePassword`: a PKCS12 or `.jks` file). This needs a TLS-terminating proxy that
+    forwards to the published port; the daemon does not do TLS.
+  - `sandbox.docker.allowInsecure` (default `true`): plain http to a non-loopback host is accepted and one WARN is logged.
+    Set it to `false` on shared deployments: the harness then refuses such a host at start with a message naming the
+    alternatives. Loopback (`127.0.0.1`, `localhost`, `::1`) http is always allowed.
+  - Safe alternatives to https: an SSH tunnel (`ssh -L <port>:127.0.0.1:<port> host`, then `remoteHost` = `127.0.0.1`) or a
+    trusted/private network.
 
 The daemon's `GET /backup` (zip of the workspace) and `POST /setup` (zip to extract, overwriting; names that leave the
 workspace are refused) do the transfer.

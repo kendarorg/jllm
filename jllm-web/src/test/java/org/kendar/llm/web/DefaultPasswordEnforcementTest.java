@@ -1,0 +1,92 @@
+package org.kendar.llm.web;
+
+import jakarta.servlet.http.Cookie;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.ResultActions;
+
+import java.nio.file.Path;
+import java.util.Map;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+class DefaultPasswordEnforcementTest {
+
+    @TempDir
+    Path dir;
+
+    private static ResultActions call(MockMvc mvc, Cookie c, String path, String remote) throws Exception {
+        return mvc.perform(get(path).cookie(c).with(r -> {
+            r.setRemoteAddr(remote);
+            return r;
+        }));
+    }
+
+    private static void assertRequired(ResultActions r) throws Exception {
+        r.andExpect(status().isForbidden());
+        assertEquals("password_change_required", WebauthFixture.json(r).path("error").asText());
+    }
+
+    @Test
+    void remoteDefaultPasswordUserIsBlockedExceptPasswordChangeAndAuth() throws Exception {
+        WebauthFixture f = new WebauthFixture(dir);
+        Cookie c = f.signIn("rita");
+        assertRequired(call(f.mvc, c, "/api/me/tools", "203.0.113.5"));
+        assertRequired(call(f.mvc, c, "/api/me/skills", "203.0.113.5"));
+        call(f.mvc, c, "/api/me", "203.0.113.5").andExpect(status().isOk());
+        // no controller in the fixture: the interceptor lets it through, so 404 rather than 403
+        call(f.mvc, c, "/api/auth/config", "203.0.113.5").andExpect(status().isNotFound());
+        f.mvc.perform(post("/api/me/password").cookie(c).contentType("application/json")
+                        .content("{\"current\":\"wrong\",\"next\":\"a-long-new-password\"}")
+                        .with(r -> {
+                            r.setRemoteAddr("203.0.113.5");
+                            return r;
+                        }))
+                .andExpect(status().isUnauthorized());
+        f.mvc.perform(post("/api/logout").cookie(c).with(r -> {
+            r.setRemoteAddr("203.0.113.5");
+            return r;
+        })).andExpect(status().isNoContent());
+    }
+
+    @Test
+    void loopbackIsExemptUnlessEnforced() throws Exception {
+        WebauthFixture f = new WebauthFixture(dir);
+        Cookie c = f.signIn("rita");
+        call(f.mvc, c, "/api/me/tools", "127.0.0.1").andExpect(status().isOk());
+        call(f.mvc, c, "/api/me/tools", "0:0:0:0:0:0:0:1").andExpect(status().isOk());
+        MockMvc strict = f.mvc(true);
+        assertRequired(call(strict, c, "/api/me/tools", "127.0.0.1"));
+    }
+
+    @Test
+    void forwardedLoopbackIsNotExempt() throws Exception {
+        WebauthFixture f = new WebauthFixture(dir);
+        Cookie c = f.signIn("rita");
+        assertRequired(f.mvc.perform(get("/api/me/tools").cookie(c).header("X-Forwarded-For", "203.0.113.5")));
+    }
+
+    @Test
+    void afterTheChangeEverythingIsOpen() throws Exception {
+        WebauthFixture f = new WebauthFixture(dir);
+        Cookie c = f.signIn("rita");
+        assertRequired(call(f.mvc(true), c, "/api/me/tools", "203.0.113.5"));
+        f.send(c, "POST", "/api/me/password", Map.of("current", "rita", "next", "a-long-new-password"))
+                .andExpect(status().isNoContent());
+        Cookie after = f.signIn("rita", "a-long-new-password");
+        call(f.mvc(true), after, "/api/me/tools", "203.0.113.5").andExpect(status().isOk());
+    }
+
+    @Test
+    void usersWithAPasswordAreNeverHeldBack() throws Exception {
+        WebauthFixture f = new WebauthFixture(dir);
+        Cookie c = f.signIn("rita");
+        f.send(c, "POST", "/api/me/password", Map.of("current", "rita", "next", "a-long-new-password"));
+        Cookie after = f.signIn("rita", "a-long-new-password");
+        call(f.mvc(true), after, "/api/me/tools", "127.0.0.1").andExpect(status().isOk());
+    }
+}

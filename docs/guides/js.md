@@ -21,7 +21,7 @@ and an IDE run (tick "include dependencies with provided scope") see the same se
   (`.sh`, `.cmd`, `.ps1`) with `community` or `oracle`: it empties `lib-ext/*.jar`, downloads from Maven Central,
   verifies the SHA-256 of each jar against `lib-ext/manifests/` and deletes the file and fails on a mismatch.
 - **Source checkout**: run `scripts/setup` once (`.sh`, `.ps1`, `.cmd`). It reads `graalvm.version` from the root pom,
-  downloads the set into the git-ignored `.graal/<version>/repo` (a Maven layout holding the gate artifact
+  downloads the set into the git-ignored `.downloaded-libs/graal/<version>/repo` (a Maven layout holding the gate artifact
   `org.kendar.llm.graal:jllm-graal-set`) with a manifest of SHA-256 sums next to it, deletes the folders of other
   versions and runs `mvn -DskipTests install` (`--no-build` skips it). The default edition is commercial: setup shows the
   Oracle GraalVM Free Terms and Conditions URL and asks y/N before any download (`--accept-license` / `-AcceptLicense`
@@ -29,14 +29,20 @@ and an IDE run (tick "include dependencies with provided scope") see the same se
   offered in the prompt. Every module then sees the set as a `provided` dependency, with no profile and no flag; the
   build stops at `validate` with a "not set up" message when the set of the current version is missing, so run setup
   again after a `graalvm.version` change. `scripts/run-cli`, `scripts/run-web` and `scripts/run-eval` use it too.
+The SQL drivers (MySQL, PostgreSQL; SQLite is bundled) follow the same pattern in the same folders: `scripts/setup` also
+fetches them (`--sql mysql|postgres|all|none`, default all) into `.downloaded-libs/<db>/<version>/`, and the release
+`setup` / `fetch-sql-driver` put them into `lib-ext/` with their manifests in `lib-ext/manifests/`; each fetch leaves the
+other set alone. MySQL asks to accept its GPL terms. See the
+[SQL starter README](../../web/jllm-sql-spring-starter/README.md#jdbc-drivers).
+
 Layouts. The release:
 
 ```
 Release files (next to each other)         Inside the zip: jllm-<version>/
 jllm-<version>.zip                         ├── jllm-cli.jar, jllm-web.jar
 SHA256SUMS                                 ├── run-cli.sh/.cmd, run-web.sh/.cmd
-setup.sh, setup.ps1                        ├── fetch-graaljs.sh/.cmd/.ps1
-                                           ├── lib-ext/            empty until setup / fetch-graaljs
+setup.sh, setup.ps1                        ├── fetch-graaljs.sh/.cmd/.ps1, fetch-sql-driver.sh/.cmd/.ps1
+                                           ├── lib-ext/            empty until setup / fetch-graaljs / fetch-sql-driver; sql/ = the SQL store jars (shipped)
                                            │   └── manifests/      graaljs-community / graaljs-oracle
                                            ├── plugins/            js, pdf, docs, workflows, workflow-web
                                            ├── settings/settings.json
@@ -49,7 +55,7 @@ A source checkout:
 
 ```
 Source checkout (after scripts/setup)
-.graal/                                    git-ignored
+.downloaded-libs/graal/                                    git-ignored
 └── <graalvm.version>/
     ├── graaljs-<edition>.manifest         edition, version, SHA-256 of every jar
     └── repo/                              Maven layout: jars + poms
@@ -75,11 +81,11 @@ declares the GraalVM Free Terms and Conditions. `fetch-graaljs oracle` refuses t
 `--accept-oracle-terms`; `scripts/setup` asks for them (or takes `--accept-license`) in the default commercial
 edition: accepting is the operator's decision, not jllm's. The community isolate is weaker (no hard memory separation).
 
-Having the downloaded Graal files in `.graal/` is the evidence that the license was accepted: the project does not ship
+Having the downloaded Graal files in `.downloaded-libs/graal/` is the evidence that the license was accepted: the project does not ship
 them in the repository, so anyone who has them downloaded them with `scripts/setup` and accepted the terms of the chosen
 edition. No marker file, no setting.
 
-The GraalJS libraries are not in this repository. If they are present in `.graal/`, you downloaded them with
+The GraalJS libraries are not in this repository. If they are present in `.downloaded-libs/graal/`, you downloaded them with
 `scripts/setup` and accepted the license terms of the chosen edition. After a `graalvm.version` change, run
 `scripts/setup` again.
  The release scripts fail on any resolved pom that declares a licence other than UPL,

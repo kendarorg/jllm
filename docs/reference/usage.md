@@ -152,7 +152,7 @@ ignored.
 | `toolsWhitelistedEnvVars` | default `["*"]`: the same for the processes of tools, i.e. MCP stdio servers; the `env` of a server in the settings is always added on top. The model keys (`<PROVIDER>_API_KEY`), `BRAVE_API_KEY` and the `${ENV_VAR}` of the settings file are read by the harness itself and are not affected |
 | `smallModel` | default `false`: append the small-model rules (`prompts/small-model.md`) to the system prompt; `--small-model` sets it |
 | `sandbox.tempDir`, `sandbox.timeoutSeconds` | scratch root; default shell timeout (the tool caps it at 600 s) |
-| `sandbox.backend`, `sandbox.localFallback`, `sandbox.docker.*` | `local` (default) or `docker`; fall back to local when docker is missing (default `true`); `binary`, `image`, `memory`, `cpus`, `pidsLimit`, `user`, `network`, `mode` (`oneshot` or `daemon`, a long-running container), `remote`, `remoteHost` (docker on another machine). See [SANDBOX](../guides/sandbox.md). CLI and web: `--sandbox`, `--docker-image`, `--docker-mode`, `--docker-remote`, `--docker-remote-host` |
+| `sandbox.backend`, `sandbox.localFallback`, `sandbox.docker.*` | `local` (default) or `docker`; fall back to local when docker is missing (default `true`); `binary`, `image`, `memory`, `cpus`, `pidsLimit`, `user`, `network`, `mode` (`oneshot` or `daemon`, a long-running container), `remote`, `remoteHost` (docker on another machine; `https://` prefix = TLS), `allowInsecure` (default `true`: plain http to a non-loopback host is allowed with a WARN; `false` refuses it, recommended for shared deployments), `trustStore`, `trustStorePassword` (https only). See [SANDBOX](../guides/sandbox.md). CLI and web: `--sandbox`, `--docker-image`, `--docker-mode`, `--docker-remote`, `--docker-remote-host` |
 | `sandbox.shell` | local backend: shell of the `bash` tool (`cmd`, `powershell`, `pwsh`, `bash`, `zsh`, `sh` or a path); default the OS one (`cmd` on Windows, `zsh` on macOS, `bash` elsewhere). See [SANDBOX](../guides/sandbox.md) |
 | `sandbox.outputLogMaxBytes` | default `51200`: cap of the spill log written when a `bash` output exceeds the kept 50 KB tail; `0` = unlimited. A capped log ends with `[log truncated at N bytes]` and the tool result says `log (itself truncated)` |
 | `instructionFiles` | default `["KENDAR.md", "AGENTS.md", "CLAUDE.md"]`, in that order, relative to the directory the harness runs in; `~` is the user home. Missing files are skipped, and so is a file with the same content as one already read (e.g. `CLAUDE.md` a symlink to `AGENTS.md`). A list in any settings layer replaces the default completely; `[]` loads none. A project with only `AGENTS.md` or only `CLAUDE.md` gets it with no configuration. See [SKILLS §2](../guides/skills.md#2-instruction-files) |
@@ -161,6 +161,8 @@ ignored.
 | `files.scopedInstructions` | default `true`: when a file tool (`read_file`, `write_file`, `edit_file`, `ls`, `glob`, `grep`, `grep_code`) works on a path inside the work dir, the files with the `instructionFiles` names found in each directory from the work dir down to that path are added to the conversation, once per chat. See [SKILLS §3](../guides/skills.md#3-directory-scoped-instruction-files). `false` turns it off |
 | `files.scopedInstructionsDepth` | default `8`: directory levels below the work dir looked at for scoped instruction files; deeper directories are ignored |
 | `web.fetchMaxBytes` | default `5242880` (5 MB): largest response body `web_fetch` reads; `<= 0` = default |
+| `web.blockLocalHost` | default `false`: `true` makes `web_fetch` and `web_download` refuse loopback, link-local (cloud metadata), site-local, any-local and IPv6 unique-local addresses, redirects included. See [tools §6](../guides/tools.md#6-output-limits) |
+| `web.blockExtraAddresses` | default `[]`: further IPs, CIDRs, host names or `*.suffix` to refuse. DNS rebinding between the check and the connection is not covered |
 | `context.noiseCommands` | default `true`: after a run, shell commands that add no information (`mkdir`, `rm`, `cd`, ...) are replaced in the context by a stub, see [INTERNALS §9](internals.md#noise-commands). `false` turns it off |
 | `context.todos` | default `true`: offer `todo_write` and `todo_read` with every context strategy (`false` hides them, except with `scope`), plus a short system-prompt section about them. The list is saved per chat and agent in the `StateStore` (`<history>/<chat>/state/todos-<agent>.json` in the CLI and web), so it survives a resume. The `scope` strategy always offers them, whatever this setting, and also shows the list in every request ([CACHES §5](caches.md#5-scope-strategy)) |
 | `context.deferCompactionOnThinkingOverflow` | Anthropic extended thinking, default `false`. Compaction rewrites history, which voids the signed thinking blocks (API 400 "Invalid `signature` in `thinking` block"). `false`: finished turns lose their thinking blocks; if compaction fires in the middle of a tool loop, thinking is switched off for the rest of that turn. `true`: compaction is skipped while the turn in progress holds thinking blocks, so thinking stays on but the prompt can exceed the budget until the turn ends. **This can incur increased charges** (larger prompts, and a rewrite after the turn invalidates the prompt cache) |
@@ -476,6 +478,25 @@ String owner = h.sessions().principal(chat);                      // "alice"; re
 
 The `jllm-web` module is a reference implementation of the wiring: password or OpenID Connect sign-in ([setup](../../jllm-web/README.md#sign-in-with-openid-connect)), roles, per-user tool and skill
 settings and an administration page; see its README.
+
+### Web application storage
+
+`jllm-web` keeps users, roles, skills, sessions, tokens, settings and chats in SQL when `jllm-sql-spring-starter` is on
+the class path (the release ships it), else in files under `jllm.webauth-dir` (default `webauth`; with SQL that folder
+only holds the default SQLite file).
+
+| Property | Meaning |
+|---|---|
+| `jllm.store` | `sql` or `file` (anything else stops the start); default: `sql` with the starter, else `file` |
+| `jllm.sql.url` | JDBC url; its scheme alone picks the database: `jdbc:sqlite:`, `jdbc:mysql:` or `jdbc:postgresql:` (others rejected). Default: SQLite `<jllm.webauth-dir>/jllm.db`, else `data/jllm.db` |
+| `jllm.sql.user`, `jllm.sql.password`, `jllm.sql.pool` | credentials (use `${ENV}`), pool size (SQLite 1, others 10) |
+| `jllm.sql.seed` | default true: a new database gets the users admin, poweru, guest (as `release/template/webauth`) |
+| `jllm.sql.driver-dir` | folder of the MySQL/PostgreSQL driver jar; default `lib-ext`, then `.downloaded-libs/<db>/<version>` |
+| `JLLM_TOKEN_KEY` (environment) | encrypts stored OAuth tokens; unset = in clear |
+
+MySQL and PostgreSQL are experimental until run against a real server and their drivers are not bundled: run
+`scripts/setup` (checkout) or `setup` / `fetch-sql-driver` (release); see the
+[starter README](../../web/jllm-sql-spring-starter/README.md). Plain JDBC: no JPA, Hibernate or Spring Data.
 
 ### Front-end contract
 

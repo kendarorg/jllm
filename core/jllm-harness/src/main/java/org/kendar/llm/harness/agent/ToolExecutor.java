@@ -184,7 +184,6 @@ public final class ToolExecutor {
         var approvals = deps.approvals();
         var gate = deps.gate();
         var sessions = deps.sessions();
-        free = free && (tool.kind() == ToolKind.READ_ONLY || !taint.isTainted(ctx.chatId()));
         HookResult pre = deps.hooks().run(HookContext.preTool(ctx.chatId(), name, input, ctx.parent()));
         if (pre.modifiedInput() != null) input = pre.modifiedInput();
         // dispatch check: a call must be inside the user's tools, even if it names a hidden one; also a call made by a
@@ -202,41 +201,28 @@ public final class ToolExecutor {
         if (adminPermission == ToolPermission.DENY) {
             return new Authz("Denied by the administrator for this user's role: " + name, pre, input);
         }
-        boolean adminAllowed = adminPermission == ToolPermission.ALLOW;
         PermissionGate userGate = policy.approval() == null ? gate : new PermissionGate(policy.approval(), gate.rules());
-        Decision decision = free || adminAllowed ? Decision.ALLOW : userGate.check(mode, tool);
-        if (adminPermission == ToolPermission.ASK && !free) decision = Decision.ASK;
-        if (!free && !adminAllowed && decision == Decision.ALLOW && mode == PermissionMode.AUTO
-                && deps.classifier() != null && tool.kind() != ToolKind.READ_ONLY && !pre.denied()) {
+        boolean readOnly = tool.kind() == ToolKind.READ_ONLY;
+        PermissionRules.Match rule = gate.rules().match(name, input, ctx.workDir());
+        boolean grant = approvals.granted(ctx.chatId(), name)
+                || approvals.commandGranted(ctx.chatId(), name, commandOf(name, input))
+                || approvals.dirGranted(ctx.chatId(), writeDirOf(tool, input, ctx));
+        AuthorizeInput in = new AuthorizeInput(free, readOnly, adminPermission, mode, userGate.check(mode, tool),
+                rule == null ? null : rule.kind(), grant, taint.isTainted(ctx.chatId()), pre.denied(),
+                deps.classifier() != null, null, interactive);
+        if (in.consultsClassifier()) {
             // auto mode: the fast model may wave the call through; anything else goes to the user
             ToolClassifier.Verdict v = deps.classifier().classify(name, input, ctx.workDir(), intent);
-            if (v != ToolClassifier.Verdict.SAFE) decision = Decision.ASK;
             sink.emit("classifier", mapper.createObjectNode().put("tool", name).put("verdict", v.name()));
+            in = in.withClassifier(v);
         }
-        // settings rules: deny wins in every mode and over any grant; ask forces the question; allow skips it
-        PermissionRules.Match rule = gate.rules().match(name, input, ctx.workDir());
-        if (!free && !adminAllowed && rule != null && rule.kind() == PermissionRules.Kind.ASK
-                && decision == Decision.ALLOW) {
-            decision = Decision.ASK;
-        }
-        // a grant only replaces the question; deny rules, hooks and plan confinement stay as they are
-        if (decision == Decision.ASK && (approvals.granted(ctx.chatId(), name)
-                || approvals.commandGranted(ctx.chatId(), name, commandOf(name, input))
-                || approvals.dirGranted(ctx.chatId(), writeDirOf(tool, input, ctx)))) decision = Decision.ALLOW;
-        if (rule != null && rule.kind() == PermissionRules.Kind.ALLOW && decision == Decision.ASK
-                && mode != PermissionMode.AUTO) {
-            decision = Decision.ALLOW;
-        }
-        // outside content is in the context: side effects need an explicit yes, even over grants and allow rules
-        if (!free && !adminAllowed && decision == Decision.ALLOW && tool.kind() != ToolKind.READ_ONLY
-                && taint.isTainted(ctx.chatId())
-                && (rule == null || rule.kind() != PermissionRules.Kind.DENY)) {
-            decision = Decision.ASK;
+        AuthorizeOutcome out = decide(in);
+        Decision decision = out.decision();
+        if (out.taintWarning()) {
             sink.emit("warning", mapper.createObjectNode().put("message", "Confirming '" + name
                     + "': the conversation holds untrusted tool output that could contain injected instructions"));
         }
-        if (decision == Decision.ASK && !interactive) {
-            decision = Decision.DENY;
+        if (out.approvalUnavailable()) {
             sink.emit("approval_unavailable", mapper.createObjectNode().put("tool", name));
         }
         if (pre.denied()) {
@@ -266,6 +252,79 @@ public final class ToolExecutor {
             approvals.grantCommand(ctx.chatId(), name, commandOf(name, input));
         }
         return new Authz(null, pre, input);
+    }
+
+    /**
+     * Everything the permission decision of one call depends on.
+     *
+     * @param free           built-in file tool called from a script (see {@link #authorize})
+     * @param admin          the administrator's permission for the tool and role (never DENY here: that returns early)
+     * @param gate           the mode/approval-policy decision of the gate
+     * @param rule           kind of the settings rule that matched, null when none
+     * @param grant          a tool, command or directory grant of the chat covers the call
+     * @param classifierAvailable an auto-mode classifier is configured
+     * @param classifier     its verdict, null when not consulted
+     */
+    record AuthorizeInput(boolean free, boolean readOnly, ToolPermission admin, PermissionMode mode, Decision gate,
+                          PermissionRules.Kind rule, boolean grant, boolean tainted, boolean hookDenied,
+                          boolean classifierAvailable, ToolClassifier.Verdict classifier, boolean interactive) {
+        boolean effectiveFree() {
+            return free && (readOnly || !tainted);
+        }
+
+        boolean adminAllowed() {
+            return admin == ToolPermission.ALLOW;
+        }
+
+        /** The classifier must be asked: only an unattended-by-gate side effect call in auto mode. */
+        boolean consultsClassifier() {
+            return !effectiveFree() && !adminAllowed() && !(admin == ToolPermission.ASK) && gate == Decision.ALLOW
+                    && mode == PermissionMode.AUTO && classifierAvailable && !readOnly && !hookDenied;
+        }
+
+        AuthorizeInput withClassifier(ToolClassifier.Verdict v) {
+            return new AuthorizeInput(free, readOnly, admin, mode, gate, rule, grant, tainted, hookDenied,
+                    classifierAvailable, v, interactive);
+        }
+    }
+
+    /** @param taintWarning the call was forced to ask by the taint; @param approvalUnavailable ask turned deny */
+    record AuthorizeOutcome(Decision decision, boolean taintWarning, boolean approvalUnavailable) {
+    }
+
+    /** The permission decision as a pure function: no events, no approval prompt, no lookups. */
+    static AuthorizeOutcome decide(AuthorizeInput in) {
+        boolean free = in.effectiveFree();
+        boolean adminAllowed = in.adminAllowed();
+        Decision decision = free || adminAllowed ? Decision.ALLOW : in.gate();
+        if (in.admin() == ToolPermission.ASK && !free) decision = Decision.ASK;
+        if (!free && !adminAllowed && decision == Decision.ALLOW && in.mode() == PermissionMode.AUTO
+                && in.classifierAvailable() && !in.readOnly() && !in.hookDenied() && in.classifier() != null
+                && in.classifier() != ToolClassifier.Verdict.SAFE) {
+            decision = Decision.ASK;
+        }
+        // settings rules: deny wins in every mode and over any grant; ask forces the question; allow skips it
+        if (!free && !adminAllowed && in.rule() == PermissionRules.Kind.ASK && decision == Decision.ALLOW) {
+            decision = Decision.ASK;
+        }
+        // a grant only replaces the question; deny rules, hooks and plan confinement stay as they are
+        if (decision == Decision.ASK && in.grant()) decision = Decision.ALLOW;
+        if (in.rule() == PermissionRules.Kind.ALLOW && decision == Decision.ASK && in.mode() != PermissionMode.AUTO) {
+            decision = Decision.ALLOW;
+        }
+        // outside content is in the context: side effects need an explicit yes, even over grants and allow rules
+        boolean taintWarning = false;
+        if (!free && !adminAllowed && decision == Decision.ALLOW && !in.readOnly() && in.tainted()
+                && in.rule() != PermissionRules.Kind.DENY) {
+            decision = Decision.ASK;
+            taintWarning = true;
+        }
+        boolean unavailable = false;
+        if (decision == Decision.ASK && !in.interactive()) {
+            decision = Decision.DENY;
+            unavailable = true;
+        }
+        return new AuthorizeOutcome(decision, taintWarning, unavailable);
     }
 
     /** Validates (and in lenient mode repairs) the arguments; a failing validator never blocks the call. */

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Gate artifact of the GraalJS set that scripts/setup downloads into .graal/<version>/repo.
+  Gate artifact of the GraalJS set that scripts/setup downloads into .downloaded-libs/graal/<version>/repo.
   Template: resolve.sh / resolve.ps1 replace @VERSION@ (root pom graalvm.version) and @ISOLATE@ (js-isolate for the
   commercial edition, js-isolate-community for the community one). Written last: its presence means the set is complete.
 -->

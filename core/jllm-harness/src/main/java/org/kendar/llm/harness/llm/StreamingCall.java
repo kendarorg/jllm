@@ -208,6 +208,60 @@ final class StreamingCall {
         }
     }
 
+    /**
+     * The non-streamed call: sends, retries with backoff on network errors and {@code retryableStatus}, refreshes the
+     * credentials once on 401, and returns the body of the 200 response. Parameters as for {@link #run}.
+     */
+    static String send(HttpClient http, Supplier<HttpRequest> build, org.kendar.llm.harness.auth.AuthProvider auth,
+                       CancelToken cancel, int maxRetries, long backoffBaseMs, IntPredicate retryableStatus,
+                       IntFunction<String> httpError, String callFailed) {
+        HttpRequest request = build.get();
+        boolean authRetried = false;
+        int attempt = 0;
+        RetryBudget budget = new RetryBudget();
+        while (true) {
+            try {
+                HttpResponse<String> resp = cancel.send(http, request);
+                int status = resp.statusCode();
+                if (status == 200) return resp.body();
+                if (status == 401 && auth != null && !authRetried) {
+                    authRetried = true;
+                    auth.onUnauthorized();
+                    request = build.get();
+                    continue;
+                }
+                if (!retryableStatus.test(status) || attempt >= maxRetries) {
+                    throw new ModelException(httpError.apply(status) + ": " + truncate(resp.body()) + rateLimitHint(resp));
+                }
+                attempt++;
+                long delayMs = budget.reserve(attempt, backoffBaseMs,
+                                resp.headers().firstValue("retry-after").map(StreamingCall::parseSeconds))
+                        .orElseThrow(() -> new ModelException(httpError.apply(status) + ": " + truncate(resp.body())
+                                + rateLimitHint(resp) + " (retry wait budget of " + RetryBudget.MAX_WAIT_MS
+                                + " ms exhausted)"));
+                log.warn("{} - retry {} in {} ms{}", httpError.apply(status), attempt, delayMs, rateLimitHint(resp));
+                cancel.retrying(status, attempt, maxRetries, delayMs);
+                cancel.sleep(delayMs);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new ModelException("Interrupted while calling the model", e);
+            } catch (IOException e) {
+                if (attempt >= maxRetries) throw new ModelException(callFailed + e.getMessage(), e);
+                attempt++;
+                long netDelay = budget.reserve(attempt, backoffBaseMs, Optional.empty())
+                        .orElseThrow(() -> new ModelException(callFailed + e.getMessage()
+                                + " (retry wait budget of " + RetryBudget.MAX_WAIT_MS + " ms exhausted)", e));
+                cancel.retrying(0, attempt, maxRetries, netDelay);
+                try {
+                    cancel.sleep(netDelay);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new ModelException("Interrupted while calling the model", ie);
+                }
+            }
+        }
+    }
+
     private static String readAll(InputStream in) throws IOException {
         try (in) {
             return new String(in.readAllBytes(), StandardCharsets.UTF_8);

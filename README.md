@@ -115,7 +115,7 @@ java -jar jllm-web/target/jllm-web-1.3.0-jllm.jar --provider anthropic          
 Set `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`, `GROK_API_KEY`, `QWEN_API_KEY`) first.
 
 The jars do not contain GraalJS, so `run_js` is off in the commands above. For development, run once `scripts/setup`
-(`.sh`, `.ps1`, `.cmd`): it downloads the GraalJS set into the git-ignored `.graal/<graalvm.version>/` (commercial
+(`.sh`, `.ps1`, `.cmd`): it downloads the GraalJS set into the git-ignored `.downloaded-libs/graal/<graalvm.version>/` (commercial
 edition after you accept the Oracle GraalVM Free Terms and Conditions, or `--accept-license`; `--edition community`
 for the community one) and runs the first build (`--no-build` skips it). Every module then sees GraalJS as a `provided`
 dependency, with no profile and no flag. These run the built jars or the eval module on it (`.sh`, `.ps1` and `.cmd` of each):
@@ -129,7 +129,7 @@ mvn test                                                  # js plugin tests run 
 
 The release zip ships no GraalJS: `setup.sh` / `setup.ps1`, released next to it, unzip it and download the edition you choose into `lib-ext/`. Licensing and details: [JS guide](docs/guides/js.md#enabling).
 
-> The GraalJS libraries are not in this repository. If they are present in `.graal/`, you downloaded them with
+> The GraalJS libraries are not in this repository. If they are present in `.downloaded-libs/graal/`, you downloaded them with
 > `scripts/setup` and accepted the license terms of the chosen edition. After a `graalvm.version` change, run
 > `scripts/setup` again.
 

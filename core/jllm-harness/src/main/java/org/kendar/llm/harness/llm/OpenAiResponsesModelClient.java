@@ -280,11 +280,11 @@ public class OpenAiResponsesModelClient implements ModelClient {
     ModelResponse parseResponse(JsonNode json) {
         JsonNode error = json.path("error");
         if (!error.isMissingNode() && !error.isNull()) {
-            throw new ModelException(cfg.name() + " returned an error: " + truncate(errorText(error)));
+            throw new ModelException(cfg.name() + " returned an error: " + StreamingCall.truncate(errorText(error)));
         }
         JsonNode output = json.path("output");
         if (!output.isArray()) {
-            throw new ModelException(cfg.name() + " returned no output: " + truncate(json.toString()));
+            throw new ModelException(cfg.name() + " returned no output: " + StreamingCall.truncate(json.toString()));
         }
         ArrayNode content = mapper.createArrayNode();
         boolean hasCalls = false;
@@ -375,7 +375,7 @@ public class OpenAiResponsesModelClient implements ModelClient {
             try {
                 e = mapper.readTree(data);
             } catch (IOException ex) {
-                throw new ModelException(cfg.name() + " returned a malformed stream event: " + truncate(data));
+                throw new ModelException(cfg.name() + " returned a malformed stream event: " + StreamingCall.truncate(data));
             }
             int index = e.path("output_index").asInt(0);
             switch (e.path("type").asText(ev.event() == null ? "" : ev.event())) {
@@ -402,10 +402,10 @@ public class OpenAiResponsesModelClient implements ModelClient {
                 case "response.failed" -> {
                     JsonNode err = e.path("response").path("error");
                     throw new StreamingCall.StreamError(cfg.name() + " returned an error: "
-                            + truncate(err.isMissingNode() || err.isNull() ? e.toString() : errorText(err)), false);
+                            + StreamingCall.truncate(err.isMissingNode() || err.isNull() ? e.toString() : errorText(err)), false);
                 }
                 case "error" -> throw new StreamingCall.StreamError(cfg.name() + " returned an error: "
-                        + truncate(errorText(e.has("error") ? e.get("error") : e)), false);
+                        + StreamingCall.truncate(errorText(e.has("error") ? e.get("error") : e)), false);
                 default -> {
                     // created, in_progress, *.done, content_part.*: the final response carries them
                 }
@@ -450,56 +450,8 @@ public class OpenAiResponsesModelClient implements ModelClient {
 
     private JsonNode send(ObjectNode body, CancelToken cancel) {
         String payload = serialize(body);
-        java.util.function.Supplier<HttpRequest> build = () -> request(payload);
-        HttpRequest request = build.get();
-        boolean authRetried = false;
-        int attempt = 0;
-        RetryBudget budget = new RetryBudget();
-        while (true) {
-            try {
-                HttpResponse<String> resp = cancel.send(http, request);
-                int status = resp.statusCode();
-                if (status == 200) return readJson(resp.body());
-                if (status == 401 && auth != null && !authRetried) {
-                    authRetried = true;
-                    auth.onUnauthorized();
-                    request = build.get();
-                    continue;
-                }
-                boolean retryable = status == 429 || status >= 500;
-                if (!retryable || attempt >= cfg.maxRetries()) {
-                    throw new ModelException(cfg.name() + " API error " + status + ": " + truncate(resp.body())
-                            + StreamingCall.rateLimitHint(resp));
-                }
-                attempt++;
-                long delayMs = budget.reserve(attempt, backoffBaseMs,
-                                resp.headers().firstValue("retry-after").map(OpenAiResponsesModelClient::parseSeconds))
-                        .orElseThrow(() -> new ModelException(cfg.name() + " API error " + status + ": "
-                                + truncate(resp.body()) + StreamingCall.rateLimitHint(resp)
-                                + " (retry wait budget of " + RetryBudget.MAX_WAIT_MS + " ms exhausted)"));
-                log.warn("{} API {} - retry {} in {} ms{}", cfg.name(), status, attempt, delayMs, StreamingCall.rateLimitHint(resp));
-                cancel.retrying(status, attempt, cfg.maxRetries(), delayMs);
-                cancel.sleep(delayMs);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new ModelException("Interrupted while calling the model", e);
-            } catch (IOException e) {
-                if (attempt >= cfg.maxRetries()) {
-                    throw new ModelException(cfg.name() + " API call failed: " + e.getMessage(), e);
-                }
-                attempt++;
-                long netDelay = budget.reserve(attempt, backoffBaseMs, Optional.empty())
-                        .orElseThrow(() -> new ModelException(cfg.name() + " API call failed: " + e.getMessage()
-                                + " (retry wait budget of " + RetryBudget.MAX_WAIT_MS + " ms exhausted)", e));
-                cancel.retrying(0, attempt, cfg.maxRetries(), netDelay);
-                try {
-                    cancel.sleep(netDelay);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    throw new ModelException("Interrupted while calling the model", ie);
-                }
-            }
-        }
+        return readJson(StreamingCall.send(http, () -> request(payload), auth, cancel, cfg.maxRetries(), backoffBaseMs,
+                st -> st == 429 || st >= 500, st -> cfg.name() + " API error " + st, cfg.name() + " API call failed: "));
     }
 
     private JsonNode readJson(String body) {
@@ -509,18 +461,8 @@ public class OpenAiResponsesModelClient implements ModelClient {
         } catch (IOException e) {
             // not JSON: reported below
         }
-        throw new ModelException(cfg.name() + " returned a non-JSON response (check baseUrl): " + truncate(body));
+        throw new ModelException(cfg.name() + " returned a non-JSON response (check baseUrl): " + StreamingCall.truncate(body));
     }
 
-    private static long parseSeconds(String v) {
-        try {
-            return Math.min(120_000L, (long) (Double.parseDouble(v.trim()) * 1000));
-        } catch (NumberFormatException e) {
-            return 2000L;
-        }
-    }
 
-    private static String truncate(String s) {
-        return s != null && s.length() > 1000 ? s.substring(0, 1000) + "..." : s;
-    }
 }

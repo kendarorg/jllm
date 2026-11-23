@@ -50,6 +50,13 @@ plugins=(target/plugins/*.jar)
 [ ${#plugins[@]} -ge 5 ] || { echo "expected 5 plugin jars in target/plugins, found ${#plugins[@]}" >&2; exit 1; }
 cp "${plugins[@]}" "$stage/plugins/"
 cp -r release/template/. "$stage/"
+# SQL store: the starter and its jars go to lib-ext/sql (fetch-graaljs empties lib-ext/*.jar, not lib-ext/sql); the JDBC
+# drivers (MySQL GPL, PostgreSQL BSD) are never shipped: fetch-sql-driver downloads them into lib-ext and checks the manifests
+sqlstarter="web/jllm-sql-spring-starter/target"
+mkdir -p "$stage/lib-ext/sql"
+cp "$sqlstarter/jllm-sql-spring-starter-$version.jar" "$sqlstarter"/lib-sql/*.jar "$stage/lib-ext/sql/"
+cp scripts/fetch-sql-driver.sh scripts/fetch-sql-driver.ps1 scripts/fetch-sql-driver.cmd "$stage/"
+chmod +x "$stage"/fetch-sql-driver.sh
 cp LICENSE NOTICE "$stage/"
 chmod +x "$stage"/*.sh
 # neither front end may carry GraalJS (it is provided through lib-ext)
@@ -64,6 +71,7 @@ for j in "$stage/jllm-cli.jar" "$stage/jllm-web.jar"; do
   fi
 done
 mkdir -p "$stage/lib-ext/manifests"
+cp web/jllm-sql/src/main/resources/db/drivers/*.manifest "$stage/lib-ext/manifests/"
 # manifests only, nothing is shipped: the operator accepts the terms of the oracle edition in setup / fetch-graaljs
 for ed in community oracle; do
   tmped=$(mktemp -d)

@@ -113,6 +113,8 @@ class AgentServiceEventsTest {
         List<AgentEvent> got = Collections.synchronizedList(new ArrayList<>());
         service.subscribe(chat, 9999, got::add);
 
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (got.size() < service.lastSeq(chat) && System.nanoTime() < deadline) Thread.sleep(5);
         assertEquals(service.lastSeq(chat), got.size());
         assertEquals(1, got.get(0).seq());
     }
@@ -170,5 +172,76 @@ class AgentServiceEventsTest {
         assertTrue(finished.await(5, TimeUnit.SECONDS));
         assertEquals(3, turns.get(), "the prompt, the steer and the follow-up");
         assertEquals(3, rig.model.requests.size());
+    }
+
+    private static final com.fasterxml.jackson.databind.node.ObjectNode NODE = MAPPER.createObjectNode();
+
+    @Test
+    void aSlowSubscriberDelaysNeitherThePublisherNorOthersAndIsDroppedOnOverflow() throws Exception {
+        String chat = rig.newChat();
+        int total = AgentService.SUBSCRIBER_QUEUE + 500;
+        CountDownLatch gate = new CountDownLatch(1);
+        CountDownLatch slowEntered = new CountDownLatch(1);
+        List<AgentEvent> slow = Collections.synchronizedList(new ArrayList<>());
+        List<AgentEvent> fast = Collections.synchronizedList(new ArrayList<>());
+        CountDownLatch fastDone = new CountDownLatch(1);
+        service.subscribe(chat, Long.MAX_VALUE, e -> {
+            slowEntered.countDown();
+            try {
+                gate.await(20, TimeUnit.SECONDS);
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+            }
+            slow.add(e);
+        });
+        service.subscribe(chat, Long.MAX_VALUE, e -> {
+            fast.add(e);
+            if (e.seq() == total) fastDone.countDown();
+        });
+
+        long t0 = System.nanoTime();
+        for (int i = 0; i < total; i++) service.notify(chat, "n", NODE);
+        assertTrue(TimeUnit.NANOSECONDS.toSeconds(System.nanoTime() - t0) < 10, "publishing must not wait for the slow one");
+        assertTrue(fastDone.await(10, TimeUnit.SECONDS));
+        for (int i = 0; i < fast.size(); i++) assertEquals(i + 1, fast.get(i).seq());
+        assertEquals(total, fast.size(), "the other subscriber is untouched");
+
+        gate.countDown();
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while ((slow.isEmpty() || !AgentService.DROPPED_EVENT.equals(slow.get(slow.size() - 1).type()))
+                && System.nanoTime() < deadline) Thread.sleep(5);
+        assertEquals(AgentService.DROPPED_EVENT, slow.get(slow.size() - 1).type());
+        assertTrue(slow.size() < total, "the dropped subscriber missed events (it replays on reconnect)");
+        // order preserved among what it did get
+        long last = 0;
+        for (AgentEvent e : slow) {
+            if (e.seq() == 0) continue;
+            assertTrue(e.seq() > last);
+            last = e.seq();
+        }
+        // after the drop it gets nothing more
+        int size = slow.size();
+        service.notify(chat, "n", NODE);
+        Thread.sleep(100);
+        assertEquals(size, slow.size());
+    }
+
+    @Test
+    void eventOrderIsPreservedPerSubscriberWithAProducerAheadOfAConsumer() throws Exception {
+        String chat = rig.newChat();
+        List<Long> got = Collections.synchronizedList(new ArrayList<>());
+        CountDownLatch done = new CountDownLatch(1);
+        service.subscribe(chat, Long.MAX_VALUE, e -> {
+            try {
+                Thread.sleep(0, 200_000);
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+            }
+            got.add(e.seq());
+            if (e.seq() == 1000) done.countDown();
+        });
+        for (int i = 0; i < 1000; i++) service.notify(chat, "n", NODE);
+        assertTrue(done.await(20, TimeUnit.SECONDS));
+        for (int i = 0; i < 1000; i++) assertEquals(i + 1, got.get(i));
     }
 }

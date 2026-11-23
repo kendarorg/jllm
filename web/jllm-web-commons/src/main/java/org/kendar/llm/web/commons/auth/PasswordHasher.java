@@ -39,6 +39,10 @@ public final class PasswordHasher {
     public static boolean verify(String id, String password, String stored) {
         if (password == null) return false;
         if (stored == null || stored.isBlank()) {
+            // TODO(timing): this branch is fast (one array compare) while the branch below runs PBKDF2, so the
+            //  response time tells an attacker which accounts still use the default password. Fix: call
+            //  burn(password) before this compare so both paths cost one PBKDF2. Test by asserting burn is
+            //  called on this path (e.g. through an injected hook), NOT by timing assertions: they are flaky.
             return MessageDigest.isEqual(defaultPassword(id).getBytes(StandardCharsets.UTF_8),
                     password.getBytes(StandardCharsets.UTF_8));
         }
@@ -46,6 +50,10 @@ public final class PasswordHasher {
         if (parts.length != 4 || !"pbkdf2".equals(parts[0])) return false;
         try {
             int iterations = Integer.parseInt(parts[1]);
+            // TODO(dos): the iteration count comes from the user file and is trusted as is. A corrupted or
+            //  tampered file with e.g. pbkdf2$2000000000$... makes every login attempt for that user spin for
+            //  minutes and ties up a thread. Fix: return false when iterations < 1 or > 10_000_000 (generous
+            //  headroom over ITERATIONS) before calling pbkdf2, and add a test with an oversized count.
             byte[] salt = Base64.getDecoder().decode(parts[2]);
             byte[] expected = Base64.getDecoder().decode(parts[3]);
             return MessageDigest.isEqual(expected, pbkdf2(password, salt, iterations));

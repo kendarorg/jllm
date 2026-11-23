@@ -67,6 +67,9 @@ final class WebauthFixture {
     final LoginThrottle throttle = new LoginThrottle();
     final AgentHarness harness;
     final MockMvc mvc;
+    private final CookieAuthentication auth;
+    private final ToolCatalogView catalog;
+    private final Gate gate;
 
     /** A tool that reports what it runs on, the way run_js reports its engine. */
     static HarnessTool toolWithStatus(String name, String status) {
@@ -125,17 +128,22 @@ final class WebauthFixture {
                 .userPolicyResolver(permissions.resolver(users, skills))
                 .principalDirectory(id -> users.find(id).map(u -> u.principal()).orElse(null))
                 .build();
-        CookieAuthentication auth = new CookieAuthentication(users, sessions);
-        ToolCatalogView catalog = new ToolCatalogView(harness);
-        Gate gate = new Gate(auth, auth, harness.sessions());
-        mvc = MockMvcBuilders.standaloneSetup(
+        auth = new CookieAuthentication(users, sessions);
+        catalog = new ToolCatalogView(harness);
+        gate = new Gate(auth, auth, harness.sessions());
+        mvc = mvc(false);
+    }
+
+    /** The API with the default-password enforcement; {@code onLoopback}: also for loopback callers. */
+    MockMvc mvc(boolean onLoopback) {
+        return MockMvcBuilders.standaloneSetup(
                         new AuthController(new AuthApi(users, auth, sessions, throttle,
                                 new org.kendar.llm.web.commons.auth.OidcProperties(null, null))),
                         new MeController(new MeApi(users, permissions, skills, sessions, throttle, harness, catalog)),
                         new AdminController(new AdminApi(users, permissions, skills, sessions, harness, catalog)),
                         new ChatController(new ChatApi(harness, MAPPER, new HarnessPricing(0, 0, 0, 0), auth), auth))
                 .setControllerAdvice(new ApiExceptionAdvice())
-                .addInterceptors(new ApiInterceptor(gate, auth, MAPPER),
+                .addInterceptors(new ApiInterceptor(gate, auth, MAPPER, onLoopback),
                         new MappedInterceptor(new String[]{"/api/admin/**"}, new AdminInterceptor(gate, auth, MAPPER)))
                 .build();
     }

@@ -1,10 +1,10 @@
-# Runs the built web app (jllm-web\target) with the GraalJS set of .graal\<graalvm.version>\repo on the loader path.
+# Runs the built web app (jllm-web\target) with the GraalJS set of .downloaded-libs\graal\<graalvm.version>\repo on the loader path.
 # Needs scripts\setup first, then mvn -DskipTests package. Usage: scripts\run-web.ps1 [web arguments]
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $pom = Get-Content (Join-Path $root 'pom.xml') -Raw
 $gver = ([regex]::Match($pom, '<graalvm.version>(.*?)</graalvm.version>')).Groups[1].Value
-$dir = Join-Path $root ".graal\$gver"
+$dir = Join-Path $root ".downloaded-libs\graal\$gver"
 if (-not (Test-Path (Join-Path $dir 'repo'))) { throw "GraalJS $gver is not set up: run scripts\setup.ps1" }
 $version = ([regex]::Match($pom, '<revision>(.*?)</revision>')).Groups[1].Value
 $jar = Join-Path $root "jllm-web\target\jllm-web-$version.jar"

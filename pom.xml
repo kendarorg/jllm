@@ -57,6 +57,9 @@
         <revision>1.3.0-jllm</revision>
         <central-publish.skip>false</central-publish.skip>
         <graalvm.version>25.5.5.0.3</graalvm.version>
+        <!-- JDBC drivers (MySQL: GPLv2 + FOSS exception; PostgreSQL: BSD): pinned here, never bundled; fetched by scripts/setup (fetch-sql-driver) into .downloaded-libs/ and verified against web/jllm-sql/.../db/drivers/<db>.manifest. SQLite is bundled. -->
+        <mysql.version>9.2.0</mysql.version>
+        <postgresql.version>42.7.5</postgresql.version>
         <maven.compiler.source>21</maven.compiler.source>
         <maven.compiler.target>21</maven.compiler.target>
         <maven.compiler.release>21</maven.compiler.release>
@@ -70,7 +73,7 @@
         <!-- GraalJS set downloaded by scripts/setup (git-ignored); the gate artifact org.kendar.llm.graal:jllm-graal-set lives here -->
         <repository>
             <id>graal-local</id>
-            <url>file://${maven.multiModuleProjectDirectory}/.graal/${graalvm.version}/repo</url>
+            <url>file://${maven.multiModuleProjectDirectory}/.downloaded-libs/graal/${graalvm.version}/repo</url>
             <releases><enabled>true</enabled></releases>
             <snapshots><enabled>false</enabled></snapshots>
         </repository>
@@ -110,7 +113,7 @@
                             <rules>
                                 <requireFilesExist>
                                     <files>
-                                        <file>${maven.multiModuleProjectDirectory}/.graal/${graalvm.version}/repo/org/kendar/llm/graal/jllm-graal-set/${graalvm.version}/jllm-graal-set-${graalvm.version}.pom</file>
+                                        <file>${maven.multiModuleProjectDirectory}/.downloaded-libs/graal/${graalvm.version}/repo/org/kendar/llm/graal/jllm-graal-set/${graalvm.version}/jllm-graal-set-${graalvm.version}.pom</file>
                                     </files>
                                     <message>GraalJS ${graalvm.version} is not set up: run scripts/setup.sh (Windows: scripts\setup.ps1). Run it again after a graalvm.version change.</message>
                                 </requireFilesExist>
@@ -123,7 +126,7 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
                     <systemPropertyVariables>
-                        <jllm.graal.dir>${maven.multiModuleProjectDirectory}/.graal/${graalvm.version}</jllm.graal.dir>
+                        <jllm.graal.dir>${maven.multiModuleProjectDirectory}/.downloaded-libs/graal/${graalvm.version}</jllm.graal.dir>
                     </systemPropertyVariables>
                 </configuration>
             </plugin>

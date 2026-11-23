@@ -20,6 +20,9 @@ only for the Docker sandbox.
 - [ ] Put `jllm-web` behind a reverse proxy with TLS and set `jllm.web.public-url` to the external URL. Event streams
       need proxy buffering off and no response timeout; set `spring.mvc.async.request-timeout=-1`.
 - [ ] Use OIDC or your own `WebAuthentication`; turn off the sample password mode (`jllm.auth.mode=oidc`).
+- [ ] With the sample password mode, set `jllm.web.use-real-password=true` so no user keeps the default password; the admin password is in the startup log (WARN, once).
+- [ ] The web app sends a `Content-Security-Policy` (same-origin only, no framing), `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`. Tighten or replace the policy with `jllm.web.content-security-policy`; `off` removes the CSP header (do not do this when exposed). A reverse proxy must not strip these headers.
+- [ ] Set `web.blockLocalHost=true` (settings file) so `web_fetch` and `web_download` cannot reach loopback, link-local or private addresses; add `web.blockExtraAddresses` for internal hosts. DNS rebinding is not covered.
 - [ ] Use the `docker` sandbox in daemon mode and give `bash` only to roles that need it. Run the JVM as an
       unprivileged user: MCP stdio servers inherit it.
 - [ ] Set `JLLM_TOKEN_KEY` so OAuth tokens are encrypted at rest. Pass secrets by `env:` or `${VAR}`.
@@ -35,8 +38,13 @@ By default state is on local disk: chat history under `.jllm/history`, users, ro
 in memory (a restart signs everyone out). That fits one instance. Beyond it:
 
 - Chat, sub-agent and state stores are ports (`ChatSessionStore`, `SubAgentRunLog`, `StateStore`).
-- Users, roles, skills and login sessions have repository interfaces in `jllm-harness`. A JDBC implementation is
-  **not shipped**; the checklist is in the [jllm-web README](../../jllm-web/README.md#a-possible-extension-a-mysql-store).
+- Users, roles, skills and login sessions have repository interfaces in `jllm-harness`. `jllm-sql-spring-starter`
+  ([README](../../web/jllm-sql-spring-starter/README.md)) implements them, and the chat, state, settings, trust and token
+  stores, in SQL: SQLite (default, bundled), MySQL or PostgreSQL (both **experimental** until run against a real server),
+  chosen by the scheme of `jllm.sql.url` alone; plain JDBC, no JPA/Hibernate/Spring Data. The release ships it in
+  `lib-ext/sql` (SQL by default; `jllm.store=file` keeps the files). The MySQL (GPL) and PostgreSQL drivers are not
+  bundled: `setup` / `fetch-sql-driver` download them with a pinned SHA-256. Set `JLLM_TOKEN_KEY` to encrypt stored tokens.
+  Plugin storage and workspace files stay on disk.
 - A `TokenStore` that reports `crossProcess()` can be shared between instances.
 - A running chat is a virtual thread and an event buffer in one process. Route a chat to one instance (sticky
   routing) unless you supply your own stores and accept that a run does not move.

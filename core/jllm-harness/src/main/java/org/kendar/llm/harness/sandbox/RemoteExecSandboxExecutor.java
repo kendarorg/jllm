@@ -306,7 +306,7 @@ public class RemoteExecSandboxExecutor implements SandboxExecutor {
                 if (!existing.path("State").path("Running").asBoolean(false)) docker("start", name);
                 String token = tokenOf(existing);
                 if (token != null) {
-                    Container c = new Container(name, new DaemonClient(daemonHost(), hostPort(name), token));
+                    Container c = new Container(name, new DaemonClient(config.sandbox().docker(), daemonHost(), hostPort(name), token));
                     if (waitHealthy(c, name, Duration.ofSeconds(20))) return c;
                 }
                 warn.accept("Sandbox container " + name + " does not answer; recreating it.");
@@ -391,7 +391,7 @@ public class RemoteExecSandboxExecutor implements SandboxExecutor {
                         "chown", d.user(), WORKSPACE);
             }
             docker("start", name);
-            Container c = new Container(name, new DaemonClient(daemonHost(), hostPort(name), token));
+            Container c = new Container(name, new DaemonClient(config.sandbox().docker(), daemonHost(), hostPort(name), token));
             if (!waitHealthy(c, name, START_TIMEOUT)) {
                 throw new IOException("The sandbox daemon in " + name + " did not become ready. "
                         + "Does the image have python3 and sh? " + logsTail(name));
@@ -465,7 +465,7 @@ public class RemoteExecSandboxExecutor implements SandboxExecutor {
         String token = tokenOf(existing);
         if (token == null) return null;
         if (!existing.path("State").path("Running").asBoolean(false)) docker("start", name);
-        Container c = new Container(name, new DaemonClient(daemonHost(), hostPort(name), token));
+        Container c = new Container(name, new DaemonClient(config.sandbox().docker(), daemonHost(), hostPort(name), token));
         return waitHealthy(c, name, Duration.ofSeconds(20)) ? c : null;
     }
 

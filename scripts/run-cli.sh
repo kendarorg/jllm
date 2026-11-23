@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Runs the built CLI (jllm-cli/target) with the GraalJS set of .graal/<graalvm.version>/repo on the class path.
+# Runs the built CLI (jllm-cli/target) with the GraalJS set of .downloaded-libs/graal/<graalvm.version>/repo on the class path.
 # Needs scripts/setup first, then mvn -DskipTests package. Usage: scripts/run-cli.sh [cli arguments]
 set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 gver=$(sed -n 's:.*<graalvm.version>\(.*\)</graalvm.version>.*:\1:p' "$root/pom.xml" | head -1)
-dir="$root/.graal/$gver"
+dir="$root/.downloaded-libs/graal/$gver"
 [ -d "$dir/repo" ] || { echo "GraalJS $gver is not set up: run scripts/setup.sh" >&2; exit 1; }
 version=$(sed -n 's:.*<revision>\(.*\)</revision>.*:\1:p' "$root/pom.xml" | head -1)
 jar="$root/jllm-cli/target/jllm-cli-$version.jar"

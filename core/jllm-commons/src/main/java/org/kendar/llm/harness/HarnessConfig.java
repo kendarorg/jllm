@@ -28,22 +28,27 @@ public record HarnessConfig(String agentId, int maxTurns, int maxTokens, boolean
      * @param remote  daemon mode only: the docker daemon is not on this machine. Nothing can be bind-mounted, so the
      *                workspace is uploaded to the container when it is created and downloaded back as a backup
      * @param remoteHost address at which this machine reaches the ports published by the remote docker host; blank:
-     *                taken from {@code DOCKER_HOST}
+     *                taken from {@code DOCKER_HOST}. A {@code https://} prefix makes the daemon traffic TLS
+     * @param allowInsecure remote daemon mode: accept plain http to a non-loopback host (token and commands travel in
+     *                cleartext); false refuses it; default true (http allowed)
+     * @param trustStore path of a PKCS12/JKS truststore for https daemon URLs; blank: the JDK default trust store
+     * @param trustStorePassword password of {@code trustStore}; blank: empty password
      */
     public record Docker(String binary, String image, String memory, String cpus, int pidsLimit, String user,
-                         String network, String mode, boolean remote, String remoteHost) {
+                         String network, String mode, boolean remote, String remoteHost,
+                         boolean allowInsecure, String trustStore, String trustStorePassword) {
         public Docker(String binary, String image, String memory, String cpus, int pidsLimit, String user,
                       String network) {
-            this(binary, image, memory, cpus, pidsLimit, user, network, "oneshot", false, "");
+            this(binary, image, memory, cpus, pidsLimit, user, network, "oneshot", false, "", true, "", "");
         }
 
         public Docker(String binary, String image, String memory, String cpus, int pidsLimit, String user,
                       String network, String mode) {
-            this(binary, image, memory, cpus, pidsLimit, user, network, mode, false, "");
+            this(binary, image, memory, cpus, pidsLimit, user, network, mode, false, "", true, "", "");
         }
 
         public static Docker defaults() {
-            return new Docker("docker", "python:3.12-slim", "512m", "1.0", 256, "1000:1000", "none", "oneshot", false, "");
+            return new Docker("docker", "python:3.12-slim", "512m", "1.0", 256, "1000:1000", "none", "oneshot", false, "", true, "", "");
         }
 
         /** True for the long-running container with the exec daemon. */
@@ -237,13 +242,13 @@ public record HarnessConfig(String agentId, int maxTurns, int maxTokens, boolean
     public HarnessConfig withDockerImage(String image) {
         Docker d = sandbox.docker();
         return withDocker(new Docker(d.binary(), image, d.memory(), d.cpus(), d.pidsLimit(), d.user(), d.network(),
-                d.mode(), d.remote(), d.remoteHost()));
+                d.mode(), d.remote(), d.remoteHost(), d.allowInsecure(), d.trustStore(), d.trustStorePassword()));
     }
 
     public HarnessConfig withDockerMode(String mode) {
         Docker d = sandbox.docker();
         return withDocker(new Docker(d.binary(), d.image(), d.memory(), d.cpus(), d.pidsLimit(), d.user(), d.network(),
-                mode, d.remote(), d.remoteHost()));
+                mode, d.remote(), d.remoteHost(), d.allowInsecure(), d.trustStore(), d.trustStorePassword()));
     }
 
     public HarnessConfig withSandboxTimeoutSeconds(int secs) {

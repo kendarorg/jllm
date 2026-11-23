@@ -146,7 +146,7 @@ class ToolOutputSafetyTest {
             for (JsonNode b : m.path("content")) {
                 if ("tool_result".equals(b.path("type").asText())) {
                     ((com.fasterxml.jackson.databind.node.ObjectNode) b).put("content",
-                            "[tool result cleared to save context]");
+                            org.kendar.llm.harness.context.ClearedResult.TEXT);
                 }
             }
         }

@@ -985,6 +985,28 @@ def main():
     os.makedirs(WORKSPACE, exist_ok=True)
     port = int(os.environ.get("JLLM_PORT", "8080"))
     bind = os.environ.get("JLLM_BIND", "0.0.0.0")
+    # ======================================================================================
+    # TODO TODO TODO  --  THIS DAEMON SPEAKS PLAIN HTTP ONLY. NO TLS.  --  TODO TODO TODO
+    #
+    # The bearer token (JLLM_TOKEN) and EVERY command, file and output exchanged with the
+    # Java side (DaemonClient) travel in CLEARTEXT. Anyone on the network path can read the
+    # token, replay it, and execute arbitrary commands inside the sandbox.
+    #
+    # Safe only when:
+    #   - the daemon is reached over loopback / a local Docker network on the same host, or
+    #   - the traffic goes through an SSH tunnel, or
+    #   - the network between client and daemon is fully trusted.
+    #
+    # For any other remote use, put a TLS-terminating reverse proxy (nginx, caddy, traefik,
+    # stunnel) in front of the published port and point the client at https://host. The Java
+    # client already supports https (HarnessConfig.Docker: allowInsecure, trustStore,
+    # trustStorePassword); see docs/guides/sandbox.md. allowInsecure currently defaults to
+    # true, so http is accepted silently apart from one WARN per host.
+    #
+    # PROPER FIX (not done): wrap srv.socket with ssl.SSLContext.wrap_socket(), loading a
+    # certificate and key from JLLM_TLS_CERT / JLLM_TLS_KEY, optionally require a client
+    # certificate (mTLS), then flip the allowInsecure default to false.
+    # ======================================================================================
     srv = ThreadingHTTPServer((bind, port), Handler)
     srv.daemon_threads = True
     signal.signal(signal.SIGTERM, lambda *_: threading.Thread(target=srv.shutdown, daemon=True).start())

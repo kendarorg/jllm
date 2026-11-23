@@ -30,7 +30,7 @@
     </properties>
 
     <dependencies>
-        <!-- GraalJS for run_js: provided, never bundled; downloaded by scripts/setup into .graal/, the release ships it in lib-ext/ -->
+        <!-- GraalJS for run_js: provided, never bundled; downloaded by scripts/setup into .downloaded-libs/graal/, the release ships it in lib-ext/ -->
         <dependency>
             <groupId>org.kendar.llm.graal</groupId>
             <artifactId>jllm-graal-set</artifactId>
@@ -42,6 +42,13 @@
             <groupId>org.kendar.llm</groupId>
             <artifactId>jllm-web-spring-starter</artifactId>
             <version>${project.version}</version>
+        </dependency>
+        <!-- test only: the release ships the SQL jars in lib-ext/sql; the existing tests stay on files (src/test/resources) -->
+        <dependency>
+            <groupId>org.kendar.llm</groupId>
+            <artifactId>jllm-sql-spring-starter</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>

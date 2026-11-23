@@ -11,10 +11,12 @@ import org.kendar.llm.harness.session.ChatSessionService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
+import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.*;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 
 /** Owns one run per chat at a time, buffers its events (replayable by seq) and supports cancellation. */
@@ -22,6 +24,10 @@ public class AgentService {
 
     private static final Logger log = LoggerFactory.getLogger(AgentService.class);
     private static final int MAX_BUFFERED_EVENTS = 2000;
+    /** Events one subscriber may have waiting: a full replay plus live ones; beyond it the subscriber is dropped. */
+    static final int SUBSCRIBER_QUEUE = MAX_BUFFERED_EVENTS + 2048;
+    /** Last event of a subscriber that fell behind and was dropped: it reconnects and replays from its last seq. */
+    public static final String DROPPED_EVENT = "subscriber_dropped";
     /**
      * Delivered live with seq 0, never buffered nor replayed. Streaming deltas, so a reconnecting client is not
      * replayed thousands of pieces (it gets the final {@code text} event instead), and {@code content_warning}: a
@@ -37,7 +43,12 @@ public class AgentService {
     }
 
     private static final class ChatRun {
-        final List<AgentEvent> events = new ArrayList<>();
+        final ArrayDeque<AgentEvent> events = new ArrayDeque<>();
+        /** Guards {@link #events} and {@link #nextSeq}. */
+        final ReentrantLock eventsLock = new ReentrantLock();
+        /** Guards the run state (running, closing, queues); {@link #changed} is signalled when a run ends or closes. */
+        final ReentrantLock lock = new ReentrantLock();
+        final Condition changed = lock.newCondition();
         final List<Consumer<AgentEvent>> listeners = new CopyOnWriteArrayList<>();
         long nextSeq = 1;
         volatile boolean running;
@@ -86,7 +97,8 @@ public class AgentService {
     public void start(String chatId, String userText) {
         sessions.get(chatId); // fail fast on unknown chat
         ChatRun run = runs.computeIfAbsent(chatId, k -> new ChatRun());
-        synchronized (run) {
+        run.lock.lock();
+        try {
             if (run.running) throw new RunAlreadyActiveException(chatId);
             run.running = true;
             run.closing = false;
@@ -94,10 +106,15 @@ public class AgentService {
             run.token = new CancelToken();
             run.steering.clear();
             run.followUp.clear();
+        } finally {
+            run.lock.unlock();
         }
         // Events of earlier runs are already part of the persisted history; replaying them duplicates the chat
-        synchronized (run.events) {
+        run.eventsLock.lock();
+        try {
             run.events.clear();
+        } finally {
+            run.eventsLock.unlock();
         }
         executor.submit(() -> execute(chatId, run, userText));
     }
@@ -118,9 +135,10 @@ public class AgentService {
     private void enqueue(String chatId, String text, boolean steering) {
         sessions.get(chatId);
         ChatRun run = runs.computeIfAbsent(chatId, k -> new ChatRun());
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-        while (true) {
-            synchronized (run) {
+        long remaining = TimeUnit.SECONDS.toNanos(5);
+        run.lock.lock();
+        try {
+            while (true) {
                 if (run.running && !run.closing) {
                     (steering ? run.steering : run.followUp).add(text);
                     publish(run, "steer_queued", mapper.createObjectNode().put("text", text)
@@ -131,14 +149,16 @@ public class AgentService {
                     start(chatId, text);
                     return;
                 }
+                if (remaining <= 0) throw new RunAlreadyActiveException(chatId);
+                try {
+                    remaining = run.changed.awaitNanos(remaining); // the run is finishing: wait for it, then start anew
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new RunAlreadyActiveException(chatId);
+                }
             }
-            if (System.nanoTime() > deadline) throw new RunAlreadyActiveException(chatId);
-            try {
-                Thread.sleep(10); // the run is finishing: wait for it, then start a new one
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new RunAlreadyActiveException(chatId);
-            }
+        } finally {
+            run.lock.unlock();
         }
     }
 
@@ -167,13 +187,17 @@ public class AgentService {
             // a message queued just as the loop finished starts the next turn instead of being lost
             while (!run.token.isCancelled()) {
                 String next;
-                synchronized (run) {
+                run.lock.lock();
+                try {
                     next = run.steering.poll();
                     if (next == null) next = run.followUp.poll();
                     if (next == null) {
                         run.closing = true;
+                        run.changed.signalAll();
                         break;
                     }
+                } finally {
+                    run.lock.unlock();
                 }
                 sink.emit("steer_applied", mapper.createObjectNode().put("text", next));
                 turnStarted(chatId, sink, next);
@@ -187,12 +211,16 @@ public class AgentService {
             if (locked) runSlot.release();
             // not running any more before anyone hears run_finished (a client may start the next run at once); under
             // the run lock, so a new run's start() cannot clear the buffer between the two
-            synchronized (run) {
+            run.lock.lock();
+            try {
                 run.running = false;
                 // outcome: how the last turn ended (completed, stuck, unverified, max_turns, ...), for embedders
                 publish(run, "run_finished", mapper.createObjectNode().put("cancelled", run.cancelRequested)
                         .put("outcome", (run.cancelRequested ? AgentLoop.Outcome.CANCELLED : outcome).name()
                                 .toLowerCase(java.util.Locale.ROOT)));
+                run.changed.signalAll();
+            } finally {
+                run.lock.unlock();
             }
         }
     }
@@ -249,12 +277,15 @@ public class AgentService {
             }
             return;
         }
-        synchronized (run.events) {
+        run.eventsLock.lock();
+        try {
             ev = new AgentEvent(run.nextSeq++, type, data);
-            run.events.add(ev);
-            if (run.events.size() > MAX_BUFFERED_EVENTS) run.events.remove(0);
+            run.events.addLast(ev);
+            if (run.events.size() > MAX_BUFFERED_EVENTS) run.events.removeFirst();
             // the listeners registered when the seq was assigned: a later subscriber gets this event by replay
             targets = List.copyOf(run.listeners);
+        } finally {
+            run.eventsLock.unlock();
         }
         for (Consumer<AgentEvent> l : targets) {
             try {
@@ -272,28 +303,94 @@ public class AgentService {
     static final class OrderedListener implements Consumer<AgentEvent> {
         private final Consumer<AgentEvent> target;
         private final java.util.TreeMap<Long, AgentEvent> held = new java.util.TreeMap<>();
+        private final ReentrantLock lock = new ReentrantLock();
         private long next;
 
-        /** @param next seq of the first event to deliver */
+        /** @param target must not block: it only hands the event over (see {@link Subscriber}) */
         OrderedListener(Consumer<AgentEvent> target, long next) {
             this.target = target;
             this.next = next;
         }
 
         /** A streaming delta (seq 0): delivered at once, outside the seq order. */
-        synchronized void acceptTransient(AgentEvent ev) {
-            target.accept(ev);
+        void acceptTransient(AgentEvent ev) {
+            lock.lock();
+            try {
+                target.accept(ev);
+            } finally {
+                lock.unlock();
+            }
         }
 
         @Override
-        public synchronized void accept(AgentEvent ev) {
-            if (ev.seq() < next) return; // already delivered
-            held.put(ev.seq(), ev);
-            // a seq that never arrives (should not happen) must not hold the stream forever
-            if (held.size() > MAX_BUFFERED_EVENTS) next = held.firstKey();
-            for (AgentEvent e = held.remove(next); e != null; e = held.remove(next)) {
-                next++;
-                target.accept(e);
+        public void accept(AgentEvent ev) {
+            lock.lock();
+            try {
+                if (ev.seq() < next) return; // already delivered
+                held.put(ev.seq(), ev);
+                // a seq that never arrives (should not happen) must not hold the stream forever
+                if (held.size() > MAX_BUFFERED_EVENTS) next = held.firstKey();
+                for (AgentEvent e = held.remove(next); e != null; e = held.remove(next)) {
+                    next++;
+                    target.accept(e);
+                }
+            } finally {
+                lock.unlock();
+            }
+        }
+    }
+
+    /**
+     * One subscriber's bounded queue, drained by its own virtual thread: a slow consumer (a stalled SSE write) delays
+     * neither the run nor other subscribers. When the queue overflows the subscriber is detached and its queue is
+     * replaced by a final {@link #DROPPED_EVENT}; it reconnects and replays from its last seq.
+     */
+    static final class Subscriber {
+        private static final AgentEvent STOP = new AgentEvent(0, "stop", null);
+        private final java.util.concurrent.LinkedBlockingQueue<AgentEvent> queue;
+        private final Consumer<AgentEvent> target;
+        private final JsonNode droppedData;
+        private final Runnable detach;
+        private volatile boolean finished;
+
+        Subscriber(Consumer<AgentEvent> target, int capacity, JsonNode droppedData, Runnable detach) {
+            this.target = target;
+            this.queue = new java.util.concurrent.LinkedBlockingQueue<>(capacity);
+            this.droppedData = droppedData;
+            this.detach = detach;
+            Thread.ofVirtual().name("event-subscriber").start(this::drain);
+        }
+
+        /** Never blocks. */
+        void offer(AgentEvent ev) {
+            if (finished) return;
+            if (queue.offer(ev)) return;
+            finished = true;
+            queue.clear();
+            queue.add(new AgentEvent(0, DROPPED_EVENT, droppedData));
+            queue.offer(STOP);
+            detach.run();
+        }
+
+        /** Unsubscribed: pending events are discarded. */
+        void close() {
+            finished = true;
+            queue.clear();
+            queue.offer(STOP);
+        }
+
+        private void drain() {
+            try {
+                while (true) {
+                    AgentEvent ev = queue.take();
+                    if (ev == STOP) return;
+                    target.accept(ev);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } catch (RuntimeException e) { // boundary: listener isolation: a failing listener is dropped
+                finished = true;
+                detach.run();
             }
         }
     }
@@ -312,9 +409,12 @@ public class AgentService {
     public CompactResult compact(String chatId, String focus) {
         sessions.get(chatId);
         ChatRun run = runs.computeIfAbsent(chatId, k -> new ChatRun());
-        synchronized (run) {
+        run.lock.lock();
+        try {
             if (run.running) throw new RunAlreadyActiveException(chatId);
             run.running = true;
+        } finally {
+            run.lock.unlock();
         }
         try {
             CompactResult r = loop.compact(chatId, focus);
@@ -324,7 +424,13 @@ public class AgentService {
             }
             return r;
         } finally {
-            run.running = false;
+            run.lock.lock();
+            try {
+                run.running = false;
+                run.changed.signalAll();
+            } finally {
+                run.lock.unlock();
+            }
         }
     }
 
@@ -364,8 +470,11 @@ public class AgentService {
     public long lastSeq(String chatId) {
         ChatRun run = runs.get(chatId);
         if (run == null) return 0;
-        synchronized (run.events) {
+        run.eventsLock.lock();
+        try {
             return run.nextSeq - 1;
+        } finally {
+            run.eventsLock.unlock();
         }
     }
 
@@ -373,8 +482,11 @@ public class AgentService {
     public List<AgentEvent> events(String chatId, long afterSeq) {
         ChatRun run = runs.get(chatId);
         if (run == null) return List.of();
-        synchronized (run.events) {
+        run.eventsLock.lock();
+        try {
             return run.events.stream().filter(e -> e.seq() > afterSeq).toList();
+        } finally {
+            run.eventsLock.unlock();
         }
     }
 
@@ -384,24 +496,28 @@ public class AgentService {
      */
     public Runnable subscribe(String chatId, long afterSeq, Consumer<AgentEvent> listener) {
         ChatRun run = runs.computeIfAbsent(chatId, k -> new ChatRun());
-        OrderedListener ordered;
+        OrderedListener[] ordered = new OrderedListener[1];
+        Subscriber sub = new Subscriber(listener, SUBSCRIBER_QUEUE,
+                mapper.createObjectNode().put("message", "subscriber too slow: reconnect and replay"),
+                () -> run.listeners.remove(ordered[0]));
         List<AgentEvent> replay;
         // registration and snapshot under the lock that assigns seqs: every event is either replayed or delivered live
-        synchronized (run.events) {
+        run.eventsLock.lock();
+        try {
             long last = run.nextSeq - 1;
             // a seq ahead of ours comes from before a restart (seqs start again at 1): replay everything buffered
             long from = afterSeq > last ? 0 : Math.max(0, afterSeq);
             replay = run.events.stream().filter(e -> e.seq() > from).toList();
-            ordered = new OrderedListener(listener, replay.isEmpty() ? run.nextSeq : replay.get(0).seq());
-            run.listeners.add(ordered);
+            ordered[0] = new OrderedListener(sub::offer, replay.isEmpty() ? run.nextSeq : replay.get(0).seq());
+            run.listeners.add(ordered[0]);
+        } finally {
+            run.eventsLock.unlock();
         }
-        try {
-            for (AgentEvent ev : replay) ordered.accept(ev);
-        } catch (RuntimeException e) { // boundary: unsubscribe on any failure, rethrown unchanged
-            run.listeners.remove(ordered);
-            throw e;
-        }
-        return () -> run.listeners.remove(ordered);
+        for (AgentEvent ev : replay) ordered[0].accept(ev);
+        return () -> {
+            run.listeners.remove(ordered[0]);
+            sub.close();
+        };
     }
 
     public List<ApprovalService.PendingApproval> pendingApprovals(String chatId) {

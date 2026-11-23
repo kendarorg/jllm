@@ -28,7 +28,8 @@ package org.kendar.llm.web.commons;
  * @param plugins       {@code jllm.plugins.<id>.enabled} and {@code jllm.plugins.<id>.settings.*}; same as the
  *                      {@code plugins} section of the settings file, and wins over it
  * @param web           {@code jllm.web.public-url}: the externally visible base URL (OAuth logins redirect to
- *                      {@code <public-url>/oauth/callback})
+ *                      {@code <public-url>/oauth/callback});
+ *                      {@code jllm.web.use-real-password}: random passwords instead of the default ones
  */
 public record JllmProperties(String provider, String apiKey, String baseUrl, String model, Integer maxTokens,
                              Integer contextTokens, Integer maxTurns, String workdir, String settings,
@@ -37,8 +38,26 @@ public record JllmProperties(String provider, String apiKey, String baseUrl, Str
                              Boolean dockerRemote, String dockerRemoteHost, String pluginDir,
                              java.util.Map<String, Plugin> plugins, Web web) {
 
-    /** @param publicUrl externally visible base URL, e.g. {@code https://jllm.example.com} */
-    public record Web(String publicUrl) {
+    /**
+     * @param publicUrl       externally visible base URL, e.g. {@code https://jllm.example.com}
+     * @param useRealPassword at startup, every user still on the default password gets a random one; the admin's is
+     *                        written to the log (once). Default false: the demo users keep their default password
+     * @param enforcePasswordChangeOnLoopback while a user is on the default password, the API refuses everything but
+     *                        the password change, sign-in and sign-out ({@code 403 password_change_required}). Requests
+     *                        from the loopback address are exempt unless this is true. Default false
+     * @param contentSecurityPolicy {@code Content-Security-Policy} header value; blank = the built-in policy, the
+     *                        literal {@code off} = no CSP header. {@code X-Content-Type-Options} and
+     *                        {@code Referrer-Policy} are always set
+     */
+    public record Web(String publicUrl, Boolean useRealPassword, Boolean enforcePasswordChangeOnLoopback,
+                      String contentSecurityPolicy) {
+        public boolean realPasswords() {
+            return Boolean.TRUE.equals(useRealPassword);
+        }
+
+        public boolean enforceOnLoopback() {
+            return Boolean.TRUE.equals(enforcePasswordChangeOnLoopback);
+        }
     }
 
     /** One entry of {@code jllm.plugins}. */

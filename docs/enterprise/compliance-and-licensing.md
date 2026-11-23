@@ -22,7 +22,12 @@ from GraalJS 25.1 the central `js` pom declares UPL and MIT and `js-community` i
 pulled an enterprise artifact under Oracle terms. At the pinned version the non-community isolate (`js-isolate`) still
 declares the GraalVM Free Terms and Conditions: the shipped set uses `js-isolate-community`, and whoever installs the
 `oracle` set (`fetch-graaljs oracle`, or `scripts/setup` in a source checkout) accepts those terms. Who accepts the Oracle terms is the operator.
-The GraalJS libraries are not in this repository. If they are present in `.graal/`, you downloaded them with `scripts/setup`
+The JDBC drivers of MySQL (GPLv2 with the Universal FOSS Exception) and PostgreSQL (BSD-2-Clause) are not bundled or
+shipped either: `scripts/setup` / `fetch-sql-driver` download them from Maven Central into `.downloaded-libs/` (checkout)
+or `lib-ext/` (release), check a pinned SHA-256, and ask to accept the MySQL terms (`--accept-license`). SQLite
+(sqlite-jdbc, Apache-2.0) is bundled.
+
+The GraalJS libraries are not in this repository. If they are present in `.downloaded-libs/graal/`, you downloaded them with `scripts/setup`
 and accepted the license terms of the chosen edition. After a `graalvm.version` change, run `scripts/setup` again. Details:
 [js guide](../guides/js.md#licensing), [NOTICE](../../NOTICE).
 

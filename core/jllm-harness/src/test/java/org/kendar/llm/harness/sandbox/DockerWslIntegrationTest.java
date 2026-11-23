@@ -95,7 +95,7 @@ class DockerWslIntegrationTest {
         };
         var d = HarnessConfig.defaults().sandbox().docker();
         config = HarnessConfig.defaults().withDocker(new HarnessConfig.Docker(d.binary(), d.image(), d.memory(), d.cpus(),
-                d.pidsLimit(), d.user(), d.network(), "daemon", true, "127.0.0.1"));
+                d.pidsLimit(), d.user(), d.network(), "daemon", true, "127.0.0.1", true, "", ""));
     }
 
     @AfterEach

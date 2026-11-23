@@ -228,6 +228,11 @@ public class ChatApi {
         sink.onTimeout(cleanup);
         Runnable subscription = agentService.subscribe(id, after, ev -> {
             if (closed.get()) return;
+            if (AgentService.DROPPED_EVENT.equals(ev.type())) { // fell behind: the client reconnects and replays
+                cleanup.run();
+                sink.complete();
+                return;
+            }
             try {
                 // a streaming delta (seq 0) is not replayable: no id, so the browser's Last-Event-ID stays put
                 String eventId = ev.seq() > 0 ? String.valueOf(ev.seq()) : null;

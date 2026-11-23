@@ -1,5 +1,6 @@
 package org.kendar.llm.harness.context.compaction;
 
+import org.kendar.llm.harness.context.ClearedResult;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import org.junit.jupiter.api.Test;
@@ -45,7 +46,7 @@ class ContextManagerTest {
         int cleared = manager.microcompact(m, 1);
 
         assertEquals(1, cleared);
-        assertEquals(ContextManager.CLEARED, m.get(2).get("content").get(0).get("content").asText());
+        assertEquals(ClearedResult.TEXT, m.get(2).get("content").get(0).get("content").asText());
         assertEquals(big, m.get(5).get("content").get(0).get("content").asText());
     }
 

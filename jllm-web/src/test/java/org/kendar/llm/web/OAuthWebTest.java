@@ -134,7 +134,7 @@ class OAuthWebTest {
                         new ChatController(new ChatApi(harness, MAPPER, new HarnessPricing(0, 0, 0, 0), auth), auth),
                         oauth)
                 .setControllerAdvice(new ApiExceptionAdvice())
-                .addInterceptors(new ApiInterceptor(gate, auth, MAPPER),
+                .addInterceptors(new ApiInterceptor(gate, auth, MAPPER, false),
                         new MappedInterceptor(new String[]{"/api/admin/**"}, new AdminInterceptor(gate, auth, MAPPER)))
                 .build();
     }
@@ -171,7 +171,7 @@ class OAuthWebTest {
 
     private static JllmProperties props(String publicUrl) {
         return new JllmProperties(null, null, null, null, null, null, null, null, null, null, null, null, null, null,
-                null, null, null, null, null, null, null, null, null, new JllmProperties.Web(publicUrl));
+                null, null, null, null, null, null, null, null, null, new JllmProperties.Web(publicUrl, null, null, null));
     }
 
     private Cookie signIn(String id) throws Exception {

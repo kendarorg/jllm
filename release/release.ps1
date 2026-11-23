@@ -54,6 +54,12 @@ $plugins = @(Get-ChildItem target\plugins\*.jar)
 if ($plugins.Count -lt 5) { throw "expected 5 plugin jars in target\plugins, found $($plugins.Count)" }
 Copy-Item $plugins.FullName (Join-Path $stage 'plugins')
 Copy-Item release\template\* $stage -Recurse -Force
+# SQL store: the starter and its jars go to lib-ext\sql (fetch-graaljs empties lib-ext\*.jar, not lib-ext\sql); the JDBC
+# drivers (MySQL GPL, PostgreSQL BSD) are never shipped: fetch-sql-driver downloads them into lib-ext and checks the manifests
+New-Item -ItemType Directory -Force (Join-Path $stage 'lib-ext\sql') | Out-Null
+Copy-Item "web\jllm-sql-spring-starter\target\jllm-sql-spring-starter-$version.jar" (Join-Path $stage 'lib-ext\sql')
+Copy-Item web\jllm-sql-spring-starter\target\lib-sql\*.jar (Join-Path $stage 'lib-ext\sql')
+Copy-Item scripts\fetch-sql-driver.sh, scripts\fetch-sql-driver.ps1, scripts\fetch-sql-driver.cmd $stage
 Copy-Item LICENSE, NOTICE $stage
 # neither front end may carry GraalJS (it is provided through lib-ext)
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -64,6 +70,7 @@ foreach ($j in 'jllm-cli.jar', 'jllm-web.jar') {
 }
 $libExt = Join-Path $stage 'lib-ext'
 New-Item -ItemType Directory -Force (Join-Path $libExt 'manifests') | Out-Null
+Copy-Item web\jllm-sql\src\main\resources\db\drivers\*.manifest (Join-Path $libExt 'manifests')
 $resolve = Join-Path $root 'release\graaljs\resolve.ps1'
 # manifests only, nothing is shipped: the operator accepts the terms of the oracle edition in setup / fetch-graaljs
 foreach ($ed in 'community', 'oracle') {

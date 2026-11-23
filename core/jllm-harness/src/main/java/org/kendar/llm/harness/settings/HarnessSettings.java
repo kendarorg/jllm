@@ -167,6 +167,16 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
                 ? DEFAULT_WEB_FETCH_MAX_BYTES : web.fetchMaxBytes();
     }
 
+    /** {@code web.blockLocalHost}, default false. */
+    public boolean webBlockLocalHost() {
+        return web != null && Boolean.TRUE.equals(web.blockLocalHost());
+    }
+
+    /** {@code web.blockExtraAddresses}, default none. */
+    public List<String> webBlockExtraAddresses() {
+        return web == null ? List.of() : web.blockExtraAddresses();
+    }
+
     /** {@code sandbox.shell}, or the OS default shell. */
     public LocalShell sandboxShell() {
         return LocalShell.of(sandbox == null ? null : sandbox.shell());

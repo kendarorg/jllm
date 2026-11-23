@@ -48,6 +48,9 @@ The file tools never follow a symlink or junction that leaves a chat's work dir:
 | `jllm.search-api-key` | `BRAVE_API_KEY` env var | Brave key for `web_search` |
 | `jllm.pricing.input-per-million`, `output-per-million`, `cache-read-per-million`, `cache-write-per-million` | 0 | USD per million tokens, for the cost estimate |
 | `jllm.web.public-url` | none | the externally visible base URL (`https://jllm.example.com`); OAuth logins redirect to `<public-url>/oauth/callback`. Required when a per-user OAuth source uses the authorization code flow |
+| `jllm.web.use-real-password` | `false` | `true`: at startup every user still on the default password gets a random 24-character one. The admin password is logged once at WARN; other users are only logged as generated, an admin resets them. Never regenerated afterwards. Users linked to an identity provider are skipped |
+| `jllm.web.enforce-password-change-on-loopback` | `false` | A user on the default password can only change it, sign in or out: every other `/api` call answers `403 password_change_required`. Requests from the loopback address (without a forwarding header) are exempt unless this is `true` |
+| `jllm.web.content-security-policy` | built-in | `Content-Security-Policy` value for every response. Blank: `default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'` (`unsafe-eval`: Vue compiles its templates in the browser; `unsafe-inline` styles: `style=""` attributes). `off`: no CSP header. Any other text replaces the policy. `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer` are always sent, unless a handler already set them |
 | `jllm.plugin-dir` | `./plugins` when it exists | directory of plugin jars |
 | `jllm.plugins.<id>.enabled`, `jllm.plugins.<id>.settings.*` | none | per-plugin switch and settings; win over the `plugins` section of the settings file |
 | env `JLLM_UPLOAD_MAX_FILE_SIZE`, `JLLM_UPLOAD_MAX_REQUEST_SIZE` | 100MB, 200MB | multipart upload limits |
@@ -300,8 +303,9 @@ the reference stores: the file repositories, the sign-in sessions and the beans 
 | `users.JsonFiles` | atomic writes of the `webauth` files |
 | `SampleFlows` | the sample workflow files |
 
-The file repositories are used with `jllm.store=file` (the default); another store supplies its own
-`UserRepository`, `RoleRepository`, `SkillRepository` and `LoginSessionRepository` beans. The harness settings layers come from a
+The file repositories (`FileStoresAutoConfiguration`) are used when no other bean of the type exists: `jllm.store=file`, or
+no SQL starter. With `jllm-sql-spring-starter` on the class path (the release ships it in `lib-ext/sql`) SQL is the
+default; another store supplies its own `UserRepository`, `RoleRepository`, `SkillRepository` and `LoginSessionRepository` beans. The harness settings layers come from a
 `SettingsSource` bean (default: the settings files) and the project trust answers from a `ProjectMcpTrust` bean;
 a `TokenStore` bean (passed through `HarnessIdentity.tokenStore()`) can replace the OAuth token files. Chat history
 (`ChatSessionStore`, `SubAgentRunLog`, `MnemonicStore`, `StateStore`) is optional beans too; default: files under each
@@ -310,45 +314,12 @@ chat's history root.
 Tests: `SampleUsersTest`, `LoginTest`, `MeControllerTest`, `AdminControllerTest`, `OAuthWebTest`, `OidcTest`, `JllmWebApplicationArgsTest`, `JllmWebBootTest`
 (`mvn -pl jllm-web -am test`).
 
-## A possible extension: a MySQL store
+## SQL store
 
-Not implemented. The interfaces are in place, so whoever wants it can add it without touching the controllers or the
-harness. A short list:
-
-- [ ] A module or package with `JdbcUserRepository`, `JdbcRoleRepository`, `JdbcSkillRepository`,
-      `JdbcLoginSessionRepository` (interfaces in jllm-harness `org.kendar.llm.harness.identity`), wired when
-      `jllm.store=mysql` (the file and in-memory beans are already `@ConditionalOnProperty(jllm.store=file)`);
-      `spring-boot-starter-jdbc`, the MySQL driver, Flyway for the schema.
-- [ ] Tables, roughly: `roles(name, read_only, approval)` + `role_tools(role, pattern, ord)`;
-      `users(id, name, role, password_hash)` + `user_credentials(user_id, source, header, env_ref)` +
-      `user_disabled_tools` + `user_disabled_skills`; `skills(owner_id NULL = global, name, description, content)`.
-      `login_sessions(token_hash, user_id, expires_at)`: store a SHA-256 of the token, never the token; `find` slides
-      `expires_at` and drops expired rows; `revokeUser` is one `DELETE ... WHERE user_id = ? AND token_hash <> ?`.
-      Sessions then survive a restart and are shared between instances.
-      Foreign keys user→role (today a missing role just gives no tools) and cascade deletes for a user's rows.
-- [ ] Keep the rules the files have: ids/names `[a-z0-9_-]{1,64}`, credentials only `env:NAME`
-      (`UserRepository.checkCredentials`), skills at most 64 KB (`SkillRepository.checkSize`) and 50 per user, the
-      `admin` role never stored (`Permissions` adds it).
-- [ ] `create` must fail on an existing id (`IllegalStateException`) and the setters on an unknown one
-      (`NoSuchElementException`): map duplicate-key and zero-rows-updated to those.
-- [ ] OAuth tokens: a `TokenStore` on a `oauth_tokens(principal_id, name, ciphertext, version)` table, encrypted with
-      `JLLM_TOKEN_KEY` as the files are, `compareAndPut` as `UPDATE ... WHERE version = ?`, `crossProcess()` true;
-      exposed as a `TokenStore` bean (`WebAuthConfiguration` passes it to `HarnessIdentity.tokenStore()`).
-- [ ] Harness settings: a `SettingsSource` bean reading one JSON document per layer
-      (`settings_layer(kind GLOBAL|PROJECT|EXPLICIT, doc)`), and a `ProjectMcpTrust` bean on
-      `mcp_trust(project_key, name, sha256, trusted)` (`ProjectMcpTrust.projectKey`/`fingerprint`).
-- [ ] An importer from an existing `webauth/` folder (users, roles, skills, tokens) into an empty database.
-- [ ] Run the existing web tests against both stores (Testcontainers MySQL, or H2 in MySQL mode).
-- [ ] Chat history: the harness already takes interfaces for it, `ChatSessionStore` (the chat row and its messages),
-      `StateStore` (per-chat JSON documents: tool grants, todo lists), `MnemonicStore` (per chat and agent) and
-      `SubAgentRunLog`. Implement them on tables keyed by `chat_id` (messages as JSON text, ordered by a sequence),
-      delete in cascade with the chat, and let the starter take them as beans instead of `HarnessFactory` building the
-      `File*` stores itself. `ChatSessionStore.list()` is most recent first; chat retention
-      (`chatRetentionLimit`) deletes through `delete(chatId)`.
-
-Still on disk after all of the above: the sandbox workspace of each chat (the files the tools read and write) and
-the `HistoryRootLock` that allows one process per base folder. Several instances behind a load balancer would also
-need a shared workspace (or the docker daemon sandbox on a shared host) and that lock replaced.
+Implemented by [jllm-sql-spring-starter](../web/jllm-sql-spring-starter/README.md): SQLite (default), MySQL and PostgreSQL
+(both experimental), chosen by the JDBC url, plain JDBC. In this module's tests the starter is a test dependency and
+`src/test/resources/application.properties` sets `jllm.store=file`; `SqlBootTest` and `FileStoresAutoConfigurationTest`
+cover the SQL store and the switch.
 
 ## Sample global flows
 

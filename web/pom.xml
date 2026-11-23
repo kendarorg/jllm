@@ -28,5 +28,7 @@
     <modules>
         <module>jllm-web-commons</module>
         <module>jllm-web-spring-starter</module>
+        <module>jllm-sql</module>
+        <module>jllm-sql-spring-starter</module>
     </modules>
 </project>

@@ -119,7 +119,8 @@ public final class HarnessSettingsBuilder {
     public HarnessSettingsBuilder dockerImage(String image) {
         DockerSettings d = currentDocker();
         return docker(new DockerSettings(d.binary(), image, d.memory(), d.cpus(), d.pidsLimit(), d.user(),
-                d.network(), d.mode(), d.remote(), d.remoteHost()));
+                d.network(), d.mode(), d.remote(), d.remoteHost(),
+                d.allowInsecure(), d.trustStore(), d.trustStorePassword()));
     }
 
     /** Replaces {@code sandbox.docker.mode}. */
@@ -129,7 +130,8 @@ public final class HarnessSettingsBuilder {
         }
         DockerSettings d = currentDocker();
         return docker(new DockerSettings(d.binary(), d.image(), d.memory(), d.cpus(), d.pidsLimit(), d.user(),
-                d.network(), mode.toLowerCase(), d.remote(), d.remoteHost()));
+                d.network(), mode.toLowerCase(), d.remote(), d.remoteHost(),
+                d.allowInsecure(), d.trustStore(), d.trustStorePassword()));
     }
 
     /** Replaces {@code sandbox.docker.remote} and {@code remoteHost}; a null argument keeps the current value. */
@@ -137,7 +139,8 @@ public final class HarnessSettingsBuilder {
         DockerSettings d = currentDocker();
         return docker(new DockerSettings(d.binary(), d.image(), d.memory(), d.cpus(), d.pidsLimit(), d.user(),
                 d.network(), d.mode(), remote != null ? remote : d.remote(),
-                remoteHost != null ? remoteHost : d.remoteHost()));
+                remoteHost != null ? remoteHost : d.remoteHost(),
+                d.allowInsecure(), d.trustStore(), d.trustStorePassword()));
     }
 
     /** Replaces {@code context.maxTokens}. */
@@ -178,7 +181,7 @@ public final class HarnessSettingsBuilder {
 
     private DockerSettings currentDocker() {
         DockerSettings d = currentSandbox().docker();
-        return d == null ? new DockerSettings(null, null, null, null, null, null, null, null, null, null) : d;
+        return d == null ? new DockerSettings(null, null, null, null, null, null, null, null, null, null, null, null, null) : d;
     }
 
     private ContextSettings currentContext() {

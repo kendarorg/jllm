@@ -16,68 +16,33 @@ import org.kendar.llm.web.commons.me.MeApi;
 import org.kendar.llm.web.commons.auth.OidcProperties;
 import org.kendar.llm.web.commons.JllmProperties;
 import org.kendar.llm.web.commons.auth.LoginThrottle;
-import org.kendar.llm.web.auth.InMemoryLoginSessionRepository;
 import org.kendar.llm.harness.identity.LoginSessionRepository;
 import org.kendar.llm.harness.identity.HarnessIdentity;
 import org.kendar.llm.harness.identity.RoleRepository;
 import org.kendar.llm.harness.identity.SkillRepository;
 import org.kendar.llm.harness.identity.UserRepository;
 import org.kendar.llm.harness.identity.User;
-import org.kendar.llm.web.users.FileRoleRepository;
-import org.kendar.llm.web.users.FileSkillRepository;
-import org.kendar.llm.web.users.FileUserRepository;
 import org.kendar.llm.web.commons.users.Permissions;
 import org.kendar.llm.web.commons.users.UserCredentialResolver;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.function.Function;
 
 /**
- * Sign-in, users, roles and skills of the reference implementation. With {@code jllm.store=file} (the default) they
- * are kept under {@code jllm.webauth-dir} (default {@code webauth}, relative to the start folder); another store
- * supplies its own {@link UserRepository}, {@link RoleRepository}, {@link SkillRepository} and
- * {@link LoginSessionRepository} beans. Supplies the authentication and authorization the common web API needs.
+ * Sign-in, users, roles and skills of the reference implementation, over whichever {@link UserRepository},
+ * {@link RoleRepository}, {@link SkillRepository} and {@link LoginSessionRepository} beans exist: SQL ones from the
+ * SQL starter, else the file ones of {@link FileStoresAutoConfiguration}. Supplies the authentication and
+ * authorization the common web API needs.
  */
 @Configuration
 public class WebAuthConfiguration {
 
-    private static final Logger log = LoggerFactory.getLogger(WebAuthConfiguration.class);
-
     private static Path root(String webauthDir) {
         return Path.of(webauthDir).toAbsolutePath().normalize();
-    }
-
-    /** {@code <webauth>/users}: one file per user. Another store replaces it with {@code jllm.store}. */
-    @Bean
-    @ConditionalOnProperty(name = "jllm.store", havingValue = "file", matchIfMissing = true)
-    public UserRepository userRepository(@Value("${jllm.webauth-dir:webauth}") String webauthDir, ObjectMapper mapper) {
-        Path dir = root(webauthDir).resolve("users");
-        if (!Files.isDirectory(dir)) {
-            log.warn("No users folder at {}: nobody can sign in. Set jllm.webauth-dir.", dir);
-        }
-        return new FileUserRepository(dir, mapper);
-    }
-
-    /** {@code <webauth>/permissions}: one file per role. */
-    @Bean
-    @ConditionalOnProperty(name = "jllm.store", havingValue = "file", matchIfMissing = true)
-    public RoleRepository roleRepository(@Value("${jllm.webauth-dir:webauth}") String webauthDir, ObjectMapper mapper) {
-        return new FileRoleRepository(root(webauthDir).resolve("permissions"), mapper);
-    }
-
-    /** {@code <webauth>/global-skills} and {@code <webauth>/user-skills}. */
-    @Bean
-    @ConditionalOnProperty(name = "jllm.store", havingValue = "file", matchIfMissing = true)
-    public SkillRepository skillRepository(@Value("${jllm.webauth-dir:webauth}") String webauthDir) {
-        return new FileSkillRepository(root(webauthDir));
     }
 
     @Bean
@@ -85,11 +50,10 @@ public class WebAuthConfiguration {
         return new Permissions(roles);
     }
 
-    /** Sign-in sessions in memory. */
+    /** Random passwords instead of the default ones when {@code jllm.web.use-real-password=true}. */
     @Bean
-    @ConditionalOnProperty(name = "jllm.store", havingValue = "file", matchIfMissing = true)
-    public LoginSessionRepository loginSessionRepository() {
-        return new InMemoryLoginSessionRepository();
+    public RealPasswordInitializer realPasswordInitializer(UserRepository users, JllmProperties jllm) {
+        return new RealPasswordInitializer(users, jllm);
     }
 
     @Bean

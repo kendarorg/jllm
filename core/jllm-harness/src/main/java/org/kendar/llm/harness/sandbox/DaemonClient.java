@@ -1,6 +1,20 @@
 package org.kendar.llm.harness.sandbox;
 
+import org.kendar.llm.harness.HarnessConfig;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManagerFactory;
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.GeneralSecurityException;
+import java.security.KeyStore;
+import java.util.Locale;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -26,18 +40,77 @@ public final class DaemonClient {
         }
     }
 
-    private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+    private static final Logger log = LoggerFactory.getLogger(DaemonClient.class);
+    private static final Set<String> WARNED = ConcurrentHashMap.newKeySet();
+
+    private final HttpClient http;
     private final String base;
     private final String token;
 
-    public DaemonClient(int port, String token) {
-        this("127.0.0.1", port, token);
+    /**
+     * @param hostSpec where the published port is reachable: 127.0.0.1, the address of a remote docker host, either
+     *                 optionally prefixed {@code http://} or {@code https://} (default http)
+     * @param docker   supplies {@code allowInsecure} and the optional truststore for https
+     * @throws SandboxUnavailableException plain http to a non-loopback host while {@code allowInsecure} is false, or an
+     *                                     unreadable truststore
+     */
+    public DaemonClient(HarnessConfig.Docker docker, String hostSpec, int port, String token) {
+        this.base = baseUrl(hostSpec, port, docker.allowInsecure());
+        this.token = token;
+        HttpClient.Builder hb = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5));
+        if (base.startsWith("https://")) hb.sslContext(sslContext(docker.trustStore(), docker.trustStorePassword()));
+        this.http = hb.build();
     }
 
-    /** @param host where the published port is reachable: 127.0.0.1, or the address of a remote docker host */
-    public DaemonClient(String host, int port, String token) {
-        this.base = "http://" + (host.contains(":") ? "[" + host + "]" : host) + ":" + port;
-        this.token = token;
+    /** Builds {@code scheme://host:port}; refuses (or warns about) cleartext http to a non-loopback host. */
+    static String baseUrl(String hostSpec, int port, boolean allowInsecure) {
+        String h = hostSpec.strip();
+        String scheme = "http";
+        String lower = h.toLowerCase(Locale.ROOT);
+        if (lower.startsWith("https://")) {
+            scheme = "https";
+            h = h.substring(8);
+        } else if (lower.startsWith("http://")) {
+            h = h.substring(7);
+        }
+        while (h.endsWith("/")) h = h.substring(0, h.length() - 1);
+        if (h.startsWith("[") && h.endsWith("]")) h = h.substring(1, h.length() - 1);
+        if (scheme.equals("http") && !isLoopback(h)) {
+            if (!allowInsecure) {
+                throw new SandboxUnavailableException("Refusing plain http to the remote sandbox daemon at " + h
+                        + ": the token and commands would cross the network in cleartext. Use an https:// "
+                        + "sandbox.docker.remoteHost (TLS in front of the daemon port), an SSH tunnel to 127.0.0.1, "
+                        + "or set sandbox.docker.allowInsecure=true on a trusted network.");
+            }
+            if (WARNED.add(h)) {
+                log.warn("Sandbox daemon at {} is reached over plain http: the token and the commands travel in "
+                        + "cleartext. Use https, an SSH tunnel, or a trusted network only.", h);
+            }
+        }
+        return scheme + "://" + (h.contains(":") ? "[" + h + "]" : h) + ":" + port;
+    }
+
+    static boolean isLoopback(String host) {
+        String h = host.toLowerCase(Locale.ROOT);
+        return h.equals("localhost") || h.startsWith("127.") || h.equals("::1") || h.equals("0:0:0:0:0:0:0:1");
+    }
+
+    private static SSLContext sslContext(String trustStore, String password) {
+        try {
+            if (trustStore == null || trustStore.isBlank()) return SSLContext.getDefault();
+            KeyStore ks = KeyStore.getInstance(trustStore.toLowerCase(Locale.ROOT).endsWith(".jks") ? "JKS" : "PKCS12");
+            try (InputStream in = Files.newInputStream(Path.of(trustStore.strip()))) {
+                ks.load(in, password == null ? new char[0] : password.toCharArray());
+            }
+            TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+            tmf.init(ks);
+            SSLContext ctx = SSLContext.getInstance("TLS");
+            ctx.init(null, tmf.getTrustManagers(), null);
+            return ctx;
+        } catch (IOException | GeneralSecurityException e) {
+            throw new SandboxUnavailableException("Cannot load sandbox.docker.trustStore " + trustStore + ": "
+                    + e.getMessage());
+        }
     }
 
     /** One request; {@code query} values are URL-encoded. */

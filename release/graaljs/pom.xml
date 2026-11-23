@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Single source of the GraalJS jar set that jllm ships in lib-ext/ (release) and fetches into .graal/<version>/ (developers).
+  Single source of the GraalJS jar set that jllm ships in lib-ext/ (release) and fetches into .downloaded-libs/graal/<version>/ (developers).
   NOT part of the reactor build. The scripts pass the version from the root pom:
     mvn -f release/graaljs/pom.xml -P<edition> -Dgraalvm.version=<root graalvm.version> -Dgraal.out=<dir> dependency:copy-dependencies
   Profiles: community (UPL/MIT isolate) and oracle (the non-community isolate; its pom may declare Oracle terms).

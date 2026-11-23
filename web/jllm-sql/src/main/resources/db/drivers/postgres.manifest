@@ -1,0 +1,6 @@
+# jllm PostgreSQL JDBC driver, never bundled. version must equal postgresql.version of the root pom (a test checks it).
+# Then "<sha256>  <path in Maven Central>".
+version=42.7.5
+license=BSD-2-Clause
+terms=https://jdbc.postgresql.org/about/license.html
+69020b3bd20984543e817393f2e6c01a890ef2e37a77dd11d6d8508181d079ab  org/postgresql/postgresql/42.7.5/postgresql-42.7.5.jar

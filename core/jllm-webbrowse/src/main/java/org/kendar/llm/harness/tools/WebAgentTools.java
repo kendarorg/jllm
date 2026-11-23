@@ -41,26 +41,34 @@ public class WebAgentTools implements HarnessToolSet {
     private final String duckDuckGoUrl;
     private final StorageQuota quota;
     private final long fetchMaxBytes;
+    private final AddressPolicy addresses;
 
     public WebAgentTools(HarnessConfig config, ObjectMapper mapper) {
-        this(config, mapper, "https://html.duckduckgo.com/html/", StorageQuota.UNLIMITED, DEFAULT_FETCH_MAX_BYTES);
+        this(config, mapper, "https://html.duckduckgo.com/html/", StorageQuota.UNLIMITED, DEFAULT_FETCH_MAX_BYTES,
+                AddressPolicy.OPEN);
     }
 
     public WebAgentTools(HarnessConfig config, ObjectMapper mapper, StorageQuota quota) {
-        this(config, mapper, "https://html.duckduckgo.com/html/", quota, DEFAULT_FETCH_MAX_BYTES);
+        this(config, mapper, "https://html.duckduckgo.com/html/", quota, DEFAULT_FETCH_MAX_BYTES, AddressPolicy.OPEN);
     }
 
-    /** @param fetchMaxBytes {@code web.fetchMaxBytes}: the most bytes of a body web_fetch reads; 0 or less: default */
-    public WebAgentTools(HarnessConfig config, ObjectMapper mapper, StorageQuota quota, long fetchMaxBytes) {
-        this(config, mapper, "https://html.duckduckgo.com/html/", quota, fetchMaxBytes);
+    /**
+     * @param fetchMaxBytes {@code web.fetchMaxBytes}: the most bytes of a body web_fetch reads; 0 or less: default
+     * @param addresses     the addresses web_fetch and web_download refuse ({@code web.blockLocalHost},
+     *                      {@code web.blockExtraAddresses})
+     */
+    public WebAgentTools(HarnessConfig config, ObjectMapper mapper, StorageQuota quota, long fetchMaxBytes,
+                         AddressPolicy addresses) {
+        this(config, mapper, "https://html.duckduckgo.com/html/", quota, fetchMaxBytes, addresses);
     }
 
     WebAgentTools(HarnessConfig config, ObjectMapper mapper, String duckDuckGoUrl) {
-        this(config, mapper, duckDuckGoUrl, StorageQuota.UNLIMITED, DEFAULT_FETCH_MAX_BYTES);
+        this(config, mapper, duckDuckGoUrl, StorageQuota.UNLIMITED, DEFAULT_FETCH_MAX_BYTES, AddressPolicy.OPEN);
     }
 
     private WebAgentTools(HarnessConfig config, ObjectMapper mapper, String duckDuckGoUrl, StorageQuota quota,
-                          long fetchMaxBytes) {
+                          long fetchMaxBytes, AddressPolicy addresses) {
+        this.addresses = addresses == null ? AddressPolicy.OPEN : addresses;
         this.duckDuckGoUrl = duckDuckGoUrl;
         this.config = config;
         this.mapper = mapper;
@@ -81,6 +89,7 @@ public class WebAgentTools implements HarnessToolSet {
         URI current = uri;
         java.util.Set<String> insecure = new java.util.HashSet<>(); // hosts the user let through, for this call only
         for (int hop = 0; ; hop++) {
+            addresses.check(current); // before the approval question: a blocked address is never offered
             checkHost(ctx, current, hop == 0 ? null : uri);
             HttpRequest req = HttpRequest.newBuilder(current)
                     .timeout(Duration.ofSeconds(30))

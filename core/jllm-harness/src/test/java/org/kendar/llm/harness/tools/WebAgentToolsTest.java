@@ -110,7 +110,7 @@ class WebAgentToolsTest {
 
     @Test
     void bodyIsReadOnlyUpToFetchMaxBytes() throws Exception {
-        web = new WebAgentTools(config, MAPPER, StorageQuota.UNLIMITED, 100);
+        web = new WebAgentTools(config, MAPPER, StorageQuota.UNLIMITED, 100, AddressPolicy.OPEN);
 
         String out = fetch("/big");
 
@@ -157,6 +157,32 @@ class WebAgentToolsTest {
             assertThrows(IllegalArgumentException.class,
                     () -> tool("web_fetch").execute(ctx, json("{'url':'" + url + "'}")), url);
         }
+    }
+
+    @Test
+    void blockedFirstUrlIsRefusedForFetchAndDownload() {
+        web = new WebAgentTools(config, MAPPER, StorageQuota.UNLIMITED, 0, new AddressPolicy(true, java.util.List.of()));
+
+        IllegalStateException e = assertThrows(IllegalStateException.class, () -> fetch("/plain"));
+        assertTrue(e.getMessage().contains("refused"), e.getMessage());
+        assertThrows(IllegalStateException.class, () -> tool("web_download")
+                .execute(ctx, json("{'url':'" + base + "/plain','path':'x.txt'}")));
+        assertFalse(java.nio.file.Files.exists(tmp.resolve("x.txt")));
+    }
+
+    @Test
+    void blockedRedirectTargetIsRefused() {
+        server.createContext("/to-metadata", ex -> {
+            ex.getResponseHeaders().add("Location", "http://169.254.169.254/latest/meta-data");
+            ex.sendResponseHeaders(302, -1);
+            ex.close();
+        });
+        web = new WebAgentTools(config, MAPPER, StorageQuota.UNLIMITED, 0,
+                new AddressPolicy(false, java.util.List.of("169.254.169.254")));
+
+        assertEquals("HTTP 200\njust plain text", assertDoesNotThrow(() -> fetch("/plain")));
+        IllegalStateException e = assertThrows(IllegalStateException.class, () -> fetch("/to-metadata"));
+        assertTrue(e.getMessage().contains("169.254.169.254"), e.getMessage());
     }
 
     @Test

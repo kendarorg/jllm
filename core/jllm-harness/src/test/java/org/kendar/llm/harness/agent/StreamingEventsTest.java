@@ -97,7 +97,7 @@ class StreamingEventsTest {
     }
 
     @Test
-    void deltasAreDeliveredLiveButNeverReplayed() {
+    void deltasAreDeliveredLiveButNeverReplayed() throws Exception {
         Rig rig = new Rig(base);
         String chatId = rig.newChat();
         AgentService service = new AgentService(rig.loop, rig.sessions, rig.approvals, MAPPER, rig.config);
@@ -106,13 +106,21 @@ class StreamingEventsTest {
         service.notify(chatId, "warning", MAPPER.createObjectNode().put("message", "kept"));
         service.notify(chatId, "text_delta", MAPPER.createObjectNode().put("text", "piece"));
         service.notify(chatId, "warning", MAPPER.createObjectNode().put("message", "kept too"));
+        awaitSize(live, 3);
         unsubscribe.run();
 
         assertEquals(List.of("warning", "text_delta", "warning"), live.stream().map(AgentEvent::type).toList());
         assertEquals(0, live.get(1).seq());
         assertEquals(2, live.get(2).seq()); // the delta took no seq
-        List<AgentEvent> replay = new ArrayList<>();
-        service.subscribe(chatId, 0, replay::add).run();
+        List<AgentEvent> replay = Collections.synchronizedList(new ArrayList<>());
+        Runnable off = service.subscribe(chatId, 0, replay::add);
+        awaitSize(replay, 2);
+        off.run();
         assertEquals(List.of("warning", "warning"), replay.stream().map(AgentEvent::type).toList());
+    }
+
+    private static void awaitSize(List<?> list, int size) throws InterruptedException {
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+        while (list.size() < size && System.nanoTime() < deadline) Thread.sleep(5);
     }
 }

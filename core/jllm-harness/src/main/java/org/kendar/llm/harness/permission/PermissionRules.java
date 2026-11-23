@@ -118,7 +118,7 @@ public final class PermissionRules {
     /**
      * As {@link #match(String, JsonNode)}, with path arguments made relative to {@code workDir} (when inside it) after
      * normalization; on Windows they are also matched case-insensitively, with trailing dots/spaces of each segment
-     * dropped and 8.3 short names expanded for paths that exist.
+     * dropped; on every OS symlinks and 8.3 short names are resolved for the part of the path that exists.
      */
     public Match match(String toolName, JsonNode input, Path workDir) {
         return match(toolName, input, workDir, WINDOWS);
@@ -176,8 +176,9 @@ public final class PermissionRules {
     /**
      * The form of a path argument the rules see: '/'-separated, {@code .} and {@code ..} segments resolved, repeated
      * separators collapsed, relative to {@code workDir} when it lies inside it (an absolute path elsewhere stays
-     * absolute). On Windows each segment loses its trailing dots and spaces ({@code .git.} is {@code .git}) and an
-     * existing path is replaced by its real path, which expands 8.3 short names ({@code GIT~1}).
+     * absolute). On Windows each segment loses its trailing dots and spaces ({@code .git.} is {@code .git}). On every
+     * OS an existing path (or its existing part) is replaced by its real path: symlinks are followed and, on Windows,
+     * 8.3 short names ({@code GIT~1}) expand.
      */
     static String normalizePath(String raw, Path workDir, boolean windows) {
         if (raw == null) return "";
@@ -206,8 +207,8 @@ public final class PermissionRules {
             Path root = workDir.toAbsolutePath().normalize();
             Path p = absolute ? Path.of(result) : root.resolve(joined);
             p = p.toAbsolutePath().normalize();
-            if (windows) p = realIfExists(p);
-            Path realRoot = windows ? realIfExists(root) : root;
+            p = realPath(p);
+            Path realRoot = realPath(root);
             Path base = p.startsWith(realRoot) ? realRoot : p.startsWith(root) ? root : null;
             if (base == null) return p.toString().replace('\\', '/');
             String rel = base.relativize(p).toString().replace('\\', '/');
@@ -224,9 +225,17 @@ public final class PermissionRules {
         return end == 0 ? seg : seg.substring(0, end);
     }
 
-    private static Path realIfExists(Path p) {
+    /**
+     * The real path (symlinks and, on Windows, 8.3 names resolved) of the path, or of its deepest existing ancestor
+     * followed by the rest, so a file to create inside a symlinked directory resolves too.
+     */
+    private static Path realPath(Path p) {
+        Path existing = p;
+        while (existing != null && !java.nio.file.Files.exists(existing)) existing = existing.getParent();
+        if (existing == null) return p;
         try {
-            return java.nio.file.Files.exists(p) ? p.toRealPath() : p;
+            Path real = existing.toRealPath();
+            return existing.equals(p) ? real : real.resolve(existing.relativize(p)).normalize();
         } catch (java.io.IOException | SecurityException e) {
             return p;
         }

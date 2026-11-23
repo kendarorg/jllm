@@ -10,11 +10,15 @@ Requirements: Java 21 or newer (`java -version`).
 | Browser (http://localhost:8080) | `./run-web.sh` | `run-web.cmd` |
 
 Sign in to the web app with `admin/admin`, `poweru/poweru` or `guest/guest`. The password of each user is its login
-until the user picks another one: change it before exposing the app beyond localhost.
+until the user picks another one. The app listens on `127.0.0.1` only (`server.address` in `application.properties`).
+To expose it: `server.address=0.0.0.0`, `jllm.web.use-real-password=true` (random passwords, the admin's is in the
+startup log) and a TLS reverse proxy. Meanwhile a user on the default password can only change it: the API answers
+`403 password_change_required` (requests from the local machine are exempt unless
+`jllm.web.enforce-password-change-on-loopback=true`).
 
 | User | Can use |
 |---|---|
-| `admin` | every tool, no approvals; manages global flows and users |
+| `admin` | every tool; manages global flows and users |
 | `poweru` | files, shell, web and scripts |
 | `guest` | scripts and web only |
 
@@ -119,6 +123,8 @@ setup.sh, setup.ps1                        ├── fetch-graaljs.sh/.cmd/.ps1
 |---|---|
 | `jllm-cli.jar`, `jllm-web.jar` | the two front ends (they do not contain GraalJS) |
 | `lib-ext/` | the GraalJS libraries of `run_js`: empty in the zip, filled by `setup` / `fetch-graaljs`; holds the manifests of both editions |
+| `fetch-sql-driver.sh`, `.cmd`, `.ps1` | download the MySQL / PostgreSQL JDBC driver into `lib-ext/` (SHA-256 checked; MySQL is GPL and asks to accept). SQLite is bundled. `setup --sql mysql\|postgres\|all\|none` does it too (default all) |
+| `lib-ext/sql/` | the SQL store jars (shipped): with them users, chats and tokens live in SQL (SQLite file under `webauth/` by default); `jllm.store=file` keeps the files; see `application.properties` |
 | `fetch-graaljs.sh`, `.cmd`, `.ps1` | fill or replace `lib-ext/` with the `community` or `oracle` (commercial) set from Maven Central |
 | `plugins/` | `js` (`run_js`), `pdf` and `docs` (document readers), `jllm-workflows`, `jllm-workflow-web` |
 | `settings/settings.json` | enables the plugins above; remove an entry to disable one |

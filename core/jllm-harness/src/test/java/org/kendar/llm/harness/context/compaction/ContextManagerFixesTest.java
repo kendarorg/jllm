@@ -1,5 +1,6 @@
 package org.kendar.llm.harness.context.compaction;
 
+import org.kendar.llm.harness.context.ClearedResult;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -213,7 +214,7 @@ class ContextManagerFixesTest {
         assertEquals(1, r.clearedToolResults());
         String prompt = model.simpleUserPrompts.get(0);
         assertTrue(prompt.contains("RESULT-ONE"), prompt);
-        assertFalse(prompt.contains(ContextManager.CLEARED));
+        assertFalse(prompt.contains(ClearedResult.TEXT));
     }
 
     @Test
@@ -229,7 +230,7 @@ class ContextManagerFixesTest {
 
         String prompt = model.simpleUserPrompts.get(0);
         assertTrue(prompt.contains("RESULT-1"), prompt);
-        assertFalse(prompt.contains(ContextManager.CLEARED));
+        assertFalse(prompt.contains(ClearedResult.TEXT));
     }
 
     // ---- 5. a refused summary request keeps the previous summary --------------------------------------------------
