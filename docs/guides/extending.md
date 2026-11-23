@@ -48,7 +48,8 @@ repository; JDK 21).
 | `jllm-webbrowse` | web search and fetch tools | only with the tools and no harness |
 | `jllm-apimcp` | REST API and MCP tool providers | only with the tools and no harness |
 | `jllm-test-support` | `HarnessTestSupport`: `ScriptedModel`, `Rig`, `Events` ([12](#12-testing)) | tests (scope `test`) |
-| `jllm-web-commons` | Spring Boot REST + SSE chat and file API; its storage interfaces are in jllm-harness ([13](#13-web-storage)) | building a web front end with its own sign-in and storage |
+| `jllm-web-commons` | the web API handlers (chat, files, sign-in, users) and the `Gate`, no Spring; its storage interfaces are in jllm-harness ([13](#13-web-storage)) | mounting the API on another web framework |
+| `jllm-web-spring-starter` | Spring Boot controllers, interceptors and auto-configuration over `jllm-web-commons` | building a web front end with its own sign-in and storage |
 | `jllm-web` | the reference web application (file stores, cookie sign-in, admin) | running it, or as an example |
 
 A plugin jar (loaded from the plugin directory by the CLI and the web app):
@@ -80,7 +81,7 @@ jars. A library too large, too delicate or under terms you do not want to redist
 `jllm-web`, `jllm-eval`), ship it outside the jars (the release puts GraalJS in `lib-ext/`, see the
 [js guide](js.md#enabling)), probe it at install time, log one WARN and register nothing when it is missing; the plugin
 class itself must not reference its types. An application embedding the harness depends on `jllm-harness` (compile scope); a web
-application on `jllm-web-commons`.
+application on `jllm-web-spring-starter`.
 
 ## 1. Tools
 
@@ -615,7 +616,7 @@ assertEquals("one row", events.ofType("text").getLast().path("text").asText());
 
 ## 13. Web storage
 
-A web application built on `jllm-web-commons` keeps its users, roles, skills, sign-in sessions, settings and tokens
+A web application built on `jllm-web-spring-starter` keeps its users, roles, skills, sign-in sessions, settings and tokens
 behind interfaces. `jllm-web` ships file and in-memory implementations, wired when `jllm.store=file` (the default,
 `WebAuthConfiguration`); another store (e.g. SQL) sets `jllm.store` to another value and supplies its own beans. The
 controllers and the harness depend only on the interfaces.
@@ -628,7 +629,7 @@ flowchart LR
         SR["SkillRepository"]
         LS["LoginSessionRepository"]
     end
-    subgraph HC["jllm-web-commons: HarnessConfiguration beans"]
+    subgraph HC["jllm-web-spring-starter: harness beans (HarnessFactory)"]
         SS["SettingsSource"]
         PT["ProjectMcpTrust"]
         HI["HarnessIdentity.tokenStore()"]
@@ -709,12 +710,12 @@ public interface SettingsSource {
 Wiring:
 - `UserRepository`, `RoleRepository`, `SkillRepository`, `LoginSessionRepository`: beans. The `jllm-web` ones are
   `@ConditionalOnProperty(name = "jllm.store", havingValue = "file", matchIfMissing = true)`.
-- `SettingsSource`, `ProjectMcpTrust`: optional beans read by `HarnessConfiguration` (`ObjectProvider`); without
+- `SettingsSource`, `ProjectMcpTrust`: optional beans read by the starter's `JllmWebAutoConfiguration` (`ObjectProvider`); without
   them the files are used.
 - `TokenStore`: returned by your `HarnessIdentity.tokenStore()`; null = the store the `tokenStore` settings describe,
   under `HarnessIdentity.tokenDir()`.
 - `HarnessIdentity`, `WebAuthentication`, `ChatAccess` (sign-in, per-user policy, chat ownership) are beans too;
-  `JllmWebCommonsAutoConfiguration` falls back to "nobody signs in" without them.
+  `JllmWebAutoConfiguration` falls back to "nobody signs in" without them.
 
 Rules every store keeps (the helpers are static methods on the interfaces):
 - ids and names `[a-z0-9_-]{1,64}` (`UserRepository.validId`, `SkillRepository.validName`);
@@ -724,7 +725,7 @@ Rules every store keeps (the helpers are static methods on the interfaces):
 - a persistent login session store keeps a hash of the token, never the token.
 
 Chat history: `ChatSessionStore`, `SubAgentRunLog`, `MnemonicStore` and `StateStore` ([8](#8-persistence)) are
-optional beans read by `HarnessConfiguration`; without them it uses `FileChatSessionStore`,
+optional beans read by `JllmWebAutoConfiguration`; without them `HarnessFactory` uses `FileChatSessionStore`,
 `FileHistorySubAgentRunLog`, `FileMnemonicStore` and `FileStateStore` under each chat's history root
 (`<base>/<chatId>/.jllm/history`). Chat retention (`chatRetentionLimit`) picks the chats to delete from `ChatSessionStore.list()`.
 

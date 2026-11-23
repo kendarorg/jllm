@@ -48,7 +48,7 @@
         <module>core</module>
         <module>plugins</module>
         <module>jllm-cli</module>
-        <module>jllm-web-commons</module>
+        <module>web</module>
         <module>jllm-web</module>
         <module>jacoco</module>
     </modules>

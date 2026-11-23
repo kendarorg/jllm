@@ -3,7 +3,11 @@ package org.kendar.llm.web;
 import java.io.IOException;
 import org.kendar.llm.web.commons.JllmProperties;
 import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.AutoConfigurationExcludeFilter;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.context.TypeExcludeFilter;
+import org.springframework.context.annotation.ComponentScan;
+import org.springframework.context.annotation.FilterType;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -12,7 +16,15 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * The starter's classes ({@code org.kendar.llm.web.spring}) are registered by its auto-configuration, which knows
+ * which of them apply: they are not component-scanned.
+ */
 @SpringBootApplication
+@ComponentScan(excludeFilters = {
+        @ComponentScan.Filter(type = FilterType.CUSTOM, classes = TypeExcludeFilter.class),
+        @ComponentScan.Filter(type = FilterType.CUSTOM, classes = AutoConfigurationExcludeFilter.class),
+        @ComponentScan.Filter(type = FilterType.REGEX, pattern = "org[.]kendar[.]llm[.]web[.]spring[.].*")})
 public class JllmWebApplication {
     static final String ASK_TOKEN = "ASK_TOKEN";
     static final int TOKEN_WAIT_SECONDS = 30;

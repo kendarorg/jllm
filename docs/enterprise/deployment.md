@@ -6,7 +6,7 @@ Three shapes, from lightest to heaviest.
 |---|---|---|
 | **Embedded** | the `jllm-harness` jar inside your application | the agent is a feature of an existing service |
 | **Web** | `jllm-web` (Spring Boot jar) | an internal chat for a team, behind your proxy |
-| **Custom web** | `jllm-web-commons` in your own Spring Boot app | your own sign-in, UI and stores |
+| **Custom web** | `jllm-web-spring-starter` in your own Spring Boot app | your own sign-in, UI and stores |
 
 [`jllm-cli`](../../jllm-cli/README.md) is the terminal front end, for developers' machines.
 
@@ -35,7 +35,7 @@ By default state is on local disk: chat history under `.jllm/history`, users, ro
 in memory (a restart signs everyone out). That fits one instance. Beyond it:
 
 - Chat, sub-agent and state stores are ports (`ChatSessionStore`, `SubAgentRunLog`, `StateStore`).
-- Users, roles, skills and login sessions have repository interfaces in `jllm-web-commons`. A JDBC implementation is
+- Users, roles, skills and login sessions have repository interfaces in `jllm-harness`. A JDBC implementation is
   **not shipped**; the checklist is in the [jllm-web README](../../jllm-web/README.md#a-possible-extension-a-mysql-store).
 - A `TokenStore` that reports `crossProcess()` can be shared between instances.
 - A running chat is a virtual thread and an event buffer in one process. Route a chat to one instance (sticky

@@ -5,7 +5,7 @@ about sign-in; the web layer asks three small interfaces, so you can plug in you
 
 ## Three interfaces
 
-Defined in [jllm-web-commons](../../jllm-web-commons/README.md). Each has a deny-by-default fallback, so a missing
+Defined in [jllm-web-commons](../../web/jllm-web-commons/README.md), mounted by [jllm-web-spring-starter](../../web/jllm-web-spring-starter/README.md). Each has a deny-by-default fallback, so a missing
 implementation locks the application instead of opening it.
 
 | Interface | Question it answers | Fallback |
@@ -45,7 +45,7 @@ A chat a user may not see answers 404, as if it did not exist.
 - Model credentials are global today; per-user model keys and OAuth are [in development](roadmap-and-limits.md#in-development-per-user-model-credentials).
 - No SAML or SCIM. Put an OIDC bridge (Keycloak, Entra, Okta) in front of a SAML provider.
 - Users, roles, skills and sessions are stored as files or in memory. The repository interfaces are in
-  `jllm-web-commons`, so a database implementation does not touch the controllers or the harness
+  `jllm-harness`, so a database implementation does not touch the controllers or the harness
   ([checklist](../../jllm-web/README.md#a-possible-extension-a-mysql-store)).
 
 If you embed the harness in an application with its own users, skip `jllm-web` and pass your own principal to

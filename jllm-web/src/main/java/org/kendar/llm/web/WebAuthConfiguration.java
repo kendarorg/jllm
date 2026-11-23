@@ -5,15 +5,17 @@ import org.kendar.llm.harness.auth.CredentialResolver;
 import org.kendar.llm.harness.auth.HarnessPrincipal;
 import org.kendar.llm.harness.auth.TokenStore;
 import org.kendar.llm.harness.auth.UserPolicyResolver;
-import org.kendar.llm.web.admin.ToolCatalogView;
+import org.kendar.llm.web.commons.admin.ToolCatalogView;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.kendar.llm.web.auth.CookieAuthentication;
-import org.kendar.llm.web.auth.OidcClient;
-import org.kendar.llm.web.auth.OidcController;
-import org.kendar.llm.web.auth.OidcProperties;
+import org.kendar.llm.web.commons.auth.CookieAuthentication;
+import org.kendar.llm.web.commons.auth.OidcClient;
+import org.kendar.llm.web.commons.admin.AdminApi;
+import org.kendar.llm.web.commons.auth.AuthApi;
+import org.kendar.llm.web.commons.auth.OidcApi;
+import org.kendar.llm.web.commons.me.MeApi;
+import org.kendar.llm.web.commons.auth.OidcProperties;
 import org.kendar.llm.web.commons.JllmProperties;
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.kendar.llm.web.auth.LoginThrottle;
+import org.kendar.llm.web.commons.auth.LoginThrottle;
 import org.kendar.llm.web.auth.InMemoryLoginSessionRepository;
 import org.kendar.llm.harness.identity.LoginSessionRepository;
 import org.kendar.llm.harness.identity.HarnessIdentity;
@@ -24,8 +26,8 @@ import org.kendar.llm.harness.identity.User;
 import org.kendar.llm.web.users.FileRoleRepository;
 import org.kendar.llm.web.users.FileSkillRepository;
 import org.kendar.llm.web.users.FileUserRepository;
-import org.kendar.llm.web.users.Permissions;
-import org.kendar.llm.web.users.UserCredentialResolver;
+import org.kendar.llm.web.commons.users.Permissions;
+import org.kendar.llm.web.commons.users.UserCredentialResolver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -45,7 +47,6 @@ import java.util.function.Function;
  * {@link LoginSessionRepository} beans. Supplies the authentication and authorization the common web API needs.
  */
 @Configuration
-@EnableConfigurationProperties(OidcProperties.class)
 public class WebAuthConfiguration {
 
     private static final Logger log = LoggerFactory.getLogger(WebAuthConfiguration.class);
@@ -116,12 +117,31 @@ public class WebAuthConfiguration {
     }
 
     @Bean
-    public OidcController oidcController(OidcProperties auth, OidcClient client, UserRepository users,
-                                         LoginSessionRepository sessions, LoginThrottle throttle) {
-        return new OidcController(auth, client, users, sessions, throttle);
+    public OidcApi oidcApi(OidcProperties auth, OidcClient client, UserRepository users,
+                           LoginSessionRepository sessions, LoginThrottle throttle) {
+        return new OidcApi(auth, client, users, sessions, throttle);
     }
 
-    /** Both the {@code WebAuthentication} and the {@code ChatAccess} of the common API. */
+    @Bean
+    public AuthApi authApi(UserRepository users, CookieAuthentication authentication, LoginSessionRepository sessions,
+                           LoginThrottle throttle, OidcProperties auth) {
+        return new AuthApi(users, authentication, sessions, throttle, auth);
+    }
+
+    @Bean
+    public MeApi meApi(UserRepository users, Permissions permissions, SkillRepository skills,
+                       LoginSessionRepository sessions, LoginThrottle throttle, AgentHarness harness,
+                       ToolCatalogView catalog) {
+        return new MeApi(users, permissions, skills, sessions, throttle, harness, catalog);
+    }
+
+    @Bean
+    public AdminApi adminApi(UserRepository users, Permissions permissions, SkillRepository skills,
+                             LoginSessionRepository sessions, AgentHarness harness, ToolCatalogView catalog) {
+        return new AdminApi(users, permissions, skills, sessions, harness, catalog);
+    }
+
+    /** Both the {@code WebAuthentication} and the {@code ChatAccess} of the web API. */
     @Bean
     public CookieAuthentication cookieAuthentication(UserRepository users, LoginSessionRepository sessions) {
         return new CookieAuthentication(users, sessions);

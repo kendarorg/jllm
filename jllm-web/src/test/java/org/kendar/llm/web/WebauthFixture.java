@@ -19,20 +19,26 @@ import org.kendar.llm.harness.settings.SkillSettings;
 import org.kendar.llm.harness.tools.HarnessTool;
 import org.kendar.llm.harness.tools.SimpleTool;
 import org.kendar.llm.harness.tools.ToolKind;
-import org.kendar.llm.web.admin.AdminController;
-import org.kendar.llm.web.admin.AdminInterceptor;
-import org.kendar.llm.web.admin.ToolCatalogView;
-import org.kendar.llm.web.auth.AuthController;
-import org.kendar.llm.web.auth.CookieAuthentication;
-import org.kendar.llm.web.auth.LoginThrottle;
+import org.kendar.llm.web.commons.admin.AdminApi;
+import org.kendar.llm.web.commons.admin.ToolCatalogView;
+import org.kendar.llm.web.commons.auth.AuthApi;
+import org.kendar.llm.web.commons.auth.CookieAuthentication;
+import org.kendar.llm.web.commons.auth.LoginThrottle;
 import org.kendar.llm.web.auth.InMemoryLoginSessionRepository;
 import org.kendar.llm.harness.identity.LoginSessionRepository;
-import org.kendar.llm.web.commons.ApiInterceptor;
-import org.kendar.llm.web.commons.ChatController;
-import org.kendar.llm.web.me.MeController;
-import org.kendar.llm.web.users.Permissions;
+import org.kendar.llm.web.commons.me.MeApi;
+import org.kendar.llm.web.commons.users.Permissions;
 import org.kendar.llm.harness.identity.SkillRepository;
 import org.kendar.llm.harness.identity.UserRepository;
+import org.kendar.llm.web.commons.ChatApi;
+import org.kendar.llm.web.commons.Gate;
+import org.kendar.llm.web.spring.AdminController;
+import org.kendar.llm.web.spring.AdminInterceptor;
+import org.kendar.llm.web.spring.ApiExceptionAdvice;
+import org.kendar.llm.web.spring.ApiInterceptor;
+import org.kendar.llm.web.spring.AuthController;
+import org.kendar.llm.web.spring.ChatController;
+import org.kendar.llm.web.spring.MeController;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
@@ -121,13 +127,16 @@ final class WebauthFixture {
                 .build();
         CookieAuthentication auth = new CookieAuthentication(users, sessions);
         ToolCatalogView catalog = new ToolCatalogView(harness);
+        Gate gate = new Gate(auth, auth, harness.sessions());
         mvc = MockMvcBuilders.standaloneSetup(
-                        new AuthController(users, auth, sessions, throttle, new org.kendar.llm.web.auth.OidcProperties(null, null)),
-                        new MeController(users, permissions, skills, sessions, throttle, harness, catalog),
-                        new AdminController(users, permissions, skills, sessions, harness, catalog),
-                        new ChatController(harness, MAPPER, new HarnessPricing(0, 0, 0, 0), auth, auth))
-                .addInterceptors(new ApiInterceptor(auth, auth, harness.sessions(), MAPPER),
-                        new MappedInterceptor(new String[]{"/api/admin/**"}, new AdminInterceptor(auth, MAPPER)))
+                        new AuthController(new AuthApi(users, auth, sessions, throttle,
+                                new org.kendar.llm.web.commons.auth.OidcProperties(null, null))),
+                        new MeController(new MeApi(users, permissions, skills, sessions, throttle, harness, catalog)),
+                        new AdminController(new AdminApi(users, permissions, skills, sessions, harness, catalog)),
+                        new ChatController(new ChatApi(harness, MAPPER, new HarnessPricing(0, 0, 0, 0), auth), auth))
+                .setControllerAdvice(new ApiExceptionAdvice())
+                .addInterceptors(new ApiInterceptor(gate, auth, MAPPER),
+                        new MappedInterceptor(new String[]{"/api/admin/**"}, new AdminInterceptor(gate, auth, MAPPER)))
                 .build();
     }
 
@@ -143,7 +152,7 @@ final class WebauthFixture {
 
     /** Signs in with the default password; the session cookie. */
     Cookie signIn(String id) throws Exception {
-        return signIn(id, org.kendar.llm.web.auth.PasswordHasher.defaultPassword(id));
+        return signIn(id, org.kendar.llm.web.commons.auth.PasswordHasher.defaultPassword(id));
     }
 
     Cookie signIn(String id, String password) throws Exception {

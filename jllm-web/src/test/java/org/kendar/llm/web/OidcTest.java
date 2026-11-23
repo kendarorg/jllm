@@ -17,11 +17,14 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.kendar.llm.web.auth.AuthController;
-import org.kendar.llm.web.auth.CookieAuthentication;
-import org.kendar.llm.web.auth.OidcClient;
-import org.kendar.llm.web.auth.OidcController;
-import org.kendar.llm.web.auth.OidcProperties;
+import org.kendar.llm.web.commons.auth.AuthApi;
+import org.kendar.llm.web.commons.auth.CookieAuthentication;
+import org.kendar.llm.web.commons.auth.OidcClient;
+import org.kendar.llm.web.commons.auth.OidcApi;
+import org.kendar.llm.web.spring.ApiExceptionAdvice;
+import org.kendar.llm.web.spring.AuthController;
+import org.kendar.llm.web.spring.OidcController;
+import org.kendar.llm.web.commons.auth.OidcProperties;
 import org.kendar.llm.harness.identity.User;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.web.servlet.MockMvc;
@@ -140,9 +143,11 @@ class OidcTest {
         UnaryOperator<String> env = n -> "IDP_SECRET".equals(n) ? SECRET : null;
         OidcClient client = new OidcClient(p, "http://127.0.0.1:8080", env, WebauthFixture.MAPPER,
                 java.net.http.HttpClient.newHttpClient(), clock);
-        OidcController c = new OidcController(p, client, f.users, f.sessions, f.throttle, clock);
+        OidcApi c = new OidcApi(p, client, f.users, f.sessions, f.throttle, clock);
         CookieAuthentication auth = new CookieAuthentication(f.users, f.sessions);
-        return MockMvcBuilders.standaloneSetup(c, new AuthController(f.users, auth, f.sessions, f.throttle, p)).build();
+        return MockMvcBuilders.standaloneSetup(new OidcController(c),
+                new AuthController(new AuthApi(f.users, auth, f.sessions, f.throttle, p)))
+                .setControllerAdvice(new ApiExceptionAdvice()).build();
     }
 
     private record Started(String state, String nonce, Cookie binding, String location) {
@@ -154,7 +159,7 @@ class OidcTest {
         assertEquals(302, r.getStatus());
         String loc = r.getHeader("Location");
         Map<String, String> q = query(loc);
-        return new Started(q.get("state"), q.get("nonce"), r.getCookie(OidcController.BINDING_COOKIE), loc);
+        return new Started(q.get("state"), q.get("nonce"), r.getCookie(OidcApi.BINDING_COOKIE), loc);
     }
 
     private static Map<String, String> query(String url) {
@@ -400,7 +405,7 @@ class OidcTest {
         assertFalse(ann.usesDefaultPassword());
         f.mvc.perform(post("/api/login").contentType("application/json").content("{\"id\":\"ann\",\"password\":\"ann\"}"))
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isUnauthorized());
-        var me = AuthController.visible(ann);
+        var me = AuthApi.visible(ann);
         assertEquals(false, me.get("defaultPassword"));
         assertEquals("oidc", me.get("source"));
     }

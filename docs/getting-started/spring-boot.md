@@ -1,19 +1,20 @@
 # JLLM in a Spring Boot application
 
 The harness has no Spring dependency, so it runs in any Spring Boot application as plain beans. Everything on this
-page is a **recipe**: JLLM ships no Spring Boot starter. The one shipped Spring layer is `jllm-web-commons`
-(Path A), which is what `jllm-web` uses.
+page is a **recipe** for your own code. The shipped Spring layer is the starter `jllm-web-spring-starter`
+(Path A), over the framework-free handlers of `jllm-web-commons`; it is what `jllm-web` uses.
 
 | Path | You get | You write |
 |---|---|---|
-| **A. `jllm-web-commons`** | chat REST + SSE API, file API, OAuth callbacks, `jllm.*` properties, plugin host | three small interfaces (identity) |
+| **A. `jllm-web-spring-starter`** | chat REST + SSE API, file API, OAuth callbacks, `jllm.*` properties, plugin host | three small interfaces (identity) |
 | **B. Harness beans** | the agent inside your services, your own API or UI | the `AgentHarness` bean and your tools |
 
-Both can be combined: the web layer is itself a Spring bean configuration over the same harness.
+Both can be combined: the web layer is itself a Spring bean configuration over the same harness. The handlers of
+`jllm-web-commons` know no web framework, so another one can mount them with its own thin layer.
 
 ## Path A: the web API in your application
 
-Add the dependency (`org.kendar.llm:jllm-web-commons`). Its auto-configuration (`JllmWebCommonsAutoConfiguration`)
+Add the dependency (`org.kendar.llm:jllm-web-spring-starter`). Its auto-configuration (`JllmWebAutoConfiguration`)
 registers the harness, the chat controllers and the web plugin host. The properties use the prefix `jllm.`
 ([full table](../../jllm-web/README.md#configuration)):
 
@@ -34,7 +35,7 @@ Supply them as beans; they replace the defaults (`@ConditionalOnMissingBean`).
 @Bean
 WebAuthentication webAuthentication() {
     return new WebAuthentication() {
-        public Optional<Principal> current(HttpServletRequest req) {
+        public Optional<Principal> current(Cookies cookies) {   // the request's cookies; Spring Security needs none
             // bridge from Spring Security
             var auth = SecurityContextHolder.getContext().getAuthentication();
             if (auth == null || !auth.isAuthenticated() || auth instanceof AnonymousAuthenticationToken) {

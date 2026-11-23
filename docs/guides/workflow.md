@@ -490,7 +490,7 @@ There are two ways to plug in a database.
 
 **A. Implement the host's plugin storage (recommended; it also serves every other plugin).** Implement
 `org.kendar.llm.harness.plugin.PluginStorage` and `PluginStorages` and publish them. In the web application, define a
-`PluginStorages` bean; `HarnessConfiguration` then uses it instead of `FilePluginStorage` (which keeps documents in
+`PluginStorages` bean; `JllmWebAutoConfiguration` then uses it instead of `FilePluginStorage` (which keeps documents in
 `<project>/.jllm/plugin-data`).
 
 ```java

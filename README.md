@@ -96,7 +96,8 @@ act under approval and isolation. Comparison: [JVM landscape](docs/comparisons/j
 |---|---|---|
 | [jllm-harness](core/jllm-harness) | the library | [README](core/jllm-harness/README.md) |
 | [jllm-cli](jllm-cli) | terminal front end, one shaded jar | [README](jllm-cli/README.md) |
-| [jllm-web-commons](jllm-web-commons) | REST + SSE chat API as a Spring Boot auto-configuration | [README](jllm-web-commons/README.md) |
+| [jllm-web-commons](web/jllm-web-commons) | framework-free handlers of the web API (chat, files, sign-in, users) | [README](web/jllm-web-commons/README.md) |
+| [jllm-web-spring-starter](web/jllm-web-spring-starter) | REST + SSE web API as a Spring Boot starter | [README](web/jllm-web-spring-starter/README.md) |
 | [jllm-web](jllm-web) | reference web app: OIDC and password sign-in, roles, Vue chat UI, flow editor | [README](jllm-web/README.md) |
 | [jllm-workflows](plugins/jllm-workflows), [jllm-workflow-web](plugins/jllm-workflow-web) | optional flow engine and its web endpoints | [WORKFLOW](docs/guides/workflow.md) |
 | jllm-js, jllm-pdf, jllm-docs | optional plugins: JavaScript sandbox, document readers | [JS](docs/guides/js.md), [TOOLS](docs/guides/tools.md#document-readers) |

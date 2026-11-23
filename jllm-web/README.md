@@ -58,7 +58,8 @@ simple reference implementation (below); bind the server to localhost or put it 
 ## Users, roles, skills and sign-in
 
 This module is a reference implementation of the multi-user mechanism of
-[jllm-web-commons](../jllm-web-commons/README.md); the common module stays generic and knows none of what follows.
+[jllm-web-commons](../web/jllm-web-commons/README.md); the common module and the
+[starter](../web/jllm-web-spring-starter/README.md) stay generic and know none of what follows.
 
 Everything lives under one folder (property `jllm.webauth-dir`, default `webauth`, relative to the start folder).
 The sample is `runConfig/webauth/`, which the IDE run configurations in `.run/` pass explicitly; they start in
@@ -221,7 +222,7 @@ All paths are under `/api/chat`. Errors are `{"error": "..."}`.
 | `GET /api/admin/catalog` | | `{tools, mcp, api}`: everything a role can be granted |
 | `GET/POST /api/admin/skills`, `GET/PUT/DELETE /api/admin/skills/{name}` | `{name, description, content}` | global skills; settings-file skills read-only |
 
-### OAuth (jllm-web-commons)
+### OAuth (OAuthApi in jllm-web-commons)
 
 | Method and path | Params | Result |
 |---|---|---|
@@ -274,26 +275,22 @@ JavaScript objects with a `template` string, so nothing is compiled or transpile
 
 ## Java classes
 
-The chat and file API, the harness wiring and the `jllm.*` properties live in
-[jllm-web-commons](../jllm-web-commons/README.md). This module keeps the startup and the reference sign-in, users,
-roles and skills, plugged in through the common module's `WebAuthentication`, `ChatAccess` and `HarnessIdentity`.
+The handlers (chat, files, OAuth, sign-in, own settings, admin), the `Gate` and the `jllm.*` properties live in
+[jllm-web-commons](../web/jllm-web-commons/README.md), free of Spring; the controllers, interceptors and auto-configuration
+in [jllm-web-spring-starter](../web/jllm-web-spring-starter/README.md). This module keeps the startup, the static UI and
+the reference stores: the file repositories, the sign-in sessions and the beans that choose them, plugged in through
+`WebAuthentication`, `ChatAccess` and `HarnessIdentity`. It depends on the starter alone.
 
 | Class | Role |
 |---|---|
-| `JllmWebApplication` | Spring Boot entry point, CLI-style flags, API key prompt |
-| `WebAuthConfiguration` | beans below; supplies `WebAuthentication`, `ChatAccess` and `HarnessIdentity` to the common API |
-| `auth.AuthController` | `/api/login`, `/api/logout`, `/api/me` |
-| `auth.CookieAuthentication` | the user of the session cookie; a chat is visible to its owner and the admin |
-| `auth.PasswordHasher`, `auth.InMemoryLoginSessionRepository`, `auth.LoginThrottle` | password hashes and default password, sign-in sessions (a `LoginSessionRepository`), lockout |
-| `me.MeController` | `/api/me/password`, `/api/me/tools`, `/api/me/skills*` |
-| `admin.AdminController`, `admin.AdminInterceptor`, `admin.AdminWebConfig` | `/api/admin/**`, admins only |
-| `admin.ToolCatalogView` | tools, MCP servers and REST APIs of the harness, for a role or a user |
+| `JllmWebApplication` | Spring Boot entry point, CLI-style flags, API key prompt; does not component-scan the starter, whose auto-configuration registers it |
+| `WebAuthConfiguration` | beans below; supplies `WebAuthentication`, `ChatAccess`, `HarnessIdentity` and the `AuthApi`, `OidcApi`, `MeApi` and `AdminApi` handlers, whose controllers the starter then mounts |
+| `auth.InMemoryLoginSessionRepository` | sign-in sessions in memory (a `LoginSessionRepository`) |
 | `users.FileUserRepository` | `webauth/users/<id>.json` (a `UserRepository`, interface and `User` in jllm-web-commons) |
 | `users.FileRoleRepository` | `webauth/permissions/<role>.json` (a `RoleRepository`; `Role` in jllm-web-commons) |
-| `users.Permissions` | the fixed `admin` role over the stored ones; each user's `UserPolicy` (role narrowed by the user, with their skills) |
 | `users.FileSkillRepository` | `webauth/global-skills/` and `webauth/user-skills/<id>/` (a `SkillRepository`) |
 | `users.JsonFiles` | atomic writes of the `webauth` files |
-| `users.UserCredentialResolver` | per-call headers from a user's `credentials`, `env:` references only |
+| `SampleFlows` | the sample workflow files |
 
 The file repositories are used with `jllm.store=file` (the default); another store supplies its own
 `UserRepository`, `RoleRepository`, `SkillRepository` and `LoginSessionRepository` beans. The harness settings layers come from a
@@ -302,7 +299,7 @@ a `TokenStore` bean (passed through `HarnessIdentity.tokenStore()`) can replace 
 (`ChatSessionStore`, `SubAgentRunLog`, `MnemonicStore`, `StateStore`) is optional beans too; default: files under each
 chat's history root.
 
-Tests: `SampleUsersTest`, `LoginTest`, `MeControllerTest`, `AdminControllerTest`, `JllmWebApplicationArgsTest`
+Tests: `SampleUsersTest`, `LoginTest`, `MeControllerTest`, `AdminControllerTest`, `OAuthWebTest`, `OidcTest`, `JllmWebApplicationArgsTest`, `JllmWebBootTest`
 (`mvn -pl jllm-web -am test`).
 
 ## A possible extension: a MySQL store
@@ -337,7 +334,7 @@ harness. A short list:
 - [ ] Chat history: the harness already takes interfaces for it, `ChatSessionStore` (the chat row and its messages),
       `StateStore` (per-chat JSON documents: tool grants, todo lists), `MnemonicStore` (per chat and agent) and
       `SubAgentRunLog`. Implement them on tables keyed by `chat_id` (messages as JSON text, ordered by a sequence),
-      delete in cascade with the chat, and let `HarnessConfiguration` take them as beans instead of building the
+      delete in cascade with the chat, and let the starter take them as beans instead of `HarnessFactory` building the
       `File*` stores itself. `ChatSessionStore.list()` is most recent first; chat retention
       (`chatRetentionLimit`) deletes through `delete(chatId)`.
 

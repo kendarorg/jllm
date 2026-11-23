@@ -1,5 +1,6 @@
 package org.kendar.llm.web.users;
 
+import org.kendar.llm.web.commons.users.Permissions;
 import org.kendar.llm.harness.identity.User;
 import org.kendar.llm.harness.identity.Role;
 import org.kendar.llm.harness.identity.RoleRepository;

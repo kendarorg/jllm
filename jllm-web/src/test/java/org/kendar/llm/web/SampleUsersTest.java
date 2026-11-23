@@ -9,8 +9,8 @@ import org.kendar.llm.harness.auth.HarnessPrincipal;
 import org.kendar.llm.harness.auth.UserPolicy;
 import org.kendar.llm.harness.tools.SimpleTool;
 import org.kendar.llm.harness.tools.ToolKind;
-import org.kendar.llm.web.users.UserCredentialResolver;
-import org.kendar.llm.web.users.Permissions;
+import org.kendar.llm.web.commons.users.UserCredentialResolver;
+import org.kendar.llm.web.commons.users.Permissions;
 import org.kendar.llm.harness.identity.UserRepository;
 
 import java.nio.file.Files;

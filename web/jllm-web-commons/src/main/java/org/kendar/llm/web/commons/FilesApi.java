@@ -1,0 +1,474 @@
+package org.kendar.llm.web.commons;
+
+import org.kendar.llm.harness.AgentHarness;
+import org.kendar.llm.harness.fs.FsException;
+import org.kendar.llm.harness.fs.RemoteFs;
+import org.kendar.llm.harness.sandbox.FileBackend;
+import org.kendar.llm.harness.tools.AtomicFiles;
+import org.kendar.llm.harness.tools.ExternalLinks;
+import org.kendar.llm.harness.tools.PathJail;
+import org.kendar.llm.harness.tools.PathJail.JailedPath;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.UncheckedIOException;
+import java.nio.channels.Channels;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.InvalidPathException;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
+
+/**
+ * Minimal file explorer over the work directory of one chat. All paths are relative to it and jailed inside it.
+ * {@code rootName} is {@code workspace}, or {@code scratch} in docker daemon mode. Framework-free; errors are
+ * {@link ApiException}.
+ */
+public class FilesApi {
+
+    public static final String WORKSPACE = "workspace";
+
+    private static final long MAX_TEXT_BYTES = 2L * 1024 * 1024;
+
+    /** Internal harness data (history, checkpoints, scratch); never exposed through the web UI. */
+    private static final String HIDDEN_DIR = ".jllm";
+
+    private final AgentHarness harness;
+
+    public FilesApi(AgentHarness harness) {
+        this.harness = harness;
+    }
+
+    private Path root(String chatId) {
+        if (harness.sessions().find(chatId).isEmpty()) {
+            throw new ApiException(404, "Unknown chat");
+        }
+        return harness.sandbox().workDir(chatId).toAbsolutePath().normalize();
+    }
+
+    // ── browse ────────────────────────────────────────────────────────────────
+
+    public Map<String, Object> list(String chatId, String path, String rootName) throws IOException {
+        try {
+            RemoteFs rfs = remote(chatId, rootName);
+            if (rfs != null) return rfs.list(path);
+            Path root = root(chatId);
+            JailedPath dir = resolve(root, path);
+            if (!PathJail.isDirectory(dir)) throw new ApiException(404, "Not a directory");
+            List<Map<String, Object>> entries = new ArrayList<>();
+            for (PathJail.Entry en : PathJail.list(dir)) {
+                JailedPath p = dir.child(en.name());
+                if (isHidden(p)) continue;
+                BasicFileAttributes a = en.attributes();
+                if (en.isLink()) {
+                    try {
+                        a = PathJail.stat(p); // a link inside the project shows what it points to
+                    } catch (IOException | IllegalArgumentException e) {
+                        continue; // leaves the project, or dangling: not listed
+                    }
+                    if (a == null) continue;
+                }
+                boolean isDir = a.isDirectory();
+                Map<String, Object> e = new LinkedHashMap<>();
+                e.put("name", en.name());
+                e.put("path", rel(p));
+                e.put("dir", isDir);
+                if (isDir && !en.isLink()) e.put("chain", chain(p));
+                e.put("size", isDir ? 0 : a.size());
+                e.put("modified", a.lastModifiedTime().toMillis());
+                entries.add(e);
+            }
+            entries.sort(Comparator.<Map<String, Object>, Boolean>comparing(e -> !(Boolean) e.get("dir"))
+                    .thenComparing(e -> ((String) e.get("name")).toLowerCase()));
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("path", rel(dir));
+            out.put("entries", entries);
+            return out;
+        } catch (FsException e) {
+            throw fs(e);
+        } catch (IllegalArgumentException e) {
+            throw outside(e);
+        }
+    }
+
+    /**
+     * GitHub-style compaction: while a directory holds nothing but one sub-directory, that sub-directory is part of the
+     * same row. Returns every segment (including the entry itself) so each can be navigated separately.
+     */
+    private List<Map<String, String>> chain(JailedPath dir) {
+        List<Map<String, String>> out = new ArrayList<>();
+        JailedPath cur = dir;
+        for (int i = 0; i < 64; i++) {
+            out.add(Map.of("name", cur.fileName(), "path", rel(cur)));
+            PathJail.Entry only = null;
+            try {
+                JailedPath here = cur;
+                List<PathJail.Entry> kids = PathJail.list(cur).stream().filter(k -> !isHidden(here.child(k.name()))).limit(2)
+                        .toList();
+                if (kids.size() == 1) only = kids.get(0);
+            } catch (IOException | IllegalArgumentException e) {
+                break;
+            }
+            if (only == null || only.isLink() || !only.attributes().isDirectory()) break;
+            cur = cur.child(only.name());
+        }
+        return out;
+    }
+
+    // ── read / modify ─────────────────────────────────────────────────────────
+
+    public Map<String, Object> read(String chatId, String path, String rootName) throws IOException {
+        try {
+            RemoteFs rfs = remote(chatId, rootName);
+            if (rfs != null) return rfs.read(path);
+            Path root = root(chatId);
+            JailedPath f = resolve(root, path);
+            BasicFileAttributes st = PathJail.stat(f);
+            if (st == null || !st.isRegularFile()) throw new ApiException(404, "Not a file");
+            if (st.size() > MAX_TEXT_BYTES) throw new ApiException(413, "File too large to edit");
+            byte[] bytes = PathJail.readAllBytes(f, MAX_TEXT_BYTES);
+            for (byte b : bytes) {
+                if (b == 0) throw new ApiException(415, "Binary file");
+            }
+            return Map.of("path", rel(f), "content", new String(bytes, StandardCharsets.UTF_8));
+        } catch (FsException e) {
+            throw fs(e);
+        } catch (IllegalArgumentException e) {
+            throw outside(e);
+        }
+    }
+
+    public Map<String, Object> write(String chatId, Map<String, String> body, String rootName) throws IOException {
+        try {
+            RemoteFs rfs = remote(chatId, rootName);
+            if (rfs != null) return rfs.write(required(body, "path"), body.getOrDefault("content", ""));
+            Path root = root(chatId);
+            JailedPath f = resolve(root, required(body, "path"));
+            BasicFileAttributes st = PathJail.stat(f);
+            if (f.components().isEmpty() || (st != null && st.isDirectory())) throw new ApiException(400, "Not a file");
+            if (st == null) throw new ApiException(404, "Not found");
+            AtomicFiles.write(f, body.getOrDefault("content", "").getBytes(StandardCharsets.UTF_8));
+            return Map.of("path", rel(f));
+        } catch (FsException e) {
+            throw fs(e);
+        } catch (IllegalArgumentException e) {
+            throw outside(e);
+        }
+    }
+
+    // ── add ───────────────────────────────────────────────────────────────────
+
+    /** Creates a file ({@code type=file}, optional {@code content}) or a directory ({@code type=dir}) inside {@code path}. */
+    public Map<String, Object> create(String chatId, Map<String, String> body, String rootName) throws IOException {
+        try {
+            RemoteFs rfs = remote(chatId, rootName);
+            if (rfs != null) {
+                String created = rfs.create(body.getOrDefault("path", ""), required(body, "name"),
+                        "dir".equals(body.get("type")), body.getOrDefault("content", ""));
+                return Map.of("path", created);
+            }
+            Path root = root(chatId);
+            JailedPath parent = resolve(root, body.getOrDefault("path", ""));
+            if (!PathJail.isDirectory(parent)) throw new ApiException(404, "Not a directory");
+            JailedPath target = child(parent, required(body, "name"));
+            if (PathJail.statNoFollow(target) != null) throw new ApiException(409, "Already exists");
+            try {
+                if ("dir".equals(body.get("type"))) {
+                    PathJail.createDirectory(target);
+                } else {
+                    try (OutputStream out = Channels.newOutputStream(
+                            PathJail.openWrite(target, Set.of(StandardOpenOption.CREATE_NEW)))) {
+                        out.write(body.getOrDefault("content", "").getBytes(StandardCharsets.UTF_8));
+                    }
+                }
+            } catch (FileAlreadyExistsException e) {
+                throw new ApiException(409, "Already exists");
+            }
+            return Map.of("path", rel(target));
+        } catch (FsException e) {
+            throw fs(e);
+        } catch (IllegalArgumentException e) {
+            throw outside(e);
+        }
+    }
+
+    public Map<String, Object> upload(String chatId, String path, List<UploadedFile> files, boolean overwrite,
+                                      String rootName) throws IOException {
+        try {
+            RemoteFs rfs = remote(chatId, rootName);
+            List<String> names = new ArrayList<>();
+            for (UploadedFile f : files) names.add(uploadName(f.name()));
+            if (rfs != null) {
+                List<String> saved = new ArrayList<>();
+                for (int i = 0; i < files.size(); i++) {
+                    try (var in = files.get(i).content()) {
+                        saved.add(rfs.upload(path, names.get(i), in, overwrite));
+                    }
+                }
+                return Map.of("saved", saved);
+            }
+            Path root = root(chatId);
+            JailedPath dir = resolve(root, path);
+            if (!PathJail.isDirectory(dir)) throw new ApiException(404, "Not a directory");
+            List<String> saved = new ArrayList<>();
+            for (int i = 0; i < files.size(); i++) {
+                String name = names.get(i);
+                JailedPath target = child(dir, name);
+                if (!overwrite && PathJail.statNoFollow(target) != null) {
+                    throw new ApiException(409, "Already exists: " + name);
+                }
+                try (var in = files.get(i).content()) {
+                    AtomicFiles.write(target, in);
+                }
+                saved.add(rel(target));
+            }
+            return Map.of("saved", saved);
+        } catch (FsException e) {
+            throw fs(e);
+        } catch (IllegalArgumentException e) {
+            throw outside(e);
+        } finally {
+            for (UploadedFile f : files) {
+                try {
+                    f.content().close();
+                } catch (IOException ignored) {
+                    // closing a temp-file stream
+                }
+            }
+        }
+    }
+
+    /** Characters no file name may hold (Windows rules, applied everywhere: the same project may be used on both). */
+    private static final java.util.regex.Pattern RESERVED = java.util.regex.Pattern.compile("[<>:\"|?*\\x00-\\x1f]");
+    private static final java.util.regex.Pattern WINDOWS_DEVICE =
+            java.util.regex.Pattern.compile("(?i)(con|prn|aux|nul|com[0-9]|lpt[0-9])(\\..*)?");
+
+    /**
+     * The file name of an upload: the last segment of the client's name (browsers may send a path), refused with 400
+     * when nothing usable is left or it holds reserved characters ({@code a:b}), is a device name or ends with a dot or
+     * space.
+     */
+    static String uploadName(String original) {
+        String o = original == null ? "" : original.replace('\\', '/');
+        String name = o.substring(o.lastIndexOf('/') + 1).strip();
+        if (name.isEmpty() || name.equals(".") || name.equals("..") || RESERVED.matcher(name).find()
+                || WINDOWS_DEVICE.matcher(name).matches() || name.endsWith(".") || name.length() > 255) {
+            throw new ApiException(400, "Invalid file name '" + original + "'");
+        }
+        return name;
+    }
+
+    // ── rename / delete ───────────────────────────────────────────────────────
+
+    public Map<String, Object> rename(String chatId, Map<String, String> body, String rootName) throws IOException {
+        try {
+            RemoteFs rfs = remote(chatId, rootName);
+            if (rfs != null) return Map.of("path", rfs.rename(required(body, "path"), required(body, "name")));
+            Path root = root(chatId);
+            JailedPath src = resolve(root, required(body, "path"));
+            if (src.components().isEmpty()) throw new ApiException(400, "Cannot rename the root");
+            if (PathJail.statNoFollow(src) == null) throw new ApiException(404, "Not found");
+            JailedPath dst = child(src.parent(), required(body, "name"));
+            if (PathJail.statNoFollow(dst) != null) throw new ApiException(409, "Already exists");
+            PathJail.rename(src, dst.fileName());
+            return Map.of("path", rel(dst));
+        } catch (FsException e) {
+            throw fs(e);
+        } catch (IllegalArgumentException e) {
+            throw outside(e);
+        }
+    }
+
+    public void delete(String chatId, String path, String rootName) throws IOException {
+        try {
+            RemoteFs rfs = remote(chatId, rootName);
+            if (rfs != null) {
+                rfs.delete(path);
+                return;
+            }
+            Path root = root(chatId);
+            JailedPath p = resolve(root, path);
+            if (p.components().isEmpty()) throw new ApiException(400, "Cannot delete the root");
+            if (PathJail.statNoFollow(p) == null) throw new ApiException(404, "Not found");
+            PathJail.deleteTree(p);
+        } catch (FsException e) {
+            throw fs(e);
+        } catch (IllegalArgumentException e) {
+            throw outside(e);
+        }
+    }
+
+    // ── download ──────────────────────────────────────────────────────────────
+
+    public ByteStream download(String chatId, String path, String rootName) throws IOException {
+        try {
+            RemoteFs rfs = remote(chatId, rootName);
+            if (rfs != null) return downloadRemote(rfs, path);
+            Path root = root(chatId);
+            JailedPath p = resolve(root, path);
+            BasicFileAttributes st = PathJail.stat(p);
+            if (st != null && st.isRegularFile()) {
+                return new ByteStream("application/octet-stream", st.size(), p.fileName(), out -> {
+                    try (var in = PathJail.newInputStream(p)) {
+                        in.transferTo(out);
+                    }
+                });
+            }
+            if (st == null || !st.isDirectory()) throw new ApiException(404, "Not found");
+            String base = p.components().isEmpty() ? "project" : p.fileName();
+            int skip = p.components().size();
+            ByteStream.Writer body = out -> {
+                try (ZipOutputStream zip = new ZipOutputStream(out)) {
+                    PathJail.walk(p, (f, a) -> {
+                        if (f.components().size() <= skip) return PathJail.Action.CONTINUE;
+                        if (isHidden(f)) return PathJail.Action.SKIP_DIRECTORY;
+                        BasicFileAttributes own = PathJail.statNoFollow(f);
+                        if (own == null || PathJail.isLink(own)) return PathJail.Action.CONTINUE; // links are not zipped
+                        String name = String.join("/", f.components().subList(skip, f.components().size()));
+                        if (a.isDirectory()) {
+                            zip.putNextEntry(new ZipEntry(name + "/"));
+                        } else {
+                            zip.putNextEntry(new ZipEntry(name));
+                            try (InputStream in = PathJail.newInputStream(f)) {
+                                in.transferTo(zip);
+                            }
+                        }
+                        zip.closeEntry();
+                        return PathJail.Action.CONTINUE;
+                    });
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                }
+            };
+            return new ByteStream("application/zip", null, base + ".zip", body);
+        } catch (FsException e) {
+            throw fs(e);
+        } catch (IllegalArgumentException e) {
+            throw outside(e);
+        }
+    }
+
+    private ByteStream downloadRemote(RemoteFs rfs, String path) {
+        var st = rfs.stat(path);
+        String name = path == null ? "" : path.replace('\\', '/');
+        name = name.substring(name.lastIndexOf('/') + 1);
+        if (st.isFile()) {
+            // chunk by chunk, never the whole file in memory
+            return new ByteStream("application/octet-stream", st.size(), name, out -> rfs.copyTo(path, st.size(), out));
+        }
+        if (!st.isDir()) throw new ApiException(404, "Not found");
+        String base = name.isEmpty() ? "project" : name;
+        return new ByteStream("application/zip", null, base + ".zip", out -> rfs.zip(path, out));
+    }
+
+    // ── daemon mode only ──────────────────────────────────────────────────────
+
+    /** Files of the work dir matching a glob (docker daemon mode only). */
+    public List<String> glob(String chatId, String pattern) {
+        try {
+            RemoteFs rfs = remote(chatId, WORKSPACE);
+            if (rfs == null) throw new ApiException(501, "Needs docker daemon mode");
+            return rfs.glob(pattern);
+        } catch (FsException e) {
+            throw fs(e);
+        }
+    }
+
+    /** Capped recursive tree of a directory (docker daemon mode only), as plain text. */
+    public String tree(String chatId, String path, int depth, String rootName) {
+        try {
+            RemoteFs rfs = remote(chatId, rootName);
+            if (rfs == null) throw new ApiException(501, "Needs docker daemon mode");
+            return rfs.tree(path, depth);
+        } catch (FsException e) {
+            throw fs(e);
+        }
+    }
+
+    // ── helpers ───────────────────────────────────────────────────────────────
+
+    /**
+     * The proxy to the container's daemon, or null when the chat's files are on the host. Checks the chat exists.
+     * {@code root=scratch} exists only in daemon mode.
+     */
+    private RemoteFs remote(String chatId, String rootName) {
+        if (harness.sessions().find(chatId).isEmpty()) {
+            throw new ApiException(404, "Unknown chat");
+        }
+        FileBackend fb = harness.sandbox().files(chatId, null);
+        if (fb == null) {
+            if (!WORKSPACE.equals(rootName)) {
+                throw new ApiException(400, "root=" + rootName + " needs docker daemon mode");
+            }
+            return null;
+        }
+        return new RemoteFs(fb, rootName);
+    }
+
+    private static String required(Map<String, String> body, String key) {
+        String v = body.get(key);
+        if (v == null || v.isBlank()) throw new ApiException(400, key + " is required");
+        return v;
+    }
+
+    /** A failure of the docker file explorer, answered with the status it carries. */
+    private static ApiException fs(FsException e) {
+        return new ApiException(e.status(), e.getMessage());
+    }
+
+    /** A link or path leaving the project, found while the jail did the I/O (also when swapped in meanwhile). */
+    private static ApiException outside(IllegalArgumentException e) {
+        return new ApiException(400, e.getMessage() == null ? "Invalid path" : e.getMessage());
+    }
+
+    /** Resolves a relative path inside the root, rejecting escapes (including via symlinks). */
+    private JailedPath resolve(Path root, String rel) {
+        String r = rel == null ? "" : rel.replace('\\', '/');
+        JailedPath p;
+        try {
+            p = PathJail.resolve(root, r, ExternalLinks.NONE, false); // the web host never follows a link out of the project
+        } catch (InvalidPathException e) {
+            throw new ApiException(400, "Invalid path");
+        } catch (IllegalArgumentException e) {
+            throw new ApiException(400, "Path outside the project");
+        }
+        if (isHidden(p)) throw new ApiException(404, "Not found");
+        return p;
+    }
+
+    /** True when the path is, or lies inside (also through a link), the hidden harness directory of the root. */
+    private boolean isHidden(JailedPath p) {
+        for (String seg : p.components()) if (HIDDEN_DIR.equalsIgnoreCase(seg)) return true;
+        List<String> real = PathJail.realComponents(p);
+        if (real != null) for (String seg : real) if (HIDDEN_DIR.equalsIgnoreCase(seg)) return true;
+        return false;
+    }
+
+    private JailedPath child(JailedPath parent, String name) {
+        if (name.isBlank() || name.contains("/") || name.contains("\\") || name.equals(".") || name.equals("..")) {
+            throw new ApiException(400, "Invalid name");
+        }
+        JailedPath p;
+        try {
+            p = parent.child(name);
+        } catch (InvalidPathException e) {
+            throw new ApiException(400, "Invalid name");
+        }
+        if (isHidden(p)) throw new ApiException(400, "Invalid name");
+        return p;
+    }
+
+    private String rel(JailedPath p) {
+        return String.join("/", p.components());
+    }
+}

@@ -24,22 +24,29 @@ import org.kendar.llm.harness.llm.ModelResponse;
 import org.kendar.llm.harness.session.InMemoryChatSessionStore;
 import org.kendar.llm.harness.settings.HarnessSettings;
 import org.kendar.llm.harness.settings.RestApiSettings;
-import org.kendar.llm.web.admin.AdminController;
-import org.kendar.llm.web.admin.AdminInterceptor;
-import org.kendar.llm.web.admin.ToolCatalogView;
-import org.kendar.llm.web.auth.AuthController;
-import org.kendar.llm.web.auth.CookieAuthentication;
-import org.kendar.llm.web.auth.LoginThrottle;
-import org.kendar.llm.web.auth.PasswordHasher;
+import org.kendar.llm.web.commons.admin.AdminApi;
+import org.kendar.llm.web.commons.admin.ToolCatalogView;
+import org.kendar.llm.web.commons.auth.AuthApi;
+import org.kendar.llm.web.commons.auth.CookieAuthentication;
+import org.kendar.llm.web.commons.auth.LoginThrottle;
+import org.kendar.llm.web.commons.auth.PasswordHasher;
 import org.kendar.llm.web.auth.InMemoryLoginSessionRepository;
 import org.kendar.llm.harness.identity.LoginSessionRepository;
-import org.kendar.llm.web.commons.ApiInterceptor;
-import org.kendar.llm.web.commons.ChatController;
 import org.kendar.llm.web.commons.JllmProperties;
-import org.kendar.llm.web.commons.OAuthController;
-import org.kendar.llm.web.users.Permissions;
+import org.kendar.llm.web.commons.OAuthApi;
+import org.kendar.llm.web.spring.OAuthController;
+import org.kendar.llm.web.commons.users.Permissions;
 import org.kendar.llm.harness.identity.SkillRepository;
 import org.kendar.llm.harness.identity.UserRepository;
+import org.kendar.llm.web.commons.ChatApi;
+import org.kendar.llm.web.commons.Gate;
+import org.kendar.llm.web.spring.AdminController;
+import org.kendar.llm.web.spring.AdminInterceptor;
+import org.kendar.llm.web.spring.ApiExceptionAdvice;
+import org.kendar.llm.web.spring.ApiInterceptor;
+import org.kendar.llm.web.spring.AuthController;
+import org.kendar.llm.web.spring.ChatController;
+import org.kendar.llm.web.spring.MeController;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
@@ -115,14 +122,20 @@ class OAuthWebTest {
                 skills);
         LoginSessionRepository sessions = new InMemoryLoginSessionRepository();
         CookieAuthentication auth = new CookieAuthentication(users, sessions);
-        OAuthController oauth = new OAuthController(harness, auth, props(PUBLIC));
-        oauth.check();
+        OAuthApi oauthApi = new OAuthApi(harness, props(PUBLIC));
+        oauthApi.check();
+        OAuthController oauth = new OAuthController(oauthApi, auth);
         ToolCatalogView catalog = new ToolCatalogView(harness);
-        mvc = MockMvcBuilders.standaloneSetup(new AuthController(users, auth, sessions, new LoginThrottle(), new org.kendar.llm.web.auth.OidcProperties(null, null)),
-                        new AdminController(users, permissions, skills, sessions, harness, catalog),
-                        new ChatController(harness, MAPPER, new HarnessPricing(0, 0, 0, 0), auth, auth), oauth)
-                .addInterceptors(new ApiInterceptor(auth, auth, harness.sessions(), MAPPER),
-                        new MappedInterceptor(new String[]{"/api/admin/**"}, new AdminInterceptor(auth, MAPPER)))
+        Gate gate = new Gate(auth, auth, harness.sessions());
+        mvc = MockMvcBuilders.standaloneSetup(
+                        new AuthController(new AuthApi(users, auth, sessions, new LoginThrottle(),
+                                new org.kendar.llm.web.commons.auth.OidcProperties(null, null))),
+                        new AdminController(new AdminApi(users, permissions, skills, sessions, harness, catalog)),
+                        new ChatController(new ChatApi(harness, MAPPER, new HarnessPricing(0, 0, 0, 0), auth), auth),
+                        oauth)
+                .setControllerAdvice(new ApiExceptionAdvice())
+                .addInterceptors(new ApiInterceptor(gate, auth, MAPPER),
+                        new MappedInterceptor(new String[]{"/api/admin/**"}, new AdminInterceptor(gate, auth, MAPPER)))
                 .build();
     }
 
@@ -274,9 +287,9 @@ class OAuthWebTest {
         AgentHarness plain = build(settings, new FileTokenStore(root.resolve("plain")), permissions, skills);
         CookieAuthentication auth = new CookieAuthentication(users, new InMemoryLoginSessionRepository());
         IllegalStateException e = assertThrows(IllegalStateException.class,
-                () -> new OAuthController(plain, auth, props(PUBLIC)).check());
+                () -> new OAuthApi(plain, props(PUBLIC)).check());
         assertTrue(e.getMessage().contains("JLLM_TOKEN_KEY"), e.getMessage());
-        e = assertThrows(IllegalStateException.class, () -> new OAuthController(harness, auth, props(null)).check());
+        e = assertThrows(IllegalStateException.class, () -> new OAuthApi(harness, props(null)).check());
         assertTrue(e.getMessage().contains("public-url"), e.getMessage());
     }
 }

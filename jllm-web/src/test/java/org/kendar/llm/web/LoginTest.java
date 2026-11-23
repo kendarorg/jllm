@@ -3,7 +3,7 @@ package org.kendar.llm.web;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.kendar.llm.web.auth.PasswordHasher;
+import org.kendar.llm.web.commons.auth.PasswordHasher;
 
 import java.nio.file.Path;
 import java.util.Map;
