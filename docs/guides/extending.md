@@ -37,7 +37,7 @@ External tools without code: [MCP and REST APIs](mcp.md). Instructions without c
 
 ## Jars to import
 
-All artifacts: group `org.kendar.llm`, version `1.2.0-jllm` (`mvn install` from the root puts them in the local
+All artifacts: group `org.kendar.llm`, version `1.3.0-jllm` (`mvn install` from the root puts them in the local
 repository; JDK 21).
 
 | Artifact | Contains | Import when |
@@ -58,19 +58,19 @@ A plugin jar (loaded from the plugin directory by the CLI and the web app):
 <dependency>
     <groupId>org.kendar.llm</groupId>
     <artifactId>jllm-commons</artifactId>
-    <version>1.2.0-jllm</version>
+    <version>1.3.0-jllm</version>
     <scope>provided</scope>
 </dependency>
 <dependency>
     <groupId>org.kendar.llm</groupId>
     <artifactId>jllm-harness</artifactId>
-    <version>1.2.0-jllm</version>
+    <version>1.3.0-jllm</version>
     <scope>test</scope>
 </dependency>
 <dependency>
     <groupId>org.kendar.llm</groupId>
     <artifactId>jllm-test-support</artifactId>
-    <version>1.2.0-jllm</version>
+    <version>1.3.0-jllm</version>
     <scope>test</scope>
 </dependency>
 ```

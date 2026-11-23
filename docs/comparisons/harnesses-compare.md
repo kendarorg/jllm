@@ -78,7 +78,7 @@ Legend: 🟢 yes, 🔴 no, uncoloured partial or unknown. Verification date: 202
 
 ## Where jllm is weaker
 
-- **Maturity and community.** The other projects have between about 10k and 266k GitHub stars and release several versions a week or month; Claude Code is at 2.1.330, OpenCode at 2.4.0, Hermes Agent at 0.23.3. jllm is a small project (`1.2.0-jllm`) with no comparable user base, third-party extensions or public issue history.
+- **Maturity and community.** The other projects have between about 10k and 266k GitHub stars and release several versions a week or month; Claude Code is at 2.1.330, OpenCode at 2.4.0, Hermes Agent at 0.23.3. jllm is a small project (`1.3.0-jllm`) with no comparable user base, third-party extensions or public issue history.
 - **Editor integration.** OpenCode, Qwen Code and Claude Code ship IDE integrations (ACP, VS Code, JetBrains); Hermes Agent has an ACP server. jllm has a terminal chat, a web chat and a Java API, but no editor plugin.
 - **Model coverage.** No image input, no native Gemini, Bedrock or Vertex client, no model registry with capabilities, and no provider subscription login (only the `OAuthLogin` SPI). Pi, OpenCode, Qwen Code and Hermes Agent cover 30 to 43 or more providers; Pi, OpenCode and Hermes Agent also offer subscription logins.
 - **Interfaces.** The terminal chat is line-based, not a full-screen UI. There is no stdio JSON or RPC mode (jllm-web offers REST and SSE), no messaging gateway, no browser automation, no LSP feedback and no scheduled tasks.

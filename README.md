@@ -106,10 +106,10 @@ act under approval and isolation. Comparison: [JVM landscape](docs/comparisons/j
 
 ```sh
 mvn -pl jllm-cli -am package
-java -jar jllm-cli/target/jllm-cli-1.2.0-jllm.jar --provider anthropic --mode edit      # terminal
+java -jar jllm-cli/target/jllm-cli-1.3.0-jllm.jar --provider anthropic --mode edit      # terminal
 
 mvn -pl jllm-web -am package
-java -jar jllm-web/target/jllm-web-1.2.0-jllm.jar --provider anthropic                 # http://localhost:8080
+java -jar jllm-web/target/jllm-web-1.3.0-jllm.jar --provider anthropic                 # http://localhost:8080
 ```
 
 Set `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`, `GROK_API_KEY`, `QWEN_API_KEY`) first.
