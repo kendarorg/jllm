@@ -42,12 +42,14 @@ contain keys: the script refuses any `*API_KEY*` line.
 
 | Preset | Target | Judge |
 |---|---|---|
-| `anthropic.env` | Haiku 5.5 | Haiku 5.5 (self-graded) |
+| `anthropic.env` | Haiku 5.5 | Sonnet 5.5 |
+| `decent-anthropic.env` | Haiku 5.5, 4 trials (max 6), rpm 500, parallelism 50 | Sonnet 5.5 |
 | `anthropic-sonnet.env` | Sonnet 5.5, medium effort | Sonnet 5.5 |
 | `nvidia.env` | NVIDIA NIM muse-glimmer-30b | same model (self-graded) |
 | `nvidia-judge-anthropic.env` | NVIDIA NIM muse-glimmer-30b | Haiku 5.5 |
-| `ollama.env` | Ollama qwen3:30b reported as `Qwen3.6-35B`, thinking minimal | same model (self-graded) |
+| `ollama.env` | Ollama qwen3:30b, thinking minimal | same model (self-graded) |
 | `llamacpp-qwen-judge-sonnet.env` | llama.cpp `qwen-local`, reported as `Qwen3.6-35B`, at `http://192.168.1.96:17001` | Sonnet 5.5, medium effort |
+| `decent-llamacpp-qwen-judge-sonnet.env` | as `llamacpp-qwen-judge-sonnet.env`, 4 trials (max 6) | Sonnet 5.5, medium effort |
 
 To add a setup, copy a preset and change it.
 
@@ -91,7 +93,7 @@ Shared:
 | `UPDATE_BASELINE` | `0` | `1`: store this run as the model baseline (`eval.updateBaseline`). Always refused from a dirty tree. |
 | `PASS_K` | empty | Comma list of k for pass@k and pass^k (`eval.passK`); empty = `1` and `MAX_TRIALS`. |
 | `DIRTY_TREE` | `warn` | `refuse`, `warn` or `allow` (`eval.dirtyTree`): what to do when tracked files differ from HEAD. |
-| `GRAAL_JS` | `fetch` | `fetch` runs `scripts/graal-fetch` (network on first use; edition from `JLLM_GRAAL_EDITION`, default `community`) and runs the tests on that jar set through the `graal-dir` profile; `provided` uses the GraalJS of the Maven build. |
+| `GRAAL_JS` | `fetch` | `fetch` runs the repository-root `scripts/graal-fetch` (network on first use; edition from `JLLM_GRAAL_EDITION`, default `community`) and runs the tests on that jar set through the `graal-dir` profile; `provided` uses the GraalJS of the Maven build. |
 | `TIMEOUT_SECONDS` | `300` | Per model request, and warm-up. |
 | `CASE_TIMEOUT_SECONDS` | `TIMEOUT_SECONDS` | Cap on each user turn of a case (`eval.caseTimeoutSeconds`). |
 | `COMPACTION_CTX_TOKENS` | `65536` | Context of the `compaction` group (`eval.compaction.contextTokens`). |
@@ -232,6 +234,9 @@ object descriptions, exception messages, connection-check output and `run.json`.
 | `eval.judge.modelName` | Name of the judge in results and reports; default the judge model id (recorded as `judgeModelId`). |
 | `eval.judge.anthropic.model` | Judge model when the judge is `anthropic`. It uses the `eval.anthropic.*` address and key. |
 | `eval.judge.openai.baseUrl`, `.model`, `.contextTokens`, `.timeoutSeconds` | Judge endpoint when the judge is `openai`. |
+| `eval.judge.openai.apiKey`, `.name`, `.maxRpm`, `.thinking` | Optional judge endpoint settings (key from the environment or command line). |
+| `eval.<anthropic|remote.<name>|judge.openai>.maxRpm` / `.thinking` | Pacing and thinking effort per endpoint (set by the smoke scripts from `*_RPM` and `*_THINKING`). |
+| `eval.price.*` | Optional prices used by the report cost estimate. |
 | `eval.fast` | Fast model: `target` (default), `anthropic` or `remote.<name>`. |
 | `eval.fast.anthropic.model` | Fast model when `eval.fast=anthropic`. |
 | `eval.local.port` | Host port of the local llama.cpp server. |

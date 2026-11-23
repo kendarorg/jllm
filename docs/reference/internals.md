@@ -3,13 +3,13 @@
 How the harness is put together and how a turn runs. Context management (compaction, mnemonic, prompt-cache layout)
 is not covered here: see [CACHES](caches.md). Step-by-step diagrams of every pipeline are in [FLOW](flow.md).
 
-Source root: `src/main/java/org/kendar/llm/harness`.
+Source root: `src/main/java/org/kendar/llm/harness` in `core/jllm-harness` and `core/jllm-commons` (shared types such as `HarnessConfig`, `HarnessTool`, `SimpleTool`, `HookEvent`, `TokenStore`).
 
 ## 1. Packages
 
 | Package | Contents |
 |---|---|
-| (root) | `AgentHarness` (facade + builder), `HarnessConfig`, `Prompts`, `HarnessMetrics`, `HarnessPricing` |
+| (root) | `AgentHarness` (facade), `AgentHarnessBuilder`, `HarnessConfig`, `Prompts`, `HarnessMetrics`, `HarnessPricing` |
 | `agent` | `AgentService` (runs, events, cancel), `AgentLoop` (ReAct loop), `ToolSelector`, `SubAgentTool`, `RequestToolGroupTool`, `AgentCatalog` |
 | `llm` | `ModelClient`, `AnthropicModelClient`, `OpenAiCompatModelClient`, `LimitedModelClient`, `CancelToken`, request/response records |
 | `tools` | `HarnessTool`, `SimpleTool`, `HarnessToolRegistry`, Files/Shell/Web tools, `ToolContext` |
@@ -323,7 +323,7 @@ is gone (compaction, `/clear`). The model cannot recall them (`history_recall` d
 |---|---|
 | approval grants | `ApprovalService`, saved in the `StateStore` (`grants`), survive a restart |
 | declined tier-3 sizes | `ContextManager`, memory only |
-| todo list (`scope` strategy, or `context.todos`) | `StateStore` (`todos-<agent>`); `scope` adds it to each request on a copy, not to the log |
+| todo list (`scope` strategy, or `context.todos`) | `StateStore` (`todos-<agent>`); `scope` also writes a snapshot into the latest user message of the log |
 | chat title, mode name changes | session row (the mode sentence is in the per-turn note, not the pinned block) |
 | sub-agent transcripts | `SubAgentRunLog` (the parent gets only the answer; mnemonic `history_recall` can read them) |
 | tool output beyond `toolMaxChars` | dropped (`[truncated N chars]`) |
@@ -336,10 +336,10 @@ is gone (compaction, `/clear`). The model cannot recall them (`history_recall` d
 
 | | `AnthropicModelClient` | `OpenAiCompatModelClient` |
 |---|---|---|
-| Endpoint | `POST {baseUrl}/v1/messages`, non-streaming | `POST {baseUrl}/chat/completions` |
+| Endpoint | `POST {baseUrl}/v1/messages`, SSE for agent-loop calls (`stream`, default on), plain call for helper calls | `POST {baseUrl}/chat/completions` |
 | System | two blocks, `cache_control` on the second | one `system` message |
 | Tools | `cache_control` on the last; `tool_choice` only when needed | translated to functions |
-| Retries | 429, 529, 5xx and I/O errors; `retry-after` or exponential backoff (max 30 s); each wait is reported as a `retry` event (`CancelToken.onRetry`) | 429, 5xx and I/O errors; same backoff and event |
+| Retries | 429, 529, 5xx and I/O errors; `retry-after` or exponential backoff, at most 10 s of waiting in total per call (`RetryBudget`); each wait is reported as a `retry` event (`CancelToken.onRetry`) | 429, 5xx and I/O errors; same backoff and event |
 | Auth | `x-api-key`, or an `AuthProvider`; one retry after a 401 | `Authorization: Bearer`, or an `AuthProvider`; one retry after a 401 |
 | Extras | extended thinking (`thinkingBudget`), citations: `search_local_knowledge` results become `search_result` blocks | `max_completion_tokens` for OpenAI proper |
 

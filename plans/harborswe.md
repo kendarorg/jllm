@@ -13,9 +13,9 @@ Consequence: the entry point is the CLI (`jllm-cli --prompt`), run in `--mode au
 
 ## Current state (verified in code)
 
-- `jllm-cli` one-shot: `--prompt`, `--mode plan|edit|auto`, `--workdir`, `--max-turns`, `--sandbox local|docker`,
+- `jllm-cli` one-shot: `--prompt`, `--mode default|plan|edit|auto`, `--workdir`, `--max-turns`, `--sandbox local|docker`,
   `--provider/--model/--base-url/--api-key`, `--settings`, `--system-prompt*`, pricing flags.
-- Shaded jar: `jllm-cli/target/jllm-cli-<ver>-jllm-shaded.jar` (main class `org.kendar.llm.cli.Main`).
+- Shaded jar: `jllm-cli/target/jllm-cli-<ver>-jllm.jar` (the shade plugin replaces the main jar) (main class `org.kendar.llm.cli.Main`).
 - Harness emits `run_finished.outcome`: `completed | stuck | unverified | max_turns | truncated | refused | cancelled | failed`,
   and `usage` events (input/output/cacheRead/cacheCreation tokens). `HarnessPricing` gives cost.
 
@@ -23,7 +23,7 @@ Consequence: the entry point is the CLI (`jllm-cli --prompt`), run in `--mode au
 
 | # | Gap | Where |
 |---|---|---|
-| 1 | `main` always `System.exit(0)`; outcome is lost | `Main.java:92` |
+| 1 | `main` always `System.exit(0)`; outcome is lost | `Main.java:94` |
 | 2 | No machine-readable result (outcome, usage, cost, turns, tool-call trajectory) | `Main.java`, `CliArgs.java` |
 | 3 | No wall-clock `--timeout` | `Main.java` |
 | 4 | `local` sandbox behaviour outside `--workdir` unverified (benchmarks use arbitrary paths) | `sandbox/*` |
@@ -57,7 +57,7 @@ Consequence: the entry point is the CLI (`jllm-cli --prompt`), run in `--mode au
 
 ## Phase 4: Harbor adapter (Terminal-Bench)
 
-Location: `core/jllm-eval/harbor/` (Python, outside the Maven build).
+Location: `eval/jllm-harbor/` (see `plans/evalfolder.md`) (Python, outside the Maven build).
 
 1. `JllmAgent(BaseInstalledAgent)`: `install()` runs `install.sh`; `run()` executes
    `java -jar jllm.jar --mode auto --workdir <cwd> --prompt <instruction> --max-turns N --timeout T --json-result /logs/jllm-result.json`
@@ -65,7 +65,7 @@ Location: `core/jllm-eval/harbor/` (Python, outside the Maven build).
 2. Parse `jllm-result.json` into Harbor's token and cost fields.
 3. Trajectory: convert `session.json`/`messages.jsonl` to ATIF (optional, after the first scores).
 4. Smoke: 3 to 5 Terminal-Bench tasks with one cheap model; then the full set.
-5. Record: model, jllm commit, `--max-turns`, timeout, pass rate, cost per task. Results go to `core/jllm-eval/eval-results/harbor/`.
+5. Record: model, jllm commit, `--max-turns`, timeout, pass rate, cost per task. Results go to `eval/results/harbor/`.
 
 ## Phase 5: SWE-bench
 

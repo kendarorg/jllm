@@ -29,8 +29,8 @@ searching, use the group id.
 
 - **RAG, embeddings and vector stores**: JLLM has none. Use LangChain4j or Spring AI for retrieval and expose it to the
   agent as a tool or an MCP server.
-- **Provider breadth and framework integration**: JLLM supports Anthropic and any OpenAI-compatible endpoint. It does
-  not have native clients for every provider and no Quarkus or Spring starter.
+- **Provider breadth and framework integration**: JLLM has built-in entries for Anthropic, OpenAI, Gemini, Grok, Qwen, llama.cpp and Ollama, and any OpenAI-compatible endpoint. It does
+  not have native clients for every provider and no Quarkus starter; the Spring starter (`jllm-web-spring-starter`) covers only the web API.
 - **Gemini-first or Google-managed agents**: use Google ADK.
 - **Ready-made planners and multi-agent topologies**: JLLM has sub-agents and flows, not a goal planner.
 

@@ -1,7 +1,7 @@
 # jllm-cli
 
 Terminal front end for [jllm-harness](../core/jllm-harness/README.md): an interactive chat, or a single `--prompt`, over the
-standard tools. One class, `org.kendar.llm.cli.Main`, packaged as a shaded runnable jar.
+standard tools. Entry point `org.kendar.llm.cli.Main`, packaged as a shaded runnable jar.
 
 ![Session with untrusted tool output and inline host and write approvals](../docs/images/chat_cli.png)
 
@@ -20,18 +20,18 @@ The API key comes from `--api-key` or the `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`
 ```text
 Main [--provider anthropic|openai|openaiGpt62|gemini|grok|qwen|llamacpp|ollama] [--model M] [--base-url U] [--api-key K]
      [--mode default|plan|edit|auto] [--workdir DIR] [--prompt TEXT] [--settings FILE] [--system-prompt TEXT] [--system-prompt-file FILE] [--system-prompt-replace FILE]
-     [--max-turns N] [--context-tokens TOKENS] [--max-tokens TOKENS]
+     [--max-turns N] [--context-tokens TOKENS] [--max-tokens TOKENS] [--resume prompt|no|CHAT_ID] [--plugin-dir DIR]
      [--context-strategy compaction|mnemonic|scope] [--search-api-key BRAVE_KEY] [--small-model]
      [--sandbox local|docker] [--docker-image IMAGE] [--docker-mode oneshot|daemon]
      [--docker-remote] [--docker-remote-host ADDRESS]
-     [--external-links none|read|readwrite]
+     [--external-links none|read|readwrite] [--pricing.input-per-million=USD] [--pricing.output-per-million=USD] [--pricing.cache-read-per-million=USD] [--pricing.cache-write-per-million=USD]
      [--sandbox-clean] [--sandbox-clean-all]
 ```
 
 | Flag | Default | Meaning |
 |---|---|---|
 | `--provider` | settings `defaultProvider`, else `anthropic` | a provider name from the settings `providers` list, or a built-in: `anthropic`, `openai`, `openaiGpt62`, `gemini`, `grok`, `qwen`, `llamacpp`, `ollama` |
-| `--model` | per provider (`claude-sonnet-5-5`, `gpt-4.1`, `gpt-6.2-sol`, `qwen3-coder-plus`, `local`, `llama3.1`) | model name; overrides the named provider for this session only |
+| `--model` | per provider (`claude-sonnet-5-5`, `gpt-4.1`, `gpt-6.2-sol`, `gemini-2.5-pro`, `grok-4`, `qwen3-coder-plus`, `local`, `llama3.1`) | model name; overrides the named provider for this session only |
 | `--base-url` | per provider | endpoint (OpenAI-compatible URLs include `/v1`) |
 | `--api-key` | `<PROVIDER>_API_KEY` env var | `ASK_TOKEN` asks for it on startup |
 | `--mode` | `default` | initial [permission mode](../core/jllm-harness/README.md#modes-working-directory-and-scratch-directory) |
@@ -47,6 +47,8 @@ Main [--provider anthropic|openai|openaiGpt62|gemini|grok|qwen|llamacpp|ollama] 
 | `--context-strategy` | `compaction` | `compaction`, `mnemonic` or `scope`; wins over `context.strategy` |
 | `--search-api-key` | `BRAVE_API_KEY` env var | Brave key for `web_search`; without it DuckDuckGo is scraped |
 | `--small-model` | off | bare, or `=false`; adds the small-model rules to the system prompt |
+| `--resume` | `prompt` | `prompt` asks to continue the newest saved chat, `no` starts a new one, anything else is a chat id or prefix; `--prompt` and piped input never ask |
+| `--plugin-dir` | `./plugins` if it exists | directory of plugin jars (see Plugins) |
 | `--pricing.input-per-million`, `output-per-million`, `cache-read-per-million`, `cache-write-per-million` | 0 | USD per million tokens, for the cost estimate; same keys as `jllm.pricing.*` of the web app |
 | `--sandbox` | `local` | `local` (no isolation) or `docker`: `bash` runs in a container with the project directory mounted ([SANDBOX](../docs/guides/sandbox.md)); wins over `sandbox.backend` |
 | `--docker-image` | `python:3.12-slim` | image of the docker sandbox; wins over `sandbox.docker.image` |
@@ -92,6 +94,10 @@ During a run the CLI prints:
 | `[tool] name {input}` | `tool_call` |
 | `[result] ...` / `[result, error] ...` (cut at 300 chars) | `tool_result` |
 | `[warning]`, `[error]` | `warning`, `error` |
+| `[retrying: ...]` | `text_reset` |
+| `[stuck] ...`, `[stop check failed, attempt N] ...` | `stuck`, `verify_failed` |
+| `[retry] ...` | `retry` |
+| `[login] ...` | `login_required`, `login` |
 | `[compaction] {...}` | `compaction` |
 | `[plan] ...` | `plan_ready` (suggests `/edit`) |
 | `[cancelled]` | `cancelled` |
@@ -109,7 +115,7 @@ queues. Ctrl+C cancels the run and exits. `/exit` or `/quit` leaves.
 
 ## Slash commands
 
-The commands are shared with every front end (`SlashCommands` in the harness). `/help` lists them, plugin commands
+The commands are shared with every front end (`SlashCommands` in the harness; `/expand` is CLI only). `/help` lists them, plugin commands
 included.
 
 | Command | Effect |
@@ -132,11 +138,13 @@ included.
 | `/back` | one level up in a menu (also Esc or `b`) |
 | `/cost` | tokens (input, output, cache read, cache write) and estimated cost |
 | `/where` | working and scratch directory |
+| `/sandbox clean|backup` | docker daemon mode: remove the sandbox container (project files stay) or copy a remote container back |
 | `/status` | context strategy, estimated context size against the window, usage, chat count |
 | `/chats` `/resume <id\|prefix>` `/title <text>` | list, switch, rename chats |
 | `/chats delete <id>` `/chats clean [days]` | delete one chat; list chats older than `days` (default 30), `/chats clean confirm` deletes them |
 | `/export [md\|html] [file]` | write the chat as a transcript into the scratch directory |
-| `/login [name]` `/logout <name>` | OAuth login of providers, MCP servers and REST APIs with `oauth` (`api:<name>`, `mcp:<name>`); no name lists them with their state and the token store in use |
+| `/login [name] [shared]` `/logout <name> [shared]` | OAuth login of providers, MCP servers and REST APIs with `oauth` (`api:<name>`, `mcp:<name>`); no name lists them with their state and the token store in use |
+| `/expand [N]` | CLI only: show the full text of a cut tool result |
 | `/exit` `/quit` | leave the CLI |
 
 Menu toggles live in memory only; the settings file is the startup default.
@@ -179,7 +187,7 @@ The resolvers exist for embedders that serve several users from one process (see
 
 ## Plugins
 
-Plugin jars are loaded from `--plugin-dir DIR` (default `./plugins` if it exists; `./mvnw install` fills the repository
+Plugin jars are loaded from `--plugin-dir DIR` (default `./plugins` if it exists; `mvn install` fills the repository
 `target/plugins`). A plugin runs only when enabled under `plugins` in the settings file. `--plugins.ID.enabled=true|false` enables or
 disables one for this run, and `--plugins.ID.settings.KEY=VALUE` sets a plugin setting; nothing writes the file. The
 web application takes the same keys with the prefix, `--jllm.plugins.ID.enabled=true`.

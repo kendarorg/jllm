@@ -1,6 +1,6 @@
 # jllm-harness: flow
 
-Source of truth: `src/main/java/org/kendar/llm/harness`. Class names below are real; line-level details can drift, re-check against code when changing behavior.
+Source of truth: `src/main/java/org/kendar/llm/harness` (modules `core/jllm-harness` and `core/jllm-commons`). Class names below are real; line-level details can drift, re-check against code when changing behavior.
 
 ## 1. Components
 
@@ -11,7 +11,7 @@ flowchart TB
         Web["Embedder / web UI"]
     end
 
-    subgraph Facade["AgentHarness (facade + Builder)"]
+    subgraph Facade["AgentHarness (facade, built by AgentHarnessBuilder)"]
         SC["SlashCommands / MenuController"]
         AS["AgentService<br/>1 run per chat, event buffer, cancel"]
     end
@@ -37,9 +37,9 @@ flowchart TB
 
     subgraph Tools["Tools"]
         REG["HarnessToolRegistry<br/>sorted group,name"]
-        FS["Files: read_file write_file edit_file glob grep"]
+        FS["Files: read_file write_file edit_file ls glob grep grep_code"]
         SH["Shell: bash"]
-        WB["Web: web_search wikipedia_search web_fetch"]
+        WB["Web: web_search wikipedia_search web_fetch web_download"]
         SK["skill"]
         EXT["ExternalSources<br/>mcp__srv__tool / api__operationId"]
     end
@@ -257,7 +257,7 @@ The mode note is the last text of `extraSystem`, so switching modes keeps the ca
 flowchart TD
     F["first message of a chat"] --> Q{"registry size > toolBatchThreshold (12)?"}
     Q -->|no| ALL["groups = null: offer every tool"]
-    Q -->|yes| LLM["ToolSelector.chooseGroups<br/>fast/main model simpleComplete, 256 tokens<br/>input: request + group/tool catalogue<br/>output: JSON array of groups"]
+    Q -->|yes| LLM["ToolSelector.selectGroups<br/>fast/main model simpleComplete, 256 tokens<br/>input: request + group/tool catalogue<br/>output: JSON array of groups"]
     LLM -->|parse fail / empty| ALL
     LLM -->|ok| G["groups = chosen + coreGroups (Files, Shell)"]
     G --> ST["sessions.setToolGroups (persisted)"]
@@ -279,7 +279,7 @@ README). Selected by `config.contextStrategy()` (settings `context.strategy`, CL
 
 ### Compaction (`ContextManager`)
 
-Runs at the top of every loop turn. Ceiling = window - buffer (buffer = 15% of window, min 16k when window >= 32k). Size = max(chars/4, last measured usage).
+Runs at the top of every loop turn. Ceiling = window - buffer (buffer = 15% of window, min 16k when window >= 32k). Size = max(chars/3.5, last measured usage).
 
 ```mermaid
 flowchart TD
@@ -381,7 +381,7 @@ flowchart LR
         C1["AgentLoop.loop<br/>stream(ModelRequest, cancelToken, listener)<br/>tools, history, maxTokens=8192"]
         C2["ContextManager.summaryOnPrefix<br/>complete(agent's request + summary ask)"]
         C3["ContextManager.summarizeSpan fallback<br/>simpleComplete, 3000 tokens"]
-        C4["ToolSelector.chooseGroups<br/>simpleComplete, 256 tokens"]
+        C4["ToolSelector.selectGroups<br/>simpleComplete, 256 tokens"]
         C5["ToolClassifier.classify<br/>simpleComplete, 60 tokens, 20 s timeout"]
         C6["NoiseQualifier.decide<br/>simpleComplete, temperature 0, 8 tokens, 4 s timeout, command text only"]
     end
@@ -399,7 +399,7 @@ flowchart LR
 Anthropic request layout (prompt-cache friendly):
 1. `system[0]` pinned block, `system[1]` extra block with `cache_control: ephemeral` (ttl `1h` if configured).
 2. `tools[]` sorted by group, name; last tool carries `cache_control`.
-3. `messages` as is; RAG tool results (`search_local_knowledge`) are converted to `search_result` blocks when citations are on.
+3. `messages`, with a third `cache_control` on the last cacheable block of the last message; RAG tool results (`search_local_knowledge`) are converted to `search_result` blocks when citations are on.
 4. `tool_choice` only set when non-auto or parallel tool use is disabled; forced choice is dropped if extended thinking is on.
 
 Cancel: `CancelToken` aborts the in-flight HTTP call and backoff sleeps (`ModelCancelledException`). `LimitedModelClient` waiters are interrupted by it too. A streamed call is aborted by closing the response body.
@@ -452,18 +452,18 @@ sequenceDiagram
     L-->>FE: text, usage, tool_call, tool_result, compaction, classifier, warning, error
     L->>A: await(...) blocks the tool thread
     L-->>FE: approval_request {id, title, preview, proposed?, agent?}
-    FE->>S: resolveApproval(chatId, id, approved, edited, remember)
+    FE->>S: resolveApproval(chatId, id, approved, edited, remember, rememberDir)
     S->>A: resolve
     A-->>L: ApprovalDecision (remember => grant for chat)
     opt user cancels
-        FE->>S: cancel(chatId)
+        FE->>S: cancel(chatId, kill)
         S->>S: token.cancel(), approvals.cancelAll(chatId)
         L-->>FE: cancelled
     end
     S-->>FE: run_finished {cancelled, outcome}
 ```
 
-Event types: `run_started`, `run_queued`, `text_delta`, `thinking_delta`, `text_reset`, `text`, `usage`, `tool_call`, `tool_result`, `approval_request`, `classifier`, `compaction`, `stuck`, `verify_failed`, `warning`, `error`, `cancelled`, `plan_ready`, `run_finished`.
+Event types: `run_started`, `run_queued`, `text_delta`, `thinking_delta`, `text_reset`, `text`, `usage`, `retry`, `tool_call`, `tool_result`, `approval_request`, `approval_unavailable`, `classifier`, `compaction`, `todos`, `stuck`, `verify_failed`, `instructions_loaded`, `content_warning`, `login_required`, `login`, `steer_queued`, `steer_applied`, `warning`, `error`, `cancelled`, `plan_ready`, `run_finished`.
 
 The deltas (`text_delta`, `thinking_delta`, `text_reset`) have `seq` 0 and are not buffered: a reconnecting client is
 not replayed them and gets the final `text` instead.
@@ -491,7 +491,7 @@ Plan mode runs the shell from scratch; only Docker can enforce that the workdir 
 
 ## 13. Slash commands (no agent loop)
 
-`SlashCommands.handles(line)` is checked before `start()`. Built-ins: `/help /clear /new /compact /mode /default /plan /edit /auto /cancel /tools /mcp /apis /skills /back /cost /where /status /chats /resume /title /exit`, plus plugin commands registered through `PluginRegistrar.command`. Menus (`/tools /mcp /apis /skills /mode`) are stateful per chat via `MenuController`; numbers select, Esc, `/back` or `b` goes up. Only `/compact` calls an LLM.
+`SlashCommands.handles(line)` is checked before `start()`. Built-ins: `/help /clear /new /compact /mode /default /plan /edit /auto /cancel /tools /mcp /apis /skills /back /cost /where /status /chats /resume /title /exit /export /followup /steer /login /logout /model /permissions /sandbox /undo /validation`, plus plugin commands registered through `PluginRegistrar.command`. Menus (`/tools /mcp /apis /skills /mode`) are stateful per chat via `MenuController`; numbers select, Esc, `/back` or `b` goes up. Only `/compact` calls an LLM.
 
 - Steering: after each tool-result round, and when an answer has no tool calls, the loop drains the chat's steering queue (and, only in the second case, one follow-up) into user messages and calls the model again.
 

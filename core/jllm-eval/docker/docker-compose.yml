@@ -3,7 +3,7 @@
 #   docker compose --env-file strong.env up -d      # load one model
 #   docker compose --env-file alt.env up -d --force-recreate   # switch model
 #   docker compose down                              # when finished
-# One model, one request slot. Adjust models/ and cache/ paths in common.env.
+# One model, one request slot. Adjust MODELS_DIR and CACHE_DIR in the env files.
 services:
   llama:
     image: ${LLAMA_IMAGE}

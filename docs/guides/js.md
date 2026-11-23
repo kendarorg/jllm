@@ -131,7 +131,7 @@ sandbox and out of its reach:
   an `Error` with the message of the tool (denied by the user, by a rule or a hook, a tool error, bad arguments); an
   uncaught one ends the run with `ok: false`.
 - The library is built for each run from the tools the agent can call at that moment, so a tool disabled with
-  `/tools` or a source disabled with `/mcp` is absent from the next run. `run_js` itself, `bash`, `sub_agent` and
+  `/tools` or a source disabled with `/mcp` is absent from the next run. `run_js` itself, `bash`, `task` and
   `request_tool_group` are never in it. A tool name that collides after the `-`/`_` mapping is rejected when the tool
   is registered.
 - Tool results are raw (no sanitizing) so parsing sees the real content. They are taint-marked: if any inner call

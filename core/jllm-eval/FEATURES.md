@@ -22,6 +22,8 @@ Sources: README, `docs/reference/{internals,flow,usage,caches}.md`, `docs/guides
 | `classifier` | `tool`, `verdict` (`SAFE`, `UNSAFE`, `UNSURE`) |
 | `compaction` | compaction: `tier`, `cleared` / `estimatedTokens`, `inherited`, `inTurn`; mnemonic: `strategy`, `kind`, `masked`, `savedTokens`, `estimatedTokens`; scope: `strategy`, `estimatedTokens` |
 | `todos` | `todos` (`id`, `content`, `status`) |
+| `instructions_loaded` | `file`: a directory-scoped instruction file was added |
+| `content_warning` | `file` and the findings: suspicious content in a loaded file (never stored) |
 | `stuck` | `pattern` (`repeat`, `same_error`, `alternation`, `malformed`, `verify_repeat`), `tool`, `count`, `action` (`nudge`, `continue`, `stop`), `message`, `agent` |
 | `verify_failed` | `agent`, `attempt`, `message` |
 | `retry` | `status` (0 = network), `attempt`, `max`, `delayMs`, `message` |
@@ -43,7 +45,7 @@ Every event has a per-chat `seq` (deltas: 0). Buffer: 2000 events, cleared at ea
 - **Tool-result error texts** (stable strings): `Unknown tool '<n>'`, `Tool unavailable for agent`, `Cancelled by user`, `Denied by a hook: <reason>. <what> is not permitted by any means (no other tool, no shell command); report this to the user instead.`, `Denied by permission rule: <rule>. <what> is not permitted by any means (no other tool, no shell command); report this to the user instead.` (`<what>` is `Writing <path>`, `Reading <path>` or `This <tool> call`), `Denied by permission policy (mode <m>)`, `The user rejected this tool call`, `Tool disabled for this chat: <n>`, `Invalid arguments for '<tool>': ...`, `Path escapes the work dir: <p>`, `Not executed: your response was cut off ...`, `Not executed: the call was interrupted.`, `Error: <message>`.
 - **Run snapshot**: `AgentHarness.contextTokens(chatId)`, `cost(session)` (needs `builder.pricing(HarnessPricing)`), `subAgentRuns()`, `pendingApprovals(chatId)`, `isRunning(chatId)`.
 
-### Doc and code differences found
+### Doc and code differences found (historical snapshot from step 1; may be out of date)
 
 - `grep_code` (group Files, READ_ONLY, in `FileSystemAgentTools`; used by `explore`) is not in the `tools.md` table.
 - `docs/guides/js.md` lists `sub_agent` as never in the script library; the tool is named `task`.

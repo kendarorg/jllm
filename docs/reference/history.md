@@ -52,7 +52,7 @@ It then got a standalone CLI (`Main`), slash commands, and a set of extension po
 - A JSON settings file with environment-variable expansion; a missing variable stops startup with its name.
 - An MCP client over HTTP: remote tools are named `mcp__<server>__<tool>` and grouped by server.
 - Tools generated from OpenAPI specs (swagger-parser), limited to an `allowedPaths` allowlist.
-- Hooks (`PRE_TOOL`, `POST_TOOL`, `USER_PROMPT`, `STOP`, `PRE_COMPACT`) that can allow, deny, change the input or
+- Hooks (`PRE_TOOL`, `POST_TOOL`, `USER_PROMPT`, `STOP`, `PRE_COMPACT`; `PRE_COMPACT` no longer exists) that can allow, deny, change the input or
   add context.
 - A plugin interface (`HarnessPlugin`) that can register tools, hooks, commands, skills and agents.
 - Skills: names and descriptions go in the system prompt, the body is loaded on demand. `KENDAR.md` instruction
@@ -110,7 +110,7 @@ A second context strategy was added, modelled on mnemonic-proxy:
   - A `history_recall` tool searches masked content by keyword (BM25 index in pure Java, identifier splitting, rank
     fusion). Its scope can be limited to one sub-agent run, because `task` results now carry a `runId`.
   - A guard blocks writing a receipt marker into a real file.
-  - `/compact` does nothing under this strategy.
+  - `/compact` first did nothing under this strategy; it now masks everything maskable before the latest turn.
   - Not implemented: llama-server slot per agent and checkpoint alignment.
 
 Then came tuning against real small models such as Haiku:
@@ -138,7 +138,7 @@ gaps that fit the small-footprint design:
   nothing new: the mode is already in the session and plan files are in the scratch directory.
 - **`scope` context strategy.** A whole-request budget, tool results offloaded to disk with a head and tail preview, a
   fixed trim order (offload, clear, summarize), a pinned first user message, and a `todo_write` / `todo_read` task
-  list that lives outside the transcript and is re-injected on every request.
+  list that lives outside the transcript and is appended to the latest user message when it changes.
 
 Left out on purpose: a filesystem abstraction behind the file tools, per-call user and session identity,
 distributed state, multi-tenancy, sandbox snapshots.
@@ -165,7 +165,7 @@ only. Not done on purpose: restoring the last `/model`.
   session and provider classes. No behaviour change intended.
 - **Portable tests.** `McpStdioClientTest` no longer needs `sh`: the fake MCP server is a Java class run by the
   current JVM. `DockerSandboxExecutorTest` was reworked so it runs on Windows too.
-- **Docs.** `docs/HARNESSES-COMPARE.md` added: a feature matrix of jllm against mini-swe-agent, Pi, OpenCode, Qwen
+- **Docs.** `docs/HARNESSES-COMPARE.md` (now `docs/comparisons/harnesses-compare.md`) added: a feature matrix of jllm against mini-swe-agent, Pi, OpenCode, Qwen
   Code and Hermes Agent (competitor columns are from memory and unverified). The root `history.md` was removed in
   favour of this file; README links updated.
 
@@ -189,8 +189,8 @@ parallel by area:
 - **Layout:** the per-workdir runtime directory `.kendhar` became `.jllm`, the same name as the configuration
   directory. Existing `.kendhar` directories are not migrated.
 
-New settings: `files.maxReadBytes`, `web.fetchMaxBytes`, `sandbox.outputLogMaxBytes`. The decisions and plans are in
-the root `todo.md`.
+New settings: `files.maxReadBytes`, `web.fetchMaxBytes`, `sandbox.outputLogMaxBytes`. The decisions and plans were in
+a root `todo.md` (no longer in the repository).
 
 ## 10. Web commons
 `jllm-web` was split in two. `jllm-web-commons` holds the chat and file API, the harness wiring and the `jllm.*`
@@ -213,7 +213,7 @@ startup, the UI and the sample sign-in and permissions that implement them.
 
 ## 12. Loop guards and streaming
 A second comparison, against the harnesses in the agent-harness survey (OpenHands, Gemini CLI, Claude Code, Codex,
-Hermes Agent, mini-swe-agent), picked three gaps, planned in the root `extend.md` and then implemented.
+Hermes Agent, mini-swe-agent), picked three gaps, planned in a root `extend.md` (no longer in the repository) and then implemented.
 - **Stuck detection:** a per-run detector of repeated calls, repeated errors, A-B-A-B alternation and malformed
   output. The first hit adds a corrective note, the second ends the run as `STUCK` (headless) or asks (interactive),
   so a headless embedder no longer spends its whole `maxTurns` budget on a loop.
@@ -229,7 +229,7 @@ Hermes Agent, mini-swe-agent), picked three gaps, planned in the root `extend.md
   `text_reset`, and `outcome` in `run_finished`. The CLI and the web UI show the new events.
 
 `HARNESSES-COMPARE.md` gained the stuck-detection and verify-on-stop rows, and its jllm column lists the three
-features. Model streaming moved out of `FUTURE.md`.
+features. Model streaming moved out of `FUTURE.md` (since removed; see `docs/enterprise/roadmap-and-limits.md`).
 
 ## 13. Plugins, JavaScript tool and module layout
 - **`run_js` tool** (module `jllm-js`): the agent runs JavaScript in a sandbox with no host access (no files, network,
@@ -274,7 +274,7 @@ SQL, can be plugged in without touching controllers or the harness. File impleme
   commands. Flows use an agentic task path in `AgentLoop` (`AgentOneShotModel`).
 - **Plugin API in core:** `OneShotModel`, `PluginEvents`, `PluginStorage`, `ServiceRegistry`, `WebContext`, `WebRequest`,
   `WebResponse`, `WorkflowApi`.
-- **Web plugin host:** `WebPlugin`, `WebPluginHost`, `WebPluginController` and file-backed `PluginStorage`. The
+- **Web plugin host:** `WebPlugin`, `WebPluginHost`, `PluginController` (starter; `PluginApi` in web-commons) and file-backed `PluginStorage`. The
   `jllm-workflow-web` module exposes the API only; all UI lives in `jllm-web`.
 - **OIDC sign-in** in `jllm-web` (`OidcClient`, `OidcController`, `OidcProperties`).
 - **UI:** a flow editor (canvas, step, task and settings forms), workflow and skills panels, with parts of the admin
@@ -352,7 +352,7 @@ The first runs exposed model-facing wording and guard rails that were then tight
   `run-command` action (exit code and output tail); steps take a `with` object of parameters, checked at save time;
   `Registry.ExplainingChooser` journals the reason of a choice. The sample `develop-app` flow reaches `done` only after
   a real test exit code 0.
-- Plan for these items: `evolution.md`.
+- Plan for these items: `evolution.md` (no longer in the repository).
 
 ## Overall direction
 - **Where it lives:** an embedded component, then a standalone library with a CLI, then a web front end, then a

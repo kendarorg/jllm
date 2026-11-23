@@ -7,7 +7,7 @@
 | Identity | one OpenID Connect provider; no IdP group or claim to role mapping; no SAML or SCIM ([Identity and access](identity-and-access.md)) |
 | Web application | a reference front end: no TLS termination, sign-in lockout is the only rate limit; run behind a proxy |
 | Stores | files and memory by default; no JDBC implementation shipped (interfaces are ready) |
-| Integrations | no Spring Boot starter and no Micrometer or OpenTelemetry module: [recipes](../getting-started/spring-boot.md) only |
+| Integrations | no Spring Boot starter for the harness itself (`jllm-web-spring-starter` covers only the web REST and SSE API) and no Micrometer or OpenTelemetry module: [recipes](../getting-started/spring-boot.md) only |
 | Model credentials | one global API key per provider; per-user credentials are [in development](#in-development-per-user-model-credentials) |
 | Flows | the `who` label of a question is shown, not enforced |
 | Isolation | the default sandbox has none; MCP stdio servers run as the JVM user |
@@ -15,9 +15,9 @@
 | `run_js` | the limits are guesses to tune with eval data (`maxInnerCalls` 200, `loop.innerCallsPerTurn` 10); GraalJS is not shipped in the jars and must be fetched ([JS guide](../guides/js.md)) |
 | Assurance | no external security audit, no certification ([security model](security-model.md#6-what-it-does-not-cover)) |
 
-## In development: per-user model credentials
+## Planned: per-user model credentials
 
-Today every model call uses the provider's global key. Work in progress lets the administrator choose, per provider in
+Today every model call uses the provider's global key and none of the following is implemented. The design below would let the administrator choose, per provider in
 the settings, how the model is paid for and who is billed:
 
 | Mode | Credential | Set by |
@@ -40,10 +40,10 @@ How it behaves:
 - **Web**: user endpoints and a Connections tab.
 - **Fast model**: a provider can be marked `fast` (at most one) for summaries and classification.
 
-Not done yet: an administrator screen (providers are set in the settings file), a role controlling who may set their
+Not designed in detail yet: an administrator screen (providers are set in the settings file), a role controlling who may set their
 own key, per-user cost attribution, a warning when `/model` switches to a provider needing a login, a shared OAuth or
 service account for providers (`client_credentials` is rejected for providers), and hidden-input `/login` for tokens in
-the CLI. Until it ships, treat model credentials as global.
+the CLI. Until it exists, treat model credentials as global.
 
 ## Future work
 

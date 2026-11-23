@@ -31,8 +31,8 @@ Front ends: [jllm-cli](../../jllm-cli/README.md) (terminal) and [jllm-web](../..
 ## Build
 
 ```sh
-mvn -pl jllm-harness -am package            # jar, sources jar, test-jar (HarnessTestSupport)
-mvn -pl jllm-harness -am package -Prelease  # also the javadoc jar
+mvn -pl core/jllm-harness -am package            # jar and sources jar
+mvn -pl core/jllm-harness -am package -Prelease  # also the javadoc jar
 ```
 
 ## Embedding
@@ -118,7 +118,7 @@ AgentHarness h = new AgentHarnessBuilder()
   and [TOOLS](../../docs/guides/tools.md#document-readers). `builder.discoverPlugins()` loads the `HarnessPlugin`s found by
   `ServiceLoader` (classpath and `builder.pluginDir(...)`) that are listed and enabled under `plugins` in the settings
   (ids `pdf`, `docs`; see [EXTENDING](../../docs/guides/extending.md#3-plugins-and-slash-commands)); `builder.documentReader(...)` adds a reader directly.
-- `${ENV_VAR}` is expanded in every string; a missing variable fails the load. MCP servers support OAuth (`oauth: true`, see [MCP](../../docs/guides/mcp.md#oauth)); REST uses static headers only.
+- `${ENV_VAR}` is expanded in every string; a missing variable fails the load. MCP servers and REST APIs support OAuth (`oauth`, see [MCP](../../docs/guides/mcp.md#oauth)).
 - A REST operation becomes a tool only if it passes `allowedPaths` and `denyPaths` (`METHOD /path`, method optional, `*` wildcard).
   MCP tools follow `allowList` and `denyList` (tool names, `*` wildcard). Absent allow = all, `[]` = none, `["*"]` = all;
   deny hides matches. Hidden tools are never sent to the model.
@@ -177,7 +177,7 @@ AgentHarness h = new AgentHarnessBuilder()
 - The default sandbox, `LocalDirSandboxExecutor`, has **no isolation** (a startup warning is logged).
   Pass `DockerSandboxExecutor` or your own `SandboxExecutor` for untrusted input.
 - Ports to implement: `ChatSessionStore`, `SubAgentRunLog`, `ToolApprovalPolicy`, `HarnessMetrics`, `SandboxExecutor`.
-- `HarnessTestSupport` (scripted fake model, rig) ships in the `test-jar`.
+- `HarnessTestSupport` (scripted fake model, rig) is in the `core/jllm-test-support` module.
 - `mvn -Prelease package` additionally builds the javadoc jar; the sources jar is always built.
 
 ## Modes, working directory and scratch directory

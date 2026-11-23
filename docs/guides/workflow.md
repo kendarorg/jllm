@@ -476,7 +476,7 @@ answers and follow its live events. Skills have their own Skills screen, for eve
   every user it is shared with; this is checked at save time.
 - A run belongs to its starter: only that user sees its history and answers its questions.
 
-Files (when no host storage is used): `dir/global/<name>.json` and `dir/users/<user>/<name>.json`.
+Files (when no host storage is used): `dir/flows/global/<name>.json` and `dir/flows/users/<user>/<name>.json`; runs are under `dir/runs`.
 
 ### Your own persistence (for example SQL)
 

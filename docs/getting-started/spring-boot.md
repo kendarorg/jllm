@@ -152,7 +152,7 @@ class SupportAgent {
 ```
 
 `start` does not block. Forward events to the client with `SseEmitter`, a WebSocket or a message queue, answer
-approvals with `resolveApproval(chatId, approvalId, approved, edited)`, and cancel with `cancel(chatId)`. The event
+approvals with `resolveApproval(chatId, approvalId, approved, edited, remember, rememberDir)`, and cancel with `cancel(chatId, kill)`. The event
 contract is in [USAGE](../reference/usage.md).
 
 ## Metrics and tracing

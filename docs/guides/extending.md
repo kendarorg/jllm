@@ -47,7 +47,7 @@ repository; JDK 21).
 | `jllm-fs` | file tools (read, write, edit, grep, remote files) | only with the tools and no harness |
 | `jllm-webbrowse` | web search and fetch tools | only with the tools and no harness |
 | `jllm-apimcp` | REST API and MCP tool providers | only with the tools and no harness |
-| `jllm-test-support` | `HarnessTestSupport`: `ScriptedModel`, `Rig`, `Events` ([12](#12-testing)) | tests (scope `test`) |
+| `jllm-test-support` | `HarnessTestSupport`: `ScriptedModel`, `text`, `json`, `tool`, `config` ([12](#12-testing)) | tests (scope `test`) |
 | `jllm-web-commons` | the web API handlers (chat, files, sign-in, users) and the `Gate`, no Spring; its storage interfaces are in jllm-harness ([13](#13-web-storage)) | mounting the API on another web framework |
 | `jllm-web-spring-starter` | Spring Boot controllers, interceptors and auto-configuration over `jllm-web-commons` | building a web front end with its own sign-in and storage |
 | `jllm-web` | the reference web application (file stores, cookie sign-in, admin) | running it, or as an example |
@@ -193,7 +193,7 @@ appends "The stop check failed. Fix the problem and finish again. If it cannot b
 message twice in a row, the run ends `UNVERIFIED` (a sub-agent reports status `unverified`). Existing `STOP` hooks
 that assumed the main agent should check `ctx.agent()`. A test run needs no code: `hooks.stop` in the settings
 ([USAGE](../reference/usage.md#verify-on-stop)) registers a `CommandStopHook`. An LLM judge is a plugin `STOP` hook that asks the
-fast model and returns `continueWith` with its objection. `AgentLoop.changedInRun(chatId, agent)` tells a hook
+fast model and returns `continueWith` with its objection. `RunGuards.changedInRun(chatId, agent)` (via `loop.guards()`) tells a hook
 whether a tool that changes things ran in the run. A `PRE_TOOL` denial is reported to the model as `Denied by a hook: <reason>`, followed by an
 instruction not to work around it with another tool and to report it to the user instead.
 
@@ -215,6 +215,8 @@ dependency. An adapter is a plugin that registers hooks and keeps the spans itse
 
 ```java
 public final class OtelPlugin implements HarnessPlugin {
+    public String id() { return "otel"; }
+
     public void install(PluginRegistrar r) {
         Tracer tracer = GlobalOpenTelemetry.getTracer("jllm");
         r.hook(HookEvent.POST_LLM, c -> {
@@ -249,8 +251,11 @@ public final class DeployPlugin implements HarnessPlugin {
         r.tool(new SimpleTool("deploy_status", "Status of the last deployment", SimpleTool.schema(),
                         "Deploy", ToolKind.READ_ONLY, (ctx, in) -> deployer.status()))
          .hook(HookEvent.STOP, ctx -> { notifier.done(ctx.chatId()); return HookResult.allow(); })
-         .command("/deploy", "Deploy the current branch", (chatId, arg) -> deployer.deploy(arg));
+         .command("/deploy", "Deploy the current branch", (chatId, arg, history) -> deployer.deploy(arg));
     }
+
+    @Override
+    public String id() { return "deploy"; }
 }
 
 AgentHarness h = new AgentHarnessBuilder().modelClient(client).plugin(new DeployPlugin()).build();
@@ -271,7 +276,7 @@ and enabled:
 "plugins": {
   "pdf":  { "enabled": true },
   "docs": { "enabled": false },
-  "js":   { "enabled": true, "settings": { "storage": { "maxBytes": -1 } } }
+  "js":   { "enabled": true, "settings": { "maxInnerCalls": 100 } }
 }
 ```
 
@@ -366,6 +371,9 @@ built-ins.
 | `readOnly` | `false` | always PLAN mode with READ_ONLY tools |
 | `prompt` / `promptFile` | none | added to its system text |
 | `inheritContext` | `false` | start from a copy of the caller's conversation |
+| `provider` | none | name of a provider from the settings list; wins over `model` |
+| `temperature` | provider's | sampling temperature, 0 to 2 |
+| `thinking` | provider's | reasoning effort: minimal, low, medium, high |
 | `model` | main model | own `LlmSettings` |
 
 ```mermaid
@@ -410,7 +418,7 @@ public interface ContextStrategy {
 ```
 
 ```java
-builder.contextStrategy(deps -> new SlidingWindowStrategy(deps.config(), deps.mapper()));
+builder.contextStrategy(deps -> new MyStrategy(deps.config(), deps.mapper()));   // MyStrategy: your ContextStrategy
 ```
 
 `deps` gives `config`, `model`, `summaryModel` (fast or main), `approvals`, `mapper`, `metrics`, `subAgentRuns`.
@@ -545,7 +553,7 @@ public interface SandboxExecutor {
 
 | Implementation | Work dir | Isolation |
 |---|---|---|
-| `LocalDirSandboxExecutor` (default) | `<sandbox.baseDir>/<chatId>` | none (warning at startup) |
+| `LocalDirSandboxExecutor` (default) | `<sandbox.tempDir>/<chatId>` | none (warning at startup) |
 | `CwdSandboxExecutor` (CLI) | the project directory for every chat | none |
 | `ChatDirSandboxExecutor` (web) | `<base>/<chatId>`, with its own `.jllm` | none |
 | `RemoteExecSandboxExecutor(config, runner, layoutExecutor, Kind, projectDir)` (settings `sandbox.backend: docker`, `sandbox.docker.mode: daemon`) | `/workspace` in a long-running container; bind mount (CLI) or volume (web) | as `Docker…`, plus a per-container token; default docker network |
@@ -597,21 +605,15 @@ with the same path earlier on the class path.
 | Helper | Use |
 |---|---|
 | `ScriptedModel` | fake `ModelClient`: `enqueue(...)` responses, `simpleReplies` for `simpleComplete`, or a `handler`; records every request in `requests` |
-| `text`, `toolUse`, `resp`, `json` | build responses |
-| `Rig(Path baseDir)` | a wired `AgentLoop` (real gate, approvals, sessions, local sandbox, context strategy) over a `ScriptedModel`: `register(tools…)`, `newChat()`, `configure(cfg -> …)`, `loopWith(client)`, `requiresApproval.put(name, true)` |
-| `Events` | `EventSink` that records: `ofType("tool_result")`, `types()` |
-| `CountingMetrics` | token totals by type |
+| `text`, `json` | build a text response, parse JSON written with single quotes |
 | `tool(name, group, kind, body)`, `config(baseDir)` | quick tool and test config |
 
-`Rig` mocks the registry with Mockito, so the consumer needs `mockito-core` in test scope.
+`Rig` (a wired `AgentLoop` over a `ScriptedModel`), `Events`, `CountingMetrics`, `toolUse` and `resp` are not part of this
+module: they live in the harness's own test sources (`core/jllm-harness/src/test/.../HarnessTestSupport.java`).
 
 ```java
-Rig rig = new Rig(tempDir).register(myTool);
-rig.model.enqueue(toolUse("t1", "db_query", "{\"sql\":\"select 1\"}"), text("one row"));
-String chat = rig.newChat();
-Events events = new Events();
-rig.loop.run(chat, "How many rows?", events, () -> false);
-assertEquals("one row", events.ofType("text").getLast().path("text").asText());
+ScriptedModel model = new ScriptedModel().enqueue(text("one row"));
+// pass `model` to AgentHarnessBuilder.modelClient(...) and run a chat; model.requests records every request
 ```
 
 ## 13. Web storage
@@ -629,7 +631,7 @@ flowchart LR
         SR["SkillRepository"]
         LS["LoginSessionRepository"]
     end
-    subgraph HC["jllm-web-spring-starter: harness beans (HarnessFactory)"]
+    subgraph HC["jllm-harness: optional beans read by the starter (HarnessFactory, jllm-web-commons)"]
         SS["SettingsSource"]
         PT["ProjectMcpTrust"]
         HI["HarnessIdentity.tokenStore()"]
@@ -648,13 +650,13 @@ flowchart LR
 
 | Interface | Module, package | Default (jllm-web) | Holds |
 |---|---|---|---|
-| `UserRepository` | jllm-harness, `...harness.identity` | `FileUserRepository`: `webauth/users/<id>.json` | `User`: id, name, role, password hash, per-source credential headers (`env:NAME` only), disabled tools and skills |
+| `UserRepository` | jllm-harness, `...harness.identity` | `FileUserRepository`: `webauth/users/<id>.json` | `User`: id, name, role, email, external id, password hash, per-source credential headers (`env:NAME` only), disabled tools and skills |
 | `RoleRepository` | jllm-harness, `...harness.identity` | `FileRoleRepository`: `webauth/permissions/<role>.json` | `Role`: tool patterns, read-only, approval `ask`/`off`; the fixed `admin` role is never stored |
 | `SkillRepository` | jllm-harness, `...harness.identity` | `FileSkillRepository`: `webauth/global-skills/`, `webauth/user-skills/<id>/` | global and per-user skills (name, description, content) |
 | `LoginSessionRepository` | jllm-harness, `...harness.identity` | `InMemoryLoginSessionRepository` (a restart signs everybody out) | cookie token → user id, sliding `TTL` of 7 days |
 | `SettingsSource` | jllm-harness, `...harness.settings` | `FileSettingsSource`: `~/.jllm/settings.json`, `<project>/.jllm/settings.json`, `--settings`/`jllm.settings` | `SettingsLayer`s, `GLOBAL` → `PROJECT` → `EXPLICIT`, a later layer wins |
 | `ProjectMcpTrust` | jllm-harness, `...harness.settings` | `FileProjectMcpTrust.user()`: `~/.jllm/trusted-mcp.json` | trust answers for project MCP servers, tied to a SHA-256 of the definition |
-| `TokenStore` | jllm-harness, `...harness.auth` | `FileTokenStore` from the `tokenStore` settings | OAuth tokens per principal ([8](#token-stores)) |
+| `TokenStore` | jllm-commons, `...harness.auth` | `FileTokenStore` from the `tokenStore` settings | OAuth tokens per principal ([8](#token-stores)) |
 | `ChatSessionStore`, `SubAgentRunLog`, `StateStore` | jllm-commons, `...harness.session`, `...harness.state` | `FileChatSessionStore`, `FileHistorySubAgentRunLog`, `FileStateStore` under `<base>/<chatId>/.jllm/history` | chats, sub-agent runs, per-chat state ([8](#8-persistence)) |
 | `MnemonicStore` | jllm-harness, `...harness.context.mnemonic` | `FileMnemonicStore` under the same root | mnemonic decisions per chat and agent |
 
@@ -663,7 +665,12 @@ public interface UserRepository {
     Optional<User> find(String id);
     List<User> all();
     boolean exists(String id);
-    User create(String id, String name, String role, String passwordHash); // IllegalStateException if it exists
+    User create(String id, String name, String role, String passwordHash, String email); // IllegalStateException if it exists
+    User createExternal(String id, String name, String role, String email, String externalId);
+    Optional<User> findByExternal(String issuer, String sub);
+    List<User> findByEmail(String email);
+    User setExternalId(String id, String externalId);
+    User setEmail(String id, String email);
     User setName(String id, String name);                                   // setters: NoSuchElementException if unknown
     User setRole(String id, String role);
     User setPassword(String id, String passwordHash);                       // null = default password

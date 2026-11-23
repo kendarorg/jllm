@@ -94,7 +94,7 @@ switch leaves the cached tool block and the text before it intact (see [CACHES Â
 directory), then the file given with `--settings` / `jllm.settings`. Missing global and project files are skipped;
 a missing explicit file is an error. Objects are merged key by key; arrays (`mcpServers`, `providers`,
 `instructionFiles`, ...) and scalars of a later file replace the earlier value. Keep API keys in the global file.
-`${ENV_VAR}` is expanded after merging. Embedding: `HarnessSettings.loadLayered(explicit, projectDir)`.
+`${ENV_VAR}` is expanded after merging. `permissions.deny` is the exception: the union of every layer. The project file cannot set `tokenStore` nor name a literal client secret. Embedding: `HarnessSettingsLoader.loadLayered(source, projectDir, env, prompt, trust, warn, contentWarnings)` with a `SettingsSource` (`FileSettingsSource`).
 
 Every key is optional. `${ENV_VAR}` is expanded in every string; a missing variable fails the load. Unknown keys are
 ignored.
@@ -210,7 +210,7 @@ told too; the warning is a message, never stored with a chat, in the history nor
 - **Startup files** (settings, skills, instruction files, agent prompts, system prompt additions): reported once per
   process. The CLI prints them under the startup lines (`[content warning] <file>: ...`, one line per finding); the
   web page reads `GET /api/content-warnings` when it loads and shows them in a banner until dismissed. Embedders:
-  create a `ContentWarnings`, pass it to `HarnessSettings.loadLayered(...)` and `builder.contentWarnings(...)`, then
+  create a `ContentWarnings`, pass it to `HarnessSettingsLoader.loadLayered(...)` and `builder.contentWarnings(...)`, then
   read `harness.contentWarnings()`.
 - **Scoped instruction files**, loaded during a chat: a transient `content_warning` event (seq 0, never buffered nor
   replayed), once per file and chat. The CLI prints it like the startup ones; the web shows it as a notice in the
@@ -316,8 +316,9 @@ the character-based size estimate; the per-agent calibration against measured us
 - `thinking` (`minimal` | `low` | `medium` | `high`) sets the reasoning effort, on a provider and on an agent type.
   Resolved request, then agent type, then provider, then unset; unset leaves the client's own default (Anthropic:
   no thinking, OpenAI-compatible: nothing sent).
-  - Anthropic: extended-thinking budget of 2048 (`low`), 8192 (`medium`) or 16384 (`high`) tokens; `minimal` turns
-    thinking off. `max_tokens` is raised to fit the budget, and a forced `toolChoice` is ignored while thinking is on.
+  - Anthropic, older models: extended-thinking budget of 2048 (`low`), 8192 (`medium`) or 16384 (`high`) tokens; `minimal` turns
+    thinking off. `max_tokens` is raised to fit the budget. Opus/Sonnet 4.6 and later, every 5.x (the default), Fable and Mythos think adaptively:
+    the level is sent as `output_config.effort` (`minimal` and `low` both `low`), thinking cannot be turned off, and a forced `toolChoice` is ignored.
   - `openaiGpt62`: sent as `reasoning.effort`; `minimal` is `low`.
   - OpenAI-compatible (openai, gemini, grok, qwen, llamacpp, ollama): sent as `reasoning_effort`; `minimal` is `minimal`, or `none`
     on Ollama. A server that rejects it gets a retry: `minimal`/`none` steps down to `low`, anything else is
@@ -421,7 +422,7 @@ h.sessions().setMode(chatId, PermissionMode.EDIT);
 Runnable unsubscribe = h.subscribe(chatId, 0, ev -> {
     switch (ev.type()) {
         case "text" -> System.out.println(ev.data().path("text").asText());
-        case "approval_request" -> h.resolveApproval(chatId, ev.data().path("id").asText(), true, null, false);
+        case "approval_request" -> h.resolveApproval(chatId, ev.data().path("id").asText(), true, null, false, false);
         default -> { }
     }
 });
@@ -465,8 +466,8 @@ String owner = h.sessions().principal(chat);                      // "alice"; re
   per-user tool lists are not supported yet.
 - OAuth REST APIs and MCP servers with `perUser` use each principal's own token, kept in the `TokenStore`
   (`Builder.tokenStore(...)`, or `tokenStoreDir(...)` for the file store; encrypt it with `JLLM_TOKEN_KEY`). The
-  harness adds its OAuth resolver after yours, so its header wins. Logins: `harness.logins()`, `harness.saveLogin`,
-  `harness.logout`; a deleted user: `harness.forgetUser(id)`. A web front end starts logins with
+  harness adds its OAuth resolver after yours, so its header wins. Logins: `harness.auth().logins()`, `saveLogin`,
+  `logout`; a deleted user: `harness.auth().forgetUser(id)`. A web front end starts logins with
   `OAuthLogin.login(ui, redirectTarget)` and its own callback ([jllm-web](../../jllm-web/README.md#oauth-logins) does);
   `harness.commands().webLogin(...)` routes `/login` typed in a chat through it.
 
@@ -496,9 +497,9 @@ sequenceDiagram
     L-->>FE: text_delta (live only), usage, text, tool_call, tool_result, compaction, classifier, warning, retry
     L-->>FE: stuck, verify_failed
     L-->>FE: approval_request {id, type, title, preview, proposed, agent?}
-    FE->>H: resolveApproval(chatId, id, approved, edited, remember)
+    FE->>H: resolveApproval(chatId, id, approved, edited, remember, rememberDir)
     opt cancel
-        FE->>H: cancel(chatId)
+        FE->>H: cancel(chatId, kill)
         L-->>FE: cancelled
     end
     L-->>FE: plan_ready (plan mode only), error (on failure)
@@ -527,6 +528,8 @@ waits `delayMs` before retry `attempt` of `max`; it is followed by the normal ev
 | `classifier` | `tool`, `verdict` |
 | `compaction` | compaction: `tier`, `cleared`/`estimatedTokens`; mnemonic: `kind`, `masked`, `savedTokens`, `estimatedTokens`; scope: `strategy`, `estimatedTokens` |
 | `todos` | `todos`: the complete list written by `todo_write` (`id`, `content`, `status`) |
+| `approval_unavailable` | `tool`: a call needed approval and nobody could answer |
+| `steer_queued`, `steer_applied` | `text`; `kind` (`steer`, `followup`) on `steer_applied` |
 | `warning`, `error` | `message` |
 | `cancelled` | â€” |
 | `plan_ready` | `message` |

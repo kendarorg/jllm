@@ -25,8 +25,8 @@ A chat a user may not see answers 404, as if it did not exist.
 - **OpenID Connect**: authorization code with PKCE against one provider (Entra, Keycloak, Okta, Google, ...). Optional
   `allowed-domains`, linking by verified email, optional auto-provisioning with a fixed default role. Modes
   `password`, `oidc` or `both`. Setup: [jllm-web](../../jllm-web/README.md#sign-in-with-openid-connect).
-- **Roles** are files listing tool patterns (`read_file`, `mcp__docs__*`, `billing__*`), an optional `readOnly` flag and
-  an `approval` setting. One role per user. `admin` is fixed and cannot be edited or removed.
+- **Roles** are files listing tool patterns (`read_file`, `mcp__docs__*`, `billing__*`), an optional `readOnly` flag,
+  an `approval` setting and optional per-tool `toolPermissions` (allow, ask, deny). One role per user. `admin` always has every tool: only its approval and tool permissions can change, and it cannot be removed.
 - **Narrowing, never widening**: a user can switch off tools and skills their role allows, but cannot add any.
 - **Own skills** per user, bounded in size and count.
 

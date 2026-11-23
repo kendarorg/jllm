@@ -154,7 +154,7 @@ judge. Every run is recorded in the [eval history](core/jllm-eval/eval-results/h
 ## Known limits and what is next
 
 Today: single OIDC provider and no IdP role mapping; one global API key per model provider; the web app is a
-reference front end to run behind your proxy; no Spring Boot starter (recipes only); no external security audit.
+reference front end to run behind your proxy; no Spring Boot starter for the harness itself (only the web API starter `jllm-web-spring-starter`; harness beans are recipes); no external security audit.
 
 Stores (chat history, users, roles, tokens) are files by default. To use your own storage, implement the store
 interfaces and register them as beans or on the builder ([ports](docs/enterprise/governance-and-audit.md#ports-for-your-stores)).

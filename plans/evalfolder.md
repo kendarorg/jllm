@@ -78,7 +78,7 @@ history index, same columns style as `jllm-eval/eval-results/history/INDEX.md`).
    (they only mention the module name; leave as history).
 6. `.gitignore`: add `eval/results/`, `eval/**/__pycache__/`, `eval/**/.venv/`, `eval/**/*.egg-info/`.
 7. `jllm-cli` stays at the repo root. The runners locate the jar by `JLLM_CLI_JAR` env, else
-   `jllm-cli/target/*-shaded.jar`.
+   `jllm-cli/target/jllm-cli-*-jllm.jar`.
 
 ## Steps
 

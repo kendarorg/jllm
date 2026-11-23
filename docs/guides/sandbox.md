@@ -1,8 +1,9 @@
 # Sandboxes
 
 A `SandboxExecutor` decides three things: where a chat works (the work directory), where agents keep temporary files
-(the scratch directory), and how the `bash` tool runs commands. The harness ships four implementations. Only
-`DockerSandboxExecutor` isolates anything.
+(the scratch directory), and how the `bash` tool runs commands. The harness ships four implementations (below) plus
+`RemoteExecSandboxExecutor`, the daemon-mode docker executor ([Daemon mode](#daemon-mode-a-long-running-container)). Only
+the docker ones isolate anything.
 
 | Executor | Used by | Work dir | Scratch dir | Isolation |
 |---|---|---|---|---|

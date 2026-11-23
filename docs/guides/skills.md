@@ -71,8 +71,9 @@ A multi-user embedder can give each user skills of their own and hide settings s
 
 ```java
 new UserPolicy(toolFilter, approval,
-        List.of(new SkillSettings("notes", "My notes", "/data/skills/alice/notes.md")),   // extra skills
-        name -> !hiddenForAlice.contains(name));                                       // settings skills kept
+        List.of(new UserSkill("notes", "My notes", notesText)),   // extra skills (SkillText)
+        name -> !hiddenForAlice.contains(name),                   // settings skills kept
+        null);                                                    // tool permission decision (none)
 ```
 
 - The extra skills are offered, next to the settings skills the filter keeps, only in that user's chats (main agent

@@ -13,6 +13,7 @@ What the model can call, how tools are grouped, selected per chat and gated. To 
 | `glob` | Files | READ_ONLY | `pattern` | at most 200 paths, sorted; `**/x` also matches top-level files |
 | `ls` | Files | READ_ONLY | `path?` | one directory, not recursive: directories first (`d name/`), then files (`f name size`); at most 200 entries; not available on a remote (docker daemon) work dir |
 | `grep` | Files | READ_ONLY | `pattern` (Java regex), `path?`, `glob?` | `path:line:text`, at most 200 hits, files over 1 MB skipped |
+| `grep_code` | Files | READ_ONLY | `path?`, `glob?`, `pattern?` | definition lines (block openers, or `pattern`, a Java regex) per file |
 | `bash` | Shell | OTHER | `command`, `timeout_seconds?` | runs through the `SandboxExecutor`; timeout capped at 600 s; stderr is merged into stdout; only the last 50 KB are kept and the result says `[output truncated: N lines omitted; log: <scratch>/bash-N.log]` (read the log with `read_file` or `grep`); the log itself is capped at `sandbox.outputLogMaxBytes` (default 50 KB, 0 = unlimited) and the result then says `log (itself truncated):` |
 | `web_search` | Web | READ_ONLY | `query`, `count?` (≤ 20) | Brave with a key, DuckDuckGo HTML otherwise |
 | `wikipedia_search` | Web | READ_ONLY | `query`, `lang?`, `count?` | titles, URLs, snippets |
@@ -211,7 +212,7 @@ with `interactive=false` (the built-in main and sub-agent loops are both interac
 
 `read_file` looks up the file extension in the registered `DocumentReader`s (`extensions()`, `extract(InputStream, String fileName)`; the stream is opened through the path jail), extracts
 the text and then applies `offset`, `limit` and the line cap to it. The path jail runs before the reader. A binary
-extension with no reader answers `No reader for .pdf; put the pdf plugin jar in the plugin directory and enable it under plugins`. Extraction has a 30 s timeout and a
+extension with no reader answers `No reader for .pdf; add the jllm-pdf module` (`jllm-docs` for docx). Extraction has a 30 s timeout and a
 5 MB text cap; the binary file may be up to 50 MB.
 
 | Module | Extensions | Notes |
@@ -219,7 +220,7 @@ extension with no reader answers `No reader for .pdf; put the pdf plugin jar in 
 | `jllm-pdf` | `pdf` | Apache PDFBox 3; text only, `--- page N ---` markers; scanned PDFs answer "no extractable text (scanned?)"; password-protected files fail with a clear error |
 | `jllm-docs` | `docx` (and `doc`) | JDK ZIP + StAX, no dependency; headings as `#`, list items as `-`, table rows as `a \| b`; headers, footers and comments skipped; tracked insertions kept, deletions dropped; legacy `.doc` answers "legacy .doc not supported, convert to docx" |
 
-The front ends carry neither: `./mvnw install` copies each plugin jar to `target/plugins/`; pass that directory with
+The front ends carry neither: `mvn install` copies each plugin jar to `target/plugins/`; pass that directory with
 `--plugin-dir` (CLI) or `jllm.plugin-dir` (web), default `./plugins`, and enable the plugin: `"plugins": {"pdf":
 {"enabled": true}}` in the settings file, `--plugins.pdf.enabled=true` for one CLI run, or
 `--jllm.plugins.pdf.enabled=true` in the web application. An embedder can add the module as a dependency and call

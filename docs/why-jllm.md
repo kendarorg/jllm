@@ -44,7 +44,7 @@ in-memory or file defaults, so you can put them on your database and your observ
 - You need **many native provider clients**. JLLM has few; combine it with LangChain4j or Spring AI.
 - RAG and vector stores are not built in, but they are easy to add: expose your retrieval as a
   [tool](guides/tools.md) (see [extending](guides/extending.md#1-tools)).
-- You want a **Spring Boot starter** or a Quarkus extension. There is none; Spring support is documented as [recipes](getting-started/spring-boot.md).
+- You want a **Spring Boot starter** or a Quarkus extension. Only the web API starter (`jllm-web-spring-starter`) exists; harness beans are documented as [recipes](getting-started/spring-boot.md), and there is no Quarkus extension.
 - You need **identity-provider role mapping** (groups or claims to roles), multiple OIDC providers, SAML or SCIM.
   Not implemented yet ([limits](enterprise/roadmap-and-limits.md)).
 - You need a **vendor-backed support contract, certifications or an external security audit**. There is none.

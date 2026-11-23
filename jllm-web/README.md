@@ -48,6 +48,9 @@ The file tools never follow a symlink or junction that leaves a chat's work dir:
 | `jllm.search-api-key` | `BRAVE_API_KEY` env var | Brave key for `web_search` |
 | `jllm.pricing.input-per-million`, `output-per-million`, `cache-read-per-million`, `cache-write-per-million` | 0 | USD per million tokens, for the cost estimate |
 | `jllm.web.public-url` | none | the externally visible base URL (`https://jllm.example.com`); OAuth logins redirect to `<public-url>/oauth/callback`. Required when a per-user OAuth source uses the authorization code flow |
+| `jllm.plugin-dir` | `./plugins` when it exists | directory of plugin jars |
+| `jllm.plugins.<id>.enabled`, `jllm.plugins.<id>.settings.*` | none | per-plugin switch and settings; win over the `plugins` section of the settings file |
+| env `JLLM_UPLOAD_MAX_FILE_SIZE`, `JLLM_UPLOAD_MAX_REQUEST_SIZE` | 100MB, 200MB | multipart upload limits |
 
 Also set: `server.port=8080` and `spring.mvc.async.request-timeout=-1` (SSE streams must not time out).
 
@@ -69,7 +72,7 @@ use, so changes (by hand or from the UI) apply without a restart.
 | Path | Content |
 |---|---|
 | `webauth/users/<id>.json` | `{name, role, email?, externalId?, password?, credentials, disabledTools?, disabledSkills?}` |
-| `webauth/permissions/<role>.json` | `{tools, readOnly?, approval?}` |
+| `webauth/permissions/<role>.json` | `{tools, readOnly?, approval?, toolPermissions?}` |
 | `webauth/global-skills/<name>.md` | skills written by the admin, offered to every user |
 | `webauth/user-skills/<id>/<name>.md` | a user's own skills |
 
@@ -124,7 +127,7 @@ jllm.auth.oidc.default-role=user                       # required (and must exis
   server, also tools it adds later), `"billing__*"` (a REST API), `["*"]` (everything).
 - `readOnly`: optional; `true` keeps only read-only tools. `approval`: optional; `"off"` turns approval prompts off,
   `"ask"` (default) uses the harness policy. A role without a valid file gets no tools.
-- `admin` is fixed: every tool, no prompts, whatever its file says; it cannot be edited, deleted or recreated. At least
+- `admin` is fixed: it always has every tool; only its `approval` (default `ask`) and `toolPermissions` can be changed, and it cannot be deleted or recreated. At least
   one admin user always remains, and an admin cannot delete their own account.
 - One role per user. Shipped: `guest` (`run_js` and the web tools), `reader` (`run_js` and read-only file tools), `poweru` (`run_js`, `bash`, file and web tools), `admin`. A role lists `run_js`, `bash`, both or neither.
 
@@ -181,7 +184,7 @@ user connects their own account, and every call of their chats carries their own
 
 ## REST API
 
-All paths are under `/api/chat`. Errors are `{"error": "..."}`.
+Chat endpoints are under `/api/chat`; the other tables below list their own paths. Errors are `{"error": "..."}`.
 
 | Method and path | Body / params | Result |
 |---|---|---|
@@ -201,6 +204,11 @@ All paths are under `/api/chat`. Errors are `{"error": "..."}`.
 | `GET /api/chat/{id}/files?q=` | | up to 50 file paths of the working directory (depth 8) containing `q`, for `@` mentions |
 | `GET /api/chat/{id}/usage` | | tokens and `estimatedCostUsd` |
 | `GET /api/chat/commands` | | slash commands (`action: server`) plus one `prompt:` shortcut per tool group |
+| `GET /api/chat/{id}/references` | | references of the chat |
+| `GET /api/content-warnings` | | warnings found in loaded files (suspicious content) |
+| `GET/PUT /api/chat/{id}/fs/content`, `POST .../fs/upload`, `POST .../fs/rename`, `GET .../fs/download`, `GET .../fs/glob`, `GET .../fs/tree` | | file explorer over the chat's work directory (FilesApi) |
+| `/api/plugins/{id}/**`, `GET /api/plugins/{id}/events` | | web plugins and their event stream |
+| `GET /auth/oidc/login`, `GET /auth/oidc/callback` | | OpenID Connect sign-in (see above) |
 
 ### Sign-in, settings and administration (this module)
 
@@ -218,7 +226,7 @@ All paths are under `/api/chat`. Errors are `{"error": "..."}`.
 | `POST /api/me/skills`, `PUT /api/me/skills/{name}`, `DELETE /api/me/skills/{name}` | `{name, description, content}` | own skills; 409 name taken, 413 too large, 403 not own |
 | `GET/POST /api/admin/users`, `PUT/DELETE /api/admin/users/{id}` | `{id, name, role, password?}` | admin only (403 otherwise) |
 | `POST /api/admin/users/{id}/password` | `{password?}` | set, or reset to the default when absent |
-| `GET/POST /api/admin/roles`, `PUT/DELETE /api/admin/roles/{name}` | `{name, tools, readOnly, approval}` | `admin` 403; delete 409 while held |
+| `GET/POST /api/admin/roles`, `PUT/DELETE /api/admin/roles/{name}` | `{name, tools, readOnly, approval, toolPermissions?}` | `admin` 403; delete 409 while held |
 | `GET /api/admin/catalog` | | `{tools, mcp, api}`: everything a role can be granted |
 | `GET/POST /api/admin/skills`, `GET/PUT/DELETE /api/admin/skills/{name}` | `{name, description, content}` | global skills; settings-file skills read-only |
 
@@ -286,8 +294,8 @@ the reference stores: the file repositories, the sign-in sessions and the beans 
 | `JllmWebApplication` | Spring Boot entry point, CLI-style flags, API key prompt; does not component-scan the starter, whose auto-configuration registers it |
 | `WebAuthConfiguration` | beans below; supplies `WebAuthentication`, `ChatAccess`, `HarnessIdentity` and the `AuthApi`, `OidcApi`, `MeApi` and `AdminApi` handlers, whose controllers the starter then mounts |
 | `auth.InMemoryLoginSessionRepository` | sign-in sessions in memory (a `LoginSessionRepository`) |
-| `users.FileUserRepository` | `webauth/users/<id>.json` (a `UserRepository`, interface and `User` in jllm-web-commons) |
-| `users.FileRoleRepository` | `webauth/permissions/<role>.json` (a `RoleRepository`; `Role` in jllm-web-commons) |
+| `users.FileUserRepository` | `webauth/users/<id>.json` (a `UserRepository`, interface in jllm-harness `org.kendar.llm.harness.identity`, as is `User`) |
+| `users.FileRoleRepository` | `webauth/permissions/<role>.json` (a `RoleRepository`; `Role` in jllm-harness) |
 | `users.FileSkillRepository` | `webauth/global-skills/` and `webauth/user-skills/<id>/` (a `SkillRepository`) |
 | `users.JsonFiles` | atomic writes of the `webauth` files |
 | `SampleFlows` | the sample workflow files |
