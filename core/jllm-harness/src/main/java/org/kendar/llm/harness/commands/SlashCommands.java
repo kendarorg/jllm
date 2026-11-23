@@ -130,7 +130,7 @@ public final class SlashCommands {
             return menus.select(chatId, Integer.parseInt(in));
         } catch (NumberFormatException e) {
             return new Result("Type a number, or Esc / b to go back", null, false, true);
-        } catch (Exception e) {
+        } catch (Exception e) { // boundary: a failing command is shown to the user as text
             return new Result("error: " + e.getMessage(), null, false, menus.active(chatId));
         }
     }
@@ -266,7 +266,7 @@ public final class SlashCommands {
                 case "/edit" -> setMode(chatId, "edit");
                 case "/auto" -> setMode(chatId, "auto");
                 case "/cancel" -> {
-                    harness.cancel(chatId);
+                    harness.cancel(chatId, false);
                     yield Result.text("Cancel requested");
                 }
                 case "/steer" -> {
@@ -332,14 +332,14 @@ public final class SlashCommands {
             };
         } catch (AgentService.RunAlreadyActiveException e) {
             return Result.text("A run is in progress");
-        } catch (Exception e) {
+        } catch (Exception e) { // boundary: a failing command is shown to the user as text
             return Result.text("error: " + e.getMessage());
         }
     }
 
     /** The store key a caller's login of {@code name} uses, or a refusal (as an exception message). */
     private String keyFor(Caller who, String name, boolean shared) {
-        boolean perUser = harness.oauth().perUser(name);
+        boolean perUser = harness.auth().oauth().perUser(name);
         if (!who.web()) return null; // the command line is the single user
         if (shared || !perUser) {
             if (!who.admin()) {
@@ -357,8 +357,8 @@ public final class SlashCommands {
         String[] a = arg.split("\\s+");
         String name = a[0];
         boolean shared = a.length > 1 && a[1].equals("shared");
-        if (harness.oauth().serviceAccount(name)) return name + " uses a service account: there is nothing to log in";
-        var logins = harness.logins();
+        if (harness.auth().oauth().serviceAccount(name)) return name + " uses a service account: there is nothing to log in";
+        var logins = harness.auth().logins();
         if (!logins.containsKey(name)) {
             return "unknown login " + name + (logins.isEmpty() ? "" : " (" + String.join(", ", logins.keySet()) + ")");
         }
@@ -374,7 +374,7 @@ public final class SlashCommands {
         String[] a = arg.split("\\s+");
         String name = a[0];
         String key = keyFor(who, name, a.length > 1 && a[1].equals("shared"));
-        return harness.logout(key, name) ? "Logged out of " + name : "No stored login for " + name;
+        return harness.auth().logout(key, name) ? "Logged out of " + name : "No stored login for " + name;
     }
 
     /**
@@ -382,8 +382,8 @@ public final class SlashCommands {
      * store in use. A web user who is not the admin sees the per-user sources only, with their own state.
      */
     private String loginList(Caller who) {
-        var logins = harness.logins();
-        var oauth = harness.oauth();
+        var logins = harness.auth().logins();
+        var oauth = harness.auth().oauth();
         java.util.TreeSet<String> names = new java.util.TreeSet<>(logins.keySet());
         names.addAll(oauth.names());
         if (names.isEmpty()) return "No logins available";
@@ -405,8 +405,8 @@ public final class SlashCommands {
         }
         String store;
         try {
-            store = harness.tokenStore().describe();
-        } catch (RuntimeException e) {
+            store = harness.auth().tokenStore().describe();
+        } catch (RuntimeException e) { // boundary: a status line must not fail on an unavailable store
             store = "unavailable (" + e.getMessage() + ")";
         }
         out.append("tokens kept in: ").append(store);
@@ -415,20 +415,20 @@ public final class SlashCommands {
 
     private String state(String key, String name) {
         try {
-            return harness.tokenStore().get(key, name).map(t -> t.expiresAt() == 0 ? "connected"
+            return harness.auth().tokenStore().get(key, name).map(t -> t.expiresAt() == 0 ? "connected"
                     : "connected (expires " + java.time.Instant.ofEpochSecond(t.expiresAt()) + ")")
                     .orElse("not connected");
-        } catch (RuntimeException e) {
+        } catch (RuntimeException e) { // boundary: a status line must not fail on an unavailable store
             return "unknown (" + e.getMessage() + ")";
         }
     }
 
     /** Runs a login on the command line (loopback redirect, or device code), blocking until it ends. */
     private String login(String name) {
-        var login = harness.logins().get(name);
+        var login = harness.auth().logins().get(name);
         StringBuilder out = new StringBuilder();
         try {
-            harness.saveLogin(null, name, login.login(new org.kendar.llm.harness.auth.UserInteraction() {
+            harness.auth().saveLogin(null, name, login.login(new org.kendar.llm.harness.auth.UserInteraction() {
                 @Override
                 public void show(String message) {
                     out.append(message).append('\n');
@@ -455,7 +455,7 @@ public final class SlashCommands {
      * {@link #onLoginFinished}; {@code /login} without a name shows who is logged in.
      */
     private String loginInBackground(String chatId, String name, String key) {
-        var login = harness.logins().get(name);
+        var login = harness.auth().logins().get(name);
         String slot = (key == null ? "-" : key) + "/" + name;
         java.util.concurrent.CompletableFuture<String> first = new java.util.concurrent.CompletableFuture<>();
         StringBuilder shown = new StringBuilder();
@@ -476,9 +476,9 @@ public final class SlashCommands {
                         return null;
                     }
                 });
-                harness.saveLogin(key, name, token);
+                harness.auth().saveLogin(key, name, token);
                 outcome = "Logged in to " + name;
-            } catch (Exception e) {
+            } catch (Exception e) { // boundary: login thread top level: the outcome is reported to the user
                 outcome = "Login to " + name + " failed: " + e.getMessage();
             } finally {
                 loginsInProgress.remove(slot);
@@ -486,7 +486,7 @@ public final class SlashCommands {
             first.complete(outcome);
             try {
                 loginListener.accept(chatId, outcome);
-            } catch (RuntimeException ignored) {
+            } catch (RuntimeException ignored) { // boundary: listener isolation
                 // the listener's problem
             }
         });
@@ -497,7 +497,10 @@ public final class SlashCommands {
             firstMessage = first.get(5, java.util.concurrent.TimeUnit.SECONDS);
         } catch (java.util.concurrent.TimeoutException e) {
             firstMessage = "Login to " + name + " started";
-        } catch (Exception e) {
+        } catch (java.util.concurrent.ExecutionException e) {
+            firstMessage = "Login to " + name + " started";
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
             firstMessage = "Login to " + name + " started";
         }
         synchronized (shown) {

@@ -47,7 +47,7 @@ class StuckDetectionTest {
     private Events answering(boolean approve) {
         Events ev = new Events();
         ev.also = (type, data) -> {
-            if ("approval_request".equals(type)) rig.approvals.resolve(chatId, data.get("id").asText(), approve, null);
+            if ("approval_request".equals(type)) rig.approvals.resolve(chatId, data.get("id").asText(), approve, null, false, false);
         };
         return ev;
     }
@@ -77,7 +77,7 @@ class StuckDetectionTest {
         rig.model.enqueue(text("never reached"));
         Events ev = answering(false);
 
-        AgentLoop.Outcome outcome = rig.loop.run(chatId, "go", ev, () -> false);
+        AgentLoop.Outcome outcome = rig.loop.run(chatId, "go", ev, () -> false, null);
 
         assertEquals(AgentLoop.Outcome.STUCK, outcome);
         assertEquals(List.of("nudge", "stop"), actions(ev));
@@ -98,7 +98,7 @@ class StuckDetectionTest {
         rig.model.enqueue(text("done"));
         Events ev = answering(true);
 
-        assertEquals(AgentLoop.Outcome.COMPLETED, rig.loop.run(chatId, "go", ev, () -> false));
+        assertEquals(AgentLoop.Outcome.COMPLETED, rig.loop.run(chatId, "go", ev, () -> false, null));
         assertEquals(List.of("nudge", "continue"), actions(ev));
         assertEquals(1, ev.ofType("approval_request").size());
     }
@@ -108,7 +108,7 @@ class StuckDetectionTest {
         rig.model.enqueue(call("t", "{'a':1,'b':2}"), call("t", "{'b':2,'a':1}"), call("t", "{'a':1,'b':2}"),
                 text("ok"));
         Events ev = answering(false);
-        rig.loop.run(chatId, "go", ev, () -> false);
+        rig.loop.run(chatId, "go", ev, () -> false, null);
         assertEquals(List.of("nudge"), actions(ev));
     }
 
@@ -117,7 +117,7 @@ class StuckDetectionTest {
         for (int i = 0; i < 3; i++) rig.model.enqueue(call("t", "{}"), call("u", "{}"));
         rig.model.enqueue(text("ok"));
         Events ev = answering(false);
-        rig.loop.run(chatId, "go", ev, () -> false);
+        rig.loop.run(chatId, "go", ev, () -> false, null);
         assertEquals(List.of("nudge"), actions(ev));
         assertEquals("alternation", ev.ofType("stuck").get(0).path("pattern").asText());
     }
@@ -126,7 +126,7 @@ class StuckDetectionTest {
     void malformedCallsInARowAreALoop() {
         rig.model.enqueue(call("nope", "{'x':1}"), call("nope2", "{'x':2}"), call("nope3", "{'x':3}"), text("ok"));
         Events ev = answering(false);
-        rig.loop.run(chatId, "go", ev, () -> false);
+        rig.loop.run(chatId, "go", ev, () -> false, null);
         assertEquals(List.of("nudge"), actions(ev));
         assertEquals("malformed", ev.ofType("stuck").get(0).path("pattern").asText());
     }
@@ -138,7 +138,7 @@ class StuckDetectionTest {
         for (int i = 0; i < 4; i++) rig.model.enqueue(call("echo", "{'edit':" + i + "}"), call("u", "{}"));
         rig.model.enqueue(text("ok"));
         Events ev = answering(false);
-        assertEquals(AgentLoop.Outcome.COMPLETED, rig.loop.run(chatId, "go", ev, () -> false));
+        assertEquals(AgentLoop.Outcome.COMPLETED, rig.loop.run(chatId, "go", ev, () -> false, null));
         assertTrue(ev.ofType("stuck").isEmpty(), ev.ofType("stuck").toString());
     }
 
@@ -152,7 +152,7 @@ class StuckDetectionTest {
         }
         rig.model.enqueue(text("ok"));
         Events ev = answering(false);
-        rig.loop.run(chatId, "go", ev, () -> false);
+        rig.loop.run(chatId, "go", ev, () -> false, null);
         assertEquals(List.of("nudge"), actions(ev));
         assertEquals("repeat", ev.ofType("stuck").get(0).path("pattern").asText());
     }
@@ -166,17 +166,17 @@ class StuckDetectionTest {
         }
         rig.model.enqueue(text("ok"));
         Events ev = answering(false);
-        rig.loop.run(chatId, "go", ev, () -> false);
+        rig.loop.run(chatId, "go", ev, () -> false, null);
         assertEquals("same_error", ev.ofType("stuck").get(0).path("pattern").asText());
     }
 
     @Test
     void disabledDetectionKeepsTodaysBehaviour() {
-        rig.configure(c -> c.withLoop(new HarnessConfig.Loop(new HarnessConfig.Stuck(false, 3, 3, 3), null)));
+        rig.configure(c -> c.withLoop(new HarnessConfig.Loop(new HarnessConfig.Stuck(false, 3, 3, 3), null, 10)));
         for (int i = 0; i < 7; i++) rig.model.enqueue(call("t", "{}"));
         rig.model.enqueue(text("ok"));
         Events ev = answering(false);
-        assertEquals(AgentLoop.Outcome.COMPLETED, rig.loop.run(chatId, "go", ev, () -> false));
+        assertEquals(AgentLoop.Outcome.COMPLETED, rig.loop.run(chatId, "go", ev, () -> false, null));
         assertTrue(ev.ofType("stuck").isEmpty());
     }
 
@@ -184,8 +184,8 @@ class StuckDetectionTest {
     void aStuckSubAgentReportsStatusStuckToTheParent() {
         for (int i = 0; i < 6; i++) rig.model.enqueue(call("t", "{}"));
         rig.model.enqueue(text("never reached"));
-        AgentLoop.SubAgentIncompleteException e = assertThrows(AgentLoop.SubAgentIncompleteException.class,
-                () -> rig.loop.runSubAgent(chatId, null, "look around"));
+        SubAgentIncompleteException e = assertThrows(SubAgentIncompleteException.class,
+                () -> rig.subAgent(chatId, null, "look around", null));
         assertEquals("stuck", e.status());
         assertEquals(6, rig.model.requests.size());
     }

@@ -32,16 +32,16 @@ class CheckpointsTest {
         cp.beginTurn("c1", root);
         run(fs, "write_file", "{\"path\":\"a.txt\",\"content\":\"four\"}");
 
-        var first = cp.undo("c1", root, 1);
+        var first = cp.undo("c1", root, 1, ExternalLinks.NONE);
         assertEquals(1, first.turns());
         assertEquals("three\n", Files.readString(root.resolve("a.txt")));
         assertTrue(Files.exists(root.resolve("sub/new.txt")));
 
-        var second = cp.undo("c1", root, 1);
+        var second = cp.undo("c1", root, 1, ExternalLinks.NONE);
         assertEquals("one\n", Files.readString(root.resolve("a.txt")));
         assertFalse(Files.exists(root.resolve("sub/new.txt")));
         assertTrue(second.message().contains("shell commands are not restored"));
-        assertEquals(0, cp.undo("c1", root, 1).turns());
+        assertEquals(0, cp.undo("c1", root, 1, ExternalLinks.NONE).turns());
     }
 
     @Test
@@ -60,7 +60,7 @@ class CheckpointsTest {
         Files.writeString(Files.createDirectories(files.resolve(".jllm/scratchpad")).resolve("s.txt"), "pwned");
 
         Checkpoints cp = new Checkpoints();
-        var r = cp.undo("c1", work, 1);
+        var r = cp.undo("c1", work, 1, ExternalLinks.NONE);
 
         assertEquals(1, r.turns());
         assertEquals("keep", Files.readString(victim));
@@ -81,7 +81,7 @@ class CheckpointsTest {
             org.junit.jupiter.api.Assumptions.assumeTrue(false, "symlinks not permitted: " + e);
         }
 
-        new Checkpoints().undo("c1", work, 1);
+        new Checkpoints().undo("c1", work, 1, ExternalLinks.NONE);
 
         assertFalse(Files.exists(work.resolve("copy.txt")), "a link must not copy an outside file in");
         assertEquals("TOP SECRET", Files.readString(secret));
@@ -115,7 +115,7 @@ class CheckpointsTest {
         run(fs, "write_file", "{\"path\":\"a.txt\",\"content\":\"two\"}");
 
         assertTrue(Files.isDirectory(root.resolve(".jllm/checkpoints/c1/3000000001")));
-        var r = cp.undo("c1", root, 1);
+        var r = cp.undo("c1", root, 1, ExternalLinks.NONE);
         assertEquals(1, r.turns());
         assertEquals("one", Files.readString(root.resolve("a.txt")));
     }

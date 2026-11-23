@@ -2,6 +2,8 @@ package org.kendar.llm.eval;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import org.kendar.llm.eval.pin.BuildInfo;
+import org.kendar.llm.eval.pin.JsInfo;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -9,21 +11,25 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 
 /**
  * Describes the run for every later step. Written as {@code run.json} in the run's output folder. {@code targetModel}
  * and {@code judgeModel} are the reported names ({@code eval.target.modelName}, {@code eval.judge.modelName});
- * {@code targetModelId} and {@code judgeModelId} are the ids sent to the servers.
+ * {@code targetModelId} and {@code judgeModelId} are the ids sent to the servers. {@code build} pins the harness
+ * version, {@code settingsHash} and {@code promptsHash} what it was configured with ({@code settings.json} beside this
+ * file holds the hashed text), {@code passK} the k values of pass@k and pass^k, {@code dirtyTree} the policy applied.
  */
 public record RunMetadata(String targetType, String targetName, String targetModel, String quantization,
                           int contextTokens, boolean smallModel, String serverVersion, String judgeType,
                           String judgeModel, String fastModel, boolean selfGraded, String startTime,
-                          String gitCommit, Map<String, Long> warmupMillis, int trials, String targetModelId,
-                          String judgeModelId) {
+                          BuildInfo build, String settingsHash, String promptsHash, List<Integer> passK,
+                          String dirtyTree, JsInfo js, Map<String, Long> warmupMillis, int trials,
+                          String targetModelId, String judgeModelId) {
 
-    public static RunMetadata of(EvalConfig c, ConnectionCheck.Result check, Instant start) {
+    public static RunMetadata of(EvalConfig c, ConnectionCheck.Result check, Instant start, BuildInfo build,
+                                 String settingsHash, String promptsHash, JsInfo js) {
         ModelEndpoint t = c.target();
         String quant = c.local() != null ? c.local().model().quantization() : "unknown";
         String server = switch (c.targetKind()) {
@@ -35,7 +41,8 @@ public record RunMetadata(String targetType, String targetName, String targetMod
         check.warmupMillis().forEach((k, v) -> warm.put(k.name().toLowerCase(), v));
         return new RunMetadata(c.targetKind().name().toLowerCase(), c.targetName(), c.targetModelName(), quant,
                 t.contextTokens(), t.smallModel(), server, c.judgeKind(), c.judgeModelName(), c.fast().model(),
-                c.selfGraded(), start.toString(), readGitCommit(), warm, c.trials(), t.model(), c.judge().model());
+                c.selfGraded(), start.toString(), build, settingsHash, promptsHash, c.passK(), c.dirtyTree().key(), js,
+                warm, c.trials(), t.model(), c.judge().model());
     }
 
     /** Writes run.json (secrets masked) and returns its path. */
@@ -46,16 +53,5 @@ public record RunMetadata(String targetType, String targetName, String targetMod
         Path file = dir.resolve("run.json");
         Files.writeString(file, json, StandardCharsets.UTF_8);
         return file;
-    }
-
-    static String readGitCommit() {
-        try {
-            Process p = new ProcessBuilder("git", "rev-parse", "HEAD").redirectErrorStream(true).start();
-            String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
-            if (!p.waitFor(10, TimeUnit.SECONDS) || p.exitValue() != 0 || out.isEmpty()) return "unknown";
-            return out;
-        } catch (Exception e) {
-            return "unknown";
-        }
     }
 }

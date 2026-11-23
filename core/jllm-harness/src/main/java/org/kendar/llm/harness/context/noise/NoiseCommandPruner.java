@@ -80,7 +80,7 @@ public final class NoiseCommandPruner {
     public int afterTurn(String chatId) {
         try {
             return prune(chatId);
-        } catch (RuntimeException e) {
+        } catch (RuntimeException e) { // boundary: context strategy failure must not fail the turn
             log.warn("Noise pruning of chat {} failed: {}", chatId, e.getMessage());
             return 0;
         }

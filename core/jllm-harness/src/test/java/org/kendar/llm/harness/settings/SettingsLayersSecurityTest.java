@@ -43,7 +43,7 @@ class SettingsLayersSecurityTest {
     }
 
     private HarnessSettings load(ProjectMcpTrust.Prompt prompt) {
-        return HarnessSettings.loadLayered(new FileSettingsSource(null, project), project, k -> null, prompt, trust, warnings::add,
+        return HarnessSettingsLoader.loadLayered(new FileSettingsSource(null, project), project, k -> null, prompt, trust, warnings::add,
                 new org.kendar.llm.harness.safety.ContentWarnings());
     }
 
@@ -78,7 +78,7 @@ class SettingsLayersSecurityTest {
         warnings.clear();
         Path single = tmp.resolve("single.json");
         write(single, "{\"bogus\":1}");
-        HarnessSettings.mapper(warnings::add).treeToValue(
+        HarnessSettingsLoader.mapper(warnings::add).treeToValue(
                 new com.fasterxml.jackson.databind.ObjectMapper().readTree(single.toFile()), HarnessSettings.class);
         assertEquals(List.of("Unknown setting 'bogus' at /bogus (ignored)"), warnings);
     }
@@ -124,7 +124,7 @@ class SettingsLayersSecurityTest {
         Path explicit = tmp.resolve("explicit.json");
         write(explicit, STDIO);
         write(project.resolve(".jllm/settings.json"), "{}");
-        assertEquals(2, HarnessSettings.loadLayered(new FileSettingsSource(explicit, project), project, k -> null, ProjectMcpTrust.Prompt.NONE, trust,
+        assertEquals(2, HarnessSettingsLoader.loadLayered(new FileSettingsSource(explicit, project), project, k -> null, ProjectMcpTrust.Prompt.NONE, trust,
                 warnings::add,
                 new org.kendar.llm.harness.safety.ContentWarnings()).mcpServers().size());
     }

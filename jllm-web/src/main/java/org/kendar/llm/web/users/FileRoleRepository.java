@@ -49,7 +49,8 @@ public final class FileRoleRepository implements RoleRepository {
         if (!Files.isRegularFile(file)) return Optional.empty();
         try {
             return Optional.of(parse(name, mapper.readTree(file.toFile())));
-        } catch (IOException | RuntimeException e) {
+        } catch (IOException | IllegalArgumentException e) {
+            log.debug("Stack of the skipped permission file {}", file, e);
             log.warn("Permission file {} skipped: {}", file, e.toString());
             return Optional.empty();
         }

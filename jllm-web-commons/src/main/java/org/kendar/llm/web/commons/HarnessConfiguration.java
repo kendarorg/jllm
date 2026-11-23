@@ -2,6 +2,7 @@ package org.kendar.llm.web.commons;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.kendar.llm.harness.AgentHarness;
+import org.kendar.llm.harness.AgentHarnessBuilder;
 import org.kendar.llm.harness.HarnessConfig;
 import org.kendar.llm.harness.HarnessPricing;
 import org.kendar.llm.harness.context.mnemonic.FileMnemonicStore;
@@ -17,11 +18,14 @@ import org.kendar.llm.harness.session.InMemorySubAgentRunLog;
 import org.kendar.llm.harness.session.SubAgentRunLog;
 import org.kendar.llm.harness.settings.FileProjectMcpTrust;
 import org.kendar.llm.harness.settings.FileSettingsSource;
+import org.kendar.llm.harness.settings.HarnessConfigMapper;
 import org.kendar.llm.harness.settings.HarnessSettings;
+import org.kendar.llm.harness.settings.HarnessSettingsLoader;
 import org.kendar.llm.harness.settings.ProjectMcpTrust;
 import org.kendar.llm.harness.settings.SettingsSource;
 import org.kendar.llm.harness.state.FileStateStore;
 import org.kendar.llm.harness.state.StateStore;
+import org.kendar.llm.harness.tools.ExternalLinks;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -66,7 +70,7 @@ public class HarnessConfiguration {
                 new FileSettingsSource(settingsFile == null ? null : Path.of(settingsFile), projectDir));
         // suspicious content in the loaded files: logged, and listed to the users by /api/content-warnings
         var contentWarnings = new org.kendar.llm.harness.safety.ContentWarnings();
-        HarnessSettings settings = HarnessSettings.loadLayered(source, projectDir, System::getenv,
+        HarnessSettings settings = HarnessSettingsLoader.loadLayered(source, projectDir, System::getenv,
                 ProjectMcpTrust.Prompt.NONE, projectTrust.getIfAvailable(FileProjectMcpTrust::user),
                 org.slf4j.LoggerFactory.getLogger(HarnessConfiguration.class)::warn, contentWarnings);
         var promptFiles = org.kendar.llm.harness.instructions.SystemPromptFiles.load(projectDir);
@@ -80,17 +84,17 @@ public class HarnessConfiguration {
                                 : null),
                 JllmProperties.blankToNull(p.systemPrompt()));
         // same precedence as the CLI: the property wins over the settings file
-        if (p.contextTokens() != null && p.contextTokens() > 0) settings = settings.withMaxTokens(p.contextTokens());
-        if (JllmProperties.blankToNull(p.contextStrategy()) != null) {
-            settings = settings.withContextStrategy(p.contextStrategy());
-        }
-        if (Boolean.TRUE.equals(p.smallModel())) settings = settings.withSmallModel(true);
-        if (JllmProperties.blankToNull(p.sandbox()) != null) settings = settings.withSandboxBackend(p.sandbox());
-        if (JllmProperties.blankToNull(p.dockerImage()) != null) settings = settings.withDockerImage(p.dockerImage());
-        if (JllmProperties.blankToNull(p.dockerMode()) != null) settings = settings.withDockerMode(p.dockerMode());
+        var b = withoutExternalLinks(settings).toBuilder();
+        if (p.contextTokens() != null && p.contextTokens() > 0) b.maxTokens(p.contextTokens());
+        if (JllmProperties.blankToNull(p.contextStrategy()) != null) b.contextStrategy(p.contextStrategy());
+        if (Boolean.TRUE.equals(p.smallModel())) b.smallModel(true);
+        if (JllmProperties.blankToNull(p.sandbox()) != null) b.sandboxBackend(p.sandbox());
+        if (JllmProperties.blankToNull(p.dockerImage()) != null) b.dockerImage(p.dockerImage());
+        if (JllmProperties.blankToNull(p.dockerMode()) != null) b.dockerMode(p.dockerMode());
         if (p.dockerRemote() != null || JllmProperties.blankToNull(p.dockerRemoteHost()) != null) {
-            settings = settings.withDockerRemote(p.dockerRemote(), JllmProperties.blankToNull(p.dockerRemoteHost()));
+            b.dockerRemote(p.dockerRemote(), JllmProperties.blankToNull(p.dockerRemoteHost()));
         }
+        settings = b.build();
         if (p.plugins() != null) {
             for (var e : p.plugins().entrySet()) {
                 if (e.getValue() == null) continue;
@@ -98,9 +102,10 @@ public class HarnessConfiguration {
                         e.getValue().settings() == null ? null : mapper.valueToTree(e.getValue().settings()));
             }
         }
+        settings = withUntrustedScriptPolicy(settings);
         services.publish(org.kendar.llm.web.commons.plugins.PluginsSettings.class,
                 new org.kendar.llm.web.commons.plugins.PluginsSettings(settings.plugins()));
-        HarnessConfig config = settings.applyTo(HarnessConfig.defaults());
+        HarnessConfig config = HarnessConfigMapper.apply(settings, HarnessConfig.defaults());
         String searchKey = JllmProperties.blankToNull(p.searchApiKey());
         if (searchKey == null) searchKey = System.getenv("BRAVE_API_KEY");
         if (searchKey != null) config = config.withSearchApiKey(searchKey);
@@ -113,7 +118,7 @@ public class HarnessConfiguration {
         services.publish(org.kendar.llm.harness.plugin.PluginStorages.class, pluginStorages.getIfAvailable(() ->
                 new org.kendar.llm.web.commons.plugins.FilePluginStorage(
                         projectDir.resolve(".jllm").resolve("plugin-data"), mapper)));
-        AgentHarness.Builder builder = AgentHarness.builder().services(services);
+        AgentHarnessBuilder builder = new AgentHarnessBuilder().services(services);
         if (JllmProperties.blankToNull(p.pluginDir()) != null) builder.pluginDir(Path.of(p.pluginDir()));
         else if (java.nio.file.Files.isDirectory(Path.of("plugins"))) builder.pluginDir(Path.of("plugins"));
         AgentHarness harness = builder
@@ -167,6 +172,33 @@ public class HarnessConfiguration {
                     org.kendar.llm.harness.sandbox.RemoteExecSandboxExecutor.Kind.WEB, projectDir);
         }
         return new org.kendar.llm.harness.sandbox.DockerSandboxExecutor(config, runner, layout);
+    }
+
+    private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(HarnessConfiguration.class);
+
+    /**
+     * The settings with {@code files.externalLinks} forced to {@code none}: the web host never follows a link out of the
+     * project, whatever the settings say. One WARN when the key names another value, which is ignored.
+     */
+    static HarnessSettings withoutExternalLinks(HarnessSettings settings) {
+        var f = settings.files();
+        if (f != null && f.externalLinks() != null && f.externalLinks() != ExternalLinks.NONE) {
+            LOG.warn("files.externalLinks={} is ignored: the web host never follows a link that leaves the project "
+                    + "directory (it always uses none)", f.externalLinks().settingValue());
+        }
+        return settings.toBuilder().externalLinks(ExternalLinks.NONE).build();
+    }
+
+    /**
+     * The web host serves untrusted users: unless the {@code js} plugin entry names a {@code policy}, its isolated
+     * profile uses the {@code untrusted} sandbox policy. Does nothing when the plugin is not listed and enabled.
+     */
+    static HarnessSettings withUntrustedScriptPolicy(HarnessSettings settings) {
+        var plugins = settings.plugins();
+        var js = plugins == null ? null : plugins.get("js");
+        if (js == null || !js.path("enabled").asBoolean(false) || js.path("settings").has("policy")) return settings;
+        var policy = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode().put("policy", "untrusted");
+        return settings.withPlugin("js", null, policy);
     }
 
     private static double nz(Double d) {

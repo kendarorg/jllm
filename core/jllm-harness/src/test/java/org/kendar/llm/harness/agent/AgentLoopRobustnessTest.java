@@ -54,14 +54,14 @@ class AgentLoopRobustnessTest {
         rig.model.enqueue(resp("refusal", "[{'type':'tool_use','id':'u1','name':'t','input':{}},"
                 + "{'type':'tool_use','id':'u2','name':'t','input':{}}]"), text("fine"));
 
-        rig.loop.run(chatId, "first", new Events(), () -> false);
+        rig.loop.run(chatId, "first", new Events(), () -> false, null);
         ArrayNode log = rig.sessions.messages(rig.sessions.get(chatId));
         JsonNode last = log.get(log.size() - 1);
         assertEquals("user", last.get("role").asText());
         assertEquals(2, last.get("content").size());
         assertTrue(last.get("content").get(0).get("is_error").asBoolean());
 
-        rig.loop.run(chatId, "second", new Events(), () -> false);
+        rig.loop.run(chatId, "second", new Events(), () -> false, null);
         assertPaired(rig.model.requests.get(1).messages());
     }
 
@@ -71,7 +71,7 @@ class AgentLoopRobustnessTest {
         rig.model.enqueue(resp("model_context_window_exceeded",
                 "[{'type':'tool_use','id':'u1','name':'t','input':{}}]"));
 
-        rig.loop.run(chatId, "first", new Events(), () -> false);
+        rig.loop.run(chatId, "first", new Events(), () -> false, null);
 
         assertPaired(rig.sessions.messages(rig.sessions.get(chatId)));
     }
@@ -85,7 +85,7 @@ class AgentLoopRobustnessTest {
         rig.sessions.saveMessages(chatId, log);
         rig.model.enqueue(text("ok"));
 
-        rig.loop.run(chatId, "next", new Events(), () -> false);
+        rig.loop.run(chatId, "next", new Events(), () -> false, null);
 
         ArrayNode sent = rig.model.requests.get(0).messages();
         assertPaired(sent);
@@ -105,7 +105,7 @@ class AgentLoopRobustnessTest {
         rig.model.enqueue(toolUse("u1", "t", "{}"), text("done"));
         Events ev = new Events();
 
-        rig.loop.run(chatId, "go", ev, () -> false);
+        rig.loop.run(chatId, "go", ev, () -> false, null);
 
         assertEquals(1, ev.ofType("tool_call").size());
         assertEquals(1, ev.ofType("tool_result").size());
@@ -122,7 +122,7 @@ class AgentLoopRobustnessTest {
             return r.messages().size() == 1 ? toolUse("t1", "task", "{\"prompts\":[\"p\"]}") : text("fin");
         };
 
-        rig.loop.run(chatId, "go", new Events(), () -> false);
+        rig.loop.run(chatId, "go", new Events(), () -> false, null);
 
         var main = rig.model.requests.stream().filter(r -> !r.pinned().contains("subagent")).toList();
         ArrayNode second = main.get(1).messages();
@@ -141,8 +141,8 @@ class AgentLoopRobustnessTest {
             return text("unused");
         };
 
-        AgentLoop.SubAgentIncompleteException e = assertThrows(AgentLoop.SubAgentIncompleteException.class,
-                () -> rig.loop.runSubAgent(chatId, "t1", "do it"));
+        SubAgentIncompleteException e = assertThrows(SubAgentIncompleteException.class,
+                () -> rig.subAgent(chatId, "t1", "do it", null));
         assertEquals("refused", e.status());
     }
 
@@ -150,13 +150,13 @@ class AgentLoopRobustnessTest {
     void subAgentWithoutTheContextStackOnlyGetsTheUsersTools() {
         rig.register(tool("allowed", "G", ToolKind.READ_ONLY, (c, in) -> "a"),
                 tool("secret", "G", ToolKind.READ_ONLY, (c, in) -> "s"));
-        rig.loop.identity(new org.kendar.llm.harness.auth.Identity(null,
+        rig.identity(new org.kendar.llm.harness.auth.Identity(null,
                 org.kendar.llm.harness.auth.UserPolicyResolver.single(new org.kendar.llm.harness.auth.UserPolicy(
                         t -> !t.name().equals("secret"), null)),
                 null, chat -> null));
         rig.model.handler = r -> text("done");
 
-        rig.loop.runSubAgent(chatId, "t1", "look");
+        rig.subAgent(chatId, "t1", "look", null);
 
         var sub = rig.model.requests.get(0);
         assertTrue(sub.toolNames().contains("allowed"));

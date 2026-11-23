@@ -10,9 +10,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.AgentHarness;
+import org.kendar.llm.harness.AgentHarnessBuilder;
 import org.kendar.llm.harness.agent.AgentEvent;
 import org.kendar.llm.harness.instructions.ScopedInstructions;
 import org.kendar.llm.harness.settings.HarnessSettings;
+import org.kendar.llm.harness.settings.HarnessSettingsLoader;
 import org.slf4j.LoggerFactory;
 
 import java.nio.file.Files;
@@ -77,7 +79,7 @@ class ContentWarningsIntegrationTest {
         ScriptedModel model = new ScriptedModel();
         model.enqueue(toolUse("t1", "read_file", "{'path':'sub/a.txt'}"), text("done"),
                 toolUse("t2", "read_file", "{'path':'sub/a.txt'}"), text("again"));
-        AgentHarness h = AgentHarness.builder().modelClient(model).config(config(base.resolve("w"))).build();
+        AgentHarness h = new AgentHarnessBuilder().modelClient(model).config(config(base.resolve("w"))).build();
         String chat = h.sessions().create(null).chatId();
         Path work = h.sandbox().workDir(chat);
         write(work.resolve("sub/AGENTS.md"), content);
@@ -139,7 +141,7 @@ class ContentWarningsIntegrationTest {
         ScriptedModel model = new ScriptedModel();
         model.enqueue(text("ok"));
 
-        AgentHarness h = AgentHarness.builder().modelClient(model).config(config(base.resolve("w")))
+        AgentHarness h = new AgentHarnessBuilder().modelClient(model).config(config(base.resolve("w")))
                 .settings(settingsFile).build();
 
         assertEquals(List.of(settingsFile.toString(), skill.toString(), instructions.toString()),
@@ -170,7 +172,7 @@ class ContentWarningsIntegrationTest {
         System.setProperty("jllm.home", base.resolve("home").toString());
         try {
             ContentWarnings warnings = new ContentWarnings();
-            HarnessSettings s = HarnessSettings.loadLayered(
+            HarnessSettings s = HarnessSettingsLoader.loadLayered(
                     new org.kendar.llm.harness.settings.FileSettingsSource(null, project), project, k -> null, null,
                     new org.kendar.llm.harness.settings.FileProjectMcpTrust(base.resolve("trust.json")), m -> { },
                     warnings);

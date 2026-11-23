@@ -265,7 +265,7 @@ public class ScopeStrategy implements ContextStrategy {
             } else {
                 changed |= summarize(t, null, beforeClear);
             }
-        } catch (RuntimeException e) {
+        } catch (RuntimeException e) { // boundary: context strategy failure is reported as a warning
             log.warn("Summarization failed: {}", e.getMessage());
             t.sink().emit("warning", mapper.createObjectNode().put("message",
                     "Context summarization failed: " + e.getMessage()));
@@ -312,7 +312,7 @@ public class ScopeStrategy implements ContextStrategy {
                     String path = offload.store(t.chatId(), t.agentKey(), id + ".txt", text);
                     ((ObjectNode) block).put("content", pointer(path, text, preview));
                     changed = true;
-                } catch (IOException | RuntimeException e) {
+                } catch (IOException | RuntimeException e) { // boundary: offloading is optional, the original stays
                     log.warn("Cannot offload a tool result: {}", e.getMessage()); // the original stays in place
                 }
             }

@@ -159,7 +159,8 @@ class McpPerUserTest {
         Identity identity = new Identity(resolver, null, id -> HarnessPrincipal.of(id), chat -> chat);
         McpHttpClient client = new McpHttpClient(HttpClient.newHttpClient(), MAPPER, url, Map.of())
                 .authProvider(AuthProvider.staticKey("Authorization", "Bearer ", "shared"));
-        HarnessTool tool = McpToolProvider.tools(settings, client, MAPPER, identity).get(0);
+        HarnessTool tool = McpToolProvider.tools(settings, client, MAPPER, identity, null,
+                org.kendar.llm.harness.tools.TruncationMode.HEAD).get(0);
 
         assertEquals("Bearer fresh", tool.execute(new ToolContext("alice", tmp), MAPPER.createObjectNode()));
         assertEquals(1, refreshed[0]);

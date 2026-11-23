@@ -1,5 +1,6 @@
 package org.kendar.llm.harness.tools;
 
+import java.io.IOException;
 import org.kendar.llm.harness.HarnessConfig;
 import org.kendar.llm.harness.sandbox.ExecutionResult;
 import org.kendar.llm.harness.sandbox.SandboxExecutor;
@@ -81,7 +82,7 @@ public class ShellAgentTools implements HarnessToolSet {
             }
             String tail = new String(buf.array(), 0, buf.position(), java.nio.charset.StandardCharsets.UTF_8);
             return tail.contains("[log truncated at ");
-        } catch (Exception e) {
+        } catch (IOException e) {
             return false;
         }
     }

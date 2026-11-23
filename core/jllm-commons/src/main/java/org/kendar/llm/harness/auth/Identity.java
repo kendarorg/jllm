@@ -9,6 +9,7 @@ import java.util.function.Function;
  * behavior (no extra headers, every tool, the harness approval policy).
  */
 public final class Identity {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(Identity.class);
 
     /** Single-user behavior: no principal, no extra credentials, every tool. */
     public static final Identity ANONYMOUS = new Identity(CredentialResolver.NONE, null, null, null);
@@ -68,7 +69,8 @@ public final class Identity {
         UserPolicy p;
         try {
             p = policies.resolve(principalOf(chatId));
-        } catch (RuntimeException e) {
+        } catch (RuntimeException e) { // boundary: an embedder resolver fails closed to no tools
+            log.debug("Policy resolver failed for chat {}, no tools offered: {}", chatId, e.toString());
             return UserPolicy.NONE;
         }
         return p == null ? UserPolicy.NONE : p;

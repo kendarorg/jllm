@@ -25,6 +25,7 @@ import java.util.stream.Stream;
 
 @RestController
 public class ChatController {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(ChatController.class);
 
     private static final int MAX_FILES = 50;
     private static final long SSE_TIMEOUT_MS = 30 * 60 * 1000L;
@@ -174,7 +175,8 @@ public class ChatController {
                     "tokensAfter", r.tokensAfter(), "clearedToolResults", r.clearedToolResults()));
         } catch (AgentService.RunAlreadyActiveException e) {
             return conflict("A run is in progress");
-        } catch (RuntimeException e) {
+        } catch (RuntimeException e) { // boundary: controller boundary: mapped to 502
+            log.warn("Compaction of chat {} failed", id, e);
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of("error", String.valueOf(e.getMessage())));
         }
     }
@@ -197,7 +199,7 @@ public class ChatController {
             try {
                 r = inMenu ? agentService.commands().menuInput(id, text.strip(), caller)
                         : agentService.commands().execute(id, text.strip(), caller);
-            } catch (RuntimeException e) {
+            } catch (RuntimeException e) { // boundary: controller boundary: mapped to 400
                 return ResponseEntity.badRequest().body(Map.of("error", String.valueOf(e.getMessage())));
             }
             Map<String, Object> m = new LinkedHashMap<>();
@@ -273,7 +275,7 @@ public class ChatController {
                 cleanup.run();
                 try {
                     emitter.completeWithError(e);
-                } catch (RuntimeException ignored) {
+                } catch (IllegalStateException ignored) {
                     // already completed
                 }
             }
@@ -330,7 +332,8 @@ public class ChatController {
             try {
                 return fb.glob("**/*").stream().filter(p -> !p.startsWith(".jllm/"))
                         .filter(p -> needle.isEmpty() || p.toLowerCase().contains(needle)).limit(MAX_FILES).toList();
-            } catch (IOException | RuntimeException e) {
+            } catch (IOException | RuntimeException e) { // boundary: controller boundary: an unreachable listing is empty
+                log.debug("File listing of chat {} failed: {}", id, e.toString());
                 return List.of();
             }
         }
@@ -378,8 +381,9 @@ public class ChatController {
                             return java.nio.file.FileVisitResult.CONTINUE;
                         }
                     });
-        } catch (IOException | RuntimeException e) {
+        } catch (IOException e) {
             // whatever was found so far
+            log.debug("File walk stopped early: {}", e.toString());
         }
         return found.stream().sorted().limit(MAX_FILES).toList();
     }

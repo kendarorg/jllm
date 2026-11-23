@@ -6,6 +6,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.AgentHarness;
+import org.kendar.llm.harness.AgentHarnessBuilder;
 import org.kendar.llm.harness.agent.AgentEvent;
 import org.kendar.llm.harness.settings.HarnessSettings;
 import org.kendar.llm.harness.settings.RestApiSettings;
@@ -72,9 +73,9 @@ class LoginRequiredLoopTest {
         ScriptedModel model = new ScriptedModel().enqueue(
                 toolUse("t1", "crm__listItems", "{}"), toolUse("t2", "crm__listItems", "{}"), text("need login"),
                 toolUse("t3", "crm__listItems", "{}"), text("done"));
-        AgentHarness h = AgentHarness.builder().modelClient(model).config(config(base)).withoutStandardTools()
-                .settings(new HarnessSettings(null, List.of(api), null, null, null, null)).tokenStore(store).build();
-        assertTrue(h.logins().containsKey("api:crm"));
+        AgentHarness h = new AgentHarnessBuilder().modelClient(model).config(config(base)).withoutStandardTools()
+                .settings(HarnessSettings.builder().restApis(List.of(api)).build()).tokenStore(store).build();
+        assertTrue(h.auth().logins().containsKey("api:crm"));
         String chat = h.sessions().create("t").chatId();
 
         List<AgentEvent> first = run(h, chat, "list");
@@ -87,7 +88,7 @@ class LoginRequiredLoopTest {
         assertEquals(1, required.size(), "one event per run and source, the model retried");
         assertEquals("api:crm", required.get(0).data().path("source").asText());
 
-        h.saveLogin(null, "api:crm", new OAuthToken("good", null, 0, null));
+        h.auth().saveLogin(null, "api:crm", new OAuthToken("good", null, 0, null));
         List<AgentEvent> second = run(h, chat, "again");
         assertTrue(second.stream().filter(e -> e.type().equals("tool_result")).findFirst().orElseThrow()
                 .data().path("output").asText().contains("HTTP 200"));
@@ -101,7 +102,7 @@ class LoginRequiredLoopTest {
         // no token text in any event
         for (AgentEvent e : second) assertFalse(e.data().toString().contains("Bearer good"), e.toString());
 
-        assertTrue(h.logout(null, "api:crm"));
+        assertTrue(h.auth().logout(null, "api:crm"));
         assertTrue(store.get(null, "api:crm").isEmpty());
     }
 

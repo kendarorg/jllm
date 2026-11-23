@@ -12,7 +12,7 @@ class ReadFileDescriptionTest {
     private static DocumentReader reader(String... ext) {
         return new DocumentReader() {
             public Set<String> extensions() { return Set.of(ext); }
-            public String extract(Path file) { return ""; }
+            public String extract(java.io.InputStream in, String fileName) { return ""; }
         };
     }
 

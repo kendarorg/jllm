@@ -151,7 +151,7 @@ When embedding the library, pass it to the builder. The optional third argument 
 directory layout (default: `LocalDirSandboxExecutor`):
 
 ```java
-AgentHarness.builder()
+new AgentHarnessBuilder()
     .sandbox(new DockerSandboxExecutor(config, new ProcessDockerCommandRunner(), new ChatDirSandboxExecutor(config, base)))
     …
 ```
@@ -304,6 +304,7 @@ CLI only. Project files and `.jllm` are never removed.
 All endpoints require the token; the body of a request without it is never read (empty `401`, connection closed), and
 a body over 256 MB is refused with `413` before it is read. Paths are jailed to the root (symlinks resolved); `root=workspace` (default) or
 `root=scratch` selects `/workspace` or the scratchpad.
+In daemon mode the daemon gets `JLLM_EXTERNAL_LINKS` (`none`, `read` or `readwrite`, default `none`) at container creation: what a link that leaves the workspace does, as `files.externalLinks` does on the host (the CLI passes its setting; the web app always passes `none`). `read` lets reads, `glob` and `grep` follow it and refuses writes, moves and deletes through it with a message naming `files.externalLinks`; `readwrite` follows it for both. A recursive delete never follows a link. A change recreates the container.
 
 | Endpoint | Does |
 |---|---|

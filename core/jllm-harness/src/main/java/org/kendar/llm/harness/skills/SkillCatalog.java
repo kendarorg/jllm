@@ -43,7 +43,7 @@ public final class SkillCatalog {
             }
             try {
                 warnings.check(path.toString(), Files.readString(path, StandardCharsets.UTF_8));
-            } catch (IOException | RuntimeException e) {
+            } catch (IOException | RuntimeException e) { // boundary: one unreadable skill file must not stop the others
                 log.warn("Cannot scan skill file {}: {}", path, e.getMessage());
             }
             String description = s.description() != null ? s.description() : frontMatterDescription(path);

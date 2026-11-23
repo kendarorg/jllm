@@ -35,6 +35,7 @@ import java.util.stream.Stream;
  * {@link WebRequest} and calls {@link #dispatch}. A plugin can only ever be reached under its own id.
  */
 public final class WebPluginHost {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(WebPluginHost.class);
     private record Route(String method, String[] segments, WebHandler handler) {
     }
 
@@ -110,7 +111,8 @@ public final class WebPluginHost {
                 if (loaded.keySet().containsAll(p.requires())) {
                     try {
                         install(p);
-                    } catch (RuntimeException e) { // a plugin that cannot start is skipped, the application still runs
+                    } catch (RuntimeException e) { // boundary: a plugin that cannot start is skipped, the application still runs
+                        log.warn("Web plugin {} could not start", id, e);
                         routes.remove(id);
                         hubs.remove(id);
                         warnings.add("web plugin " + id + " skipped: " + e.getMessage());
@@ -169,7 +171,8 @@ public final class WebPluginHost {
         for (WebPlugin p : loaded.values()) {
             try {
                 p.close();
-            } catch (RuntimeException e) {
+            } catch (RuntimeException e) { // boundary: plugin isolation: a plugin failing to close must not stop the others
+                log.warn("Web plugin {} failed to close", p.id(), e);
                 warnings.add("web plugin " + p.id() + " failed to close: " + e.getMessage());
             }
         }
@@ -199,7 +202,8 @@ public final class WebPluginHost {
             if (!r.method().equals(req.method().toUpperCase())) continue;
             try {
                 return r.handler().handle(req.withPathParams(params));
-            } catch (Exception e) {
+            } catch (Exception e) { // boundary: plugin isolation: a handler failure is a 500
+                log.warn("Web plugin {} handler failed", pluginId, e);
                 return WebResponse.error(500, String.valueOf(e.getMessage()));
             }
         }
@@ -229,8 +233,9 @@ public final class WebPluginHost {
             for (var l : listeners.getOrDefault(user, List.of())) {
                 try {
                     l.accept(new Event(type, data));
-                } catch (RuntimeException ignored) {
+                } catch (RuntimeException ignored) { // boundary: listener isolation: a dead listener must not stop the others
                     // a dead listener must not stop the others
+                    log.debug("Plugin event listener failed: {}", ignored.toString());
                 }
             }
         }

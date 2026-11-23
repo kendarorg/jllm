@@ -44,6 +44,41 @@ todo tools are not in the registry: the loop adds them to the tool list of each 
 All file tools resolve paths against the chat's working directory and reject anything that escapes it, including
 through symlinks (the deepest existing ancestor is resolved with `toRealPath`).
 
+The check is not the only protection: `PathJail` (in `jllm-fs`) does every read, write, directory creation, listing and
+delete itself, walking the path again from the real root, one component at a time, without following links. A link
+whose target is inside the working directory is always followed (at most 40 hops); a dangling one is refused; one that
+leaves it follows `files.externalLinks` (below). An atomic write puts its temporary file next to the target through the jail too, so a directory swapped for a
+link between the check and the open cannot redirect the write. On Linux and macOS the walk uses `openat` with
+`O_NOFOLLOW` on directory handles and is race-free. On Windows (and any file system without secure directory streams)
+the final component is opened without following links and without sharing delete, and the real path is checked again
+after the open; **a process on the host that swaps a directory for a junction and back inside that window can still win
+the race** (accepted: creating a junction needs a host shell, which has no jail anyway). A hard link in the work dir to
+a file of another user is not rewritten in place (Linux, macOS; Windows does not expose the link count). `ls` lists
+links as links; `glob`, `grep` and `grep_code` visit a link to a file inside and never enter a link to a directory
+inside (its files are listed where they lie).
+
+### Links that leave the work dir (`files.externalLinks`)
+
+A symlink or junction inside the work dir whose target is **outside** it is decided by the setting `files.externalLinks`
+(CLI flag `--external-links`):
+
+| Value | Reads (`read_file`, `ls`, `glob`, `grep`, `grep_code`, document readers) | Writes (`write_file`, `edit_file`, atomic writer, `web_download` target, checkpoint undo) |
+|---|---|---|
+| `none` | refused: `<path> is a link that leaves the work dir` | refused, same message |
+| `read` (default) | followed; `glob`, `grep` and `grep_code` enter a linked directory (once, never a link to an ancestor of the work dir) | refused; the message names `files.externalLinks`; undo reports the file as `not restored` and keeps its checkpoint |
+| `readwrite` | followed | followed; the approval prompt of `write_file` and `edit_file` shows `link -> resolved target`, not only the link path |
+
+Chains work as one: every hop is judged by where it lands, so a link inside that points to another link that leaves the
+dir follows the mode of the last hop. A recursive delete (checkpoint cleanup, the daemon's `DELETE /file`) removes a
+link and never enters it. A path that leaves the work dir without any link (`..`, an absolute path) is refused in every
+mode. A script run by `run_js` in a shared work dir is confined to its scratch dir and always uses `none`.
+
+**The web app never follows an outside link**, reads or writes: it forces `none` when it builds the harness and
+ignores the key; when the settings carry it with another value, one `WARN` is logged at startup. There is no per-user
+or UI setting. In docker daemon mode the container daemon receives the mode (`JLLM_EXTERNAL_LINKS`) when the container
+is created ([SANDBOX](sandbox.md)). The shell is not covered by any of this: `bash` runs as the host user and follows
+every link.
+
 ```mermaid
 flowchart TD
     P["path from the model"] --> A{"absolute and under<br/>the scratch dir?"}
@@ -147,7 +182,7 @@ model corrects it on its next turn. Modes (`output.validation` in the settings, 
 | `strict` | the input must match the schema exactly |
 
 The default check is JSON Schema (draft 7) on `inputSchema()`; a schema the library cannot compile is skipped with a
-warning. Replace it with `AgentHarness.builder().toolInputValidator(v)`, or add a further check after it with
+warning. Replace it with `new AgentHarnessBuilder().toolInputValidator(v)`, or add a further check after it with
 `addToolInputValidator(v)`. A `ToolInputValidator` returns the input to use and the list of problems; chained
 validators see the input as repaired by the previous one.
 
@@ -174,7 +209,7 @@ with `interactive=false` (the built-in main and sub-agent loops are both interac
 
 ## Document readers
 
-`read_file` looks up the file extension in the registered `DocumentReader`s (`extensions()`, `extract(Path)`), extracts
+`read_file` looks up the file extension in the registered `DocumentReader`s (`extensions()`, `extract(InputStream, String fileName)`; the stream is opened through the path jail), extracts
 the text and then applies `offset`, `limit` and the line cap to it. The path jail runs before the reader. A binary
 extension with no reader answers `No reader for .pdf; put the pdf plugin jar in the plugin directory and enable it under plugins`. Extraction has a 30 s timeout and a
 5 MB text cap; the binary file may be up to 50 MB.

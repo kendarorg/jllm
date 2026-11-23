@@ -72,18 +72,18 @@ public class OAuthController {
      */
     @PostConstruct
     public void check() {
-        if (!harness.multiUser()) {
+        if (!harness.auth().multiUser()) {
             harness.commands().webLogin(this::startFromChat);
             return;
         }
-        for (String source : harness.oauth().names()) {
-            if (!harness.oauth().perUser(source)) continue;
-            if (harness.tokenStore() instanceof FileTokenStore f && !f.encrypted()) {
+        for (String source : harness.auth().oauth().names()) {
+            if (!harness.auth().oauth().perUser(source)) continue;
+            if (harness.auth().tokenStore() instanceof FileTokenStore f && !f.encrypted()) {
                 throw new IllegalStateException(source + " keeps a token per user: set JLLM_TOKEN_KEY (32 bytes, "
                         + "base64) to encrypt the token files, or tokenStore.encrypt; the users' tokens must not be "
                         + "readable from backups and volumes");
             }
-            if (publicUrl == null && harness.oauth().needsRedirect(source)) {
+            if (publicUrl == null && harness.auth().oauth().needsRedirect(source)) {
                 throw new IllegalStateException(source + " logs every user in through a browser redirect: set "
                         + "jllm.web.public-url (the externally visible base URL of this server)");
             }
@@ -116,7 +116,7 @@ public class OAuthController {
         } catch (IllegalArgumentException e) {
             return error(HttpStatus.FORBIDDEN, e.getMessage());
         }
-        if (!harness.logins().containsKey(source)) return error(HttpStatus.NOT_FOUND, "Unknown login " + source);
+        if (!harness.auth().logins().containsKey(source)) return error(HttpStatus.NOT_FOUND, "Unknown login " + source);
         Started s = start(chatId, user.id(), key, source);
         if (s.error != null) return error(HttpStatus.CONFLICT, s.error);
         Map<String, Object> out = new LinkedHashMap<>();
@@ -127,7 +127,7 @@ public class OAuthController {
 
     /** The store key of the user's login: their id for a per-user source; the shared login only for the admin. */
     private String keyFor(WebPrincipal user, String source, boolean shared) {
-        if (!shared && harness.oauth().perUser(source)) return user.id();
+        if (!shared && harness.auth().oauth().perUser(source)) return user.id();
         if (!user.admin()) {
             throw new IllegalArgumentException(source + " has one login shared by every user: only the "
                     + "administrator can change it");
@@ -137,7 +137,7 @@ public class OAuthController {
 
     /** Runs the login on a virtual thread; returns once it has a URL (or a device code) to show. */
     private Started start(String chatId, String userId, String key, String name) {
-        OAuthLogin login = harness.logins().get(name);
+        OAuthLogin login = harness.auth().logins().get(name);
         if (login == null) return new Started(null, null, "Unknown login " + name);
         purge();
         String slot = (key == null ? "-" : key) + "/" + name;
@@ -163,20 +163,20 @@ public class OAuthController {
                         first.complete(new Started(url, null, null));
                     }
                 }, new WebTarget(userId, name, done));
-                harness.saveLogin(key, name, token);
+                harness.auth().saveLogin(key, name, token);
                 outcome = "Connected to " + name;
                 ok = true;
             } catch (OAuthException e) {
                 outcome = "Login to " + name + " failed (" + e.code() + ")";
-            } catch (RuntimeException e) {
-                log.warn("Login to {} failed: {}", name, e.toString());
+            } catch (RuntimeException e) { // boundary: login thread top level: the outcome is reported to the user
+                log.warn("Login to {} failed", name, e);
                 outcome = "Login to " + name + " failed";
             } finally {
                 running.remove(slot);
             }
             done.complete(ok);
             first.complete(new Started(null, null, outcome));
-            harness.loginFinished(chatId, name, ok, outcome);
+            harness.auth().loginFinished(chatId, name, ok, outcome);
         });
         if (running.putIfAbsent(slot, t) != null) {
             return new Started(null, null, "A login to " + name + " is already in progress");
@@ -305,25 +305,25 @@ public class OAuthController {
     public ResponseEntity<Object> list(@RequestAttribute(value = WebPrincipal.ATTR, required = false) WebPrincipal user) {
         if (user == null) return error(HttpStatus.UNAUTHORIZED, "Sign in first");
         List<Map<String, Object>> out = new ArrayList<>();
-        for (String source : harness.oauth().names()) {
-            boolean perUser = harness.oauth().perUser(source);
-            boolean service = harness.oauth().serviceAccount(source);
+        for (String source : harness.auth().oauth().names()) {
+            boolean perUser = harness.auth().oauth().perUser(source);
+            boolean service = harness.auth().oauth().serviceAccount(source);
             if (!perUser && !user.admin() && !service) continue;
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("source", source);
             m.put("perUser", perUser);
             m.put("serviceAccount", service);
             if (!service) {
-                Optional<OAuthToken> t = harness.tokenStore().get(perUser ? user.id() : null, source);
+                Optional<OAuthToken> t = harness.auth().tokenStore().get(perUser ? user.id() : null, source);
                 m.put("connected", t.isPresent());
                 t.filter(x -> x.expiresAt() != 0).ifPresent(x -> m.put("expiresAt", x.expiresAt()));
                 if (perUser && user.admin()) {
-                    m.put("sharedConnected", harness.tokenStore().get(null, source).isPresent());
+                    m.put("sharedConnected", harness.auth().tokenStore().get(null, source).isPresent());
                 }
             }
             out.add(m);
         }
-        return ResponseEntity.ok(Map.of("sources", out, "store", harness.tokenStore().describe()));
+        return ResponseEntity.ok(Map.of("sources", out, "store", harness.auth().tokenStore().describe()));
     }
 
     @DeleteMapping("/api/oauth/{source}")
@@ -338,7 +338,7 @@ public class OAuthController {
         } catch (IllegalArgumentException e) {
             return error(HttpStatus.FORBIDDEN, e.getMessage());
         }
-        harness.logout(key, source);
+        harness.auth().logout(key, source);
         return ResponseEntity.noContent().build();
     }
 

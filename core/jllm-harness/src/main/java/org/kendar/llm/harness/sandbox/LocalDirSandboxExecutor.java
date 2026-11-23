@@ -132,7 +132,7 @@ public class LocalDirSandboxExecutor implements SandboxExecutor {
             capture.detach();
             Thread.currentThread().interrupt();
             return new ExecutionResult("", "Interrupted", -1, false);
-        } catch (Exception e) {
+        } catch (Exception e) { // boundary: sandbox boundary: detach, report the failure
             capture.detach();
             return new ExecutionResult("", "Execution failed: " + e.getMessage(), -1, false);
         }

@@ -24,7 +24,7 @@ class HarnessSettingsTest {
                 {"mcpServers":[{"name":"m","url":"http://h/mcp","headers":{"Authorization":"Bearer ${TOKEN}"}}],
                  "restApis":[{"name":"r","openApiUrl":"http://h/spec","allowedPaths":["GET /x"]}],
                  "unknown":1}""");
-        HarnessSettings s = HarnessSettings.load(f, Map.of("TOKEN", "abc")::get);
+        HarnessSettings s = HarnessSettingsLoader.load(f, Map.of("TOKEN", "abc")::get);
 
         assertEquals("Bearer abc", s.mcpServers().get(0).headers().get("Authorization"));
         assertTrue(s.mcpServers().get(0).active());
@@ -34,32 +34,32 @@ class HarnessSettingsTest {
 
     @Test
     void maxParallelIsRead() throws Exception {
-        assertEquals(1, HarnessSettings.load(write("{}"), k -> null).maxParallel());
-        assertEquals(1, HarnessSettings.load(write("{\"execution\":{}}"), k -> null).maxParallel());
-        assertEquals(3, HarnessSettings.load(write("{\"execution\":{\"maxParallel\":3}}"), k -> null).maxParallel());
-        assertEquals(1, HarnessSettings.load(write("{\"execution\":{\"maxParallel\":0}}"), k -> null).maxParallel());
-        assertEquals(-1, HarnessSettings.load(write("{\"execution\":{\"maxParallel\":-1}}"), k -> null).maxParallel());
+        assertEquals(1, HarnessSettingsLoader.load(write("{}"), k -> null).maxParallel());
+        assertEquals(1, HarnessSettingsLoader.load(write("{\"execution\":{}}"), k -> null).maxParallel());
+        assertEquals(3, HarnessSettingsLoader.load(write("{\"execution\":{\"maxParallel\":3}}"), k -> null).maxParallel());
+        assertEquals(1, HarnessSettingsLoader.load(write("{\"execution\":{\"maxParallel\":0}}"), k -> null).maxParallel());
+        assertEquals(-1, HarnessSettingsLoader.load(write("{\"execution\":{\"maxParallel\":-1}}"), k -> null).maxParallel());
     }
 
     @Test
     void smallModelIsReadAndKeptByTheWithers() throws Exception {
-        assertFalse(HarnessSettings.load(write("{}"), k -> null).isSmallModel());
-        HarnessSettings s = HarnessSettings.load(write("{\"smallModel\":true}"), k -> null);
+        assertFalse(HarnessSettingsLoader.load(write("{}"), k -> null).isSmallModel());
+        HarnessSettings s = HarnessSettingsLoader.load(write("{\"smallModel\":true}"), k -> null);
         assertTrue(s.isSmallModel());
-        assertTrue(s.withMaxTokens(1000).withContextStrategy("mnemonic").isSmallModel());
-        assertTrue(HarnessSettings.empty().withSmallModel(true).isSmallModel());
+        assertTrue(s.toBuilder().maxTokens(1000).contextStrategy("mnemonic").build().isSmallModel());
+        assertTrue(HarnessSettings.builder().smallModel(true).build().isSmallModel());
     }
 
     @Test
     void missingVariableFailsWithItsName() throws Exception {
         Path f = write("{\"mcpServers\":[{\"name\":\"m\",\"url\":\"${NOPE}\"}]}");
-        IllegalStateException e = assertThrows(IllegalStateException.class, () -> HarnessSettings.load(f, k -> null));
+        IllegalStateException e = assertThrows(IllegalStateException.class, () -> HarnessSettingsLoader.load(f, k -> null));
         assertTrue(e.getMessage().contains("NOPE"));
     }
 
     @Test
     void scopeThresholdsOverrideTheDefaults() throws Exception {
-        HarnessSettings s = HarnessSettings.load(write(
+        HarnessSettings s = HarnessSettingsLoader.load(write(
                 "{\"context\":{\"strategy\":\"scope\",\"scope\":{\"offloadChars\":5000,\"safetyPercent\":5}}}"), k -> null);
         var d = org.kendar.llm.harness.context.scope.ScopeStrategy.Options.defaults();
         var o = s.scopeOptions(d);
@@ -68,12 +68,12 @@ class HarnessSettingsTest {
         assertEquals(d.previewChars(), o.previewChars());
         assertEquals(d, HarnessSettings.empty().scopeOptions(d));
         assertEquals(org.kendar.llm.harness.context.ContextStrategyKind.SCOPE,
-                s.applyTo(org.kendar.llm.harness.HarnessConfig.defaults()).contextStrategy());
+                HarnessConfigMapper.apply(s, org.kendar.llm.harness.HarnessConfig.defaults()).contextStrategy());
     }
 
     @Test
     void providerOrderIsRead() throws Exception {
-        HarnessSettings s = HarnessSettings.load(write(
+        HarnessSettings s = HarnessSettingsLoader.load(write(
                 "{\"providers\":[{\"name\":\"a\",\"type\":\"openai\",\"order\":2}]}"), k -> null);
         assertEquals(2, s.providers().get(0).order());
     }

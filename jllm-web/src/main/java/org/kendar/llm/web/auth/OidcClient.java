@@ -1,5 +1,6 @@
 package org.kendar.llm.web.auth;
 
+import com.nimbusds.jose.JOSEException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.nimbusds.jose.JWSAlgorithm;
@@ -172,7 +173,7 @@ public final class OidcClient {
             return new Identity(issuer(), sub, c.getStringClaim("email"), emailVerified, c.getStringClaim("name"));
         } catch (OidcException e) {
             throw e;
-        } catch (Exception e) {
+        } catch (Exception e) { // boundary: any unreadable or unverifiable token is an invalid token
             throw new OidcException("invalid_token", "Unreadable token: " + e.getClass().getSimpleName());
         }
     }
@@ -185,7 +186,7 @@ public final class OidcClient {
         try {
             if (JWSAlgorithm.RS256.equals(alg) && key instanceof RSAKey rsa) return new RSASSAVerifier(rsa);
             if (JWSAlgorithm.ES256.equals(alg) && key instanceof ECKey ec) return new ECDSAVerifier(ec);
-        } catch (Exception e) {
+        } catch (JOSEException e) {
             throw new OidcException("invalid_token", "Unusable key");
         }
         throw new OidcException("invalid_token", "Key does not fit the algorithm");

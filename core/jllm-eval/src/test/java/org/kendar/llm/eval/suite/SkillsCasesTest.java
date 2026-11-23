@@ -3,7 +3,7 @@ package org.kendar.llm.eval.suite;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.kendar.llm.eval.cases.EvalCase;
 import org.kendar.llm.eval.grade.judge.Rubrics;
-import org.kendar.llm.harness.AgentHarness;
+import org.kendar.llm.harness.AgentHarnessBuilder;
 import org.kendar.llm.harness.tools.SimpleTool;
 import org.kendar.llm.harness.tools.ToolKind;
 
@@ -18,7 +18,7 @@ import static org.kendar.llm.eval.suite.Suite.*;
 /** 1.20 Skills, instruction files. */
 class SkillsCasesTest extends SuiteBase {
 
-    private static Consumer<AgentHarness.Builder> skill(String name, String description, String body) {
+    private static Consumer<AgentHarnessBuilder> skill(String name, String description, String body) {
         return b -> {
             Path dir = tempDir("jllm-eval-skill-");
             Path file = tempFile(dir, name + ".md", body);
@@ -27,7 +27,7 @@ class SkillsCasesTest extends SuiteBase {
         };
     }
 
-    private static Consumer<AgentHarness.Builder> instructions(String text) {
+    private static Consumer<AgentHarnessBuilder> instructions(String text) {
         return b -> {
             Path file = tempFile(tempDir("jllm-eval-instr-"), "RULES.md", text);
             b.settings(settings((ObjectNode root) -> root.putArray("instructionFiles").add(file.toString())));

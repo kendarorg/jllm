@@ -40,7 +40,7 @@ For your own tools, validate inside the tool as you would any user-supplied inpu
 
 | Level | Backend | Guarantee |
 |---|---|---|
-| File tools | path jail, always on | `read_file`, `write_file`, `edit_file`, `glob`, `grep` run in the JVM and cannot leave the chat's working directory (`..` and symlinks rejected) |
+| File tools | path jail, always on | `read_file`, `write_file`, `edit_file`, `glob`, `grep` run in the JVM and cannot leave the chat's working directory (`..` rejected; a symlink or junction that leaves the directory follows `files.externalLinks`: the CLI default is read-only follow, the web app always refuses, see [tools](../guides/tools.md#links-that-leave-the-work-dir-filesexternallinks)) |
 | `bash` on the host | `local` sandbox (default) | **none**: commands run as the user of the JVM |
 | `bash` in a container | `docker` `oneshot` | a container per command, working directory mounted |
 | Container per chat | `docker` `daemon`, optionally remote | one long-running container per chat, removed with the chat; file tools can go through it too, so no host path is used |

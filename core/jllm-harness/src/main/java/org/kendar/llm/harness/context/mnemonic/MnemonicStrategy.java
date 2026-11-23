@@ -291,7 +291,7 @@ public class MnemonicStrategy implements ContextStrategy {
         if (mainAgentKey != null) {
             try {
                 main = mainAgentKey.apply(chatId);
-            } catch (RuntimeException e) {
+            } catch (RuntimeException e) { // boundary: context strategy failure must not fail the turn
                 log.debug("No main agent for chat {}: {}", chatId, e.getMessage());
             }
         }
@@ -301,7 +301,7 @@ public class MnemonicStrategy implements ContextStrategy {
                 // the agent left memory (idle): its decisions came back from the store, the log from the session
                 try {
                     a.log = mainLog.apply(chatId);
-                } catch (RuntimeException e) {
+                } catch (RuntimeException e) { // boundary: context strategy failure must not fail the turn
                     log.debug("Cannot load the log of chat {}: {}", chatId, e.getMessage());
                 }
             }
@@ -357,7 +357,7 @@ public class MnemonicStrategy implements ContextStrategy {
         if (!a.persistent) return;
         try {
             store.save(chatId, agentKey, a.state);
-        } catch (RuntimeException e) {
+        } catch (RuntimeException e) { // boundary: context strategy failure must not fail the turn
             log.warn("Cannot save the mnemonic state of chat {}: {}", chatId, e.getMessage());
         }
     }
@@ -398,7 +398,7 @@ public class MnemonicStrategy implements ContextStrategy {
         try {
             notes = switcher.notes(t.prefix(), notesView(a, view, t.prefix(), overflowed),
                     config.mnemonic().notesMaxTokens(), t.usageSink());
-        } catch (RuntimeException e) {
+        } catch (RuntimeException e) { // boundary: context strategy failure is reported as a warning
             log.warn("Handoff notes failed: {}", e.getMessage());
             t.sink().emit("warning", mapper.createObjectNode()
                     .put("message", "Handoff notes failed: " + e.getMessage()));

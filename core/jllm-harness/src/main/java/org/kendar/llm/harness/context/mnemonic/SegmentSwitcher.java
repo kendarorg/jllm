@@ -84,7 +84,7 @@ public final class SegmentSwitcher {
         }
         ((ArrayNode) last.get("content")).addObject().put("type", "text").put("text", HANDOFF);
         ModelResponse resp = prefix.client().complete(new ModelRequest(prefix.pinned(), prefix.extra(), req,
-                prefix.tools(), maxTokens, null, prefix.disableParallelToolUse()));
+                prefix.tools(), maxTokens, null, prefix.disableParallelToolUse(), null, null));
         if (resp.usage() != null) usageSink.accept(resp.usage());
         StringBuilder text = new StringBuilder();
         for (JsonNode b : resp.content()) {

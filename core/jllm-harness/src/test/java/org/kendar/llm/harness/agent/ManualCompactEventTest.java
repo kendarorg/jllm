@@ -3,6 +3,7 @@ package org.kendar.llm.harness.agent;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.AgentHarness;
+import org.kendar.llm.harness.AgentHarnessBuilder;
 import org.kendar.llm.harness.session.ChatSessionData;
 
 import java.nio.file.Path;
@@ -48,7 +49,7 @@ class ManualCompactEventTest {
         ScriptedModel model = new ScriptedModel();
         model.enqueue(text("a1"), text("a2"), text("a3"), text(summary));
         model.simpleHandler = u -> summary;
-        AgentHarness h = AgentHarness.builder().modelClient(model).config(config(base).withKeepRecentTurns(1))
+        AgentHarness h = new AgentHarnessBuilder().modelClient(model).config(config(base).withKeepRecentTurns(1))
                 .withoutStandardTools().build();
         ChatSessionData chat = h.sessions().create(null);
         turn(h, chat.chatId(), "first " + "x".repeat(2000));

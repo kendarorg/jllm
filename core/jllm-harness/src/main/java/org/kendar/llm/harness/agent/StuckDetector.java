@@ -1,5 +1,6 @@
 package org.kendar.llm.harness.agent;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
@@ -200,7 +201,7 @@ final class StuckDetector {
             // a tree keeps its order when written: go through plain maps, which the feature sorts
             Object plain = canonical.treeToValue(node, Object.class);
             return canonical.writeValueAsString(plain);
-        } catch (Exception e) {
+        } catch (JsonProcessingException | IllegalArgumentException e) {
             return node.toString();
         }
     }

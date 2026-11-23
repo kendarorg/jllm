@@ -212,7 +212,7 @@ public class ContextManager {
             try {
                 changed = force ? compactOverflow(own, room, usageSink).changed()
                         : compactTo(chatId, own, null, sink, () -> false, usageSink, false, room, null, 1.0);
-            } catch (RuntimeException e) {
+            } catch (RuntimeException e) { // boundary: a failing summary call degrades compaction, the run goes on
                 log.warn("Compaction of the agent's own messages failed: {}", e.getMessage());
             }
         }
@@ -231,7 +231,7 @@ public class ContextManager {
                 metrics.compaction(2);
                 sink.emit("compaction", obj("tier", 2, "inherited", true));
                 changed = true;
-            } catch (RuntimeException e) {
+            } catch (RuntimeException e) { // boundary: a failing summary call degrades compaction, the run goes on
                 log.warn("Compaction of the inherited context failed: {}", e.getMessage());
             }
         }
@@ -241,7 +241,7 @@ public class ContextManager {
             try {
                 changed |= force ? compactOverflow(own, left, usageSink).changed()
                         : compactTo(chatId, own, null, sink, () -> false, usageSink, false, left, null, 1.0);
-            } catch (RuntimeException e) {
+            } catch (RuntimeException e) { // boundary: a failing summary call degrades compaction, the run goes on
                 log.warn("Compaction of the agent's own messages failed: {}", e.getMessage());
             }
         }
@@ -290,7 +290,7 @@ public class ContextManager {
                 metrics.compaction(2);
                 sink.emit("compaction", obj("tier", 2, "estimatedTokens", estimateTokens(messages, null)));
             }
-        } catch (RuntimeException e) {
+        } catch (RuntimeException e) { // boundary: a failing summary call degrades compaction, the run goes on
             log.warn("Tier-2 compaction failed: {}", e.getMessage());
             sink.emit("warning", obj("message", "Context summarization failed: " + e.getMessage()));
         }
@@ -336,7 +336,7 @@ public class ContextManager {
                 metrics.approval("context", false);
                 declined.put(chatId, size);
             }
-        } catch (RuntimeException e) {
+        } catch (RuntimeException e) { // boundary: a failing summary call is reported as a warning
             sink.emit("warning", obj("message", "Context rewrite proposal failed: " + e.getMessage()));
         }
         return changed;
@@ -408,7 +408,7 @@ public class ContextManager {
                     summarized = true;
                     metrics.compaction(2);
                 }
-            } catch (RuntimeException e) {
+            } catch (RuntimeException e) { // boundary: a failing summary call degrades compaction, the run goes on
                 log.warn("Summary of the earlier turns failed: {}", e.getMessage());
             }
         }
@@ -460,7 +460,7 @@ public class ContextManager {
         try {
             summary = summarizeSpan(span, span.size(), "the steps already taken for the request in progress, their "
                     + "findings and what is left to do; the request itself stays verbatim", usageSink, null, null);
-        } catch (RuntimeException e) {
+        } catch (RuntimeException e) { // boundary: a failing summary call degrades compaction, the run goes on
             log.warn("Summary of the current turn failed: {}", e.getMessage());
             return false;
         }
@@ -639,7 +639,7 @@ public class ContextManager {
         ((ArrayNode) last.get("content")).addObject().put("type", "text").put("text", ask);
         org.kendar.llm.harness.llm.ModelResponse resp = model.complete(new org.kendar.llm.harness.llm.ModelRequest(
                 prefix.pinned(), prefix.extra(), req, prefix.tools(), SUMMARY_TOKENS, null,
-                prefix.disableParallelToolUse()));
+                prefix.disableParallelToolUse(), null, null));
         if (usageSink != null && resp.usage() != null) usageSink.accept(resp.usage());
         StringBuilder text = new StringBuilder();
         for (JsonNode b : resp.content()) {

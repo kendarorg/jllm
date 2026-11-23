@@ -3,6 +3,7 @@ package org.kendar.llm.harness.sandbox;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.settings.HarnessSettings;
+import org.kendar.llm.harness.settings.HarnessSettingsLoader;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -62,7 +63,7 @@ class EnvironmentWhitelistTest {
         Path f = base.resolve("s.json");
         Files.writeString(f, "{\"whitelistedEnvVars\":[\"PATH\",\"*key*test\"],\"toolsWhitelistedEnvVars\":[]}");
 
-        HarnessSettings s = HarnessSettings.load(f);
+        HarnessSettings s = HarnessSettingsLoader.load(f);
 
         assertEquals(List.of("PATH", "*key*test"), s.whitelistedEnvVars());
         assertEquals(List.of(), s.toolsWhitelistedEnvVars());

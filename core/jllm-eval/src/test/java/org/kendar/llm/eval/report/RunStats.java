@@ -1,5 +1,6 @@
 package org.kendar.llm.eval.report;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.kendar.llm.eval.report.ResultLoader.CaseRun;
@@ -28,18 +29,29 @@ final class RunStats {
 
     /** Accumulator over cases and trials. */
     private static final class Agg {
-        int cases, passKCases, trials, passedTrials, retentionChecks, retentionPassed, cacheBreaks;
+        int cases, trials, passedTrials, retentionChecks, retentionPassed, cacheBreaks;
         double rateSum;
+        final List<Integer> ks;
+        /** Per k: sum of the case estimates, and the number of cases with enough trials (the coverage). */
+        final Map<Integer, double[]> atK = new TreeMap<>();
+        final Map<Integer, double[]> powK = new TreeMap<>();
         long in, out, cacheRead, cacheWrite, reqMillisSum, reqCount;
         final List<Long> millis = new ArrayList<>();
         final Map<Integer, double[]> turn = new TreeMap<>();
         HarnessPricing pricing;
         double cost;
 
+        Agg(List<Integer> ks) {
+            this.ks = ks;
+        }
+
         void add(CaseRun c) {
             cases++;
             rateSum += c.passRate();
-            if (c.passK()) passKCases++;
+            for (int k : ks) {
+                PassAtK.passAt(c.n(), c.c(), k).ifPresent(v -> add(atK, k, v));
+                PassAtK.passPow(c.n(), c.c(), k).ifPresent(v -> add(powK, k, v));
+            }
             for (Trial t : c.trials()) {
                 trials++;
                 if (t.passed()) passedTrials++;
@@ -76,12 +88,32 @@ final class RunStats {
             }
         }
 
+        private static void add(Map<Integer, double[]> m, int k, double v) {
+            double[] a = m.computeIfAbsent(k, x -> new double[2]);
+            a[0] += v;
+            a[1]++;
+        }
+
+        /** Macro average over the cases that have at least k trials; a k no case can tell is left out. */
+        private void putKs(ObjectNode o) {
+            ObjectNode at = o.putObject("passAtK");
+            ObjectNode pow = o.putObject("passPowK");
+            ObjectNode cov = o.putObject("coverage");
+            for (int k : ks) {
+                double[] a = atK.get(k);
+                double[] p = powK.get(k);
+                if (a != null) at.put(String.valueOf(k), a[0] / a[1]);
+                if (p != null) pow.put(String.valueOf(k), p[0] / p[1]);
+                cov.put(String.valueOf(k), a == null ? 0 : (int) a[1]);
+            }
+        }
+
         ObjectNode toJson(boolean withTurns) {
             ObjectNode o = ResultLoader.MAPPER.createObjectNode();
             o.put("cases", cases);
             o.put("trials", trials);
             o.put("passRate", cases == 0 ? 0 : rateSum / cases);
-            o.put("passKRate", cases == 0 ? 0 : (double) passKCases / cases);
+            putKs(o);
             if (retentionChecks > 0) o.put("retention", (double) retentionPassed / retentionChecks);
             else o.putNull("retention");
             ObjectNode tok = o.putObject("tokens");
@@ -128,18 +160,30 @@ final class RunStats {
         r.put("judgeModel", run.judgeModel());
         r.put("selfGraded", run.selfGraded());
         r.put("trials", run.meta().path("trials").asInt());
+        List<Integer> ks = run.passK();
+        ArrayNode kn = r.putArray("passK");
+        ks.forEach(kn::add);
+        r.put("reportK", ks.get(ks.size() - 1));
+        JsonNode build = run.meta().path("build");
+        r.put("commit", ResultLoader.text(build, "commit"));
+        r.put("dirty", run.dirty());
+        r.put("dirtyFileCount", build.path("dirtyFileCount").asInt());
+        r.put("dirtyTree", run.dirtyTreePolicy());
+        r.put("version", ResultLoader.text(build, "projectVersion"));
+        r.put("settingsHash", ResultLoader.text(run.meta(), "settingsHash"));
+        r.put("promptsHash", ResultLoader.text(run.meta(), "promptsHash"));
         r.put("startTime", ResultLoader.text(run.meta(), "startTime"));
         r.put("runFolder", String.valueOf(run.dir().getFileName()));
 
-        Agg all = new Agg();
+        Agg all = new Agg(ks);
         all.pricing = p;
         Map<String, Agg> features = new TreeMap<>();
         Map<String, Agg> strategies = new TreeMap<>();
         Map<String, int[]> failures = new LinkedHashMap<>();
         int missing = 0;
         for (CaseRun c : run.cases()) {
-            Agg f = features.computeIfAbsent(c.feature(), k -> new Agg());
-            Agg s = strategies.computeIfAbsent(c.strategy(), k -> new Agg());
+            Agg f = features.computeIfAbsent(c.feature(), k -> new Agg(ks));
+            Agg s = strategies.computeIfAbsent(c.strategy(), k -> new Agg(ks));
             f.pricing = p;
             s.pricing = p;
             all.add(c);
@@ -173,12 +217,22 @@ final class RunStats {
             ObjectNode n = cases.addObject();
             n.put("key", c.key());
             n.put("passRate", c.passRate());
-            n.put("passK", c.passK());
+            ObjectNode at = n.putObject("passAtK");
+            ObjectNode pow = n.putObject("passPowK");
+            for (int k : ks) {
+                PassAtK.passAt(c.n(), c.c(), k).ifPresent(v -> at.put(String.valueOf(k), v));
+                PassAtK.passPow(c.n(), c.c(), k).ifPresent(v -> pow.put(String.valueOf(k), v));
+            }
             n.put("passed", c.passed());
             n.put("trials", c.trials().size());
             n.put("passes", (int) c.trials().stream().filter(Trial::passed).count());
         }
         ArrayNode warnings = root.putArray("warnings");
+        if (run.dirty() && !"allow".equals(run.dirtyTreePolicy())) {
+            warnings.add("dirty working tree: " + build.path("dirtyFileCount").asInt()
+                    + " tracked file(s) differed from commit " + ResultLoader.text(build, "commit")
+                    + " during the run; the results do not match a commit");
+        }
         if (run.selfGraded()) warnings.add("self-graded: the judge is the model under test");
         if (missing > 0) warnings.add(missing + " trial trace(s) missing: tokens and latency incomplete");
         if (run.cases().isEmpty()) warnings.add("no result.json found");

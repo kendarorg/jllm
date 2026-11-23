@@ -3,6 +3,7 @@ package org.kendar.llm.harness.skills;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.AgentHarness;
+import org.kendar.llm.harness.AgentHarnessBuilder;
 import org.kendar.llm.harness.agent.AgentEvent;
 import org.kendar.llm.harness.auth.HarnessPrincipal;
 import org.kendar.llm.harness.auth.UserPolicy;
@@ -40,8 +41,8 @@ class UserSkillsTest {
     }
 
     private AgentHarness harness(ScriptedModel model, List<SkillSettings> harnessSkills) {
-        HarnessSettings settings = new HarnessSettings(null, null, harnessSkills, null, null);
-        return AgentHarness.builder().modelClient(model).config(config(base)).withoutStandardTools()
+        HarnessSettings settings = HarnessSettings.builder().skills(harnessSkills).build();
+        return new AgentHarnessBuilder().modelClient(model).config(config(base)).withoutStandardTools()
                 .settings(settings)
                 .userPolicyResolver(user -> user == null ? UserPolicy.ALL
                         : new UserPolicy(null, null, own.getOrDefault(user.id(), List.of()),

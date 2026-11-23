@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import org.kendar.llm.harness.agent.AgentLoop;
 import org.kendar.llm.harness.agent.EventSink;
+import org.kendar.llm.harness.agent.AgentDefinition;
+import org.kendar.llm.harness.agent.SubAgentRequest;
 import org.kendar.llm.harness.agent.SubAgentTool;
 import org.kendar.llm.harness.agent.ToolSelector;
 import org.kendar.llm.harness.context.ContextStrategy;
@@ -203,6 +205,9 @@ public final class HarnessTestSupport {
         public ToolSelector selector;
         public SubAgentTool subAgentTool;
         public AgentLoop loop;
+        private org.kendar.llm.harness.auth.Identity identity;
+        private java.util.Collection<HarnessTool> builtinFileTools = List.of();
+        private org.kendar.llm.harness.instructions.ScopedInstructions scopedInstructions;
 
         public Rig(Path baseDir) {
             this(baseDir, HarnessMetrics.noop());
@@ -252,7 +257,7 @@ public final class HarnessTestSupport {
             }
             selector = new ToolSelector(config, model, MAPPER);
             AgentLoop[] ref = new AgentLoop[1];
-            subAgentTool = new SubAgentTool(() -> ref[0], MAPPER);
+            subAgentTool = new SubAgentTool(() -> ref[0].subAgents(), MAPPER);
             loop = loopWith(model);
             ref[0] = loop;
         }
@@ -265,8 +270,32 @@ public final class HarnessTestSupport {
         public AgentLoop loopWith(ModelClient client, org.kendar.llm.harness.permission.ToolClassifier classifier) {
             HarnessToolRegistry registry = mock(HarnessToolRegistry.class);
             when(registry.all()).thenAnswer(i -> new ArrayList<>(registered));
-            return new AgentLoop(config, client, context, selector, gate, approvals, sessions, sandbox,
-                    registry, subAgentTool, null, runLog, MAPPER, metrics, "", hooks, classifier);
+            return new AgentLoop(new AgentLoop.Deps(config, client, context, selector, gate, approvals, sessions,
+                    sandbox, registry, subAgentTool, null, runLog, MAPPER, metrics, "", hooks, classifier, identity,
+                    null, builtinFileTools, scopedInstructions, null, null));
+        }
+
+        /** The built-in file tools (free from a script) and the scoped instructions of the loop; rebuilds the loop. */
+        public Rig scopedInstructions(java.util.Collection<HarnessTool> builtin,
+                                      org.kendar.llm.harness.instructions.ScopedInstructions scoped) {
+            builtinFileTools = builtin;
+            scopedInstructions = scoped;
+            wire();
+            return this;
+        }
+
+        /** Who the calls are made for; rebuilds the loop. */
+        public Rig identity(org.kendar.llm.harness.auth.Identity who) {
+            identity = who;
+            wire();
+            return this;
+        }
+
+        /** A sub-agent of the chat, in the mode the chat is in, as the fan-out tool starts it. */
+        public String subAgent(String chatId, String toolUseId, String prompt, AgentDefinition agentType) {
+            return loop.subAgents().run(new SubAgentRequest(chatId, toolUseId, prompt, agentType,
+                    org.kendar.llm.harness.permission.PermissionMode.parse(sessions.get(chatId).mode()), null,
+                    org.kendar.llm.harness.util.Uuids.v7String()));
         }
 
         public Rig register(HarnessTool... tools) {

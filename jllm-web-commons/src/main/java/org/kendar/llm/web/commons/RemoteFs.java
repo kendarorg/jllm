@@ -21,6 +21,7 @@ import java.util.zip.ZipOutputStream;
  * relative to the chosen root and jailed twice (here, and by the daemon).
  */
 final class RemoteFs {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(RemoteFs.class);
 
     static final long MAX_TEXT_BYTES = 2L * 1024 * 1024;
     private static final String HIDDEN_DIR = ".jllm";
@@ -141,7 +142,8 @@ final class RemoteFs {
             JsonNode l;
             try {
                 l = fb.list(new Target(root, cur), true);
-            } catch (IOException | RuntimeException e) {
+            } catch (IOException e) {
+                log.debug("Listing of {} stopped: {}", cur, e.toString());
                 break;
             }
             List<JsonNode> kids = new ArrayList<>();

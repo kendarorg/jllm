@@ -3,8 +3,9 @@ package org.kendar.llm.eval.fixture;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import org.kendar.llm.harness.AgentHarness;
+import org.kendar.llm.harness.AgentHarnessBuilder;
 import org.kendar.llm.harness.settings.HarnessSettings;
+import org.kendar.llm.harness.settings.HarnessSettingsLoader;
 import org.kendar.llm.workflows.WorkflowsPlugin;
 
 import java.io.IOException;
@@ -172,7 +173,7 @@ public final class Fixtures implements AutoCloseable {
     }
 
     /** For {@code EvalCase.harness}: resets the fixtures and registers servers, tools and plugin. */
-    public Consumer<AgentHarness.Builder> harness() {
+    public Consumer<AgentHarnessBuilder> harness() {
         return b -> {
             reset();
             ObjectNode root = M.createObjectNode();
@@ -273,7 +274,7 @@ public final class Fixtures implements AutoCloseable {
             Path f = Files.createTempFile("jllm-eval-settings", ".json");
             try {
                 Files.writeString(f, M.writeValueAsString(root));
-                return HarnessSettings.load(f);
+                return HarnessSettingsLoader.load(f);
             } finally {
                 Files.deleteIfExists(f);
             }

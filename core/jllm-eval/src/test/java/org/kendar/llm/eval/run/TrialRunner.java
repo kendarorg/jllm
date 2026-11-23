@@ -9,6 +9,7 @@ import org.kendar.llm.eval.grade.Check;
 import org.kendar.llm.eval.grade.CheckResult;
 import org.kendar.llm.eval.grade.TrialContext;
 import org.kendar.llm.harness.AgentHarness;
+import org.kendar.llm.harness.AgentHarnessBuilder;
 import org.kendar.llm.harness.HarnessConfig;
 import org.kendar.llm.harness.agent.AgentEvent;
 import org.kendar.llm.harness.context.ContextStrategyKind;
@@ -110,6 +111,18 @@ public final class TrialRunner {
         return out;
     }
 
+    /** The harness configuration every trial starts from, before the case's own values. */
+    public static HarnessConfig trialBase() {
+        return HarnessConfig.defaults().withAgentId("jllm").withMaxTokens(4096).withLocalDirSandboxAllowed(true)
+                .withSandboxTimeoutSeconds(60);
+    }
+
+    /** The configuration of a trial before the case's own customization is applied. */
+    public static HarnessConfig caseConfig(EvalCase c, ContextStrategyKind strategy, int budget, String sandboxDir) {
+        return trialBase().withMaxTurns(c.maxTurns()).withApprovalTimeoutSeconds(Math.max(30, c.timeoutSeconds()))
+                .withSandboxBaseDir(sandboxDir).withContextStrategy(strategy).withContextBudgetTokens(budget);
+    }
+
     private record Execution(TrialTrace trace, Path workspace, Map<String, String> before) {
     }
 
@@ -126,12 +139,8 @@ public final class TrialRunner {
         RecordingModelClient fastRec = fast == null ? null : new RecordingModelClient(fast, label);
         int budget = c.contextBudgetTokens(strategy) != null ? c.contextBudgetTokens(strategy)
                 : (int) Math.max(4_000, settings.contextTokens() * 0.75);
-        HarnessConfig config = HarnessConfig.defaults().withAgentId("jllm").withMaxTokens(4096)
-                .withMaxTurns(c.maxTurns()).withApprovalTimeoutSeconds(Math.max(30, c.timeoutSeconds()))
-                .withSandboxBaseDir(base.toString()).withLocalDirSandboxAllowed(true)
-                .withSandboxTimeoutSeconds(60).withContextStrategy(strategy).withContextBudgetTokens(budget);
-        config = c.config().apply(config);
-        AgentHarness.Builder b = AgentHarness.builder().modelClient(main).config(config)
+        HarnessConfig config = c.config().apply(caseConfig(c, strategy, budget, base.toString()));
+        AgentHarnessBuilder b = new AgentHarnessBuilder().modelClient(main).config(config)
                 .smallModel(settings.smallModel());
         if (fastRec != null) b.fastModelClient(fastRec);
         if (settings.systemPromptExtra() != null && !settings.systemPromptExtra().isBlank()) {
@@ -206,7 +215,7 @@ public final class TrialRunner {
 
     private static void answerApproval(AgentHarness h, String chatId, EvalCase c, JsonNode data) {
         boolean ok = Boolean.TRUE.equals(c.approvals().apply(data));
-        h.resolveApproval(chatId, data.path("id").asText(), ok, null);
+        h.resolveApproval(chatId, data.path("id").asText(), ok, null, false, false);
     }
 
     private static String lastAssistantText(AgentHarness h, String chatId) {

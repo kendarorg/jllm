@@ -1,6 +1,7 @@
 package org.kendar.llm.harness.auth;
 
 import org.kendar.llm.harness.settings.HarnessSettings;
+import org.kendar.llm.harness.settings.TokenStoreSettings;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -26,7 +27,7 @@ public final class TokenStores {
      * @throws IllegalArgumentException for {@code native} with users, {@code encrypt} without {@code JLLM_TOKEN_KEY},
      *                                  an unknown type, or a native store that does not work on this machine
      */
-    public static TokenStore create(HarnessSettings.TokenStoreSettings settings, boolean multiUser, Path defaultDir,
+    public static TokenStore create(TokenStoreSettings settings, boolean multiUser, Path defaultDir,
                                     Function<String, String> env) {
         String type = settings == null || settings.type() == null || settings.type().isBlank() ? "auto"
                 : settings.type().strip().toLowerCase();

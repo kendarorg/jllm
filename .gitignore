@@ -52,3 +52,9 @@ node_modules/
 !/CHANGELOG.md
 !/CONTRIBUTING.md
 .flattened-pom.xml
+
+### Python ###
+__pycache__/
+*.pyc
+
+/.graal/

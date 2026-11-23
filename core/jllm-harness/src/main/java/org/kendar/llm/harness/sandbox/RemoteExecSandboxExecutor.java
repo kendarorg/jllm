@@ -3,6 +3,7 @@ package org.kendar.llm.harness.sandbox;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.kendar.llm.harness.HarnessConfig;
+import org.kendar.llm.harness.tools.ExternalLinks;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -362,6 +363,7 @@ public class RemoteExecSandboxExecutor implements SandboxExecutor {
                 "--user", d.user(),
                 "-e", "HOME=/tmp", "-e", "JLLM_TOKEN=" + token, "-e", "JLLM_PORT=" + DAEMON_PORT,
                 "-e", "JLLM_BIND=0.0.0.0", "-e", "JLLM_WORKSPACE=" + WORKSPACE,
+                "-e", "JLLM_EXTERNAL_LINKS=" + externalLinks().settingValue(),
                 "-p", (remote() ? "0.0.0.0" : "127.0.0.1") + "::" + DAEMON_PORT));
         if (remote()) {
             a.addAll(List.of("-e", "JLLM_AGENT_B64=" + agentPayload()));
@@ -396,7 +398,7 @@ public class RemoteExecSandboxExecutor implements SandboxExecutor {
             }
             if (remote()) upload(c, chatId);
             return c;
-        } catch (IOException | RuntimeException e) {
+        } catch (IOException | RuntimeException e) { // boundary: remove the container, rethrown unchanged
             removeContainer(name);
             throw e;
         }
@@ -441,7 +443,7 @@ public class RemoteExecSandboxExecutor implements SandboxExecutor {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return new Backup(false, "Backup interrupted.");
-        } catch (IOException | RuntimeException e) {
+        } catch (IOException | RuntimeException e) { // boundary: reported to the caller as a failed backup
             return new Backup(false, "Backup failed: " + e.getMessage());
         }
     }
@@ -624,7 +626,7 @@ public class RemoteExecSandboxExecutor implements SandboxExecutor {
                 if (!b.ok()) return b.message() + "\n" + keptMessage(name);
                 saved = b.message();
             }
-        } catch (IOException | RuntimeException e) {
+        } catch (IOException | RuntimeException e) { // boundary: reported to the caller as text
             return "Cannot clean the sandbox: " + e.getMessage();
         }
         containers.remove(owner);
@@ -677,7 +679,7 @@ public class RemoteExecSandboxExecutor implements SandboxExecutor {
                     removed.add(f[0]);
                 }
             }
-        } catch (IOException | RuntimeException e) {
+        } catch (IOException | RuntimeException e) { // boundary: the sweep is best effort
             log.debug("Orphan sweep skipped: {}", e.getMessage());
         }
         return removed;
@@ -718,11 +720,16 @@ public class RemoteExecSandboxExecutor implements SandboxExecutor {
 
     // ── helpers ───────────────────────────────────────────────────────────────
 
+    /** What the daemon does with a link that leaves the workspace: the web host never follows one. */
+    private ExternalLinks externalLinks() {
+        return kind == Kind.WEB ? ExternalLinks.NONE : config.externalLinks();
+    }
+
     /** Hash of what a container is made of; a different value recreates a reused container. */
     private String configHash() throws IOException {
         HarnessConfig.Docker d = config.sandbox().docker();
         return hash(String.join("|", d.image(), d.memory(), d.cpus(), String.valueOf(d.pidsLimit()), d.user(),
-                "daemon", String.valueOf(remote()), agentHash())).substring(0, 12);
+                "daemon", String.valueOf(remote()), externalLinks().settingValue(), agentHash())).substring(0, 12);
     }
 
     private static volatile String agentHash;

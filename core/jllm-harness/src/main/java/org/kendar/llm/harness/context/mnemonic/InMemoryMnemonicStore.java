@@ -1,5 +1,6 @@
 package org.kendar.llm.harness.context.mnemonic;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.Map;
@@ -17,7 +18,7 @@ public class InMemoryMnemonicStore implements MnemonicStore {
         if (json == null) return new MnemonicState();
         try {
             return mapper.readValue(json, MnemonicState.class);
-        } catch (Exception e) {
+        } catch (JsonProcessingException e) {
             throw new IllegalStateException("Corrupt mnemonic state of chat " + chatId, e);
         }
     }
@@ -26,7 +27,7 @@ public class InMemoryMnemonicStore implements MnemonicStore {
     public void save(String chatId, String agentKey, MnemonicState state) {
         try {
             states.put(key(chatId, agentKey), mapper.writeValueAsString(state));
-        } catch (Exception e) {
+        } catch (JsonProcessingException e) {
             throw new IllegalStateException("Cannot serialize mnemonic state", e);
         }
     }

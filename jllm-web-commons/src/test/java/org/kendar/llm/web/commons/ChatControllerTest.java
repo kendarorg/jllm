@@ -6,6 +6,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.AgentHarness;
+import org.kendar.llm.harness.AgentHarnessBuilder;
 import org.kendar.llm.harness.llm.ModelClient;
 import org.kendar.llm.harness.llm.ModelRequest;
 import org.kendar.llm.harness.llm.ModelResponse;
@@ -42,7 +43,7 @@ class ChatControllerTest {
                 return "";
             }
         };
-        AgentHarness harness = AgentHarness.builder()
+        AgentHarness harness = new AgentHarnessBuilder()
                 .modelClient(unused)
                 .sessionStore(new InMemoryChatSessionStore())
                 .objectMapper(mapper)
@@ -74,7 +75,7 @@ class ChatControllerTest {
     void contentWarningsOfTheStartupFilesAreListed() throws Exception {
         assertEquals(0, mapper.readTree(mvc.perform(get("/api/content-warnings")).andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString()).size());
-        AgentHarness harness = AgentHarness.builder()
+        AgentHarness harness = new AgentHarnessBuilder()
                 .modelClient(new ModelClient() {
                     @Override
                     public ModelResponse complete(ModelRequest request) {
@@ -125,7 +126,7 @@ class ChatControllerTest {
                 return "";
             }
         };
-        AgentHarness harness = AgentHarness.builder().modelClient(unused)
+        AgentHarness harness = new AgentHarnessBuilder().modelClient(unused)
                 .sessionStore(new FileChatSessionStore(root, mapper)).objectMapper(mapper).build();
         MockMvc restarted = MockMvcBuilders.standaloneSetup(
                 TestUser.chatController(harness, mapper)).build();

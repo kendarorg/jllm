@@ -10,7 +10,7 @@ decides what the agent may touch and what needs a human.
 > engines). JLLM talks to any OpenAI-compatible endpoint, so those can serve as its model backend.
 
 ```java
-AgentHarness h = AgentHarness.builder()
+AgentHarness h = new AgentHarnessBuilder()
     .modelClient(ModelClients.anthropic(AnthropicSettings.defaults(System.getenv("ANTHROPIC_API_KEY")), mapper))
     .tools(List.of(myTool))                      // your Java code as tools
     .settings(Path.of("harness.json"))           // MCP servers and REST APIs
@@ -63,7 +63,7 @@ Untrusted tool output tagged, approvals inline (<a href="jllm-cli/README.md">jll
 
 | | |
 |---|---|
-| **Framework-free core** | Jackson, the JDK `HttpClient`, jsoup, slf4j-api. No Spring, JPA or Micrometer in the library. Fits Spring Boot, Quarkus, Jakarta EE or plain Java ([Spring recipes](docs/getting-started/spring-boot.md)) |
+| **Framework-free core** | Jackson, the JDK `HttpClient`, jsoup, json-schema-validator, swagger-parser (with its transitive libraries) and `slf4j-api` (full list: `mvn dependency:tree -pl core/jllm-harness`). No Spring, JPA or Micrometer in the library. Fits Spring Boot, Quarkus, Jakarta EE or plain Java ([Spring recipes](docs/getting-started/spring-boot.md)) |
 | **Governed tool calls** | tool kinds, permission modes, regex deny rules, hidden tools, per-host network approval, hooks to deny, rewrite or audit ([security model](docs/enterprise/security-model.md)) |
 | **Isolation** | path jail for file tools, Docker sandbox per command or per chat (also remote), and a JavaScript sandbox with no host access ([JS](docs/guides/js.md)) |
 | **Deterministic flows** | business processes as JSON maps of steps: your engine decides the path, the model does bounded work inside a step ([flows](docs/guides/workflow.md)) |
@@ -88,7 +88,7 @@ See [MCP and REST](docs/guides/mcp.md) and [TOOLS](docs/guides/tools.md).
 
 JLLM is an agent runtime, not a RAG toolkit or a model SDK. Use it beside Spring AI or LangChain4j when the agent must
 act under approval and isolation. Comparison: [JVM landscape](docs/comparisons/jvm-landscape.md),
-[terminal agents](docs/comparisons/harnesses-compare.md), [Why JLLM](docs/why-jllm.md).
+[terminal agents](docs/comparisons/harnesses-compare.md) ([sources](docs/comparisons/harnesses-sources.md)), [Why JLLM](docs/why-jllm.md).
 
 ## Modules
 
@@ -105,13 +105,26 @@ act under approval and isolation. Comparison: [JVM landscape](docs/comparisons/j
 
 ```sh
 mvn -pl jllm-cli -am package
-java -jar jllm-cli/target/jllm-cli-1.0.0.jar --provider anthropic --mode edit      # terminal
+java -jar jllm-cli/target/jllm-cli-1.2.0-jllm.jar --provider anthropic --mode edit      # terminal
 
 mvn -pl jllm-web -am package
-java -jar jllm-web/target/jllm-web-1.0.0.jar --provider anthropic                 # http://localhost:8080
+java -jar jllm-web/target/jllm-web-1.2.0-jllm.jar --provider anthropic                 # http://localhost:8080
 ```
 
 Set `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`, `GROK_API_KEY`, `QWEN_API_KEY`) first.
+
+The jars do not contain GraalJS, so `run_js` is off in the commands above. For development, `scripts/graal-fetch`
+downloads the GraalJS set into `.graal/<version>/<edition>/` (`community` by default, `JLLM_GRAAL_EDITION=oracle` or
+`--edition oracle` for the other), and these run the built jars or tests on it (`.sh`, `.ps1` and `.cmd` of each):
+
+```sh
+scripts/run-cli.sh --provider anthropic --mode edit       # terminal, with run_js
+scripts/run-web.sh --jllm.provider=anthropic              # http://localhost:8080, with run_js
+scripts/run-eval.sh                                       # eval module (needs a model; you run it, not the build)
+mvn $(scripts/graal-flags.sh) test                        # js plugin tests on the fetched set
+```
+
+The release zip ships the same set in `lib-ext/`. Licensing and details: [JS guide](docs/guides/js.md#enabling).
 
 ## Maven Central
 

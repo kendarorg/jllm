@@ -17,15 +17,28 @@ Set a key first: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GROK_API_KEY` or `QWEN_
 ## Terminal
 
 ```sh
-java -jar jllm-cli/target/jllm-cli-1.0.0.jar --provider anthropic --mode edit
+java -jar jllm-cli/target/jllm-cli-1.2.0-jllm.jar --provider anthropic --mode edit
 ```
 
 Flags, startup directories, slash commands and local models: [jllm-cli](../../jllm-cli/README.md).
 
+## JavaScript (`run_js`)
+
+The jars do not contain GraalJS: with `java -jar` the `run_js` tool is off (the harness starts, one WARN says why).
+From a source checkout run the same jars with the GraalJS set fetched into `.graal/`:
+
+```sh
+scripts/run-cli.sh --provider anthropic --mode edit            # Windows: scripts\run-cli.cmd
+scripts/run-web.sh --jllm.provider=anthropic                   # Windows: scripts\run-web.cmd
+```
+
+`JLLM_GRAAL_EDITION=oracle` switches the edition (the oracle set declares terms to accept, see the
+[JS guide](../guides/js.md#licensing)). The release zip carries the set in `lib-ext/`, which its launchers use.
+
 ## Browser
 
 ```sh
-java -jar jllm-web/target/jllm-web-1.0.0.jar --provider anthropic
+java -jar jllm-web/target/jllm-web-1.2.0-jllm.jar --provider anthropic
 ```
 
 Open http://localhost:8080. The reference application has password and OpenID Connect sign-in, roles, skills, a flow

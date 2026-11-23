@@ -160,7 +160,7 @@ class ContextManagerCompactionTest {
     private boolean compactWithUser(ArrayNode m, Events ev, boolean approve, String edited) {
         ev.also = (type, data) -> {
             if ("approval_request".equals(type)) {
-                assertTrue(approvals.resolve("c", data.get("id").asText(), approve, edited));
+                assertTrue(approvals.resolve("c", data.get("id").asText(), approve, edited, false, false));
             }
         };
         return manager.compactIfNeeded("c", m, null, ev, () -> false);

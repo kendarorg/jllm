@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.sandbox.LocalDirSandboxExecutor;
 import org.kendar.llm.harness.settings.HarnessSettings;
+import org.kendar.llm.harness.settings.HarnessSettingsLoader;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -139,7 +140,7 @@ class StorageQuotaTest {
         Path f = base.resolve("settings.json");
         Files.writeString(f, "{\"storage\":{\"maxBytes\":123}}");
 
-        assertEquals(123, HarnessSettings.load(f).storageMaxBytes());
+        assertEquals(123, HarnessSettingsLoader.load(f).storageMaxBytes());
         assertEquals(-1, HarnessSettings.empty().storageMaxBytes());
     }
 }

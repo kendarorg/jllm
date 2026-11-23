@@ -56,7 +56,7 @@ final class Term implements AutoCloseable {
             for (String k : new String[]{"[A", "OA"}) main.bind(new Reference(LineReader.UP_HISTORY), k);
             for (String k : new String[]{"[B", "OB"}) main.bind(new Reference(LineReader.DOWN_HISTORY), k);
             return new Term(t, r);
-        } catch (IOException | RuntimeException e) {
+        } catch (IOException | RuntimeException e) { // boundary: a terminal that cannot edit lines falls back to plain input
             System.err.println("warning: terminal line editing unavailable (" + e + "); using plain input");
             return null;
         }

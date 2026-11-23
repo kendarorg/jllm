@@ -107,4 +107,18 @@ class SettingsOverridesTest {
         assertThrows(NumberFormatException.class,
                 () -> SettingsOverrides.applyToSettings(args("context-tokens", "big"), HarnessSettings.empty()));
     }
+    @Test
+    void externalLinksFlagReplacesTheSetting() {
+        assertEquals(org.kendar.llm.harness.tools.ExternalLinks.READ, HarnessSettings.empty().externalLinks());
+        for (var m : org.kendar.llm.harness.tools.ExternalLinks.values()) {
+            HarnessSettings s = SettingsOverrides.applyToSettings(args("external-links", m.settingValue()),
+                    HarnessSettings.empty());
+            assertEquals(m, s.externalLinks());
+        }
+        assertEquals(org.kendar.llm.harness.tools.ExternalLinks.READ_WRITE,
+                SettingsOverrides.applyToSettings(args("external-links", "ReadWrite"), HarnessSettings.empty()).externalLinks());
+        assertThrows(IllegalArgumentException.class,
+                () -> SettingsOverrides.applyToSettings(args("external-links", "write"), HarnessSettings.empty()));
+        assertTrue(CliArgs.USAGE.contains("--external-links none|read|readwrite"));
+    }
 }

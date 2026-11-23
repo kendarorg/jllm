@@ -92,10 +92,6 @@ public final class FileTokenStore implements TokenStore {
         return Path.of(System.getProperty("jllm.home", System.getProperty("user.home")), ".jllm");
     }
 
-    public static Path defaultFile() {
-        return defaultDir().resolve("auth.json");
-    }
-
     /** The plain store on {@link #defaultDir()}, one instance for the whole JVM. */
     public static FileTokenStore defaultStore() {
         return SHARED.computeIfAbsent(defaultDir().toAbsolutePath().normalize(), d -> new FileTokenStore(d, null));

@@ -13,6 +13,7 @@ final class CliArgs {
             + "[--resume prompt|no|CHAT_ID] "
             + "[--sandbox local|docker] [--docker-image IMAGE] [--docker-mode oneshot|daemon] "
             + "[--docker-remote] [--docker-remote-host ADDRESS] [--sandbox-clean] [--sandbox-clean-all] "
+            + "[--external-links none|read|readwrite] "
             + "[--pricing.input-per-million=USD] [--pricing.output-per-million=USD] [--pricing.cache-read-per-million=USD] [--pricing.cache-write-per-million=USD] [--plugin-dir DIR] [--plugins.ID.enabled=true|false] [--plugins.ID.settings.KEY=VALUE]";
 
     private CliArgs() {

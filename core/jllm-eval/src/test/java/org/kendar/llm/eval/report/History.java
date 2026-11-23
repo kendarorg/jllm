@@ -40,7 +40,9 @@ public final class History {
             run.put("target", meta.path("targetType").asText("") + ":" + meta.path("targetName").asText(""));
             run.put("quantization", meta.path("quantization").asText(""));
             run.put("contextTokens", meta.path("contextTokens").asInt());
-            run.put("commit", meta.path("gitCommit").asText("unknown"));
+            JsonNode build = meta.path("build");
+            run.put("commit", build.path("commit").asText("unknown"));
+            run.put("dirty", build.path("dirty").asBoolean());
             run.put("endTime", Instant.now().toString());
             String name = stamp(run.path("runFolder").asText(runDir.getFileName().toString())) + "_"
                     + ReportBuilder.safe(run.path("model").asText("model"));
@@ -97,23 +99,34 @@ public final class History {
                     : stored ? "baseline" : "no baseline";
             String base = f.getFileName().toString();
             base = base.substring(0, base.length() - 5);
+            int k = r.path("reportK").asInt(1);
+            String commit = r.path("commit").asText("unknown");
+            if (commit.length() > 8) commit = commit.substring(0, 8);
             sb.append("| ").append(localTime(r.path("startTime").asText(""))).append(" | ")
                     .append(localTime(r.path("endTime").asText(""))).append(" | ").append(r.path("model").asText())
                     .append(" | ").append(r.path("target").asText()).append(" | ").append(judge)
+                    .append(" | ").append(commit).append(r.path("dirty").asBoolean() ? " (dirty)" : "")
                     .append(" | ").append(o.path("cases").asInt())
                     .append(" | ").append(String.format("%.1f%%", o.path("passRate").asDouble() * 100))
-                    .append(" | ").append(String.format("%.1f%%", o.path("passKRate").asDouble() * 100))
+                    .append(" | ").append(kText(o, "passAtK", k)).append(" | ").append(kText(o, "passPowK", k))
                     .append(" | ").append(Math.round(o.path("tokens").path("perTrial").asDouble()))
                     .append(" | ").append(delta).append(" | [").append(base).append(".md](").append(base)
                     .append(".md) |\n");
             rows.put(base, sb.toString());
         }
         StringBuilder sb = new StringBuilder("# Eval history\n\n");
-        sb.append("| start | end | model | target | judge | cases | pass rate | pass^k | tokens/trial | vs baseline | recap |\n");
-        sb.append("|---|---|---|---|---|---|---|---|---|---|---|\n");
+        sb.append("| start | end | model | target | judge | commit | cases | pass rate | pass@k | pass^k | tokens/trial | vs baseline | recap |\n");
+        sb.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|\n");
         rows.values().forEach(sb::append);
         Files.writeString(index, sb.toString(), StandardCharsets.UTF_8);
         return index;
+    }
+
+    /** pass@k or pass^k of the overall scope at the run's largest k, with the k; {@code n/a} when not measured. */
+    private static String kText(JsonNode overall, String metric, int k) {
+        JsonNode v = overall.path(metric).path(String.valueOf(k));
+        if (v.isMissingNode()) return "n/a (k=" + k + ")";
+        return String.format("%.1f%% (k=%d)", v.asDouble() * 100, k);
     }
 
     private static final DateTimeFormatter LOCAL = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");

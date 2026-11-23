@@ -76,7 +76,7 @@ flowchart TB
 
 The fast model is optional. If none is configured, `ContextManager` and `ToolSelector` use the main model, and `ToolClassifier` is null (auto mode never asks).
 
-## 2. Startup: `AgentHarness.Builder.build()`
+## 2. Startup: `AgentHarnessBuilder.build()`
 
 ```mermaid
 flowchart TD
@@ -170,7 +170,7 @@ sequenceDiagram
 | `refusal`, `model_context_window_exceeded` | warning; return |
 | context-overflow error | `compactNow` once, retry same turn (`turn--`); second failure is an `error` event |
 | cancel | `cancelled` event, return |
-| `maxTurns` reached | interactive run: approval of type `continue` (approve = another `maxTurns`); otherwise, or when rejected, warning "Stopped after N turns" |
+| `maxTurns` reached | the budget is the model turns plus the `run_js` inner tool calls divided by `loop.innerCallsPerTurn` (`RunBudget`, one per run, so a sub-agent has its own). Interactive run: approval of type `continue` reporting both counts (approve = another `maxTurns`); otherwise, or when rejected, warning "Stopped after N turns" (with "and M script tool calls" when scripts made some). While the budget is used up, inner calls throw a catchable error |
 
 Two more ways a run ends:
 

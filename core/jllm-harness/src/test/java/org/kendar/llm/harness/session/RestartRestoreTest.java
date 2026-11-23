@@ -32,8 +32,8 @@ class RestartRestoreTest {
         Rig control = rig(new FileChatSessionStore(base.resolve("control"), MAPPER));
         String cc = control.newChat();
         control.model.enqueue(toolUse("t1", "echo", "{}"), text("a1"), text("a2"));
-        control.loop.run(cc, "q1", new Events(), () -> false);
-        control.loop.run(cc, "q2", new Events(), () -> false);
+        control.loop.run(cc, "q1", new Events(), () -> false, null);
+        control.loop.run(cc, "q2", new Events(), () -> false, null);
 
         // restarted between the two turns
         Path root = base.resolve("restart");
@@ -43,7 +43,7 @@ class RestartRestoreTest {
         first.sessions.setToolGroups(id, Set.of("Misc"));
         first.sessions.addUsage(id, new Usage(10, 20, 30, 40));
         first.model.enqueue(toolUse("t1", "echo", "{}"), text("a1"));
-        first.loop.run(id, "q1", new Events(), () -> false);
+        first.loop.run(id, "q1", new Events(), () -> false, null);
 
         Rig second = rig(new FileChatSessionStore(root, MAPPER));
         ChatSessionData back = second.sessions.get(id);
@@ -51,7 +51,7 @@ class RestartRestoreTest {
         assertEquals(Set.of("Misc"), second.sessions.toolGroups(id));
         assertTrue(back.inputTokens() >= 10);
         second.model.enqueue(text("a2"));
-        second.loop.run(id, "q2", new Events(), () -> false);
+        second.loop.run(id, "q2", new Events(), () -> false, null);
 
         var req = second.model.requests.get(0);
         var ref = control.model.requests.get(control.model.requests.size() - 1);

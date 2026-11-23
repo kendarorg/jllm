@@ -86,7 +86,7 @@ class StreamingEventsTest {
         rig.loop = rig.loopWith(new Streaming(rig.model));
         rig.model.enqueue(text("one two three"));
         Events ev = new Events();
-        rig.loop.run(chatId, "go", ev, () -> false);
+        rig.loop.run(chatId, "go", ev, () -> false, null);
 
         String streamed = String.join("", ev.ofType("text_delta").stream().map(d -> d.path("text").asText()).toList());
         assertEquals("one two three", streamed);

@@ -63,7 +63,7 @@ public class CompactionStrategy implements ContextStrategy {
             t.sink().emit("compaction", mapper.createObjectNode().put("tier", 2)
                     .put("estimatedTokens", r.tokensAfter()).put("reason", "overflow"));
             return new ContextView(t.log(), true, true);
-        } catch (RuntimeException e) {
+        } catch (RuntimeException e) { // boundary: a failing summary call degrades compaction, the run goes on
             log.warn("Overflow compaction failed: {}", e.getMessage());
             return null;
         }

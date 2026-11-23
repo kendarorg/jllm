@@ -101,7 +101,8 @@ class RestApiToolProviderTest {
 
     private List<HarnessTool> tools(List<String> allow, List<String> deny) {
         return RestApiToolProvider.discover(new RestApiSettings("t", base + "/api", base + "/spec.yaml", null,
-                Map.of("X-Key", "cfg"), null, allow, null, deny, null), http, MAPPER);
+                Map.of("X-Key", "cfg"), null, allow, null, deny, null), http, MAPPER,
+                org.kendar.llm.harness.auth.Identity.ANONYMOUS, null, Map.of(), org.kendar.llm.harness.tools.TruncationMode.HEAD);
     }
 
     private static HarnessTool named(List<HarnessTool> tools, String name) {
@@ -198,7 +199,8 @@ class RestApiToolProviderTest {
         RestApiSettings api = new RestApiSettings("c", base + "/api", base + "/clash.yaml", null, null, null, null,
                 null, null, null);
         ToolNames.CollisionException e = assertThrows(ToolNames.CollisionException.class,
-                () -> RestApiToolProvider.discover(api, http, MAPPER));
+                () -> RestApiToolProvider.discover(api, http, MAPPER,
+                        org.kendar.llm.harness.auth.Identity.ANONYMOUS, null, Map.of(), org.kendar.llm.harness.tools.TruncationMode.HEAD));
         assertTrue(e.getMessage().contains("GET /a"), e.getMessage());
         assertTrue(e.getMessage().contains("GET /b"), e.getMessage());
     }
@@ -210,6 +212,6 @@ class RestApiToolProviderTest {
         RestApiSettings api = new RestApiSettings("t", base + "/api", base + "/spec.yaml", null, null, null, null,
                 null, null, null);
         assertThrows(ToolNames.CollisionException.class, () -> RestApiToolProvider.discover(api, http, MAPPER,
-                org.kendar.llm.harness.auth.Identity.ANONYMOUS, claims));
+                org.kendar.llm.harness.auth.Identity.ANONYMOUS, claims, Map.of(), org.kendar.llm.harness.tools.TruncationMode.HEAD));
     }
 }

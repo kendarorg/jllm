@@ -15,7 +15,7 @@ public final class BrowserLauncher {
                     || !Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) return false;
             Desktop.getDesktop().browse(URI.create(url));
             return true;
-        } catch (Exception | LinkageError e) {
+        } catch (Exception | LinkageError e) { // boundary: desktop integration may be missing or throw anything
             return false;
         }
     }

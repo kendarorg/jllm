@@ -6,6 +6,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.AgentHarness;
+import org.kendar.llm.harness.AgentHarnessBuilder;
 import org.kendar.llm.harness.HarnessConfig;
 import org.kendar.llm.harness.agent.AgentEvent;
 import org.kendar.llm.harness.permission.ApprovalService;
@@ -207,7 +208,7 @@ class WebHostApprovalTest {
         h.subscribe(chat, 0, ev -> {
             events.add(ev);
             if (ev.type().equals("approval_request")) {
-                h.resolveApproval(chat, ev.data().path("id").asText(), true, null, grantAnswer);
+                h.resolveApproval(chat, ev.data().path("id").asText(), true, null, grantAnswer, false);
             }
             if (ev.type().equals("run_finished")) done.countDown();
         });
@@ -221,7 +222,7 @@ class WebHostApprovalTest {
         ScriptedModel model = new ScriptedModel().enqueue(
                 toolUse("t1", "web_fetch", "{\"url\":\"" + ip + "/plain\"}"),
                 toolUse("t2", "web_fetch", "{\"url\":\"" + ip + "/plain\"}"), text("ok"));
-        AgentHarness h = AgentHarness.builder().modelClient(model).config(config).build();
+        AgentHarness h = new AgentHarnessBuilder().modelClient(model).config(config).build();
         String chat = h.sessions().create(null).chatId();
 
         List<AgentEvent> events = run(h, chat, true);
@@ -238,7 +239,7 @@ class WebHostApprovalTest {
         ScriptedModel model = new ScriptedModel().enqueue(
                 toolUse("t1", "web_fetch", "{\"url\":\"" + ip + "/plain\"}"),
                 toolUse("t2", "web_fetch", "{\"url\":\"" + ip + "/plain\"}"), text("ok"));
-        AgentHarness h = AgentHarness.builder().modelClient(model).config(config).build();
+        AgentHarness h = new AgentHarnessBuilder().modelClient(model).config(config).build();
 
         List<AgentEvent> events = run(h, h.sessions().create(null).chatId(), false);
 

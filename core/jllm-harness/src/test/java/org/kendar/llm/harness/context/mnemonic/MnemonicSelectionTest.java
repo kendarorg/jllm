@@ -5,12 +5,15 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.AgentHarness;
+import org.kendar.llm.harness.AgentHarnessBuilder;
 import org.kendar.llm.harness.HarnessConfig;
 import org.kendar.llm.harness.HarnessTestSupport.*;
 import org.kendar.llm.harness.context.ContextStrategyKind;
 import org.kendar.llm.harness.context.compaction.CompactionStrategy;
 import org.kendar.llm.harness.context.compaction.ContextManager;
+import org.kendar.llm.harness.settings.HarnessConfigMapper;
 import org.kendar.llm.harness.settings.HarnessSettings;
+import org.kendar.llm.harness.settings.HarnessSettingsLoader;
 import org.kendar.llm.harness.tools.ToolKind;
 
 import java.nio.file.Files;
@@ -32,7 +35,7 @@ class MnemonicSelectionTest {
     void settingsChooseTheStrategy() throws Exception {
         Path f = Files.writeString(base.resolve("s.json"), """
                 {"context":{"strategy":"mnemonic","mnemonic":{"maskTrigger":50000,"minAgeTurns":3}}}""");
-        HarnessConfig c = HarnessSettings.load(f, k -> null).applyTo(HarnessConfig.defaults());
+        HarnessConfig c = HarnessConfigMapper.apply(HarnessSettingsLoader.load(f, k -> null), HarnessConfig.defaults());
         assertEquals(ContextStrategyKind.MNEMONIC, c.contextStrategy());
         assertEquals(50000, c.mnemonic().maskTrigger());
         assertEquals(3, c.mnemonic().minAgeTurns());
@@ -40,35 +43,35 @@ class MnemonicSelectionTest {
 
         Path old = Files.writeString(base.resolve("o.json"), "{\"context\":{\"strategy\":\"compaction\"}}");
         assertEquals(ContextStrategyKind.COMPACTION,
-                HarnessSettings.load(old, k -> null).applyTo(c).contextStrategy());
+                HarnessConfigMapper.apply(HarnessSettingsLoader.load(old, k -> null), c).contextStrategy());
         assertEquals(ContextStrategyKind.COMPACTION, HarnessConfig.defaults().contextStrategy());
 
         Path bad = Files.writeString(base.resolve("b.json"), "{\"context\":{\"strategy\":\"magic\"}}");
-        assertThrows(IllegalArgumentException.class, () -> HarnessSettings.load(bad, k -> null).applyTo(c));
+        assertThrows(IllegalArgumentException.class, () -> HarnessConfigMapper.apply(HarnessSettingsLoader.load(bad, k -> null), c));
         assertEquals(ContextStrategyKind.MNEMONIC,
-                HarnessSettings.empty().withContextStrategy("mnemonic").applyTo(HarnessConfig.defaults())
+                HarnessConfigMapper.apply(HarnessSettings.builder().contextStrategy("mnemonic").build(), HarnessConfig.defaults())
                         .contextStrategy());
     }
 
     @Test
     void theBuilderBuildsTheChosenStrategyAndAFactoryWins() {
-        HarnessSettings mnemonic = HarnessSettings.empty().withContextStrategy("mnemonic");
-        AgentHarness h = AgentHarness.builder().modelClient(new ScriptedModel()).config(config(base))
+        HarnessSettings mnemonic = HarnessSettings.builder().contextStrategy("mnemonic").build();
+        AgentHarness h = new AgentHarnessBuilder().modelClient(new ScriptedModel()).config(config(base))
                 .withoutStandardTools().settings(mnemonic).build();
         assertInstanceOf(MnemonicStrategy.class, h.contextStrategy());
         String chat = h.sessions().create(null).chatId();
         assertTrue(h.commands().execute(chat, "/compact").output().contains(MnemonicStrategy.NOTHING_TO_MASK));
         assertTrue(h.commands().execute(chat, "/status").output().contains("context strategy: mnemonic"));
 
-        AgentHarness byConfig = AgentHarness.builder().modelClient(new ScriptedModel())
+        AgentHarness byConfig = new AgentHarnessBuilder().modelClient(new ScriptedModel())
                 .config(config(base).withContextStrategy(ContextStrategyKind.MNEMONIC)).withoutStandardTools().build();
         assertInstanceOf(MnemonicStrategy.class, byConfig.contextStrategy());
 
-        AgentHarness old = AgentHarness.builder().modelClient(new ScriptedModel()).config(config(base))
+        AgentHarness old = new AgentHarnessBuilder().modelClient(new ScriptedModel()).config(config(base))
                 .withoutStandardTools().build();
         assertInstanceOf(CompactionStrategy.class, old.contextStrategy());
 
-        AgentHarness custom = AgentHarness.builder().modelClient(new ScriptedModel()).config(config(base))
+        AgentHarness custom = new AgentHarnessBuilder().modelClient(new ScriptedModel()).config(config(base))
                 .withoutStandardTools().settings(mnemonic)
                 .contextStrategy(d -> new CompactionStrategy(new ContextManager(d.config(), d.summaryModel(),
                         d.approvals(), d.mapper(), d.metrics()), d.config(), d.mapper()))
@@ -97,7 +100,7 @@ class MnemonicSelectionTest {
         String chat = rig.newChat();
         scriptBigCalls(rig.model, 16);
         Events events = new Events();
-        rig.loop.run(chat, "go", events, () -> false);
+        rig.loop.run(chat, "go", events, () -> false, null);
 
         List<Recorded> reqs = rig.model.requests;
         assertEquals(17, reqs.size());
@@ -130,7 +133,7 @@ class MnemonicSelectionTest {
         rig.configure(c -> c.withContextStrategy(ContextStrategyKind.MNEMONIC));
         String chat = rig.newChat();
         rig.model.enqueue(toolUse("k1", "task", "{'prompts':['look around']}"), text("sub answer"), text("main done"));
-        rig.loop.run(chat, "delegate", new Events(), () -> false);
+        rig.loop.run(chat, "delegate", new Events(), () -> false, null);
 
         JsonNode result = null;
         for (JsonNode m : rig.sessions.messages(rig.sessions.get(chat))) {

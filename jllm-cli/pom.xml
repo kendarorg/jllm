@@ -35,22 +35,43 @@
             <artifactId>jllm-harness</artifactId>
             <version>${project.version}</version>
         </dependency>
-        <!-- GraalJS for the jllm-js plugin, which does not bundle it -->
+        <!-- GraalJS for run_js: provided, never bundled; the release ships it in lib-ext/ (see release/graaljs) -->
         <dependency>
             <groupId>org.graalvm.polyglot</groupId>
             <artifactId>polyglot</artifactId>
             <version>${graalvm.version}</version>
+            <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>org.graalvm.polyglot</groupId>
             <artifactId>js</artifactId>
             <version>${graalvm.version}</version>
             <type>pom</type>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.graalvm.regex</groupId>
+            <artifactId>regex</artifactId>
+            <version>${graalvm.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.graalvm.polyglot</groupId>
+            <artifactId>js-isolate-community</artifactId>
+            <version>${graalvm.version}</version>
+            <type>pom</type>
+            <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>org.jline</groupId>
             <artifactId>jline</artifactId>
             <version>3.26.3</version>
+        </dependency>
+        <!-- the log binding of the CLI; src/main/resources/simplelogger.properties keeps it quiet -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-simple</artifactId>
+            <version>2.0.17</version>
         </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
@@ -84,7 +105,7 @@
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                                     <mainClass>org.kendar.llm.cli.Main</mainClass>
                                     <manifestEntries>
-                                        <!-- Truffle refuses to start in a fat jar that lost this attribute -->
+                                        <!-- GraalJS is not in this jar (lib-ext is added to the class path); Truffle still needs a Multi-Release main jar, so the flag stays -->
                                         <Multi-Release>true</Multi-Release>
                                     </manifestEntries>
                                 </transformer>

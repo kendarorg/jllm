@@ -39,7 +39,8 @@ public final class FileUserRepository implements UserRepository {
         if (!Files.isRegularFile(file)) return Optional.empty();
         try {
             return Optional.of(parse(id, mapper.readTree(file.toFile())));
-        } catch (IOException | RuntimeException e) {
+        } catch (IOException | IllegalArgumentException e) {
+            log.debug("Stack of the skipped user file {}", file, e);
             log.warn("User file {} skipped: {}", file, e.toString());
             return Optional.empty();
         }

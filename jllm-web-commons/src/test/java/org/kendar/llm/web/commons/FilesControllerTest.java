@@ -6,6 +6,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.AgentHarness;
+import org.kendar.llm.harness.AgentHarnessBuilder;
 import org.kendar.llm.harness.HarnessConfig;
 import org.kendar.llm.harness.llm.ModelClient;
 import org.kendar.llm.harness.llm.ModelRequest;
@@ -50,7 +51,7 @@ class FilesControllerTest {
                 return "";
             }
         };
-        harness = AgentHarness.builder()
+        harness = new AgentHarnessBuilder()
                 .modelClient(unused)
                 .sandbox(new ChatDirSandboxExecutor(HarnessConfig.defaults(), dir))
                 .sessionStore(new InMemoryChatSessionStore())

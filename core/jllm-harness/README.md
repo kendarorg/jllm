@@ -1,7 +1,7 @@
 # jllm-harness
 
 Framework-free coding-agent harness for Java: a library to embed and a command-line agent. No Spring, JPA or
-Micrometer. Java 21, Jackson, JDK `HttpClient`, jsoup, swagger-parser, slf4j-api.
+Micrometer. Java 21, Jackson, the JDK `HttpClient`, jsoup, json-schema-validator, swagger-parser (with its transitive libraries) and `slf4j-api` (full list: `mvn dependency:tree -pl core/jllm-harness`).
 
 - **Models**: Anthropic (prompt caching, thinking, citations) and any OpenAI-compatible endpoint (OpenAI, Qwen,
   llama.cpp, vLLM, Ollama); an optional fast model for summaries, tool-group selection and the auto-mode classifier;
@@ -38,7 +38,7 @@ mvn -pl jllm-harness -am package -Prelease  # also the javadoc jar
 ## Embedding
 
 ```java
-AgentHarness h = AgentHarness.builder()
+AgentHarness h = new AgentHarnessBuilder()
     .modelClient(ModelClients.anthropic(AnthropicSettings.defaults(System.getenv("ANTHROPIC_API_KEY")),
                                         new ObjectMapper()))
     .tools(List.of(myTool))                 // added to the standard Files, Shell and Web tools
@@ -79,7 +79,7 @@ ends the run. A cut `write_file` keeps the lines that arrived in the scratch dir
 ## Settings file, hooks and plugins
 
 ```java
-AgentHarness h = AgentHarness.builder()
+AgentHarness h = new AgentHarnessBuilder()
     .modelClient(client)
     .settings(Path.of("harness.json"))                       // MCP, REST, skills, instruction files, agent types
     .hook(HookEvent.PRE_TOOL, ctx -> HookResult.deny("no"))  // USER_PROMPT, PRE_TOOL, POST_TOOL, STOP, PRE_LLM, POST_LLM, PRE_AGENT, POST_AGENT
@@ -225,7 +225,7 @@ Three strategies, in separate packages behind `context.ContextStrategy`:
 
 Select it with settings `"context": {"strategy": "mnemonic"}`, the CLI flag `--context-strategy mnemonic` (wins over
 the settings), `config.withContextStrategy(ContextStrategyKind.MNEMONIC)`, or a custom implementation with
-`AgentHarness.builder().contextStrategy(deps -> ...)` (wins over everything). `/status` shows the active one.
+`new AgentHarnessBuilder().contextStrategy(deps -> ...)` (wins over everything). `/status` shows the active one.
 
 The mnemonic strategy (after mnemonic-proxy) renders each request from the verbatim log and decisions stored per chat
 and agent (`mnemonicStore(...)`; the CLI keeps them in `.jllm/history/<chat>/<agent>/mnemonic.json`). The same log
@@ -278,7 +278,7 @@ The other strategies offer them too unless `context.todos: false` (saved the sam
 ## Fast model and the auto-mode classifier
 
 `"fastModel": {"name": "ollama", "baseUrl": "...", "apiKey": "", "model": "...", ...}` in the settings file (or
-`AgentHarness.builder().fastModelClient(..)`) adds a small model used for compaction summaries, tool-group selection and
+`new AgentHarnessBuilder().fastModelClient(..)`) adds a small model used for compaction summaries, tool-group selection and
 the classifier. In `auto` mode, with a fast model configured, each tool call that is not read-only is classified as
 safe or unsafe from the tool name, its input, the working directory and the user's request only (never tool output).
 Safe runs; unsafe, unsure, low confidence (under 0.8), timeout or error asks the user. Without a fast model `auto` asks

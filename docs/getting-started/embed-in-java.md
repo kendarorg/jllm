@@ -11,7 +11,7 @@ Java 21, Maven coordinates `org.kendar.llm:jllm-harness`. Build from source with
 ## 2. Build a harness
 
 ```java
-AgentHarness h = AgentHarness.builder()
+AgentHarness h = new AgentHarnessBuilder()
     .modelClient(ModelClients.anthropic(AnthropicSettings.defaults(System.getenv("ANTHROPIC_API_KEY")), mapper))
     .tools(List.of(myTool))                      // your Java code as tools
     .settings(Path.of("harness.json"))           // MCP servers and REST APIs

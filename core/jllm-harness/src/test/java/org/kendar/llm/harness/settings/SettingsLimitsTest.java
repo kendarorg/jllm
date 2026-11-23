@@ -15,7 +15,7 @@ class SettingsLimitsTest {
     Path dir;
 
     private HarnessSettings load(String json) throws Exception {
-        return HarnessSettings.load(Files.writeString(dir.resolve("s.json"), json));
+        return HarnessSettingsLoader.load(Files.writeString(dir.resolve("s.json"), json));
     }
 
     @Test
@@ -50,9 +50,9 @@ class SettingsLimitsTest {
     void commandLineOverridesKeepTheLimits() throws Exception {
         HarnessSettings s = load("{\"files\":{\"maxReadBytes\":2000},\"web\":{\"fetchMaxBytes\":3000},"
                 + "\"sandbox\":{\"outputLogMaxBytes\":4000}}")
-                .withSandboxBackend("docker").withDockerImage("img").withDockerMode("daemon")
-                .withDockerRemote(true, "h").withMaxTokens(1000).withContextStrategy("compaction")
-                .withSmallModel(true).withChatRetentionLimit(3).withPlugin("x", true);
+                .toBuilder().sandboxBackend("docker").dockerImage("img").dockerMode("daemon")
+                .dockerRemote(true, "h").maxTokens(1000).contextStrategy("compaction")
+                .smallModel(true).chatRetentionLimit(3).build().withPlugin("x", true, null);
         assertEquals(2000, s.filesMaxReadBytes());
         assertEquals(3000, s.webFetchMaxBytes());
         assertEquals(4000, s.sandboxOutputLogMaxBytes());

@@ -7,6 +7,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.AgentHarness;
+import org.kendar.llm.harness.AgentHarnessBuilder;
 import org.kendar.llm.harness.agent.AgentEvent;
 import org.kendar.llm.harness.integration.McpHttpClient;
 import org.kendar.llm.harness.tools.SimpleTool;
@@ -176,7 +177,7 @@ class UserIdentityTest {
     }
 
     private AgentHarness readerHarness(ScriptedModel model, SimpleTool... tools) {
-        return AgentHarness.builder().modelClient(model).config(config(base)).withoutStandardTools()
+        return new AgentHarnessBuilder().modelClient(model).config(config(base)).withoutStandardTools()
                 .tools(List.of(tools))
                 .userPolicyResolver(user -> user != null && user.roles().contains("reader")
                         ? new UserPolicy(t -> t.kind() == ToolKind.READ_ONLY, null) : UserPolicy.ALL)

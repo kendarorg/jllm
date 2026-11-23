@@ -15,6 +15,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.kendar.llm.harness.HarnessTestSupport.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -53,7 +54,7 @@ class SubAgentFanOutTest {
         String chatId = rig.newChat();
         Events ev = new Events();
 
-        rig.loop.run(chatId, "investigate all repos", ev, () -> false);
+        rig.loop.run(chatId, "investigate all repos", ev, () -> false, null);
 
         JsonNode results = taskResults(rig);
         assertEquals(3, results.size());
@@ -92,7 +93,7 @@ class SubAgentFanOutTest {
         String chatId = rig.newChat();
         rig.sessions.setMode(chatId, PermissionMode.EDIT);
 
-        rig.loop.run(chatId, "go", new Events(), () -> false);
+        rig.loop.run(chatId, "go", new Events(), () -> false, null);
 
         var main = rig.model.requests.stream().filter(r -> !r.pinned().contains("subagent")).findFirst().orElseThrow();
         var sub = subRequest(rig);
@@ -109,7 +110,7 @@ class SubAgentFanOutTest {
         String chatId = rig.newChat();
         rig.sessions.setMode(chatId, PermissionMode.EDIT);
 
-        rig.loop.run(chatId, "go", new Events(), () -> false);
+        rig.loop.run(chatId, "go", new Events(), () -> false, null);
 
         var sub = subRequest(rig);
         assertEquals(List.of("search", "writer", "bash"), sub.toolNames());
@@ -132,10 +133,10 @@ class SubAgentFanOutTest {
         rig.sessions.setMode(chatId, PermissionMode.EDIT);
         Events ev = new Events();
         ev.also = (type, data) -> {
-            if ("approval_request".equals(type)) rig.approvals.resolve(chatId, data.get("id").asText(), true, null, true);
+            if ("approval_request".equals(type)) rig.approvals.resolve(chatId, data.get("id").asText(), true, null, true, false);
         };
 
-        rig.loop.run(chatId, "go", ev, () -> false);
+        rig.loop.run(chatId, "go", ev, () -> false, null);
 
         assertEquals(1, ev.ofType("approval_request").size());
         assertTrue(ev.ofType("approval_request").get(0).get("title").asText().startsWith("[general #1] bash"));
@@ -157,10 +158,10 @@ class SubAgentFanOutTest {
         String chatId = rig.newChat();
         Events ev = new Events();
         ev.also = (type, data) -> {
-            if ("approval_request".equals(type)) rig.approvals.resolve(chatId, data.get("id").asText(), false, null);
+            if ("approval_request".equals(type)) rig.approvals.resolve(chatId, data.get("id").asText(), false, null, false, false);
         };
 
-        rig.loop.run(chatId, "go", ev, () -> false);
+        rig.loop.run(chatId, "go", ev, () -> false, null);
 
         var subMessages = subRequests(rig).get(1).messages();
         assertTrue(subMessages.get(subMessages.size() - 1).toString().contains(AgentLoop.REJECTED));
@@ -179,7 +180,7 @@ class SubAgentFanOutTest {
         };
         String chatId = rig.newChat();
 
-        rig.loop.run(chatId, "go", new Events(), () -> false);
+        rig.loop.run(chatId, "go", new Events(), () -> false, null);
 
         // user, assistant(tool_use), user(tool_result), assistant(final)
         assertEquals(4, rig.sessions.messages(rig.sessions.get(chatId)).size());
@@ -189,10 +190,10 @@ class SubAgentFanOutTest {
     @Test
     @SuppressWarnings("unchecked")
     void toolLevelMergeReportsPerPromptFailureWithoutAbortingOthers() throws Exception {
-        AgentLoop loop = mock(AgentLoop.class);
-        when(loop.runSubAgent(any(), any(), eq("a"), any(), any(), any(), any())).thenReturn("A!");
-        when(loop.runSubAgent(any(), any(), eq("b"), any(), any(), any(), any())).thenThrow(new IllegalStateException("b exploded"));
-        when(loop.runSubAgent(any(), any(), eq("c"), any(), any(), any(), any())).thenReturn("C!");
+        SubAgentRunner loop = mock(SubAgentRunner.class);
+        when(loop.run(argThat(r -> r != null && "a".equals(r.prompt())))).thenReturn("A!");
+        when(loop.run(argThat(r -> r != null && "b".equals(r.prompt())))).thenThrow(new IllegalStateException("b exploded"));
+        when(loop.run(argThat(r -> r != null && "c".equals(r.prompt())))).thenReturn("C!");
         SubAgentTool tool = new SubAgentTool(() -> loop, MAPPER);
 
         String out = tool.execute(new ToolContext("c1", base), json("{'prompts':['a','b','','c',5]}"));
@@ -208,8 +209,8 @@ class SubAgentFanOutTest {
     @Test
     @SuppressWarnings("unchecked")
     void toolRejectsEmptyAndCapsPromptCount() throws Exception {
-        AgentLoop loop = mock(AgentLoop.class);
-        when(loop.runSubAgent(any(), any(), any(), any(), any(), any(), any())).thenReturn("ok");
+        SubAgentRunner loop = mock(SubAgentRunner.class);
+        when(loop.run(any())).thenReturn("ok");
         SubAgentTool tool = new SubAgentTool(() -> loop, MAPPER);
         ToolContext ctx = new ToolContext("c1", base);
 

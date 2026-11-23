@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import org.kendar.llm.eval.EvalLog;
 import org.kendar.llm.eval.RunMetadata;
+import org.kendar.llm.eval.pin.Fingerprint;
 import org.kendar.llm.eval.EvalRun;
 import org.kendar.llm.eval.run.TrialResult;
 import org.kendar.llm.eval.run.TrialRunner;
@@ -28,22 +29,22 @@ public final class CaseExecutor {
     private final Path outputDir;
     private final int defaultTrials;
     private final int maxTrials;
+    private final List<Integer> passK;
     private final RunMetadata metadata;
 
     /**
-     * @param metadata attached to every saved result; null in unit tests, whose cases then stay out of the run's
-     *                 progress counters (they share the JVM with the eval suites)
+     * @param maxTrials upper bound on the trials of every case, also the ones that set their own count
+     * @param passK     the k values of pass@k and pass^k to compute
+     * @param metadata  attached to every saved result; null in unit tests, whose cases then stay out of the run's
+     *                  progress counters (they share the JVM with the eval suites)
      */
-    public CaseExecutor(TrialRunner runner, Path outputDir, int defaultTrials, RunMetadata metadata) {
-        this(runner, outputDir, defaultTrials, Integer.MAX_VALUE, metadata);
-    }
-
-    /** @param maxTrials upper bound on the trials of every case, also the ones that set their own count */
-    public CaseExecutor(TrialRunner runner, Path outputDir, int defaultTrials, int maxTrials, RunMetadata metadata) {
+    public CaseExecutor(TrialRunner runner, Path outputDir, int defaultTrials, int maxTrials, List<Integer> passK,
+                        RunMetadata metadata) {
         this.runner = runner;
         this.outputDir = outputDir;
         this.defaultTrials = defaultTrials;
         this.maxTrials = maxTrials;
+        this.passK = List.copyOf(passK);
         this.metadata = metadata;
     }
 
@@ -66,11 +67,9 @@ public final class CaseExecutor {
                     + (t.passed() ? "" : ", failed: " + t.failedChecks().stream()
                     .map(k -> k.name() + " (" + k.reason() + ")").collect(java.util.stream.Collectors.joining("; "))));
             trials.add(t);
-            // a risk case cannot recover from a failed trial: stop spending model calls
-            if (c.risk() && !t.passed()) break;
         }
-        CaseResult r = CaseResult.of(c, strategy.name().toLowerCase(), trials);
-        save(dir, c, r);
+        CaseResult r = CaseResult.of(c, strategy.name().toLowerCase(), trials, passK);
+        save(dir, c, strategy, r);
         long millis = (System.nanoTime() - t0) / 1_000_000;
         String detail = "pass rate " + Math.round(r.passRate() * 100) + "%";
         if (metadata != null) EvalLog.caseFinished(label, r.passed(), millis, detail);
@@ -79,7 +78,7 @@ public final class CaseExecutor {
         return r;
     }
 
-    private void save(Path dir, EvalCase c, CaseResult r) {
+    private void save(Path dir, EvalCase c, ContextStrategyKind strategy, CaseResult r) {
         try {
             Files.createDirectories(dir);
             Map<String, Object> doc = new LinkedHashMap<>();
@@ -90,7 +89,8 @@ public final class CaseExecutor {
             doc.put("risk", r.risk());
             doc.put("rubric", c.rubric());
             doc.put("passRate", r.passRate());
-            doc.put("passK", r.passK());
+            doc.put("passAtK", r.passAtK());
+            doc.put("passPowK", r.passPowK());
             doc.put("passed", r.passed());
             doc.put("trials", r.trials().stream().map(t -> {
                 Map<String, Object> m = new LinkedHashMap<>();
@@ -102,6 +102,7 @@ public final class CaseExecutor {
                 m.put("trace", t.traceFile() == null ? null : t.traceFile().toString());
                 return m;
             }).toList());
+            doc.put("caseHash", Fingerprint.caseHash(c, strategy));
             doc.put("run", metadata);
             Files.writeString(dir.resolve("result.json"), EvalRun.activeSecrets().maskJson(MAPPER.writeValueAsString(doc)),
                     StandardCharsets.UTF_8);

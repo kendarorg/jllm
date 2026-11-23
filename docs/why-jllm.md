@@ -6,7 +6,7 @@ and what needs a person's approval. Five properties, each with where to read mor
 
 ## 1. A framework-free core
 
-The harness depends on Jackson, the JDK `HttpClient`, jsoup, swagger-parser and `slf4j-api`. No Spring, JPA or
+The harness depends on Jackson, the JDK `HttpClient`, jsoup, json-schema-validator, swagger-parser (with its transitive libraries) and `slf4j-api` (full list: `mvn dependency:tree -pl core/jllm-harness`). No Spring, JPA or
 Micrometer. It embeds in a plain Java service, a desktop application or a Spring Boot application
 ([recipes](getting-started/spring-boot.md)), and a small dependency list is easier to review
 ([compliance](enterprise/compliance-and-licensing.md)).

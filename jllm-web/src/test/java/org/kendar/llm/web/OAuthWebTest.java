@@ -12,6 +12,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.AgentHarness;
+import org.kendar.llm.harness.AgentHarnessBuilder;
 import org.kendar.llm.harness.HarnessPricing;
 import org.kendar.llm.harness.auth.FileTokenStore;
 import org.kendar.llm.harness.auth.OAuthToken;
@@ -110,7 +111,7 @@ class OAuthWebTest {
         SkillRepository skills = new FileSkillRepository(root);
         store = new FileTokenStore(root.resolve("tokens"),
                 new TokenCipher(Base64.getDecoder().decode(TokenCipher.newKey()), null));
-        harness = build(new HarnessSettings(null, List.of(crm, shared), null, null, null, null), store, permissions,
+        harness = build(HarnessSettings.builder().restApis(List.of(crm, shared)).build(), store, permissions,
                 skills);
         LoginSessionRepository sessions = new InMemoryLoginSessionRepository();
         CookieAuthentication auth = new CookieAuthentication(users, sessions);
@@ -138,7 +139,7 @@ class OAuthWebTest {
 
     private AgentHarness build(HarnessSettings settings, TokenStore store, Permissions permissions,
                                SkillRepository skills) {
-        return AgentHarness.builder().modelClient(new ModelClient() {
+        return new AgentHarnessBuilder().modelClient(new ModelClient() {
                     @Override
                     public ModelResponse complete(ModelRequest request) {
                         throw new UnsupportedOperationException();
@@ -267,7 +268,7 @@ class OAuthWebTest {
     @Test
     void startupIsRefusedWithoutEncryptionOrPublicUrl() throws Exception {
         Path spec = root.resolve("crm.yaml");
-        HarnessSettings settings = new HarnessSettings(null, List.of(api("crm", spec, true)), null, null, null, null);
+        HarnessSettings settings = HarnessSettings.builder().restApis(List.of(api("crm", spec, true))).build();
         Permissions permissions = new Permissions(new FileRoleRepository(root.resolve("permissions"), MAPPER));
         SkillRepository skills = new FileSkillRepository(root);
         AgentHarness plain = build(settings, new FileTokenStore(root.resolve("plain")), permissions, skills);

@@ -1,6 +1,7 @@
 package org.kendar.llm.eval;
 
 import org.kendar.llm.eval.ModelEndpoint.Role;
+import org.kendar.llm.eval.pin.DirtyTreePolicy;
 import org.kendar.llm.harness.llm.ThinkingLevel;
 
 import java.io.IOException;
@@ -40,6 +41,9 @@ public final class EvalConfig {
     private int maxTrials;
     private int caseTimeoutSeconds;
     private boolean updateBaseline;
+    private List<Integer> passK = List.of(1);
+    private DirtyTreePolicy dirtyTree = DirtyTreePolicy.WARN;
+    private final Map<String, String> resolved = new TreeMap<>();
     private int compactionContextTokens;
     private String systemPromptExtra = "";
     private Path outputDir;
@@ -99,6 +103,22 @@ public final class EvalConfig {
     public int caseTimeoutSeconds() { return caseTimeoutSeconds; }
     /** Store this run as the model baseline once its report is written (after comparing with the old one). */
     public boolean updateBaseline() { return updateBaseline; }
+    /**
+     * The k values of pass@k and pass^k ({@code eval.passK}, comma separated; default 1 and the maximum trials):
+     * ascending, without duplicates, each between 1 and {@link #maxTrials()}.
+     */
+    public List<Integer> passK() { return passK; }
+    /** What a run does when tracked files differ from HEAD ({@code eval.dirtyTree}: refuse, warn or allow; default warn). */
+    public DirtyTreePolicy dirtyTree() { return dirtyTree; }
+    /**
+     * Every resolved key that can change a result (secrets never included, nor the keys that only say where results
+     * go or what to do with them), with its value or its default, sorted by key. Input of the settings fingerprint.
+     */
+    public Map<String, String> resolvedKeys() {
+        Map<String, String> out = new TreeMap<>(resolved);
+        out.keySet().removeAll(NOT_RESULT_KEYS);
+        return Collections.unmodifiableMap(out);
+    }
     /** Text added to the system prompt of every case; empty (default) leaves the harness prompt as it is. */
     public String systemPromptExtra() { return systemPromptExtra; }
     /** Context size used for the cases tagged {@code compaction}; the other cases use the target's own. */
@@ -128,11 +148,15 @@ public final class EvalConfig {
         return key.endsWith(".apiKey");
     }
 
+    private static final Set<String> NOT_RESULT_KEYS = Set.of("eval.dirtyTree", "eval.updateBaseline", "eval.outputDir");
+
     private String raw(String key) {
         String v = sys.get(key);
         if (v == null || v.isBlank()) v = env.get(envName(key));
         if ((v == null || v.isBlank()) && !isSecret(key)) v = file.getProperty(key);
-        return v == null || v.isBlank() ? null : v.trim();
+        String out = v == null || v.isBlank() ? null : v.trim();
+        if (out != null && !isSecret(key)) resolved.put(key, out);
+        return out;
     }
 
     /** First non-blank of the key and the fallbacks (each a property key or a plain environment variable name). */
@@ -154,7 +178,9 @@ public final class EvalConfig {
     }
 
     private int integerOr(String key, int min, int def) {
-        return raw(key) == null ? def : integer(key, min);
+        if (raw(key) != null) return integer(key, min);
+        resolved.put(key, String.valueOf(def));
+        return def;
     }
 
     private int integer(String key, int min) {
@@ -172,7 +198,10 @@ public final class EvalConfig {
 
     private boolean bool(String key, boolean def) {
         String v = raw(key);
-        if (v == null) return def;
+        if (v == null) {
+            resolved.put(key, String.valueOf(def));
+            return def;
+        }
         if (v.equalsIgnoreCase("true")) return true;
         if (v.equalsIgnoreCase("false")) return false;
         errors.add(key + ": must be true or false (got '" + v + "')");
@@ -210,6 +239,8 @@ public final class EvalConfig {
         maxTrials = integerOr("eval.maxTrials", 1, 10);
         caseTimeoutSeconds = integerOr("eval.caseTimeoutSeconds", 0, 0);
         updateBaseline = bool("eval.updateBaseline", false);
+        passK = resolvePassK();
+        dirtyTree = dirtyTreeSetting();
         String extra = str("eval.systemPrompt.extra", false);
         systemPromptExtra = extra == null ? "" : extra.strip();
         compactionContextTokens = integerOr("eval.compaction.contextTokens", 1024, 65536);
@@ -222,6 +253,43 @@ public final class EvalConfig {
         resolveFast();
         targetModelName = modelName("eval.target.modelName", target);
         judgeModelName = modelName("eval.judge.modelName", judge);
+    }
+
+    /** {@code eval.passK}: a comma list, clipped to the maximum trials, deduplicated, ascending; default 1 and the maximum. */
+    private List<Integer> resolvePassK() {
+        String v = raw("eval.passK");
+        Set<Integer> ks = new TreeSet<>();
+        if (v == null) {
+            ks.add(1);
+            ks.add(maxTrials);
+        } else {
+            for (String part : v.split(",")) {
+                String t = part.strip();
+                try {
+                    int k = Integer.parseInt(t);
+                    if (k < 1) errors.add("eval.passK: every k must be >= 1 (got " + k + ")");
+                    else ks.add(Math.min(k, maxTrials));
+                } catch (NumberFormatException e) {
+                    errors.add("eval.passK: not a comma separated list of integers ('" + v + "')");
+                    break;
+                }
+            }
+        }
+        if (ks.isEmpty()) ks.add(1);
+        List<Integer> list = List.copyOf(ks);
+        resolved.put("eval.passK", list.stream().map(String::valueOf).collect(java.util.stream.Collectors.joining(",")));
+        return list;
+    }
+
+    private DirtyTreePolicy dirtyTreeSetting() {
+        String v = raw("eval.dirtyTree");
+        if (v == null) return DirtyTreePolicy.WARN;
+        try {
+            return DirtyTreePolicy.parse(v);
+        } catch (IllegalArgumentException e) {
+            errors.add("eval.dirtyTree: " + e.getMessage());
+            return DirtyTreePolicy.WARN;
+        }
     }
 
     /** The override, else the endpoint's model id; blank when there is no endpoint (already an error). */

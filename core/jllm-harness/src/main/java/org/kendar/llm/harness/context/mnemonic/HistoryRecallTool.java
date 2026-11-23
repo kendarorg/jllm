@@ -1,5 +1,6 @@
 package org.kendar.llm.harness.context.mnemonic;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -24,6 +25,7 @@ import java.util.function.IntPredicate;
  * into the transcripts of sub-agent runs.
  */
 final class HistoryRecallTool implements HarnessTool {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(HistoryRecallTool.class);
 
     static final String NAME = "history_recall";
     private static final int RESULTS = 8;
@@ -338,8 +340,9 @@ final class HistoryRecallTool implements HarnessTool {
             if (line.isBlank()) continue;
             try {
                 out.add(mapper.readTree(line));
-            } catch (Exception e) {
+            } catch (JsonProcessingException e) {
                 // a corrupt line is skipped, the rest of the transcript is still searchable
+                log.debug("Skipping a corrupt transcript line: {}", e.toString());
             }
         }
         return out;

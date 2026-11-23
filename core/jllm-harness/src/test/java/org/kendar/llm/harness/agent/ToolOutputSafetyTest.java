@@ -42,7 +42,7 @@ class ToolOutputSafetyTest {
         Events ev = new Events();
         ev.also = (type, data) -> {
             if ("approval_request".equals(type)) {
-                assertTrue(rig.approvals.resolve(chatId, data.get("id").asText(), approve, null));
+                assertTrue(rig.approvals.resolve(chatId, data.get("id").asText(), approve, null, false, false));
             }
         };
         return ev;
@@ -57,7 +57,7 @@ class ToolOutputSafetyTest {
         setUp("wrap", true);
         rig.model.enqueue(toolUse("t1", "fetch", "{}"), text("ok"));
 
-        rig.loop.run(chatId, "go", new Events(), () -> false);
+        rig.loop.run(chatId, "go", new Events(), () -> false, null);
 
         String content = toolResult(rig.model.requests.get(1).messages()).get("content").asText();
         assertTrue(content.startsWith("<tool_output source=\"fetch\" trust=\"untrusted\""), content);
@@ -71,7 +71,7 @@ class ToolOutputSafetyTest {
         rig.model.enqueue(toolUse("t1", "fetch", "{}"), toolUse("t2", "shell", "{}"), text("done"));
         Events ev = answering(false);
 
-        rig.loop.run(chatId, "go", ev, () -> false);
+        rig.loop.run(chatId, "go", ev, () -> false, null);
 
         assertEquals(1, ev.ofType("approval_request").size());
         assertEquals(0, shellRuns.get());
@@ -82,7 +82,7 @@ class ToolOutputSafetyTest {
         setUp("wrap", true);
         rig.model.enqueue(toolUse("t1", "fetch", "{}"), toolUse("t2", "shell", "{}"), text("done"));
 
-        rig.loop.run(chatId, "go", answering(true), () -> false);
+        rig.loop.run(chatId, "go", answering(true), () -> false, null);
 
         assertEquals(1, shellRuns.get());
     }
@@ -93,7 +93,7 @@ class ToolOutputSafetyTest {
         rig.model.enqueue(toolUse("t1", "shell", "{}"), text("done"));
         Events ev = new Events();
 
-        rig.loop.run(chatId, "go", ev, () -> false);
+        rig.loop.run(chatId, "go", ev, () -> false, null);
 
         assertTrue(ev.ofType("approval_request").isEmpty());
         assertEquals(1, shellRuns.get());
@@ -105,7 +105,7 @@ class ToolOutputSafetyTest {
         rig.model.enqueue(toolUse("t1", "fetch", "{}"), toolUse("t2", "shell", "{}"), text("done"));
         Events ev = new Events();
 
-        rig.loop.run(chatId, "go", ev, () -> false);
+        rig.loop.run(chatId, "go", ev, () -> false, null);
 
         assertTrue(ev.ofType("approval_request").isEmpty());
         assertEquals(1, shellRuns.get());
@@ -116,7 +116,7 @@ class ToolOutputSafetyTest {
         setUp("off", true);
         rig.model.enqueue(toolUse("t1", "fetch", "{}"), text("ok"));
 
-        rig.loop.run(chatId, "go", new Events(), () -> false);
+        rig.loop.run(chatId, "go", new Events(), () -> false, null);
 
         assertEquals(EVIL, toolResult(rig.model.requests.get(1).messages()).get("content").asText());
     }
@@ -125,11 +125,11 @@ class ToolOutputSafetyTest {
     void taintCarriesToTheNextRunWhileTheOutputIsInTheContext() {
         setUp("wrap", true);
         rig.model.enqueue(toolUse("t1", "fetch", "{}"), text("ok"), toolUse("t2", "shell", "{}"), text("done"));
-        rig.loop.run(chatId, "first", new Events(), () -> false);
+        rig.loop.run(chatId, "first", new Events(), () -> false, null);
         Events ev = answering(false);
 
         // "continue": the injected text is still in the conversation
-        rig.loop.run(chatId, "second", ev, () -> false);
+        rig.loop.run(chatId, "second", ev, () -> false, null);
 
         assertEquals(1, ev.ofType("approval_request").size());
         assertEquals(0, shellRuns.get());
@@ -139,7 +139,7 @@ class ToolOutputSafetyTest {
     void taintEndsWhenTheOutputLeftTheContext() {
         setUp("wrap", true);
         rig.model.enqueue(toolUse("t1", "fetch", "{}"), text("ok"), toolUse("t2", "shell", "{}"), text("done"));
-        rig.loop.run(chatId, "first", new Events(), () -> false);
+        rig.loop.run(chatId, "first", new Events(), () -> false, null);
         // compaction cleared the untrusted result
         ArrayNode log = rig.sessions.messages(rig.sessions.get(chatId));
         for (JsonNode m : log) {
@@ -153,7 +153,7 @@ class ToolOutputSafetyTest {
         rig.sessions.saveMessages(chatId, log);
         Events ev = new Events();
 
-        rig.loop.run(chatId, "second", ev, () -> false);
+        rig.loop.run(chatId, "second", ev, () -> false, null);
 
         assertTrue(ev.ofType("approval_request").isEmpty());
         assertEquals(1, shellRuns.get());
@@ -172,7 +172,7 @@ class ToolOutputSafetyTest {
         };
         Events ev = answering(false);
 
-        rig.loop.run(chatId, "go", ev, () -> false);
+        rig.loop.run(chatId, "go", ev, () -> false, null);
 
         assertEquals(1, ev.ofType("approval_request").size());
         assertEquals(0, shellRuns.get());

@@ -1,5 +1,10 @@
 package org.kendar.llm.eval;
 
+import org.kendar.llm.eval.pin.BuildInfo;
+import org.kendar.llm.eval.pin.DirtyTree;
+import org.kendar.llm.eval.pin.Fingerprint;
+import org.kendar.llm.eval.pin.JsInfo;
+
 import java.nio.file.Path;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -53,6 +58,16 @@ public final class EvalRun {
         Instant start = Instant.now();
         EvalLog.info("run starting: loading configuration");
         EvalConfig config = EvalConfig.load();
+        // before any client exists and before the warm-up call: a refused tree costs no model request
+        BuildInfo build = BuildInfo.detect(Path.of("").toAbsolutePath(), config.outputDir(), projectVersion());
+        String banner = DirtyTree.enforce(config.dirtyTree(), build, config.updateBaseline());
+        if (banner != null) EvalLog.info(banner);
+        Fingerprint.Settings settings = Fingerprint.settings(config);
+        String prompts = Fingerprint.prompts();
+        JsInfo js = JsInfo.detect();
+        EvalLog.info("build " + build.label() + " (version " + build.projectVersion() + "), settings "
+                + settings.hash().substring(0, 12) + ", prompts " + shortHash(prompts) + ", pass@k for k "
+                + config.passK() + ", run_js " + js.engine() + " (" + js.edition() + " " + js.version() + ")");
         EvalLog.info("target " + config.target().name() + " model " + named(config.targetModelName(),
                 config.target().model()) + ", judge " + named(config.judgeModelName(), config.judge().model())
                 + (config.selfGraded() ? " (self-graded)" : "") + ", trials "
@@ -60,11 +75,12 @@ public final class EvalRun {
                 + ", test classes in parallel: " + System.getProperty("run.parallelism", "1"));
         EvalLog.info("connection check and warm-up call (the first call can take minutes on a cold model)");
         ConnectionCheck.Result check = ConnectionCheck.run(config, EvalModels::client);
-        RunMetadata meta = RunMetadata.of(config, check, start);
+        RunMetadata meta = RunMetadata.of(config, check, start, build, settings.hash(), prompts, js);
         Path dir = config.outputDir().resolve(slug(meta.targetModel())).resolve("run-" + DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")
                 .withZone(ZoneOffset.UTC).format(start));
         try {
             Path file = meta.write(dir, config.secrets());
+            settings.write(dir, config.secrets());
             EvalRun run = new EvalRun(config, meta, dir, file);
             EvalLog.info("warm-up done " + check.warmupMillis() + " ms; results in " + dir);
             // normally written by EvalProgressListener when the test plan ends; the hook covers a JVM that ends early
@@ -73,6 +89,16 @@ public final class EvalRun {
         } catch (java.io.IOException e) {
             throw new IllegalStateException("Cannot write run metadata: " + config.secrets().mask(e.getMessage()), e);
         }
+    }
+
+    /** The project version the tests were started with (surefire passes it); {@code unknown} from an IDE. */
+    static String projectVersion() {
+        String v = System.getProperty("jllm.project.version");
+        return v == null || v.isBlank() || v.contains("${") ? BuildInfo.UNKNOWN : v;
+    }
+
+    private static String shortHash(String h) {
+        return h.length() > 12 ? h.substring(0, 12) : h;
     }
 
     /** {@code name (id id)} when the reported name differs from the id sent to the server, else the id. */

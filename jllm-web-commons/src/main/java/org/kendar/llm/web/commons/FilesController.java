@@ -2,6 +2,10 @@ package org.kendar.llm.web.commons;
 
 import org.kendar.llm.harness.AgentHarness;
 import org.kendar.llm.harness.sandbox.FileBackend;
+import org.kendar.llm.harness.tools.AtomicFiles;
+import org.kendar.llm.harness.tools.ExternalLinks;
+import org.kendar.llm.harness.tools.PathJail;
+import org.kendar.llm.harness.tools.PathJail.JailedPath;
 import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -9,12 +13,17 @@ import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.io.UncheckedIOException;
+import java.nio.channels.Channels;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.*;
+import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.InvalidPathException;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.*;
-import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -49,27 +58,35 @@ public class FilesController {
         RemoteFs rfs = remote(chatId, rootName);
         if (rfs != null) return rfs.list(path);
         Path root = root(chatId);
-        Path dir = resolve(root, path);
-        if (!Files.isDirectory(dir)) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Not a directory");
+        JailedPath dir = resolve(root, path);
+        if (!PathJail.isDirectory(dir)) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Not a directory");
         List<Map<String, Object>> entries = new ArrayList<>();
-        try (Stream<Path> s = Files.list(dir)) {
-            for (Path p : s.toList()) {
-                if (isHidden(root, p)) continue;
-                boolean isDir = Files.isDirectory(p);
-                Map<String, Object> e = new LinkedHashMap<>();
-                e.put("name", p.getFileName().toString());
-                e.put("path", rel(root, p));
-                e.put("dir", isDir);
-                if (isDir) e.put("chain", chain(root, p));
-                e.put("size", isDir ? 0 : safeSize(p));
-                e.put("modified", safeModified(p));
-                entries.add(e);
+        for (PathJail.Entry en : PathJail.list(dir)) {
+            JailedPath p = dir.child(en.name());
+            if (isHidden(p)) continue;
+            BasicFileAttributes a = en.attributes();
+            if (en.isLink()) {
+                try {
+                    a = PathJail.stat(p); // a link inside the project shows what it points to
+                } catch (IOException | IllegalArgumentException e) {
+                    continue; // leaves the project, or dangling: not listed
+                }
+                if (a == null) continue;
             }
+            boolean isDir = a.isDirectory();
+            Map<String, Object> e = new LinkedHashMap<>();
+            e.put("name", en.name());
+            e.put("path", rel(p));
+            e.put("dir", isDir);
+            if (isDir && !en.isLink()) e.put("chain", chain(p));
+            e.put("size", isDir ? 0 : a.size());
+            e.put("modified", a.lastModifiedTime().toMillis());
+            entries.add(e);
         }
         entries.sort(Comparator.<Map<String, Object>, Boolean>comparing(e -> !(Boolean) e.get("dir"))
                 .thenComparing(e -> ((String) e.get("name")).toLowerCase()));
         Map<String, Object> out = new LinkedHashMap<>();
-        out.put("path", rel(root, dir));
+        out.put("path", rel(dir));
         out.put("entries", entries);
         return out;
     }
@@ -78,20 +95,22 @@ public class FilesController {
      * GitHub-style compaction: while a directory holds nothing but one sub-directory, that sub-directory is part of the
      * same row. Returns every segment (including the entry itself) so each can be navigated separately.
      */
-    private List<Map<String, String>> chain(Path root, Path dir) {
+    private List<Map<String, String>> chain(JailedPath dir) {
         List<Map<String, String>> out = new ArrayList<>();
-        Path cur = dir;
+        JailedPath cur = dir;
         for (int i = 0; i < 64; i++) {
-            out.add(Map.of("name", cur.getFileName().toString(), "path", rel(root, cur)));
-            Path only = null;
-            try (Stream<Path> s = Files.list(cur)) {
-                List<Path> kids = s.filter(k -> !isHidden(root, k)).limit(2).toList();
+            out.add(Map.of("name", cur.fileName(), "path", rel(cur)));
+            PathJail.Entry only = null;
+            try {
+                JailedPath here = cur;
+                List<PathJail.Entry> kids = PathJail.list(cur).stream().filter(k -> !isHidden(here.child(k.name()))).limit(2)
+                        .toList();
                 if (kids.size() == 1) only = kids.get(0);
-            } catch (IOException e) {
+            } catch (IOException | IllegalArgumentException e) {
                 break;
             }
-            if (only == null || Files.isSymbolicLink(only) || !Files.isDirectory(only)) break;
-            cur = only;
+            if (only == null || only.isLink() || !only.attributes().isDirectory()) break;
+            cur = cur.child(only.name());
         }
         return out;
     }
@@ -104,16 +123,17 @@ public class FilesController {
         RemoteFs rfs = remote(chatId, rootName);
         if (rfs != null) return rfs.read(path);
         Path root = root(chatId);
-        Path f = resolve(root, path);
-        if (!Files.isRegularFile(f)) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Not a file");
-        if (Files.size(f) > MAX_TEXT_BYTES) {
+        JailedPath f = resolve(root, path);
+        BasicFileAttributes st = PathJail.stat(f);
+        if (st == null || !st.isRegularFile()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Not a file");
+        if (st.size() > MAX_TEXT_BYTES) {
             throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "File too large to edit");
         }
-        byte[] bytes = Files.readAllBytes(f);
+        byte[] bytes = PathJail.readAllBytes(f, MAX_TEXT_BYTES);
         for (byte b : bytes) {
             if (b == 0) throw new ResponseStatusException(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Binary file");
         }
-        return Map.of("path", rel(root, f), "content", new String(bytes, StandardCharsets.UTF_8));
+        return Map.of("path", rel(f), "content", new String(bytes, StandardCharsets.UTF_8));
     }
 
     @PutMapping("/content")
@@ -122,13 +142,14 @@ public class FilesController {
         RemoteFs rfs = remote(chatId, rootName);
         if (rfs != null) return rfs.write(required(body, "path"), body.getOrDefault("content", ""));
         Path root = root(chatId);
-        Path f = resolve(root, required(body, "path"));
-        if (f.equals(root) || Files.isDirectory(f)) {
+        JailedPath f = resolve(root, required(body, "path"));
+        BasicFileAttributes st = PathJail.stat(f);
+        if (f.components().isEmpty() || (st != null && st.isDirectory())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Not a file");
         }
-        if (!Files.exists(f)) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Not found");
-        Files.writeString(f, body.getOrDefault("content", ""), StandardCharsets.UTF_8);
-        return Map.of("path", rel(root, f));
+        if (st == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Not found");
+        AtomicFiles.write(f, body.getOrDefault("content", "").getBytes(StandardCharsets.UTF_8));
+        return Map.of("path", rel(f));
     }
 
     // ── add ───────────────────────────────────────────────────────────────────
@@ -144,16 +165,23 @@ public class FilesController {
             return ResponseEntity.status(HttpStatus.CREATED).body(Map.of("path", created));
         }
         Path root = root(chatId);
-        Path parent = resolve(root, body.getOrDefault("path", ""));
-        if (!Files.isDirectory(parent)) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Not a directory");
-        Path target = child(root, parent, required(body, "name"));
-        if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
+        JailedPath parent = resolve(root, body.getOrDefault("path", ""));
+        if (!PathJail.isDirectory(parent)) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Not a directory");
+        JailedPath target = child(parent, required(body, "name"));
+        if (PathJail.statNoFollow(target) != null) throw new ResponseStatusException(HttpStatus.CONFLICT, "Already exists");
+        try {
+            if ("dir".equals(body.get("type"))) {
+                PathJail.createDirectory(target);
+            } else {
+                try (OutputStream out = Channels.newOutputStream(
+                        PathJail.openWrite(target, Set.of(StandardOpenOption.CREATE_NEW)))) {
+                    out.write(body.getOrDefault("content", "").getBytes(StandardCharsets.UTF_8));
+                }
+            }
+        } catch (FileAlreadyExistsException e) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Already exists");
         }
-        if ("dir".equals(body.get("type"))) Files.createDirectory(target);
-        else Files.writeString(target, body.getOrDefault("content", ""), StandardCharsets.UTF_8,
-                StandardOpenOption.CREATE_NEW);
-        return ResponseEntity.status(HttpStatus.CREATED).body(Map.of("path", rel(root, target)));
+        return ResponseEntity.status(HttpStatus.CREATED).body(Map.of("path", rel(target)));
     }
 
     @PostMapping("/upload")
@@ -174,20 +202,20 @@ public class FilesController {
             return Map.of("saved", saved);
         }
         Path root = root(chatId);
-        Path dir = resolve(root, path);
-        if (!Files.isDirectory(dir)) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Not a directory");
+        JailedPath dir = resolve(root, path);
+        if (!PathJail.isDirectory(dir)) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Not a directory");
         List<String> saved = new ArrayList<>();
         for (int i = 0; i < files.size(); i++) {
             MultipartFile mf = files.get(i);
             String name = names.get(i);
-            Path target = child(root, dir, name);
-            if (!overwrite && Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
+            JailedPath target = child(dir, name);
+            if (!overwrite && PathJail.statNoFollow(target) != null) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "Already exists: " + name);
             }
             try (var in = mf.getInputStream()) {
-                Files.copy(in, target, StandardCopyOption.REPLACE_EXISTING);
+                AtomicFiles.write(target, in);
             }
-            saved.add(rel(root, target));
+            saved.add(rel(target));
         }
         return Map.of("saved", saved);
     }
@@ -220,17 +248,13 @@ public class FilesController {
         RemoteFs rfs = remote(chatId, rootName);
         if (rfs != null) return Map.of("path", rfs.rename(required(body, "path"), required(body, "name")));
         Path root = root(chatId);
-        Path src = resolve(root, required(body, "path"));
-        if (src.equals(root)) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Cannot rename the root");
-        if (!Files.exists(src, LinkOption.NOFOLLOW_LINKS)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Not found");
-        }
-        Path dst = child(root, src.getParent(), required(body, "name"));
-        if (Files.exists(dst, LinkOption.NOFOLLOW_LINKS)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Already exists");
-        }
-        Files.move(src, dst);
-        return Map.of("path", rel(root, dst));
+        JailedPath src = resolve(root, required(body, "path"));
+        if (src.components().isEmpty()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Cannot rename the root");
+        if (PathJail.statNoFollow(src) == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Not found");
+        JailedPath dst = child(src.parent(), required(body, "name"));
+        if (PathJail.statNoFollow(dst) != null) throw new ResponseStatusException(HttpStatus.CONFLICT, "Already exists");
+        PathJail.rename(src, dst.fileName());
+        return Map.of("path", rel(dst));
     }
 
     @DeleteMapping
@@ -242,28 +266,10 @@ public class FilesController {
             return ResponseEntity.noContent().build();
         }
         Path root = root(chatId);
-        Path p = resolve(root, path);
-        if (p.equals(root)) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Cannot delete the root");
-        if (!Files.exists(p, LinkOption.NOFOLLOW_LINKS)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Not found");
-        }
-        if (Files.isDirectory(p, LinkOption.NOFOLLOW_LINKS)) {
-            Files.walkFileTree(p, new SimpleFileVisitor<>() {
-                @Override
-                public FileVisitResult visitFile(Path f, BasicFileAttributes a) throws IOException {
-                    Files.delete(f);
-                    return FileVisitResult.CONTINUE;
-                }
-
-                @Override
-                public FileVisitResult postVisitDirectory(Path d, IOException e) throws IOException {
-                    Files.delete(d);
-                    return FileVisitResult.CONTINUE;
-                }
-            });
-        } else {
-            Files.delete(p);
-        }
+        JailedPath p = resolve(root, path);
+        if (p.components().isEmpty()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Cannot delete the root");
+        if (PathJail.statNoFollow(p) == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Not found");
+        PathJail.deleteTree(p);
         return ResponseEntity.noContent().build();
     }
 
@@ -275,33 +281,41 @@ public class FilesController {
         RemoteFs rfs = remote(chatId, rootName);
         if (rfs != null) return downloadRemote(rfs, path);
         Path root = root(chatId);
-        Path p = resolve(root, path);
-        if (Files.isRegularFile(p)) {
+        JailedPath p = resolve(root, path);
+        BasicFileAttributes st = PathJail.stat(p);
+        if (st != null && st.isRegularFile()) {
             return ResponseEntity.ok()
-                    .header(HttpHeaders.CONTENT_DISPOSITION, attachment(p.getFileName().toString()))
+                    .header(HttpHeaders.CONTENT_DISPOSITION, attachment(p.fileName()))
                     .contentType(MediaType.APPLICATION_OCTET_STREAM)
-                    .contentLength(Files.size(p))
+                    .contentLength(st.size())
                     .body(out -> {
-                        try (var in = Files.newInputStream(p)) {
+                        try (var in = PathJail.newInputStream(p)) {
                             in.transferTo(out);
                         }
                     });
         }
-        if (!Files.isDirectory(p)) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Not found");
-        String base = p.equals(root) || p.getFileName() == null ? "project" : p.getFileName().toString();
+        if (st == null || !st.isDirectory()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Not found");
+        String base = p.components().isEmpty() ? "project" : p.fileName();
+        int skip = p.components().size();
         StreamingResponseBody body = out -> {
-            try (ZipOutputStream zip = new ZipOutputStream(out); Stream<Path> s = Files.walk(p)) {
-                for (Path f : s.toList()) {
-                    if (f.equals(p) || Files.isSymbolicLink(f) || isHidden(root, f)) continue;
-                    String name = p.relativize(f).toString().replace('\\', '/');
-                    if (Files.isDirectory(f)) {
+            try (ZipOutputStream zip = new ZipOutputStream(out)) {
+                PathJail.walk(p, (f, a) -> {
+                    if (f.components().size() <= skip) return PathJail.Action.CONTINUE;
+                    if (isHidden(f)) return PathJail.Action.SKIP_DIRECTORY;
+                    BasicFileAttributes own = PathJail.statNoFollow(f);
+                    if (own == null || PathJail.isLink(own)) return PathJail.Action.CONTINUE; // links are not zipped
+                    String name = String.join("/", f.components().subList(skip, f.components().size()));
+                    if (a.isDirectory()) {
                         zip.putNextEntry(new ZipEntry(name + "/"));
                     } else {
                         zip.putNextEntry(new ZipEntry(name));
-                        Files.copy(f, zip);
+                        try (InputStream in = PathJail.newInputStream(f)) {
+                            in.transferTo(zip);
+                        }
                     }
                     zip.closeEntry();
-                }
+                    return PathJail.Action.CONTINUE;
+                });
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
             }
@@ -381,77 +395,50 @@ public class FilesController {
         return v;
     }
 
+    /** A link or path leaving the project, found while the jail did the I/O (also when swapped in meanwhile). */
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<Map<String, String>> outsideTheProject(IllegalArgumentException e) {
+        return ResponseEntity.badRequest().body(Map.of("error", e.getMessage() == null ? "Invalid path" : e.getMessage()));
+    }
+
     /** Resolves a relative path inside the root, rejecting escapes (including via symlinks). */
-    private Path resolve(Path root, String rel) {
+    private JailedPath resolve(Path root, String rel) {
         String r = rel == null ? "" : rel.replace('\\', '/');
-        Path p;
+        JailedPath p;
         try {
-            p = root.resolve(r).normalize();
+            p = PathJail.resolve(root, r, ExternalLinks.NONE, false); // the web host never follows a link out of the project
         } catch (InvalidPathException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid path");
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Path outside the project");
         }
-        if (!p.startsWith(root)) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Path outside the project");
-        if (isHidden(root, p)) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Not found");
-        jailCheck(root, p);
+        if (isHidden(p)) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Not found");
         return p;
     }
 
-    /** True when the path is, or lies inside, the hidden harness directory of the root. */
-    private boolean isHidden(Path root, Path p) {
-        Path r = root.relativize(p);
-        for (Path seg : r) if (HIDDEN_DIR.equalsIgnoreCase(seg.toString())) return true;
+    /** True when the path is, or lies inside (also through a link), the hidden harness directory of the root. */
+    private boolean isHidden(JailedPath p) {
+        for (String seg : p.components()) if (HIDDEN_DIR.equalsIgnoreCase(seg)) return true;
+        List<String> real = PathJail.realComponents(p);
+        if (real != null) for (String seg : real) if (HIDDEN_DIR.equalsIgnoreCase(seg)) return true;
         return false;
     }
 
-    private Path child(Path root, Path parent, String name) {
+    private JailedPath child(JailedPath parent, String name) {
         if (name.isBlank() || name.contains("/") || name.contains("\\") || name.equals(".") || name.equals("..")) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid name");
         }
-        Path p;
+        JailedPath p;
         try {
-            p = parent.resolve(name).normalize();
+            p = parent.child(name);
         } catch (InvalidPathException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid name");
         }
-        if (!p.startsWith(root) || !parent.equals(p.getParent())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid name");
-        }
-        if (isHidden(root, p)) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid name");
-        jailCheck(root, p);
+        if (isHidden(p)) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid name");
         return p;
     }
 
-    /** The deepest existing ancestor must really live under the real root (blocks symlink escapes). */
-    private void jailCheck(Path root, Path p) {
-        try {
-            Path real = root.toRealPath();
-            Path q = p;
-            while (q != null && !Files.exists(q)) q = q.getParent();
-            if (q != null && !q.toRealPath().startsWith(real)) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Path outside the project");
-            }
-        } catch (IOException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid path");
-        }
-    }
-
-    private String rel(Path root, Path p) {
-        return root.relativize(p).toString().replace('\\', '/');
-    }
-
-    private static long safeSize(Path p) {
-        try {
-            return Files.size(p);
-        } catch (IOException e) {
-            return 0;
-        }
-    }
-
-    private static long safeModified(Path p) {
-        try {
-            return Files.getLastModifiedTime(p).toMillis();
-        } catch (IOException e) {
-            return 0;
-        }
+    private String rel(JailedPath p) {
+        return String.join("/", p.components());
     }
 }

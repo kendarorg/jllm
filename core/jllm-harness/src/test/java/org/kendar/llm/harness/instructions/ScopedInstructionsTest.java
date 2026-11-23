@@ -7,9 +7,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.agent.AgentEvent;
 import org.kendar.llm.harness.AgentHarness;
+import org.kendar.llm.harness.AgentHarnessBuilder;
 import org.kendar.llm.harness.session.ChatSessionStore;
 import org.kendar.llm.harness.session.InMemoryChatSessionStore;
 import org.kendar.llm.harness.settings.HarnessSettings;
+import org.kendar.llm.harness.settings.HarnessSettingsLoader;
 import org.kendar.llm.harness.tools.FileSystemAgentTools;
 import org.kendar.llm.harness.tools.HarnessTool;
 
@@ -39,7 +41,7 @@ class ScopedInstructionsTest {
         Rig rig = new Rig(base, store);
         List<HarnessTool> files = new FileSystemAgentTools().tools();
         rig.register(files.toArray(HarnessTool[]::new));
-        rig.loop.builtinFileTools(files).scopedInstructions(scoped);
+        rig.scopedInstructions(files, scoped);
         return rig;
     }
 
@@ -74,7 +76,7 @@ class ScopedInstructionsTest {
                 toolUse("t2", "read_file", "{'path':'sub/b.txt'}"), text("done"));
         Events ev = new Events();
 
-        rig.loop.run(chat, "read them", ev, () -> false);
+        rig.loop.run(chat, "read them", ev, () -> false, null);
 
         List<Recorded> req = rig.model.requests;
         assertEquals(3, req.size());
@@ -93,7 +95,7 @@ class ScopedInstructionsTest {
         // a resumed chat (another loop over the same store) does not load it again
         Rig resumed = rig(base, store, scoped());
         resumed.model.enqueue(toolUse("t3", "read_file", "{'path':'sub/a.txt'}"), text("again"));
-        resumed.loop.run(chat, "read again", new Events(), () -> false);
+        resumed.loop.run(chat, "read again", new Events(), () -> false, null);
 
         assertEquals(List.of("sub/AGENTS.md"), blockFiles(resumed.model.requests.get(1).messages()));
         assertEquals(List.of("sub/AGENTS.md"), blockFiles(resumed.sessions.messages(resumed.sessions.get(chat))));
@@ -113,7 +115,7 @@ class ScopedInstructionsTest {
         rig.model.enqueue(toolUse("t1", "edit_file", "{'path':'a/b/c/x.txt','old_string':'x','new_string':'y'}"),
                 text("done"));
 
-        rig.loop.run(chat, "edit it", new Events(), () -> false);
+        rig.loop.run(chat, "edit it", new Events(), () -> false, null);
 
         assertEquals("y", Files.readString(work.resolve("a/b/c/x.txt")));
         assertEquals(List.of("KENDAR.md", "a/AGENTS.md", "a/b/AGENTS.md", "a/b/CLAUDE.md"),
@@ -189,7 +191,7 @@ class ScopedInstructionsTest {
         assertEquals(ScopedInstructions.DEFAULT_MAX_DEPTH, HarnessSettings.empty().scopedInstructionsDepth());
         Path off = Files.writeString(base.resolve("off.json"),
                 "{\"files\":{\"scopedInstructions\":false,\"scopedInstructionsDepth\":3}}");
-        HarnessSettings settings = HarnessSettings.load(off);
+        HarnessSettings settings = HarnessSettingsLoader.load(off);
         assertFalse(settings.scopedInstructions());
         assertEquals(3, settings.scopedInstructionsDepth());
 
@@ -201,7 +203,7 @@ class ScopedInstructionsTest {
     private List<String> runHarness(HarnessSettings settings, String dir) throws Exception {
         ScriptedModel model = new ScriptedModel();
         model.enqueue(toolUse("t1", "read_file", "{'path':'sub/a.txt'}"), text("done"));
-        AgentHarness h = AgentHarness.builder().modelClient(model).config(config(base.resolve(dir)))
+        AgentHarness h = new AgentHarnessBuilder().modelClient(model).config(config(base.resolve(dir)))
                 .settings(settings).build();
         String chat = h.sessions().create(null).chatId();
         Path work = h.sandbox().workDir(chat);

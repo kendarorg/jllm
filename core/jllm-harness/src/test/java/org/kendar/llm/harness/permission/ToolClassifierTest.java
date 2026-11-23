@@ -39,9 +39,9 @@ class ToolClassifierTest {
     private Events run(boolean approve) {
         Events ev = new Events();
         ev.also = (type, data) -> {
-            if ("approval_request".equals(type)) rig.approvals.resolve(chat, data.get("id").asText(), approve, null);
+            if ("approval_request".equals(type)) rig.approvals.resolve(chat, data.get("id").asText(), approve, null, false, false);
         };
-        rig.loop.run(chat, "list files", ev, () -> false);
+        rig.loop.run(chat, "list files", ev, () -> false, null);
         return ev;
     }
 

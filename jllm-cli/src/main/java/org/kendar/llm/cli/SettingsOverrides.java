@@ -2,6 +2,7 @@ package org.kendar.llm.cli;
 
 import org.kendar.llm.harness.HarnessConfig;
 import org.kendar.llm.harness.settings.HarnessSettings;
+import org.kendar.llm.harness.tools.ExternalLinks;
 
 import java.util.Map;
 
@@ -15,18 +16,23 @@ final class SettingsOverrides {
     }
 
     static HarnessSettings applyToSettings(Map<String, String> a, HarnessSettings settings) {
+        var b = settings.toBuilder();
         if (a.containsKey("context-tokens") && Integer.parseInt(a.get("context-tokens")) > 0) {
-            settings = settings.withMaxTokens(Integer.parseInt(a.get("context-tokens"))); // <= 0: default, as the web app
+            b.maxTokens(Integer.parseInt(a.get("context-tokens"))); // <= 0: default, as the web app
         }
-        if (a.containsKey("context-strategy")) settings = settings.withContextStrategy(a.get("context-strategy"));
-        if (CliArgs.flag(a, "small-model")) settings = settings.withSmallModel(true);
-        if (a.containsKey("sandbox")) settings = settings.withSandboxBackend(a.get("sandbox"));
-        if (a.containsKey("docker-image")) settings = settings.withDockerImage(a.get("docker-image"));
-        if (a.containsKey("docker-mode")) settings = settings.withDockerMode(a.get("docker-mode"));
+        if (a.containsKey("context-strategy")) b.contextStrategy(a.get("context-strategy"));
+        if (CliArgs.flag(a, "small-model")) b.smallModel(true);
+        if (a.containsKey("sandbox")) b.sandboxBackend(a.get("sandbox"));
+        if (a.containsKey("docker-image")) b.dockerImage(a.get("docker-image"));
+        if (a.containsKey("docker-mode")) b.dockerMode(a.get("docker-mode"));
+        // what the file tools do with a link that leaves the project: none, read (default) or readwrite
+        if (a.containsKey("external-links")) {
+            b.externalLinks(ExternalLinks.parse(a.get("external-links"), ExternalLinks.DEFAULT));
+        }
         if (CliArgs.flag(a, "docker-remote") || a.containsKey("docker-remote-host")) {
-            settings = settings.withDockerRemote(CliArgs.flag(a, "docker-remote") ? Boolean.TRUE : null,
-                    a.get("docker-remote-host"));
+            b.dockerRemote(CliArgs.flag(a, "docker-remote") ? Boolean.TRUE : null, a.get("docker-remote-host"));
         }
+        settings = b.build();
         for (var e : a.entrySet()) { // --plugins.<id>.enabled=true: this run only, as jllm.plugins.* in the web app
             if (e.getKey().startsWith("plugins.")) settings = settings.withPluginOption(e.getKey().substring(8), e.getValue());
         }

@@ -175,7 +175,7 @@ class CancellationTest {
         AgentLoop loop = loopWith(rig, blocking);
         CancelToken token = new CancelToken();
         Events ev = new Events();
-        CompletableFuture<Void> run = CompletableFuture.runAsync(() -> loop.run(chat, "hi", ev, token));
+        CompletableFuture<Void> run = CompletableFuture.runAsync(() -> loop.run(chat, "hi", ev, token, null));
         assertTrue(inCall.await(5, TimeUnit.SECONDS));
         token.cancel();
         run.get(5, TimeUnit.SECONDS);
@@ -205,7 +205,7 @@ class CancellationTest {
         rig.model.enqueue(toolUse("tu1", "slow", "{}"));
         CancelToken token = new CancelToken();
         Events ev = new Events();
-        CompletableFuture<Void> run = CompletableFuture.runAsync(() -> rig.loop.run(chat, "go", ev, token));
+        CompletableFuture<Void> run = CompletableFuture.runAsync(() -> rig.loop.run(chat, "go", ev, token, null));
         assertTrue(inTool.await(5, TimeUnit.SECONDS));
         token.cancel();
         run.get(5, TimeUnit.SECONDS);

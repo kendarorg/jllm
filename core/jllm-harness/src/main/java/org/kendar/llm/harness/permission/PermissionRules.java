@@ -212,7 +212,7 @@ public final class PermissionRules {
             if (base == null) return p.toString().replace('\\', '/');
             String rel = base.relativize(p).toString().replace('\\', '/');
             return rel.isEmpty() ? "." : rel;
-        } catch (RuntimeException e) {
+        } catch (IllegalArgumentException e) {
             return result.isEmpty() ? "." : result;
         }
     }

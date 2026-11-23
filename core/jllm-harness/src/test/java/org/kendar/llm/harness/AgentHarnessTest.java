@@ -24,8 +24,8 @@ class AgentHarnessTest {
     @TempDir
     Path base;
 
-    private AgentHarness.Builder builder(ScriptedModel model) {
-        return AgentHarness.builder().modelClient(model).config(config(base));
+    private AgentHarnessBuilder builder(ScriptedModel model) {
+        return new AgentHarnessBuilder().modelClient(model).config(config(base));
     }
 
     @Test
@@ -49,7 +49,7 @@ class AgentHarnessTest {
 
     @Test
     void duplicateToolNamesAreRejected() {
-        AgentHarness.Builder b = builder(new ScriptedModel())
+        AgentHarnessBuilder b = builder(new ScriptedModel())
                 .tools(List.of(tool("read_file", "Mine", ToolKind.READ_ONLY, (c, i) -> "")));
 
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class, b::build);
@@ -105,11 +105,11 @@ class AgentHarnessTest {
     @Test
     void smallModelAddsItsRulesFromBuilderOrSettings() throws Exception {
         assertTrue(firstSystemPrompt(builder(new ScriptedModel()).smallModel(true)).contains("Before you say \"done\""));
-        assertTrue(firstSystemPrompt(builder(new ScriptedModel()).settings(HarnessSettings.empty().withSmallModel(true)))
+        assertTrue(firstSystemPrompt(builder(new ScriptedModel()).settings(HarnessSettings.builder().smallModel(true).build()))
                 .contains("Before you say \"done\""));
     }
 
-    private static String firstSystemPrompt(AgentHarness.Builder b) throws Exception {
+    private static String firstSystemPrompt(AgentHarnessBuilder b) throws Exception {
         ScriptedModel model = new ScriptedModel();
         model.enqueue(text("done"));
         AgentHarness h = b.modelClient(model).withoutStandardTools().build();

@@ -59,7 +59,7 @@ public class CancelToken implements BooleanSupplier {
         if (l == null) return;
         try {
             l.retrying(status, attempt, max, delayMs);
-        } catch (RuntimeException ignored) {
+        } catch (RuntimeException ignored) { // boundary: a listener must not break the call
             // a listener must not break the call
         }
     }
@@ -93,7 +93,7 @@ public class CancelToken implements BooleanSupplier {
         for (Runnable h : hooks) {
             try {
                 h.run();
-            } catch (RuntimeException ignored) {
+            } catch (RuntimeException ignored) { // boundary: a failing abort hook must not stop the others
                 // best effort
             }
         }

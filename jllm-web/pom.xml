@@ -30,17 +30,32 @@
     </properties>
 
     <dependencies>
-        <!-- GraalJS for the jllm-js plugin, which does not bundle it -->
+        <!-- GraalJS for run_js: provided, never bundled; the release ships it in lib-ext/ (see release/graaljs) -->
         <dependency>
             <groupId>org.graalvm.polyglot</groupId>
             <artifactId>polyglot</artifactId>
             <version>${graalvm.version}</version>
+            <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>org.graalvm.polyglot</groupId>
             <artifactId>js</artifactId>
             <version>${graalvm.version}</version>
             <type>pom</type>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.graalvm.regex</groupId>
+            <artifactId>regex</artifactId>
+            <version>${graalvm.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.graalvm.polyglot</groupId>
+            <artifactId>js-isolate-community</artifactId>
+            <version>${graalvm.version}</version>
+            <type>pom</type>
+            <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>org.kendar.llm</groupId>
@@ -76,6 +91,13 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <version>${spring-boot.version}</version>
+                <configuration>
+                    <!-- ZIP layout: the jar starts through PropertiesLauncher, so "java -jar" keeps working and an
+                         external folder (lib-ext) can be added with -Dloader.path=lib-ext -->
+                    <layout>ZIP</layout>
+                    <!-- GraalJS is provided, and provided jars are otherwise repackaged: the release ships it in lib-ext/ -->
+                    <excludeGroupIds>org.graalvm.polyglot,org.graalvm.js,org.graalvm.regex,org.graalvm.truffle,org.graalvm.sdk,org.graalvm.shadowed</excludeGroupIds>
+                </configuration>
                 <executions>
                     <execution>
                         <goals>

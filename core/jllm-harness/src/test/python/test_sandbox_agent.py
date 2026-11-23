@@ -1,7 +1,7 @@
 """Tests of sandbox-agent.py.
 
 Run from the repository root:
-    python -m unittest jllm-harness/src/test/python/test_sandbox_agent.py -v
+    python -m unittest core/jllm-harness/src/test/python/test_sandbox_agent.py -v
 
 The daemon runs as a subprocess on a random local port with a temporary workspace; `sh` must be on the PATH.
 """
@@ -30,13 +30,15 @@ def free_port():
 
 
 class Base(unittest.TestCase):
+    extra_env = {}  # environment of the daemon on top of the defaults (a subclass sets JLLM_EXTERNAL_LINKS)
+
     @classmethod
     def setUpClass(cls):
         cls.tmp = tempfile.TemporaryDirectory()
         cls.ws = os.path.realpath(cls.tmp.name)
         cls.port = free_port()
         env = dict(os.environ, JLLM_TOKEN=TOKEN, JLLM_PORT=str(cls.port), JLLM_BIND="127.0.0.1",
-                   JLLM_WORKSPACE=cls.ws)
+                   JLLM_WORKSPACE=cls.ws, **cls.extra_env)
         env.pop("JLLM_SCRATCH", None)
         cls.proc = subprocess.Popen([sys.executable, str(AGENT)], env=env, stderr=subprocess.DEVNULL)
         for _ in range(100):
@@ -348,6 +350,228 @@ class BackupTest(Base):
 
     def test_backup_needs_token(self):
         self.assertEqual(401, self.call("GET", "/backup", token=None, raw=True)[0])
+
+
+@unittest.skipUnless(os.name == "posix", "the open-in-root helper needs openat with O_NOFOLLOW (Linux, macOS)")
+class OpenInRootTest(Base):
+    """Links inside the workspace: followed when they stay inside, refused when they leave it, never raced."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.out_tmp = tempfile.TemporaryDirectory()
+        cls.outside = os.path.realpath(cls.out_tmp.name)
+        with open(os.path.join(cls.outside, "secret.txt"), "w") as f:
+            f.write("SECRET")
+        import importlib.util
+        os.environ.setdefault("JLLM_WORKSPACE", cls.ws)
+        spec = importlib.util.spec_from_file_location("sandbox_agent_under_test", str(AGENT))
+        cls.agent = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.agent)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.out_tmp.cleanup()
+        super().tearDownClass()
+
+    def path(self, name):
+        return os.path.join(self.ws, name)
+
+    def test_link_inside_to_inside_is_followed_and_kept(self):
+        self.call("PUT", "/file?path=oir/real.txt", b"one")
+        os.symlink("real.txt", self.path("oir/alias.txt"))
+        self.assertEqual(b"one", self.call("GET", "/file?path=oir/alias.txt", raw=True)[1])
+        self.assertEqual(200, self.call("PUT", "/file?path=oir/alias.txt", b"two")[0])
+        self.assertTrue(os.path.islink(self.path("oir/alias.txt")))
+        with open(self.path("oir/real.txt")) as f:
+            self.assertEqual("two", f.read())
+        self.assertEqual(["alias.txt", "real.txt"], sorted(os.listdir(self.path("oir"))))  # no temp file left
+
+    def test_directory_link_inside_to_inside_is_followed(self):
+        self.call("PUT", "/file?path=oird/real/f.txt", b"in")
+        os.symlink("real", self.path("oird/alias"))
+        self.assertEqual(b"in", self.call("GET", "/file?path=oird/alias/f.txt", raw=True)[1])
+        self.assertEqual(200, self.call("PUT", "/file?path=oird/alias/g.txt", b"new")[0])
+        self.assertTrue(os.path.exists(self.path("oird/real/g.txt")))
+
+    def test_link_leaving_the_root_is_refused_for_read_write_and_delete(self):
+        os.symlink(self.outside, self.path("oir-dir"))
+        os.symlink(os.path.join(self.outside, "secret.txt"), self.path("oir-file"))
+        for p in ["oir-dir/secret.txt", "oir-file"]:
+            self.assertEqual(400, self.call("GET", "/file?path=" + p)[0], p)
+            self.assertEqual(400, self.call("PUT", "/file?path=" + p, b"pwn")[0], p)
+        self.assertEqual(400, self.call("PUT", "/file?path=oir-dir/new.txt", b"pwn")[0])
+        self.assertEqual(400, self.call("POST", "/mkdir?path=oir-dir/sub")[0])
+        with open(os.path.join(self.outside, "secret.txt")) as f:
+            self.assertEqual("SECRET", f.read())
+        self.assertEqual(["secret.txt"], os.listdir(self.outside))
+
+    def test_delete_removes_a_link_but_never_enters_it(self):
+        self.call("PUT", "/file?path=oird-tree/keep/x.txt", b"x")
+        os.symlink(self.outside, self.path("oird-tree/keep/out"))
+        self.assertEqual(200, self.call("DELETE", "/file?path=oird-tree")[0])
+        self.assertFalse(os.path.exists(self.path("oird-tree")))
+        self.assertEqual(["secret.txt"], os.listdir(self.outside))
+
+    def test_hard_link_keeps_sharing(self):
+        self.call("PUT", "/file?path=oirh/a.txt", b"v1")
+        os.link(self.path("oirh/a.txt"), self.path("oirh/b.txt"))
+        self.assertEqual(200, self.call("PUT", "/file?path=oirh/a.txt", b"v2")[0])
+        with open(self.path("oirh/b.txt")) as f:
+            self.assertEqual("v2", f.read())
+
+    def test_write_keeps_permissions(self):
+        self.call("PUT", "/file?path=oirp/run.sh", b"#!/bin/sh\n")
+        os.chmod(self.path("oirp/run.sh"), 0o755)
+        self.call("PUT", "/file?path=oirp/run.sh", b"#!/bin/sh\necho\n")
+        self.assertEqual(0o755, os.stat(self.path("oirp/run.sh")).st_mode & 0o777)
+
+    def test_too_many_levels_of_links_is_refused(self):
+        self.call("PUT", "/file?path=oirc/target.txt", b"t")
+        prev = "target.txt"
+        for i in range(45):
+            os.symlink(prev, self.path("oirc/l%d" % i))
+            prev = "l%d" % i
+        self.assertEqual(400, self.call("GET", "/file?path=oirc/" + prev)[0])
+        self.assertEqual(b"t", self.call("GET", "/file?path=oirc/l3", raw=True)[1])
+
+    def test_grep_does_not_read_through_a_link_leaving_the_root(self):
+        os.symlink(self.outside, self.path("oirg-out"))
+        self.call("PUT", "/file?path=oirg/a.txt", b"SECRET of mine\n")
+        out = self.call("POST", "/grep", {"pattern": "SECRET"})[1]
+        self.assertIn("oirg/a.txt:1:SECRET of mine", out)
+        self.assertNotIn("secret.txt", out)
+
+    # the race: the check passed, then a component is swapped for a link; the helper alone must refuse
+
+    def test_helper_refuses_a_directory_swapped_for_a_link(self):
+        os.symlink(self.outside, self.path("oirs"))
+        real_root = os.path.realpath(self.ws)
+        with self.assertRaises(self.agent.HttpError) as ctx:
+            self.agent.walk_parent(real_root, ["oirs", "secret.txt"])
+        self.assertEqual(400, ctx.exception.code)
+
+    def test_helper_refuses_a_file_swapped_for_a_link(self):
+        os.symlink(os.path.join(self.outside, "secret.txt"), self.path("oirf"))
+        real_root = os.path.realpath(self.ws)
+        fd, name = self.agent.walk_parent(real_root, ["oirf"], follow_final=False)
+        try:
+            with self.assertRaises(OSError):
+                os.open(name, os.O_RDONLY | self.agent.O_NOFOLLOW, dir_fd=fd)
+        finally:
+            os.close(fd)
+        with self.assertRaises(self.agent.HttpError):
+            self.agent.walk_parent(real_root, ["oirf"])  # followed: its target leaves the root
+
+    def test_open_in_root_after_a_passed_check(self):
+        os.symlink(self.outside, self.path("oirr"))
+        original = self.agent.resolve
+        # the check as it was before the swap: the lexical path, nothing else
+        self.agent.resolve = lambda root, path, must_exist=False, write=False: os.path.join(os.path.realpath(root), path)
+        try:
+            with self.assertRaises(self.agent.HttpError):
+                self.agent.open_in_root(self.ws, "oirr/secret.txt", os.O_RDONLY)
+            with self.assertRaises(self.agent.HttpError):
+                self.agent.write_file(self.ws, "oirr/planted.txt", b"pwn", False)
+            with self.assertRaises(self.agent.HttpError):
+                self.agent.delete_path(self.ws, "oirr/secret.txt")
+        finally:
+            self.agent.resolve = original
+        self.assertEqual(["secret.txt"], os.listdir(self.outside))
+
+
+class ExternalLinksBase(Base):
+    """A link that leaves the workspace, with the daemon started for one value of JLLM_EXTERNAL_LINKS."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.out_tmp = tempfile.TemporaryDirectory()
+        cls.outside = os.path.realpath(cls.out_tmp.name)
+        with open(os.path.join(cls.outside, "secret.txt"), "w") as f:
+            f.write("SECRET")
+        super().setUpClass()
+        if os.name == "posix":
+            os.symlink(cls.outside, os.path.join(cls.ws, "out-dir"))
+            os.symlink(os.path.join(cls.outside, "secret.txt"), os.path.join(cls.ws, "out-file"))
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        cls.out_tmp.cleanup()
+
+    def secret(self):
+        with open(os.path.join(self.outside, "secret.txt")) as f:
+            return f.read()
+
+    def error(self, response):
+        self.assertEqual(400, response[0], response)
+        return response[1]["error"]
+
+
+@unittest.skipUnless(os.name == "posix", "needs symlinks")
+class ExternalLinksNoneTest(ExternalLinksBase):
+    extra_env = {"JLLM_EXTERNAL_LINKS": "none"}
+
+    def test_everything_through_the_link_is_refused(self):
+        for p in ["out-dir/secret.txt", "out-file"]:
+            self.assertIn("is a link that leaves the work dir", self.error(self.call("GET", "/file?path=" + p)))
+            self.error(self.call("PUT", "/file?path=" + p, b"pwn"))
+        self.error(self.call("GET", "/stat?path=out-dir/secret.txt"))
+        self.assertEqual("SECRET", self.secret())
+
+    def test_walks_do_not_enter_the_link(self):
+        out = self.call("POST", "/grep", {"pattern": "SECRET"})[1]
+        self.assertNotIn("secret.txt", out)
+        self.assertNotIn("secret.txt", self.call("GET", "/glob?pattern=**/*.txt")[1])
+
+
+@unittest.skipUnless(os.name == "posix", "needs symlinks")
+class ExternalLinksReadTest(ExternalLinksBase):
+    extra_env = {"JLLM_EXTERNAL_LINKS": "read"}
+
+    def test_reads_follow_the_link(self):
+        self.assertEqual(b"SECRET", self.call("GET", "/file?path=out-dir/secret.txt", raw=True)[1])
+        self.assertEqual(b"SECRET", self.call("GET", "/file?path=out-file", raw=True)[1])
+        self.assertEqual(200, self.call("GET", "/stat?path=out-dir/secret.txt")[0])
+
+    def test_walks_enter_the_link(self):
+        out = self.call("POST", "/grep", {"pattern": "SECRET"})[1]
+        self.assertIn("out-dir/secret.txt:1:SECRET", out)
+        self.assertIn("out-dir/secret.txt", self.call("GET", "/glob?pattern=**/*.txt")[1])
+
+    def test_writes_name_the_setting(self):
+        for p in ["out-dir/secret.txt", "out-file", "out-dir/new.txt"]:
+            self.assertIn("files.externalLinks is read", self.error(self.call("PUT", "/file?path=" + p, b"pwn")))
+        self.assertIn("files.externalLinks", self.error(self.call("POST", "/mkdir?path=out-dir/sub")))
+        self.assertIn("files.externalLinks", self.error(self.call("DELETE", "/file?path=out-dir/secret.txt")))
+        self.assertIn("files.externalLinks", self.error(self.call("POST", "/move?from=out-dir/secret.txt&to=x.txt")))
+        self.assertEqual("SECRET", self.secret())
+        self.assertEqual(["secret.txt"], os.listdir(self.outside))
+
+
+@unittest.skipUnless(os.name == "posix", "needs symlinks")
+class ExternalLinksReadWriteTest(ExternalLinksBase):
+    extra_env = {"JLLM_EXTERNAL_LINKS": "readwrite"}
+
+    def test_writes_follow_the_link(self):
+        self.assertEqual(200, self.call("PUT", "/file?path=out-dir/new.txt", b"made")[0])
+        with open(os.path.join(self.outside, "new.txt")) as f:
+            self.assertEqual("made", f.read())
+        self.assertEqual(200, self.call("PUT", "/file?path=out-dir/new.txt", b"more", )[0])
+        self.assertEqual(200, self.call("POST", "/mkdir?path=out-dir/sub")[0])
+        self.assertTrue(os.path.isdir(os.path.join(self.outside, "sub")))
+        self.assertEqual(200, self.call("DELETE", "/file?path=out-dir/new.txt")[0])
+        self.assertFalse(os.path.exists(os.path.join(self.outside, "new.txt")))
+
+    def test_recursive_delete_never_follows_a_link(self):
+        self.call("PUT", "/file?path=rwtree/keep/x.txt", b"x")
+        os.symlink(self.outside, os.path.join(self.ws, "rwtree/keep/out"))
+        self.assertEqual(200, self.call("DELETE", "/file?path=rwtree")[0])
+        self.assertFalse(os.path.exists(os.path.join(self.ws, "rwtree")))
+        self.assertEqual("SECRET", self.secret())
+
+    def test_a_path_leaving_the_workspace_lexically_is_still_refused(self):
+        self.assertEqual(400, self.call("GET", "/file?path=../etc/passwd")[0])
 
 
 if __name__ == "__main__":

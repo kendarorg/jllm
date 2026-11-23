@@ -401,7 +401,7 @@ public class WebAgentTools implements HarnessToolSet {
             }
             String shown = in.path("path").asText();
             long max = config.web().downloadMaxBytes();
-            Path target = ctx.files() != null ? null : FileSystemAgentTools.jailWrite(ctx, shown);
+            PathJail.JailedPath target = ctx.files() != null ? null : FileSystemAgentTools.jailWrite(ctx, shown);
             HttpResponse<java.io.InputStream> resp = get(ctx, uri, HttpResponse.BodyHandlers.ofInputStream());
             try (java.io.InputStream body = resp.body()) {
                 if (resp.statusCode() / 100 != 2) throw new IllegalStateException("download failed: HTTP " + resp.statusCode());
@@ -421,27 +421,35 @@ public class WebAgentTools implements HarnessToolSet {
                     fb.write(t, bytes, false);
                     size = bytes.length;
                 } else {
-                    Path dir = target.getParent();
-                    java.nio.file.Files.createDirectories(dir);
-                    Path tmp = java.nio.file.Files.createTempFile(dir, ".download-", ".tmp");
-                    try {
-                        long n = 0;
-                        try (var out = java.nio.file.Files.newOutputStream(tmp)) {
-                            byte[] buf = new byte[65536];
-                            for (int r; (r = body.read(buf)) >= 0; ) {
-                                n += r;
-                                if (n > max) throw new IllegalStateException("File too large: more than " + max
+                    PathJail.createParentDirectories(target);
+                    java.nio.file.attribute.BasicFileAttributes old = PathJail.stat(target);
+                    if (old != null && old.isDirectory()) throw new IllegalArgumentException("Is a directory: " + shown);
+                    long oldSize = old != null ? old.size() : 0;
+                    long[] n = {0};
+                    java.io.InputStream limited = new java.io.FilterInputStream(body) {
+                        private void count(long r) {
+                            if (r > 0 && (n[0] += r) > max) {
+                                throw new IllegalStateException("File too large: more than " + max
                                         + " bytes (web.downloadMaxBytes)");
-                                out.write(buf, 0, r);
                             }
                         }
-                        quota.reserve(ctx.chatId(), target,
-                                java.nio.file.Files.exists(target) ? java.nio.file.Files.size(target) : 0, n);
-                        java.nio.file.Files.move(tmp, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-                        size = n;
-                    } finally {
-                        java.nio.file.Files.deleteIfExists(tmp);
-                    }
+
+                        @Override
+                        public int read() throws java.io.IOException {
+                            int b = super.read();
+                            if (b >= 0) count(1);
+                            return b;
+                        }
+
+                        @Override
+                        public int read(byte[] buf, int off, int len) throws java.io.IOException {
+                            int r = super.read(buf, off, len);
+                            count(r);
+                            return r;
+                        }
+                    };
+                    AtomicFiles.write(target, limited, written -> quota.reserve(ctx.chatId(), target.lexical(), oldSize, written));
+                    size = n[0];
                 }
                 return FileSystemAgentTools.written(ctx, "Saved " + size + " bytes (" + type + ") to", shown);
             }

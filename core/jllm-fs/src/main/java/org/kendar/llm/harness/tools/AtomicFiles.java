@@ -1,23 +1,33 @@
 package org.kendar.llm.harness.tools;
 
+import org.kendar.llm.harness.tools.PathJail.Dir;
+import org.kendar.llm.harness.tools.PathJail.JailedPath;
+import org.kendar.llm.harness.tools.PathJail.Located;
+
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
+import java.nio.channels.SeekableByteChannel;
 import java.nio.file.*;
 import java.nio.file.attribute.DosFileAttributeView;
 import java.nio.file.attribute.DosFileAttributes;
 import java.nio.file.attribute.PosixFileAttributeView;
+import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
- * Replaces the content of a file without a moment where it is truncated or half written: the new content goes to a
- * temporary file in the same directory, is flushed to disk and then moved over the target.
+ * Replaces the content of a file inside a {@link PathJail} without a moment where it is truncated or half written: the
+ * new content goes to a temporary file in the same directory (created through the jail, so never through a swapped
+ * link), is flushed to disk and then moved over the target, relative to the open directory.
  * <ul>
- *     <li>a symlink is kept: the file it points to is replaced</li>
- *     <li>a file with more than one hard link is rewritten in place, so all the links keep sharing it</li>
+ *     <li>a final link inside the jail is resolved by the jail: the file it points to is replaced</li>
+ *     <li>a file with more than one hard link is rewritten in place, so all the links keep sharing it; when the file
+ *     belongs to another user the write is refused (see {@link PathJail})</li>
  *     <li>POSIX permissions / DOS hidden, system and archive flags of the old file are copied to the new one</li>
  *     <li>without atomic move support the move is not atomic; when the target stays locked (Windows
- *     {@code AccessDenied}, e.g. an open handle) after a few retries the file is rewritten in place</li>
+ *     {@code AccessDenied}, e.g. an open handle) after a few retries the file is rewritten in place, opened without
+ *     following links</li>
  * </ul>
  */
 public final class AtomicFiles {
@@ -28,61 +38,87 @@ public final class AtomicFiles {
     private AtomicFiles() {
     }
 
+    /** Writes the new content to an open channel. */
+    @FunctionalInterface
     private interface Content {
-        void writeTo(FileChannel ch) throws IOException;
+        void writeTo(SeekableByteChannel ch) throws IOException;
+    }
+
+    /** Called with the number of bytes written, after the temporary file is complete and before it replaces the target. */
+    @FunctionalInterface
+    public interface BeforeCommit {
+        void check(long size) throws IOException;
     }
 
     /** Replaces (or creates) {@code target} with {@code data}. The parent directory must exist. */
-    public static void write(Path target, byte[] data) throws IOException {
+    public static void write(JailedPath target, byte[] data) throws IOException {
         replace(target, ch -> {
             ByteBuffer b = ByteBuffer.wrap(data);
             while (b.hasRemaining()) ch.write(b);
-        });
+        }, null);
     }
 
     /** Replaces (or creates) {@code target} with the content of {@code source}. The parent directory must exist. */
-    public static void copy(Path source, Path target) throws IOException {
+    public static void write(JailedPath target, InputStream source) throws IOException {
+        write(target, source, null);
+    }
+
+    /** As {@link #write(JailedPath, InputStream)}, with a check before the temporary file replaces the target. */
+    public static void write(JailedPath target, InputStream source, BeforeCommit before) throws IOException {
+        long[] size = new long[1];
         replace(target, ch -> {
-            try (FileChannel src = FileChannel.open(source, StandardOpenOption.READ)) {
-                long size = src.size();
-                for (long pos = 0; pos < size; ) {
-                    long n = src.transferTo(pos, size - pos, ch);
-                    if (n <= 0) break;
-                    pos += n;
-                }
+            byte[] buf = new byte[65536];
+            for (int n; (n = source.read(buf)) >= 0; ) {
+                ByteBuffer b = ByteBuffer.wrap(buf, 0, n);
+                while (b.hasRemaining()) ch.write(b);
+                size[0] += n;
             }
-        });
+        }, before == null ? null : () -> before.check(size[0]));
     }
 
-    private static void replace(Path target, Content content) throws IOException {
-        Path real = Files.isSymbolicLink(target) ? target.toRealPath() : target.toAbsolutePath().normalize();
-        if (Files.isDirectory(real)) throw new IOException("Is a directory: " + target);
-        boolean exists = Files.exists(real);
-        if (exists && linkCount(real) > 1) {
-            inPlace(real, content);
-            return;
-        }
-        Path tmp = createTemp(real);
-        try {
-            try (FileChannel ch = FileChannel.open(tmp, StandardOpenOption.WRITE)) {
-                content.writeTo(ch);
-                ch.force(true);
-            }
-            if (exists) copyAttributes(real, tmp);
-            move(tmp, real, content);
-        } finally {
-            Files.deleteIfExists(tmp);
-        }
+    @FunctionalInterface
+    private interface Commit {
+        void run() throws IOException;
     }
 
-    /** A new empty file next to {@code real}, created with the default permissions (not the 0600 of temp files). */
-    private static Path createTemp(Path real) throws IOException {
-        Path dir = real.getParent();
-        for (int i = 0; ; i++) {
-            Path tmp = dir.resolve("." + real.getFileName() + "." + Long.toHexString(ThreadLocalRandom.current().nextLong())
-                    + ".tmp");
+    private static void replace(JailedPath target, Content content, Commit before) throws IOException {
+        try (Located l = PathJail.locate(target, false, true, true)) {
+            Dir dir = l.dir();
+            String name = l.name();
+            java.nio.file.attribute.BasicFileAttributes old = dir.stat(name);
+            if (old != null && old.isDirectory()) throw new IOException("Is a directory: " + target);
+            boolean exists = old != null;
+            if (exists && linkCount(dir, name) > 1) {
+                inPlace(dir, name, before == null ? content : ch -> {
+                    content.writeTo(ch);
+                    before.run();
+                }, target);
+                return;
+            }
+            String tmp = createTemp(dir, name);
+            boolean moved = false;
             try {
-                Files.newByteChannel(tmp, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE).close();
+                try (SeekableByteChannel ch = dir.open(tmp, Set.of(StandardOpenOption.WRITE))) {
+                    content.writeTo(ch);
+                    if (ch instanceof FileChannel fc) fc.force(true);
+                }
+                if (before != null) before.run();
+                if (exists) copyAttributes(dir, name, tmp);
+                PathJail.hook();
+                moved = move(dir, tmp, name, content, target);
+            } finally {
+                if (!moved) deleteQuietly(dir, tmp);
+            }
+        }
+    }
+
+    /** A new empty file next to {@code name}, created with the default permissions (not the 0600 of temp files). */
+    private static String createTemp(Dir dir, String name) throws IOException {
+        for (int i = 0; ; i++) {
+            String tmp = "." + name + "." + Long.toHexString(ThreadLocalRandom.current().nextLong()) + ".tmp";
+            try {
+                PathJail.hook();
+                dir.open(tmp, Set.of(StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)).close();
                 return tmp;
             } catch (FileAlreadyExistsException e) {
                 if (i >= 10) throw e;
@@ -90,60 +126,87 @@ public final class AtomicFiles {
         }
     }
 
-    private static void move(Path tmp, Path real, Content content) throws IOException {
+    /** @return true when the temporary file was moved over the target (false: rewritten in place, the temp file stays) */
+    private static boolean move(Dir dir, String tmp, String name, Content content, JailedPath target) throws IOException {
         for (int attempt = 1; ; attempt++) {
             try {
-                Files.move(tmp, real, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-                return;
-            } catch (AtomicMoveNotSupportedException e) {
-                Files.move(tmp, real, StandardCopyOption.REPLACE_EXISTING);
-                return;
+                dir.rename(tmp, name);
+                return true;
             } catch (AccessDeniedException e) {
-                if (attempt >= MOVE_ATTEMPTS || !Files.exists(real)) {
-                    inPlace(real, content);
-                    return;
+                if (attempt >= MOVE_ATTEMPTS || dir.stat(name) == null) {
+                    copyTempInPlace(dir, tmp, name, target);
+                    return false;
                 }
                 try {
                     Thread.sleep(RETRY_DELAY_MS * attempt);
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
-                    inPlace(real, content);
-                    return;
+                    copyTempInPlace(dir, tmp, name, target);
+                    return false;
                 }
             }
         }
     }
 
-    private static void inPlace(Path real, Content content) throws IOException {
-        try (FileChannel ch = FileChannel.open(real, StandardOpenOption.WRITE, StandardOpenOption.CREATE,
-                StandardOpenOption.TRUNCATE_EXISTING)) {
-            content.writeTo(ch);
-            ch.force(true);
+    /** The target stays locked: its content is replaced by the finished temporary file's. */
+    private static void copyTempInPlace(Dir dir, String tmp, String name, JailedPath target) throws IOException {
+        PathJail.refuseForeignHardLink(dir, name, target.lexical().toString());
+        try (SeekableByteChannel in = dir.open(tmp, Set.of(StandardOpenOption.READ));
+             SeekableByteChannel out = dir.open(name, Set.of(StandardOpenOption.WRITE, StandardOpenOption.CREATE,
+                     StandardOpenOption.TRUNCATE_EXISTING))) {
+            ByteBuffer b = ByteBuffer.allocate(65536);
+            while (in.read(b) >= 0) {
+                b.flip();
+                while (b.hasRemaining()) out.write(b);
+                b.clear();
+            }
+            if (out instanceof FileChannel fc) fc.force(true);
         }
     }
 
-    private static int linkCount(Path p) {
+    private static void inPlace(Dir dir, String name, Content content, JailedPath target) throws IOException {
+        PathJail.refuseForeignHardLink(dir, name, target.lexical().toString());
+        PathJail.hook();
+        try (SeekableByteChannel ch = dir.open(name, Set.of(StandardOpenOption.WRITE, StandardOpenOption.CREATE,
+                StandardOpenOption.TRUNCATE_EXISTING))) {
+            content.writeTo(ch);
+            if (ch instanceof FileChannel fc) fc.force(true);
+        }
+    }
+
+    private static void deleteQuietly(Dir dir, String name) {
         try {
-            Object n = Files.getAttribute(p, "unix:nlink");
+            if (dir.stat(name) != null) dir.delete(name, false);
+        } catch (IOException e) {
+            // best effort: a leftover temporary file is harmless
+        }
+    }
+
+    private static int linkCount(Dir dir, String name) {
+        if (PathJail.WINDOWS) return 1;
+        try {
+            Object n = Files.getAttribute(dir.path().resolve(name), "unix:nlink", LinkOption.NOFOLLOW_LINKS);
             return n instanceof Integer i ? i : 1;
         } catch (UnsupportedOperationException | IllegalArgumentException | IOException e) {
             return 1;
         }
     }
 
-    private static void copyAttributes(Path from, Path to) {
+    private static void copyAttributes(Dir dir, String from, String to) {
         try {
-            if (Files.getFileAttributeView(from, PosixFileAttributeView.class) != null) {
-                Files.setPosixFilePermissions(to, Files.getPosixFilePermissions(from));
+            PosixFileAttributeView src = dir.view(from, PosixFileAttributeView.class);
+            PosixFileAttributeView dst = dir.view(to, PosixFileAttributeView.class);
+            if (src != null && dst != null) {
+                dst.setPermissions(src.readAttributes().permissions());
                 return;
             }
-            DosFileAttributeView src = Files.getFileAttributeView(from, DosFileAttributeView.class);
-            DosFileAttributeView dst = Files.getFileAttributeView(to, DosFileAttributeView.class);
-            if (src != null && dst != null) {
-                DosFileAttributes a = src.readAttributes();
-                if (a.isHidden()) dst.setHidden(true);
-                if (a.isSystem()) dst.setSystem(true);
-                dst.setArchive(a.isArchive());
+            DosFileAttributeView dsrc = dir.view(from, DosFileAttributeView.class);
+            DosFileAttributeView ddst = dir.view(to, DosFileAttributeView.class);
+            if (dsrc != null && ddst != null) {
+                DosFileAttributes a = dsrc.readAttributes();
+                if (a.isHidden()) ddst.setHidden(true);
+                if (a.isSystem()) ddst.setSystem(true);
+                ddst.setArchive(a.isArchive());
             }
         } catch (IOException | UnsupportedOperationException e) {
             // best effort: the content matters more than the flags

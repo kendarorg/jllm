@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.HarnessTestSupport.*;
 import org.kendar.llm.harness.settings.HarnessSettings;
+import org.kendar.llm.harness.settings.PermissionSettings;
 import org.kendar.llm.harness.tools.ToolKind;
 
 import java.nio.file.Path;
@@ -49,7 +50,7 @@ class PermissionRulesTest {
         rig.approvals.grant(chat, "bash");
         rig.model.enqueue(toolUse("t1", "bash", "{\"command\":\"git push origin main\"}"), text("ok"));
 
-        rig.loop.run(chat, "go", new Events(), () -> false);
+        rig.loop.run(chat, "go", new Events(), () -> false, null);
 
         assertEquals(0, runs.get());
         assertEquals("Denied by permission rule: bash(.*git push.*). This bash call is not permitted by any means (no "
@@ -63,7 +64,7 @@ class PermissionRulesTest {
         rig.sessions.setMode(chat, PermissionMode.AUTO);
         rig.model.enqueue(toolUse("t1", "bash", "{\"command\":\"ls\"}"), text("ok"));
 
-        rig.loop.run(chat, "go", new Events(), () -> false);
+        rig.loop.run(chat, "go", new Events(), () -> false, null);
 
         assertEquals(1, runs.get());
     }
@@ -82,8 +83,8 @@ class PermissionRulesTest {
     @Test
     void invalidRegexFailsAtStartupWithTheIndex() {
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
-                () -> new HarnessSettings(null, null, null, null, null, null, null, null, null, null, null,
-                        new HarnessSettings.Permissions(List.of("ok", "bash(["), null, null), null, null));
+                () -> HarnessSettings.builder()
+                        .permissions(new PermissionSettings(List.of("ok", "bash(["), null, null)).build());
 
         assertTrue(e.getMessage().contains("permissions.deny[1]"), e.getMessage());
     }
@@ -103,7 +104,7 @@ class PermissionRulesTest {
         rig.model.enqueue(toolUse("t1", "bash", "{\"command\":\"mvn test\"}"), text("ok"));
         Events ev = new Events();
 
-        rig.loop.run(chat, "go", ev, () -> false);
+        rig.loop.run(chat, "go", ev, () -> false, null);
 
         assertEquals(1, runs.get());
         assertTrue(ev.ofType("approval_request").isEmpty());
@@ -111,9 +112,9 @@ class PermissionRulesTest {
         rig.model.enqueue(toolUse("t2", "bash", "{\"command\":\"curl x\"}"), text("ok"));
         Events ev2 = new Events();
         ev2.also = (type, data) -> {
-            if ("approval_request".equals(type)) rig.approvals.resolve(chat, data.get("id").asText(), false, null);
+            if ("approval_request".equals(type)) rig.approvals.resolve(chat, data.get("id").asText(), false, null, false, false);
         };
-        rig.loop.run(chat, "again", ev2, () -> false);
+        rig.loop.run(chat, "again", ev2, () -> false, null);
         assertEquals(1, ev2.ofType("approval_request").size());
         assertEquals(1, runs.get());
     }

@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.Cookie;
 import org.kendar.llm.harness.AgentHarness;
+import org.kendar.llm.harness.AgentHarnessBuilder;
 import org.kendar.llm.harness.HarnessPricing;
 import org.kendar.llm.harness.llm.ModelClient;
 import org.kendar.llm.harness.llm.ModelRequest;
@@ -61,6 +62,23 @@ final class WebauthFixture {
     final AgentHarness harness;
     final MockMvc mvc;
 
+    /** A tool that reports what it runs on, the way run_js reports its engine. */
+    static HarnessTool toolWithStatus(String name, String status) {
+        SimpleTool t = tool(name, ToolKind.OTHER);
+        return new HarnessTool() {
+            @Override public String name() { return t.name(); }
+            @Override public String description() { return t.description(); }
+            @Override public com.fasterxml.jackson.databind.JsonNode inputSchema() { return t.inputSchema(); }
+            @Override public String group() { return t.group(); }
+            @Override public ToolKind kind() { return t.kind(); }
+            @Override public String status() { return status; }
+            @Override public String execute(org.kendar.llm.harness.tools.ToolContext ctx,
+                                            com.fasterxml.jackson.databind.JsonNode input) throws Exception {
+                return t.execute(ctx, input);
+            }
+        };
+    }
+
     static SimpleTool tool(String name, ToolKind kind) {
         return new SimpleTool(name, name + " tool", MAPPER.createObjectNode(), "g", kind, (c, i) -> "");
     }
@@ -90,12 +108,13 @@ final class WebauthFixture {
                 return "";
             }
         };
-        HarnessSettings settings = new HarnessSettings(
-                List.of(new McpServerSettings("docs", "http://127.0.0.1:9/mcp", null, null, false, null, null, null, null, null, null, null, null)),
-                null, List.of(new SkillSettings("pdf", null, pdf.toString())), null, null);
+        HarnessSettings settings = HarnessSettings.builder()
+                .mcpServers(List.of(new McpServerSettings("docs", "http://127.0.0.1:9/mcp", null, null, false, null, null, null, null, null, null, null, null)))
+                .skills(List.of(new SkillSettings("pdf", null, pdf.toString()))).build();
         List<HarnessTool> tools = List.of(tool("read_file", ToolKind.READ_ONLY), tool("grep", ToolKind.READ_ONLY),
-                tool("write_file", ToolKind.FILE_EDIT), tool("web_fetch", ToolKind.READ_ONLY));
-        harness = AgentHarness.builder().modelClient(unused).sessionStore(new InMemoryChatSessionStore())
+                tool("write_file", ToolKind.FILE_EDIT), tool("web_fetch", ToolKind.READ_ONLY),
+                toolWithStatus("run_js", "edition community, profile isolated, isolate available"));
+        harness = new AgentHarnessBuilder().modelClient(unused).sessionStore(new InMemoryChatSessionStore())
                 .objectMapper(MAPPER).withoutStandardTools().tools(tools).settings(settings)
                 .userPolicyResolver(permissions.resolver(users, skills))
                 .principalDirectory(id -> users.find(id).map(u -> u.principal()).orElse(null))

@@ -52,14 +52,14 @@ class ChatScopedEnforcementTest {
                 .with(ChatToolSet.Kind.TOOL, "beta", false));
         rig.model.enqueue(toolUse("t1", "beta", "{}"), text("done"), toolUse("t2", "beta", "{}"), text("done"));
 
-        rig.loop.run(chat, "go", new Events(), () -> false);
+        rig.loop.run(chat, "go", new Events(), () -> false, null);
 
         assertTrue(rig.model.requests.get(0).toolNames().contains("alpha"));
         assertFalse(rig.model.requests.get(0).toolNames().contains("beta"));
         assertTrue(lastResults(rig).get(0).path("is_error").asBoolean(), lastResults(rig).toString());
         assertEquals(0, runs.get());
 
-        rig.loop.run(other, "go", new Events(), () -> false); // another chat keeps the tool
+        rig.loop.run(other, "go", new Events(), () -> false, null); // another chat keeps the tool
         assertEquals(1, runs.get());
     }
 
@@ -87,7 +87,7 @@ class ChatScopedEnforcementTest {
         rig.model.enqueue(toolUse("t1", "skill", "{\"name\":\"b\"}"), toolUse("t2", "skill", "{\"name\":\"a\"}"),
                 text("done"));
 
-        rig.loop.run(chat, "go", new Events(), () -> false);
+        rig.loop.run(chat, "go", new Events(), () -> false, null);
 
         JsonNode refused = rig.model.requests.get(1).messages().get(2).path("content").get(0);
         assertTrue(refused.path("is_error").asBoolean(), refused.toString());
@@ -107,7 +107,7 @@ class ChatScopedEnforcementTest {
                 .with(ChatToolSet.Kind.SKILL, "a", false));
         rig.model.enqueue(text("done"));
 
-        rig.loop.run(chat, "go", new Events(), () -> false);
+        rig.loop.run(chat, "go", new Events(), () -> false, null);
 
         assertFalse(rig.model.requests.get(0).toolNames().contains("skill"));
     }
@@ -139,7 +139,7 @@ class ChatScopedEnforcementTest {
         rig.model.enqueue(toolUse("t1", "write", "{\"path\":\"src/a.txt\"}"), text("done"));
 
         Events ev = answeringDir(rig, chat, "../outside");
-        rig.loop.run(chat, "go", ev, () -> false);
+        rig.loop.run(chat, "go", ev, () -> false, null);
 
         assertEquals(0, runs.get());
         assertTrue(lastResults(rig).get(0).path("content").asText().contains("rejected"), lastResults(rig).toString());
@@ -156,7 +156,7 @@ class ChatScopedEnforcementTest {
         String chat = rig.newChat();
         rig.model.enqueue(toolUse("t1", "write", "{\"path\":\"src/a.txt\"}"), text("done"));
 
-        rig.loop.run(chat, "go", answeringDir(rig, chat, "src"), () -> false);
+        rig.loop.run(chat, "go", answeringDir(rig, chat, "src"), () -> false, null);
 
         assertEquals(1, runs.get());
         assertTrue(rig.approvals.dirGranted(chat, "src"));
@@ -179,7 +179,7 @@ class ChatScopedEnforcementTest {
         Rig before = taintRig(history, shellRuns);
         String chat = before.newChat();
         before.model.enqueue(toolUse("t1", "fetch", "{}"), text("ok"));
-        before.loop.run(chat, "first", new Events(), () -> false);
+        before.loop.run(chat, "first", new Events(), () -> false, null);
         assertEquals(java.util.Set.of("t1"), before.sessions.taintedToolUses(chat));
 
         Rig after = taintRig(history, shellRuns); // a new process: nothing in memory
@@ -187,10 +187,10 @@ class ChatScopedEnforcementTest {
         Events ev = new Events();
         ev.also = (type, data) -> {
             if ("approval_request".equals(type)) {
-                assertTrue(after.approvals.resolve(chat, data.get("id").asText(), false, null));
+                assertTrue(after.approvals.resolve(chat, data.get("id").asText(), false, null, false, false));
             }
         };
-        after.loop.run(chat, "second", ev, () -> false);
+        after.loop.run(chat, "second", ev, () -> false, null);
 
         assertEquals(1, ev.ofType("approval_request").size(), "the untrusted output still gates side effects");
         assertEquals(0, shellRuns.get());
@@ -203,11 +203,11 @@ class ChatScopedEnforcementTest {
         Rig rig = taintRig(history, shellRuns);
         String chat = rig.newChat();
         rig.model.enqueue(toolUse("t1", "fetch", "{}"), text("ok"));
-        rig.loop.run(chat, "first", new Events(), () -> false);
+        rig.loop.run(chat, "first", new Events(), () -> false, null);
         assertFalse(rig.sessions.taintedToolUses(chat).isEmpty());
 
         rig.sessions.delete(chat);
-        rig.loop.forgetTaint(chat);
+        rig.loop.taint().forget(chat);
 
         assertTrue(rig.sessions.taintedToolUses(chat).isEmpty());
         assertTrue(new FileChatSessionStore(history, MAPPER).find(chat).isEmpty());

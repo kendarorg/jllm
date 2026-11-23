@@ -6,6 +6,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.AgentHarness;
+import org.kendar.llm.harness.AgentHarnessBuilder;
 import org.kendar.llm.harness.HarnessConfig;
 import org.kendar.llm.harness.llm.ModelClient;
 import org.kendar.llm.harness.llm.ModelRequest;
@@ -54,7 +55,7 @@ class WebSecurityFixesTest {
                 return "";
             }
         };
-        harness = AgentHarness.builder().modelClient(unused)
+        harness = new AgentHarnessBuilder().modelClient(unused)
                 .sandbox(new ChatDirSandboxExecutor(HarnessConfig.defaults(), dir))
                 .sessionStore(new InMemoryChatSessionStore()).objectMapper(mapper).build();
         chats = MockMvcBuilders.standaloneSetup(TestUser.chatController(harness, mapper))

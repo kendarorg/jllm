@@ -38,7 +38,7 @@ class AgentLoopTest {
 
     private Events run(String text) {
         Events ev = new Events();
-        rig.loop.run(chatId, text, ev, () -> false);
+        rig.loop.run(chatId, text, ev, () -> false, null);
         return ev;
     }
 
@@ -179,9 +179,9 @@ class AgentLoopTest {
 
         Events ev = new Events();
         ev.also = (type, data) -> {
-            if ("approval_request".equals(type)) rig.approvals.resolve(chatId, data.get("id").asText(), false, null);
+            if ("approval_request".equals(type)) rig.approvals.resolve(chatId, data.get("id").asText(), false, null, false, false);
         };
-        rig.loop.run(chatId, "loop forever", ev, () -> false);
+        rig.loop.run(chatId, "loop forever", ev, () -> false, null);
 
         assertEquals(3, rig.model.requests.size());
         assertEquals(1, ev.ofType("approval_request").size());
@@ -200,11 +200,11 @@ class AgentLoopTest {
         ev.also = (type, data) -> {
             if ("approval_request".equals(type)) {
                 assertEquals("3", data.get("proposed").asText(), "default is maxTurns");
-                rig.approvals.resolve(chatId, data.get("id").asText(), asked.incrementAndGet() == 1, "2");
+                rig.approvals.resolve(chatId, data.get("id").asText(), asked.incrementAndGet() == 1, "2", false, false);
             }
         };
 
-        rig.loop.run(chatId, "loop forever", ev, () -> false);
+        rig.loop.run(chatId, "loop forever", ev, () -> false, null);
 
         assertEquals(5, rig.model.requests.size()); // 3 turns, then the 2 the user typed
         assertEquals(2, ev.ofType("approval_request").size());
@@ -222,7 +222,7 @@ class AgentLoopTest {
         rig.model.enqueue(toolUse("tu1", "echo", "{}"), text("must never be requested"));
         Events ev = new Events();
 
-        rig.loop.run(chatId, "go", ev, stop::get);
+        rig.loop.run(chatId, "go", ev, stop::get, null);
 
         assertEquals(1, rig.model.requests.size());
         assertEquals(1, ev.ofType("cancelled").size());
@@ -236,7 +236,7 @@ class AgentLoopTest {
     void cancelBeforeStartMakesNoModelCall() {
         Events ev = new Events();
 
-        rig.loop.run(chatId, "go", ev, () -> true);
+        rig.loop.run(chatId, "go", ev, () -> true, null);
 
         assertTrue(rig.model.requests.isEmpty());
         assertEquals(List.of("cancelled"), ev.types());
@@ -255,7 +255,7 @@ class AgentLoopTest {
             return toolUse("tu1", "echo", "{}");
         };
 
-        rig.loop.run(chatId, "go", new Events(), stop::get);
+        rig.loop.run(chatId, "go", new Events(), stop::get, null);
 
         assertEquals(0, runs.get());
         ArrayNode m = stored();

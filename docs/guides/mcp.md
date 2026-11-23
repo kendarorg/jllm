@@ -296,7 +296,7 @@ tool name (see [EXTENDING §4](extending.md#4-approval-policy)).
 ## 6. Token storage
 
 OAuth tokens (MCP servers, REST APIs, provider logins) go through one `TokenStore`, chosen by the `tokenStore`
-settings section or given in code (`AgentHarness.Builder.tokenStore`, which wins):
+settings section or given in code (`AgentHarnessBuilder.tokenStore`, which wins):
 
 ```json
 "tokenStore": {"type": "auto", "dir": null, "encrypt": null}

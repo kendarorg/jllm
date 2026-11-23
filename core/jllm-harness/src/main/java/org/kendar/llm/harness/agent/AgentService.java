@@ -179,7 +179,7 @@ public class AgentService {
                 turnStarted(chatId, sink, next);
                 outcome = loop.run(chatId, next, sink, run.token, inbox);
             }
-        } catch (Throwable t) {
+        } catch (Throwable t) { // boundary: run thread top level: any failure ends the run as FAILED
             log.error("Agent run failed for chat {}", chatId, t);
             outcome = AgentLoop.Outcome.FAILED;
             sink.emit("error", mapper.createObjectNode().put("message", String.valueOf(t.getMessage())));
@@ -202,7 +202,7 @@ public class AgentService {
         if (text == null) return null;
         try {
             turnStart.accept(chatId);
-        } catch (RuntimeException e) {
+        } catch (RuntimeException e) { // boundary: a failed turn start is reported to the client
             log.warn("Turn start failed for chat {}: {}", chatId, e.getMessage());
             sink.emit("warning", mapper.createObjectNode()
                     .put("message", "Turn start failed (/undo may not see this turn): " + e.getMessage()));
@@ -243,7 +243,7 @@ public class AgentService {
                 try {
                     if (l instanceof OrderedListener o) o.acceptTransient(ev);
                     else l.accept(ev);
-                } catch (RuntimeException e) {
+                } catch (RuntimeException e) { // boundary: listener isolation: a failing listener is dropped
                     run.listeners.remove(l);
                 }
             }
@@ -259,7 +259,7 @@ public class AgentService {
         for (Consumer<AgentEvent> l : targets) {
             try {
                 l.accept(ev);
-            } catch (RuntimeException e) {
+            } catch (RuntimeException e) { // boundary: listener isolation: a failing listener is dropped
                 run.listeners.remove(l);
             }
         }
@@ -329,15 +329,11 @@ public class AgentService {
     }
 
     public org.kendar.llm.harness.tools.ValidationMode validationMode(String chatId) {
-        return loop.validationMode(chatId);
+        return loop.toolExecutor().validationMode(chatId);
     }
 
     public void validationMode(String chatId, org.kendar.llm.harness.tools.ValidationMode mode) {
-        loop.validationMode(chatId, mode);
-    }
-
-    public void cancel(String chatId) {
-        cancel(chatId, false);
+        loop.toolExecutor().validationMode(chatId, mode);
     }
 
     /**
@@ -355,8 +351,8 @@ public class AgentService {
         approvals.cancelAll(chatId);
     }
 
-    public List<AgentLoop.ActiveSubAgent> activeSubAgents(String chatId) {
-        return loop.activeSubAgents(chatId);
+    public List<ActiveSubAgent> activeSubAgents(String chatId) {
+        return loop.subAgents().activeSubAgents(chatId);
     }
 
     public boolean isRunning(String chatId) {
@@ -401,7 +397,7 @@ public class AgentService {
         }
         try {
             for (AgentEvent ev : replay) ordered.accept(ev);
-        } catch (RuntimeException e) {
+        } catch (RuntimeException e) { // boundary: unsubscribe on any failure, rethrown unchanged
             run.listeners.remove(ordered);
             throw e;
         }
@@ -412,16 +408,9 @@ public class AgentService {
         return approvals.pending(chatId);
     }
 
-    public boolean resolveApproval(String chatId, String approvalId, boolean approved, String edited) {
-        return approvals.resolve(chatId, approvalId, approved, edited);
-    }
-
-    public boolean resolveApproval(String chatId, String approvalId, boolean approved, String edited,
-                                   boolean remember) {
-        return approvals.resolve(chatId, approvalId, approved, edited, remember);
-    }
-
-    /** @param rememberDir allow file writes in the call's directory and below, for this chat */
+    /**
+     * @param remember    allow the tool for the rest of the chat, sub-agents included
+     * @param rememberDir allow file writes in the call's directory and below, for this chat */
     public boolean resolveApproval(String chatId, String approvalId, boolean approved, String edited,
                                    boolean remember, boolean rememberDir) {
         return approvals.resolve(chatId, approvalId, approved, edited, remember, rememberDir);

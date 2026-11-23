@@ -9,7 +9,7 @@ standard tools. One class, `org.kendar.llm.cli.Main`, packaged as a shaded runna
 
 ```sh
 mvn -pl jllm-cli -am package
-java -jar jllm-cli/target/jllm-cli-1.0.0.jar --provider anthropic --mode edit
+java -jar jllm-cli/target/jllm-cli-1.2.0-jllm.jar --provider anthropic --mode edit
 ```
 
 The API key comes from `--api-key` or the `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GROK_API_KEY` / `QWEN_API_KEY` environment variable.
@@ -24,6 +24,7 @@ Main [--provider anthropic|openai|openaiGpt62|gemini|grok|qwen|llamacpp|ollama] 
      [--context-strategy compaction|mnemonic|scope] [--search-api-key BRAVE_KEY] [--small-model]
      [--sandbox local|docker] [--docker-image IMAGE] [--docker-mode oneshot|daemon]
      [--docker-remote] [--docker-remote-host ADDRESS]
+     [--external-links none|read|readwrite]
      [--sandbox-clean] [--sandbox-clean-all]
 ```
 
@@ -52,6 +53,7 @@ Main [--provider anthropic|openai|openaiGpt62|gemini|grok|qwen|llamacpp|ollama] 
 | `--docker-mode` | `oneshot` | `oneshot` (a container per command) or `daemon` (one long-running container for `bash` and the file tools; kept between runs); wins over `sandbox.docker.mode` |
 | `--docker-remote` | off | bare, or `=false`; the docker daemon is on another machine: the project is uploaded to the container and backed up on exit and on `/sandbox backup` ([SANDBOX](../docs/guides/sandbox.md#remote-docker)); wins over `sandbox.docker.remote` |
 | `--docker-remote-host` | from `DOCKER_HOST` | address where the remote host's published ports are reached |
+| `--external-links` | `read` | `none`, `read` or `readwrite`: what the file tools do with a symlink or junction in the project whose target is outside it. `read` follows it for read tools and refuses writes through it, `readwrite` follows both (the approval prompt shows the resolved target), `none` refuses all; wins over `files.externalLinks`. The web app always uses `none` |
 | `--sandbox-clean` | | no value; removes the daemon-mode container of the startup directory, prints what was removed, exits. Project files stay |
 | `--sandbox-clean-all` | | no value; removes every CLI sandbox container, then exits |
 | `-h`, `--help` | | print usage |

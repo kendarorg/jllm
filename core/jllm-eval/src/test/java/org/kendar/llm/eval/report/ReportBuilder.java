@@ -38,6 +38,10 @@ public final class ReportBuilder {
      */
     public static JsonNode build(Path runDir, boolean updateBaseline) {
         ResultLoader.Run run = ResultLoader.load(runDir);
+        if (updateBaseline && run.dirty()) {
+            throw new IllegalStateException("Refusing to store a baseline from a run on a dirty working tree ("
+                    + ResultLoader.text(run.meta().path("build"), "commit") + "): commit the changes and run again");
+        }
         HarnessPricing pricing = new HarnessPricing(price("input"), price("output"), price("cacheRead"),
                 price("cacheWrite"));
         boolean priced = price("input") > 0 || price("output") > 0 || price("cacheRead") > 0
@@ -74,6 +78,12 @@ public final class ReportBuilder {
         o.put("passRate", s.path("overall").path("passRate").asDouble());
         o.put("tokensPerTrial", s.path("overall").path("tokens").path("perTrial").asDouble());
         o.put("meanMs", s.path("overall").path("latency").path("meanMs").asDouble());
+        o.set("passAtK", s.path("overall").path("passAtK"));
+        o.set("passPowK", s.path("overall").path("passPowK"));
+        o.set("coverage", s.path("overall").path("coverage"));
+        b.set("passK", s.path("run").path("passK"));
+        b.put("commit", s.path("run").path("commit").asText());
+        b.put("settingsHash", s.path("run").path("settingsHash").asText());
         ObjectNode f = b.putObject("features");
         s.path("features").fields().forEachRemaining(e -> f.put(e.getKey(), e.getValue().path("passRate").asDouble()));
         ObjectNode c = b.putObject("cases");
@@ -82,6 +92,8 @@ public final class ReportBuilder {
             cn.put("passRate", n.path("passRate").asDouble());
             cn.put("passes", n.path("passes").asInt());
             cn.put("trials", n.path("trials").asInt());
+            cn.set("passAtK", n.path("passAtK"));
+            cn.set("passPowK", n.path("passPowK"));
         }
         return b;
     }
@@ -146,21 +158,39 @@ public final class ReportBuilder {
         Doc d = new Doc("Eval report: " + run.path("model").asText());
         JsonNode ov = s.path("overall");
         for (JsonNode w : s.path("warnings")) d.warn(w.asText());
+        int k = run.path("reportK").asInt(1);
+        d.p("Commit: " + commitLabel(run) + ", version " + run.path("version").asText("unknown") + ", settings "
+                + shortHash(run.path("settingsHash").asText()) + ", prompts "
+                + shortHash(run.path("promptsHash").asText()) + ".");
         d.p("Judge: " + judge(run) + (run.path("selfGraded").asBoolean() ? " (SELF-GRADED)" : " (independent)")
                 + ". Trials per case: " + run.path("trials").asInt() + ". Run: " + run.path("runFolder").asText());
         d.h("Overall");
-        d.table(List.of("cases", "trials", "pass rate", "pass^k", "tokens/trial", "cost/trial", "cache ratio",
-                        "latency mean/p50/p95 ms"),
+        d.table(List.of("cases", "trials", "pass rate", "pass@" + k, "pass^" + k, "tokens/trial", "cost/trial",
+                        "cache ratio", "latency mean/p50/p95 ms"),
                 List.of(List.of(ov.path("cases").asText(), ov.path("trials").asText(), pct(ov.path("passRate")),
-                        pct(ov.path("passKRate")), num(ov.path("tokens").path("perTrial")), money(ov),
-                        pct(ov.path("cacheRatio")), lat(ov.path("latency")))));
+                        kCell(ov, "passAtK", k), kCell(ov, "passPowK", k), num(ov.path("tokens").path("perTrial")),
+                        money(ov), pct(ov.path("cacheRatio")), lat(ov.path("latency")))));
+        d.h("Reliability by k");
+        List<List<String>> kr = new ArrayList<>();
+        for (JsonNode kn : run.path("passK")) {
+            int kk = kn.asInt();
+            kr.add(List.of(String.valueOf(kk), kCell(ov, "passAtK", kk), kCell(ov, "passPowK", kk),
+                    ov.path("coverage").path(String.valueOf(kk)).asInt() + " of " + ov.path("cases").asInt()));
+        }
+        d.table(List.of("k", "pass@k", "pass^k", "cases measured"), kr);
+        d.p("pass@k is the chance that at least one of k trials passes: how much a retry helps. pass^k is the chance "
+                + "that all k trials pass: how reliable the agent is when it is run k times. Both are unbiased "
+                + "estimates from the trials of each case, averaged over cases. A case with fewer than k trials cannot "
+                + "tell and is left out of that k (\"cases measured\"); when no case has k trials the cell says "
+                + "\"k greater than trials: not measured\" instead of a number.");
         d.h("Features");
         List<List<String>> rows = new ArrayList<>();
         s.path("features").fields().forEachRemaining(e -> rows.add(List.of(e.getKey(),
                 e.getValue().path("cases").asText(), pct(e.getValue().path("passRate")),
-                pct(e.getValue().path("passKRate")), num(e.getValue().path("tokens").path("perTrial")),
+                kCell(e.getValue(), "passAtK", k), kCell(e.getValue(), "passPowK", k),
+                num(e.getValue().path("tokens").path("perTrial")),
                 money(e.getValue()), lat(e.getValue().path("latency")))));
-        d.table(List.of("feature", "cases", "pass rate", "pass^k", "tokens/trial", "cost/trial",
+        d.table(List.of("feature", "cases", "pass rate", "pass@" + k, "pass^" + k, "tokens/trial", "cost/trial",
                 "latency mean/p50/p95 ms"), rows);
 
         d.h("Strategy comparison");
@@ -168,10 +198,10 @@ public final class ReportBuilder {
         s.path("strategies").fields().forEachRemaining(e -> {
             JsonNode v = e.getValue();
             sr.add(List.of(e.getKey(), v.path("cases").asText(), pct(v.path("retention")), pct(v.path("passRate")),
-                    pct(v.path("passKRate")), num(v.path("tokens").path("perTrial")), money(v),
+                    kCell(v, "passPowK", k), num(v.path("tokens").path("perTrial")), money(v),
                     pct(v.path("cacheRatio")), v.path("cacheBreaks").asText()));
         });
-        d.table(List.of("strategy", "cases", "retention", "success", "pass^k", "tokens/trial", "cost/trial",
+        d.table(List.of("strategy", "cases", "retention", "success", "pass^" + k, "tokens/trial", "cost/trial",
                 "cache ratio", "unexpected cache breaks"), sr);
         d.h("Cache ratio per turn");
         d.svg(CacheChart.svg(s.path("strategies")));
@@ -210,6 +240,30 @@ public final class ReportBuilder {
         String m = run.path("judgeModel").asText();
         String t = run.path("judgeType").asText();
         return (t.isEmpty() ? "" : t + " ") + (m.isEmpty() ? "unknown" : m);
+    }
+
+    /** Commit, short, with a dirty marker; {@code unknown} without git. */
+    static String commitLabel(JsonNode run) {
+        String c = run.path("commit").asText("unknown");
+        if (c.isEmpty()) c = "unknown";
+        return (c.length() > 8 ? c.substring(0, 8) : c) + (run.path("dirty").asBoolean() ? " (DIRTY)" : "");
+    }
+
+    static String shortHash(String h) {
+        if (h == null || h.isEmpty()) return "unknown";
+        return h.length() > 12 ? h.substring(0, 12) : h;
+    }
+
+    /**
+     * pass@k or pass^k of a scope for one k: the percentage, with the measured cases when only some had k trials, or
+     * the note that k is greater than the trials of every case.
+     */
+    static String kCell(JsonNode scope, String metric, int k) {
+        JsonNode v = scope.path(metric).path(String.valueOf(k));
+        int covered = scope.path("coverage").path(String.valueOf(k)).asInt();
+        int cases = scope.path("cases").asInt();
+        if (v.isMissingNode() || covered == 0) return "k greater than trials: not measured";
+        return pct(v) + (covered < cases ? " (" + covered + " of " + cases + " cases)" : "");
     }
 
     static String pct(JsonNode n) {

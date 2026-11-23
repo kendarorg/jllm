@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.AgentHarness;
+import org.kendar.llm.harness.AgentHarnessBuilder;
 import org.kendar.llm.harness.agent.AgentEvent;
 
 import java.nio.file.Path;
@@ -89,7 +90,7 @@ class ToolInputValidationTest {
 
     @Test
     void everyBuiltInToolSchemaCompilesAndRejectsAnEmptyCallWhenItHasRequiredFields() throws Exception {
-        AgentHarness h = AgentHarness.builder().modelClient(new ScriptedModel()).config(config(base)).build();
+        AgentHarness h = new AgentHarnessBuilder().modelClient(new ScriptedModel()).config(config(base)).build();
         var factory = com.networknt.schema.JsonSchemaFactory.getInstance(com.networknt.schema.SpecVersion.VersionFlag.V7);
         int checked = 0;
         for (HarnessTool t : h.tools().all()) {
@@ -135,7 +136,7 @@ class ToolInputValidationTest {
     void invalidCallNeverReachesTheTool() throws Exception {
         List<String> ran = Collections.synchronizedList(new ArrayList<>());
         ScriptedModel model = new ScriptedModel().enqueue(toolUse("t1", "count", "{\"n\":1}"), text("ok"));
-        AgentHarness h = AgentHarness.builder().modelClient(model).config(config(base)).withoutStandardTools()
+        AgentHarness h = new AgentHarnessBuilder().modelClient(model).config(config(base)).withoutStandardTools()
                 .tools(List.of(tool(ran))).build();
 
         String out = output(run(h, h.sessions().create(null).chatId()));
@@ -148,7 +149,7 @@ class ToolInputValidationTest {
     void lenientIsTheDefaultAndRepairsBeforeTheToolRuns() throws Exception {
         List<String> ran = Collections.synchronizedList(new ArrayList<>());
         ScriptedModel model = new ScriptedModel().enqueue(toolUse("t1", "count", "{\"path\":\"a\",\"n\":\"2\"}"), text("ok"));
-        AgentHarness h = AgentHarness.builder().modelClient(model).config(config(base)).withoutStandardTools()
+        AgentHarness h = new AgentHarnessBuilder().modelClient(model).config(config(base)).withoutStandardTools()
                 .tools(List.of(tool(ran))).build();
         String chat = h.sessions().create(null).chatId();
 
@@ -161,7 +162,7 @@ class ToolInputValidationTest {
     void chatOverrideSwitchesToStrict() throws Exception {
         List<String> ran = Collections.synchronizedList(new ArrayList<>());
         ScriptedModel model = new ScriptedModel().enqueue(toolUse("t1", "count", "{\"path\":\"a\",\"n\":\"2\"}"), text("ok"));
-        AgentHarness h = AgentHarness.builder().modelClient(model).config(config(base)).withoutStandardTools()
+        AgentHarness h = new AgentHarnessBuilder().modelClient(model).config(config(base)).withoutStandardTools()
                 .tools(List.of(tool(ran))).build();
         String chat = h.sessions().create(null).chatId();
         h.setToolValidation(chat, ValidationMode.STRICT);
@@ -178,14 +179,14 @@ class ToolInputValidationTest {
 
         List<String> ran = Collections.synchronizedList(new ArrayList<>());
         ScriptedModel m1 = new ScriptedModel().enqueue(toolUse("t1", "count", "{\"path\":\"/etc\"}"), text("ok"));
-        AgentHarness added = AgentHarness.builder().modelClient(m1).config(config(base)).withoutStandardTools()
+        AgentHarness added = new AgentHarnessBuilder().modelClient(m1).config(config(base)).withoutStandardTools()
                 .tools(List.of(tool(ran))).addToolInputValidator(noRoot).build();
         String out = output(run(added, added.sessions().create(null).chatId()));
         assertTrue(out.contains("absolute paths are not allowed"), out);
 
         // the replacement alone: the schema is no longer enforced
         ScriptedModel m2 = new ScriptedModel().enqueue(toolUse("t1", "count", "{}"), text("ok"));
-        AgentHarness replaced = AgentHarness.builder().modelClient(m2).config(config(base)).withoutStandardTools()
+        AgentHarness replaced = new AgentHarnessBuilder().modelClient(m2).config(config(base)).withoutStandardTools()
                 .tools(List.of(tool(ran))).toolInputValidator(noRoot).build();
         assertEquals("ran", output(run(replaced, replaced.sessions().create(null).chatId())));
     }

@@ -182,7 +182,7 @@ public final class McpHttpClient implements McpClient {
         try {
             http.sendAsync(HttpRequest.newBuilder(url).timeout(Duration.ofSeconds(10)).header("Mcp-Session-Id", session)
                     .DELETE().build(), HttpResponse.BodyHandlers.discarding());
-        } catch (RuntimeException e) {
+        } catch (RuntimeException e) { // boundary: best-effort session close
             log.debug("MCP {}: session close failed: {}", url, e.toString());
         }
     }
@@ -215,7 +215,7 @@ public final class McpHttpClient implements McpClient {
             log.warn("MCP server {} is unavailable: {}", url, reason);
             try {
                 onUnavailable.accept(reason);
-            } catch (RuntimeException e) {
+            } catch (RuntimeException e) { // boundary: an embedder callback must not break the client
                 log.warn("MCP server {}: unavailable callback failed: {}", url, e.toString());
             }
         }

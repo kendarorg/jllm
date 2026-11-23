@@ -55,8 +55,8 @@ class FileSystemAgentToolsJailTest {
 
     @Test
     void benignDotSegmentsStayInside() {
-        assertEquals(root.resolve("inside.txt").toAbsolutePath().normalize(), FileSystemAgentTools.jail(ctx, "./a/../inside.txt"));
-        assertEquals(root.toAbsolutePath().normalize(), FileSystemAgentTools.jail(ctx, "."));
+        assertEquals(root.resolve("inside.txt").toAbsolutePath().normalize(), FileSystemAgentTools.jail(ctx, "./a/../inside.txt").lexical());
+        assertEquals(root.toAbsolutePath().normalize(), FileSystemAgentTools.jail(ctx, ".").lexical());
     }
 
     @Test

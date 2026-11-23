@@ -22,8 +22,12 @@ public final class ToolCatalogView {
 
     private static final int DESCRIPTION_MAX = 240;
 
-    /** @param enabled for a user view: not switched off by the user; always true in the full catalog */
-    public record Tool(String name, String group, String kind, String description, boolean enabled) {
+    /**
+     * @param enabled for a user view: not switched off by the user; always true in the full catalog
+     * @param status  what the tool runs on (for {@code run_js}: edition, profile, isolate), or null; shown in the tool
+     *                picker
+     */
+    public record Tool(String name, String group, String kind, String description, boolean enabled, String status) {
     }
 
     /**
@@ -115,7 +119,8 @@ public final class ToolCatalogView {
         int nl = d.indexOf('\n');
         if (nl > 0) d = d.substring(0, nl);
         if (d.length() > DESCRIPTION_MAX) d = d.substring(0, DESCRIPTION_MAX) + "…";
-        return new Tool(t.name(), t.group(), String.valueOf(t.kind()), d, !Wildcard.matchesAny(disabled, t.name()));
+        return new Tool(t.name(), t.group(), String.valueOf(t.kind()), d, !Wildcard.matchesAny(disabled, t.name()),
+                t.status());
     }
 
     private static <T> List<T> concat(List<T> a, List<T> b) {

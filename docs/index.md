@@ -8,7 +8,7 @@ Pick the path that matches your role.
 |---|---|
 | [Why JLLM](why-jllm.md) | what it is for, and when not to choose it |
 | [JVM landscape](comparisons/jvm-landscape.md) | how it relates to Spring AI, LangChain4j, ADK, Koog, local engines |
-| [Harness comparison](comparisons/harnesses-compare.md) | feature matrix against terminal agents |
+| [Harness comparison](comparisons/harnesses-compare.md), [sources](comparisons/harnesses-sources.md) | feature matrix against terminal agents, with the source of each cell |
 | [Security model](enterprise/security-model.md) | threats, controls, what is not covered |
 | [Compliance and licensing](enterprise/compliance-and-licensing.md) | Apache-2.0, dependencies, data handling |
 | [Roadmap and limits](enterprise/roadmap-and-limits.md) | known gaps and future work |

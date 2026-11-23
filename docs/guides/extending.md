@@ -1,10 +1,10 @@
 # Extending the harness
 
-Every extension point is a plain Java interface passed to `AgentHarness.builder()`. No framework, no reflection.
+Every extension point is a plain Java interface passed to `new AgentHarnessBuilder()`. No framework, no reflection.
 
 ```mermaid
 flowchart LR
-    B["AgentHarness.Builder"]
+    B["AgentHarnessBuilder"]
     B --- T["tools(List&lt;HarnessTool&gt;)"]
     B --- H["hook(event, Hook) / before*/after*"]
     B --- P["plugin(HarnessPlugin)<br/>tools + hooks + /commands"]
@@ -75,8 +75,11 @@ A plugin jar (loaded from the plugin directory by the CLI and the web app):
 ```
 
 Package third-party libraries into the plugin (`jar-with-dependencies`, as `plugins/jllm-pdf` does); never the `jllm-*`
-jars. A library too large or too delicate to bundle can be left to the host instead, as `plugins/jllm-js` does with
-GraalJS: declare it `provided` and fail clearly at startup when it is missing. An application embedding the harness depends on `jllm-harness` (compile scope); a web
+jars. A library too large, too delicate or under terms you do not want to redistribute can be left to the host instead, as
+`plugins/jllm-js` does with GraalJS: declare it `provided` (in the plugin and in every host that runs it: `jllm-cli`,
+`jllm-web`, `jllm-eval`), ship it outside the jars (the release puts GraalJS in `lib-ext/`, see the
+[js guide](js.md#enabling)), probe it at install time, log one WARN and register nothing when it is missing; the plugin
+class itself must not reference its types. An application embedding the harness depends on `jllm-harness` (compile scope); a web
 application on `jllm-web-commons`.
 
 ## 1. Tools
@@ -104,7 +107,7 @@ HarnessTool sql = new SimpleTool("db_query",
         "Db", ToolKind.READ_ONLY,
         (ctx, in) -> reporting.query(in.path("sql").asText(), in.path("limit").asInt(100)));
 
-AgentHarness h = AgentHarness.builder().modelClient(client).tools(List.of(sql)).build();
+AgentHarness h = new AgentHarnessBuilder().modelClient(client).tools(List.of(sql)).build();
 ```
 
 Group several tools in a `HarnessToolSet` (`List<HarnessTool> tools()`), as the built-ins do.
@@ -249,7 +252,7 @@ public final class DeployPlugin implements HarnessPlugin {
     }
 }
 
-AgentHarness h = AgentHarness.builder().modelClient(client).plugin(new DeployPlugin()).build();
+AgentHarness h = new AgentHarnessBuilder().modelClient(client).plugin(new DeployPlugin()).build();
 ```
 
 A plugin can also register a `DocumentReader` for `read_file` (`r.documentReader(reader)`; see
@@ -450,7 +453,7 @@ cheap or write behind. The `FileHistory*` stores are decorators: they wrap anoth
 
 OAuth tokens (REST APIs, MCP servers, provider logins) go through `org.kendar.llm.harness.auth.TokenStore`. Shipped:
 `FileTokenStore` (one file per principal, optional `TokenCipher` encryption, cross-process file lock) and
-`NativeTokenStore` (macOS Keychain, Windows DPAPI, Linux Secret Service; single user). `AgentHarness.Builder.tokenStore(store)`
+`NativeTokenStore` (macOS Keychain, Windows DPAPI, Linux Secret Service; single user). `AgentHarnessBuilder.tokenStore(store)`
 takes any implementation and wins over the `tokenStore` settings ([MCP](mcp.md#6-token-storage)).
 
 ```java

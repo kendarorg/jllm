@@ -1,5 +1,6 @@
 package org.kendar.llm.harness.session;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -94,7 +95,7 @@ public class ChatSessionService {
         for (var l : deleteListeners) {
             try {
                 l.accept(chatId);
-            } catch (RuntimeException e) {
+            } catch (RuntimeException e) { // boundary: cleanup after a delete is best effort
                 org.slf4j.LoggerFactory.getLogger(ChatSessionService.class)
                         .warn("Cleanup of deleted chat {} failed: {}", chatId, e.toString());
             }
@@ -116,7 +117,7 @@ public class ChatSessionService {
                 if (!line.isBlank() && !ChatSessionData.isReference(line)) out.add(mapper.readTree(line));
             }
             return out;
-        } catch (Exception e) {
+        } catch (JsonProcessingException e) {
             throw new IllegalStateException("Corrupt message log for chat " + s.chatId(), e);
         }
     }
@@ -152,7 +153,7 @@ public class ChatSessionService {
                 }
             }
             store.save(current.withMessagesJson(sb.toString()));
-        } catch (Exception e) {
+        } catch (JsonProcessingException e) {
             throw new IllegalStateException("Cannot serialize messages", e);
         }
     }
@@ -170,7 +171,7 @@ public class ChatSessionService {
             for (String line : raw.split("\n")) {
                 if (!line.isBlank() && ChatSessionData.isReference(line)) out.add(mapper.readTree(line));
             }
-        } catch (Exception e) {
+        } catch (JsonProcessingException e) {
             throw new IllegalStateException("Corrupt message log for chat " + s.chatId(), e);
         }
         return out;
@@ -189,7 +190,7 @@ public class ChatSessionService {
                 sb.append(mapper.writeValueAsString(m));
             }
             return sb.toString();
-        } catch (Exception e) {
+        } catch (JsonProcessingException e) {
             throw new IllegalStateException("Cannot serialize messages", e);
         }
     }

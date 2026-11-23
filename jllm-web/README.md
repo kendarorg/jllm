@@ -22,6 +22,8 @@ Standard Spring Boot properties, prefix `jllm.` (`application.properties`, envir
 flags as the CLI, without the prefix: `--provider openai`, `--sandbox docker`, `--docker-mode daemon`, `--small-model`
 (`--flag value` or `--flag=value`). Spring's own flags (`--server.port=9000`) are unchanged.
 
+The file tools never follow a symlink or junction that leaves a chat's work dir: the web application forces `files.externalLinks` to `none` and logs one WARN at startup when the settings ask for another value ([tools guide](../docs/guides/tools.md#links-that-leave-the-work-dir-filesexternallinks)).
+
 | Property | Default | Meaning |
 |---|---|---|
 | `jllm.provider` | `anthropic` | `anthropic`, `openai`, `openaiGpt62`, `gemini`, `grok`, `qwen`, `llamacpp`, `ollama` |

@@ -45,19 +45,19 @@ class AgentLoopModesTest {
         rig.register(new FileSystemAgentTools().tools().toArray(new org.kendar.llm.harness.tools.HarnessTool[0]));
         rig.sessions.setMode(chatId, PermissionMode.PLAN);
         Path work = rig.sandbox.workDir(chatId);
-        Path scratch = rig.sandbox.scratchDir(chatId, org.kendar.llm.harness.agent.AgentLoop.scratchId(rig.sessions.get(chatId).agentId()));
+        Path scratch = rig.sandbox.scratchDir(chatId, org.kendar.llm.harness.agent.SubAgentRunner.scratchId(rig.sessions.get(chatId).agentId()));
         String abs = work.resolve("project.txt").toString().replace("\\", "\\\\");
 
         rig.model.enqueue(toolUse("w1", "write_file", "{\"path\":\"plan.md\",\"content\":\"p\"}"),
                 text("a"));
         Events ev = new Events();
-        rig.loop.run(chatId, "plan it", ev, () -> false);
+        rig.loop.run(chatId, "plan it", ev, () -> false, null);
         assertEquals("p", Files.readString(scratch.resolve("plan.md")));
         assertFalse(Files.exists(work.resolve("plan.md")));
         assertEquals(1, ev.ofType("plan_ready").size());
 
         rig.model.enqueue(toolUse("w2", "write_file", "{\"path\":\"" + abs + "\",\"content\":\"x\"}"), text("b"));
-        rig.loop.run(chatId, "again", new Events(), () -> false);
+        rig.loop.run(chatId, "again", new Events(), () -> false, null);
         assertFalse(Files.exists(work.resolve("project.txt")));
         var last = rig.model.requests.get(rig.model.requests.size() - 1).messages();
         assertTrue(last.get(last.size() - 1).toString().contains("read-only"), last.toString());
@@ -67,9 +67,9 @@ class AgentLoopModesTest {
     void modeIsInTheAddendumNotInTheCachedPrefix() {
         rig.model.enqueue(text("a"), text("b"));
         rig.sessions.setMode(chatId, PermissionMode.PLAN);
-        rig.loop.run(chatId, "one", new Events(), () -> false);
+        rig.loop.run(chatId, "one", new Events(), () -> false, null);
         rig.sessions.setMode(chatId, PermissionMode.EDIT);
-        rig.loop.run(chatId, "two", new Events(), () -> false);
+        rig.loop.run(chatId, "two", new Events(), () -> false, null);
 
         var first = rig.model.requests.get(0);
         var second = rig.model.requests.get(1);
@@ -91,7 +91,7 @@ class AgentLoopModesTest {
         };
         Events ev = new Events();
 
-        rig.loop.run(chatId, "go", ev, () -> false);
+        rig.loop.run(chatId, "go", ev, () -> false, null);
 
         assertEquals(2, calls.get());
         assertTrue(ev.ofType("error").isEmpty());
@@ -108,7 +108,7 @@ class AgentLoopModesTest {
         };
         Events ev = new Events();
 
-        rig.loop.run(chatId, "go", ev, () -> false);
+        rig.loop.run(chatId, "go", ev, () -> false, null);
 
         assertEquals(1, ev.ofType("error").size());
     }
@@ -125,7 +125,7 @@ class AgentLoopModesTest {
         };
         Events ev = new Events();
 
-        rig.loop.run(chatId, "go", ev, () -> false);
+        rig.loop.run(chatId, "go", ev, () -> false, null);
 
         assertEquals(1, calls.get());
         assertEquals(1, ev.ofType("error").size());

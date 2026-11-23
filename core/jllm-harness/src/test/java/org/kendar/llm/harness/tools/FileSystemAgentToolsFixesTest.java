@@ -214,14 +214,16 @@ class FileSystemAgentToolsFixesTest {
     @Test
     void atomicFilesReplacesAndCreates() throws Exception {
         Path f = root.resolve("x.bin");
-        AtomicFiles.write(f, new byte[]{1, 2, 3});
-        AtomicFiles.write(f, new byte[]{4});
+        AtomicFiles.write(PathJail.resolve(root, "x.bin", ExternalLinks.NONE, false), new byte[]{1, 2, 3});
+        AtomicFiles.write(PathJail.resolve(root, "x.bin", ExternalLinks.NONE, false), new byte[]{4});
         assertArrayEquals(new byte[]{4}, Files.readAllBytes(f));
         Path src = root.resolve("src.bin");
         Files.write(src, new byte[]{9, 8});
-        AtomicFiles.copy(src, f);
+        try (var in = Files.newInputStream(src)) {
+            AtomicFiles.write(PathJail.resolve(root, "x.bin", ExternalLinks.NONE, false), in);
+        }
         assertArrayEquals(new byte[]{9, 8}, Files.readAllBytes(f));
-        assertThrows(java.io.IOException.class, () -> AtomicFiles.write(root, new byte[]{1}));
+        assertThrows(java.io.IOException.class, () -> AtomicFiles.write(PathJail.resolve(root, ".", ExternalLinks.NONE, false), new byte[]{1}));
     }
 
     // ── read / edit limits ──────────────────────────────────────────────────────────────────
@@ -308,7 +310,7 @@ class FileSystemAgentToolsFixesTest {
         String text = Files.readString(f);
         for (int i = 0; i < n; i++) assertTrue(text.contains("value" + i + "=new\n"), text);
         assertEquals(0, PathLocks.size());
-        cp.undo("c1", root, 1);
+        cp.undo("c1", root, 1, ExternalLinks.NONE);
         assertEquals(sb.toString(), Files.readString(f), "the backup is the content before all the edits");
     }
 

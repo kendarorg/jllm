@@ -111,4 +111,25 @@ class ApprovalPrompterTest {
         }
         assertTrue(resolved.isEmpty());
     }
+    @Test
+    void theApprovalOfAWriteThroughALinkShowsTheResolvedTarget(@org.junit.jupiter.api.io.TempDir Path tmp) throws Exception {
+        Path work = java.nio.file.Files.createDirectories(tmp.resolve("work"));
+        Path elsewhere = java.nio.file.Files.createDirectories(tmp.resolve("elsewhere"));
+        java.nio.file.Files.writeString(elsewhere.resolve("secret.txt"), "old");
+        try {
+            java.nio.file.Files.createSymbolicLink(work.resolve("link"), elsewhere);
+        } catch (java.io.IOException | UnsupportedOperationException | SecurityException e) {
+            org.junit.jupiter.api.Assumptions.assumeTrue(false, "symlinks are not permitted on this machine");
+        }
+        var ctx = new org.kendar.llm.harness.tools.ToolContext("c", work)
+                .withLinks(org.kendar.llm.harness.tools.ExternalLinks.READ_WRITE);
+        var write = new org.kendar.llm.harness.tools.FileSystemAgentTools().tools().stream()
+                .filter(t -> t.name().equals("write_file")).findFirst().orElseThrow();
+        String preview = write.preview(ctx, M.readTree("{\"path\":\"link/secret.txt\",\"content\":\"new\"}"));
+
+        prompter("n").prompt("c", req("tool").put("preview", preview));
+
+        String shown = said.get(0);
+        assertTrue(shown.contains("link/secret.txt -> " + elsewhere.resolve("secret.txt").toRealPath()), shown);
+    }
 }

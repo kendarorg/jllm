@@ -27,6 +27,7 @@ import org.kendar.llm.harness.settings.RestApiSettings;
 import org.kendar.llm.harness.tools.HarnessTool;
 import org.kendar.llm.harness.tools.SimpleTool;
 import org.kendar.llm.harness.tools.ToolKind;
+import org.kendar.llm.harness.tools.TruncationMode;
 import org.kendar.llm.harness.util.ToolFilter;
 import org.kendar.llm.harness.util.Wildcard;
 import org.slf4j.Logger;
@@ -68,41 +69,25 @@ public final class RestApiToolProvider {
     public static List<HarnessTool> load(RestApiSettings api, HttpClient http, ObjectMapper mapper) {
         if (!api.active()) return new ArrayList<>();
         try {
-            return discover(api, http, mapper);
-        } catch (Exception e) {
+            return discover(api, http, mapper, Identity.ANONYMOUS, null, Map.of(), TruncationMode.HEAD);
+        } catch (Exception e) { // boundary: one broken API spec must not stop the others
             log.warn("REST API '{}' skipped: {}", api.name(), e.toString());
             return new ArrayList<>();
         }
     }
 
-    /** Reads the spec and builds the tools of the allowed operations. */
-    public static List<HarnessTool> discover(RestApiSettings api, HttpClient http, ObjectMapper mapper) {
-        return discover(api, http, mapper, Identity.ANONYMOUS);
-    }
-
-    /** As {@link #discover(RestApiSettings, HttpClient, ObjectMapper)}; each call uses the credentials of its chat's principal. */
-    public static List<HarnessTool> discover(RestApiSettings api, HttpClient http, ObjectMapper mapper, Identity identity) {
-        return discover(api, http, mapper, identity, null);
-    }
-
     /**
-     * As {@link #discover(RestApiSettings, HttpClient, ObjectMapper, Identity)}; the names are also taken in
-     * {@code claims} under the source {@code "api:<name>"}.
+     * Reads the spec and builds the tools of the allowed operations. Each call uses the credentials of its chat's
+     * principal. The names are also taken in {@code claims} (null: none) under the source {@code "api:<name>"}.
      *
+     * @param specHeaders added to the settings headers when the spec is fetched (e.g. a client credentials token)
+     * @param truncation  which end of an over-long result the harness keeps
      * @throws ToolNames.CollisionException when two operations get the same tool name, or one takes the name of a
      *                                      tool of another source of {@code claims}
      */
     public static List<HarnessTool> discover(RestApiSettings api, HttpClient http, ObjectMapper mapper, Identity identity,
-                                             ToolNames.Claims claims) {
-        return discover(api, http, mapper, identity, claims, Map.of());
-    }
-
-    /**
-     * As {@link #discover(RestApiSettings, HttpClient, ObjectMapper, Identity, ToolNames.Claims)}; the spec is fetched
-     * with {@code specHeaders} on top of the settings headers (e.g. a client credentials token).
-     */
-    public static List<HarnessTool> discover(RestApiSettings api, HttpClient http, ObjectMapper mapper, Identity identity,
-                                             ToolNames.Claims claims, Map<String, String> specHeaders) {
+                                             ToolNames.Claims claims, Map<String, String> specHeaders,
+                                             TruncationMode truncation) {
         List<HarnessTool> out = new ArrayList<>();
         OpenAPI spec = readSpec(api, specHeaders);
         String baseUrl = baseUrl(api, spec);
@@ -113,7 +98,7 @@ public final class RestApiToolProvider {
         if (spec.getPaths() != null) {
             spec.getPaths().forEach((path, item) -> item.readOperationsMap().forEach((method, op) -> {
                 if (!filter.visible(method + " " + path)) return;
-                out.add(tool(api, baseUrl, path, method, item, op, http, mapper, schemas, identity, filter, names));
+                out.add(tool(api, baseUrl, path, method, item, op, http, mapper, schemas, identity, filter, names, truncation));
             }));
         }
         if (out.isEmpty()) {
@@ -212,7 +197,7 @@ public final class RestApiToolProvider {
     private static HarnessTool tool(RestApiSettings api, String baseUrl, String path, PathItem.HttpMethod method,
                                     PathItem item, Operation op, HttpClient http, ObjectMapper mapper,
                                     ObjectMapper schemas, Identity identity, Filter filter,
-                                    ToolNames.SourceNames names) {
+                                    ToolNames.SourceNames names, TruncationMode truncation) {
         // Path-level parameters first; an operation parameter with the same location and name replaces it.
         Map<String, Parameter> merged = new LinkedHashMap<>();
         if (item.getParameters() != null) item.getParameters().forEach(p -> merged.put(p.getIn() + ":" + p.getName(), p));
@@ -271,7 +256,8 @@ public final class RestApiToolProvider {
         return new SimpleTool(name, description, schema, api.effectiveGroup(),
                 readOnly ? ToolKind.READ_ONLY : ToolKind.OTHER,
                 (ctx, input) -> call(api, baseUrl, path, method, params, body, input, http, mapper, filter,
-                        identity.callerOf(ctx == null ? null : ctx.chatId())));
+                        identity.callerOf(ctx == null ? null : ctx.chatId())),
+                null, truncation);
     }
 
     /** The JSON schema of a spec schema, without the null fields the plain mapper would write. */

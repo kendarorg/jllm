@@ -11,6 +11,8 @@
 | Model credentials | one global API key per provider; per-user credentials are [in development](#in-development-per-user-model-credentials) |
 | Flows | the `who` label of a question is shown, not enforced |
 | Isolation | the default sandbox has none; MCP stdio servers run as the JVM user |
+| Path jail | on Windows, and on file systems without secure directory streams, a junction swapped in between check and use is a residual race (accepted: creating one needs a host shell, which has no jail); the shell tools are not covered ([tools guide](../guides/tools.md#links-that-leave-the-work-dir-filesexternallinks)) |
+| `run_js` | the limits are guesses to tune with eval data (`maxInnerCalls` 200, `loop.innerCallsPerTurn` 10); GraalJS is not shipped in the jars and must be fetched ([JS guide](../guides/js.md)) |
 | Assurance | no external security audit, no certification ([security model](security-model.md#6-what-it-does-not-cover)) |
 
 ## In development: per-user model credentials

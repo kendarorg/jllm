@@ -1,5 +1,6 @@
 package org.kendar.llm.harness.sandbox;
 
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 
 /**
@@ -29,7 +30,7 @@ public final class ShellPaths {
             Path resolved;
             try {
                 resolved = base.resolve(token.replace('\\', '/')).normalize();
-            } catch (RuntimeException e) {
+            } catch (InvalidPathException e) {
                 return token; // not a valid path on this OS, yet it climbs: refuse rather than guess
             }
             if (allowed.stream().noneMatch(resolved::startsWith)) return token;

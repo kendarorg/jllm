@@ -126,7 +126,7 @@ public final class ExternalSources implements AutoCloseable {
             }
             for (RestApiSettings a : settings.restApis()) {
                 add(new Source(Kind.API, a.name(), () -> RestApiToolProvider.discover(a, http, mapper, identity, claims,
-                        this.specHeaders.apply(a)),
+                        this.specHeaders.apply(a), TruncationMode.HEAD),
                         () -> apiProbe(a), a.active()));
             }
             synchronized (this) {
@@ -134,7 +134,7 @@ public final class ExternalSources implements AutoCloseable {
                     if (s.startEnabled) enable(s, true);
                 }
             }
-        } catch (RuntimeException e) {
+        } catch (RuntimeException e) { // boundary: close what was started, rethrown unchanged
             close();
             throw e;
         }
@@ -179,7 +179,7 @@ public final class ExternalSources implements AutoCloseable {
             s.registered = names;
             s.error = null;
             return null;
-        } catch (RuntimeException e) {
+        } catch (RuntimeException e) { // boundary: a failing MCP server is recorded and dropped
             drop(s);
             s.error = String.valueOf(e.getMessage());
             if (e instanceof ToolNames.CollisionException) {
@@ -229,7 +229,7 @@ public final class ExternalSources implements AutoCloseable {
                 s.error = null;
             }
             return new CheckResult(true, ms, s.tools, message);
-        } catch (RuntimeException e) {
+        } catch (RuntimeException e) { // boundary: a failing MCP call is recorded, then handled below
             long ms = (System.nanoTime() - start) / 1_000_000;
             synchronized (this) {
                 s.error = String.valueOf(e.getMessage());
@@ -298,7 +298,7 @@ public final class ExternalSources implements AutoCloseable {
                 reason -> onMcpUnavailable(m.name(), self.get(), reason));
         self.set(client);
         try {
-            List<HarnessTool> tools = McpToolProvider.tools(m, client, mapper, identity, claims);
+            List<HarnessTool> tools = McpToolProvider.tools(m, client, mapper, identity, claims, TruncationMode.HEAD);
             closeConnection(key);
             connections.put(key, client);
             return wrap(tools);
@@ -309,7 +309,7 @@ public final class ExternalSources implements AutoCloseable {
             closeQuietly(client);
             Thread.currentThread().interrupt();
             throw new IllegalStateException("interrupted", e);
-        } catch (RuntimeException e) {
+        } catch (RuntimeException e) { // boundary: close the client, rethrown unchanged
             closeQuietly(client);
             throw e;
         }
@@ -333,7 +333,7 @@ public final class ExternalSources implements AutoCloseable {
         if (caller == null || caller.run() == null || caller.run().sink() == null) return;
         try {
             caller.run().sink().emit("warning", mapper.createObjectNode().put("message", message));
-        } catch (RuntimeException e) {
+        } catch (RuntimeException e) { // boundary: warning delivery is best effort
             log.debug("Cannot emit MCP warning: {}", e.toString());
         }
     }
@@ -352,7 +352,7 @@ public final class ExternalSources implements AutoCloseable {
     }
 
     private String mcpProbe(McpServerSettings m) {
-        try (McpClient client = McpToolProvider.connect(m, http, mapper, toolEnv, this::mcpOAuth)) {
+        try (McpClient client = McpToolProvider.connect(m, http, mapper, toolEnv, this::mcpOAuth, null)) {
             int n = client.listTools().size();
             return n + " tools offered";
         } catch (java.io.IOException e) {

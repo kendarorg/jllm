@@ -31,7 +31,7 @@ class SubAgentWorkDirLockTest {
 
     /** A loop whose sub-agents block until released, counting how many run at once. */
     private static final class Blocking {
-        final AgentLoop loop = mock(AgentLoop.class);
+        final SubAgentRunner loop = mock(SubAgentRunner.class);
         final AtomicInteger running = new AtomicInteger();
         final AtomicInteger maxRunning = new AtomicInteger();
         final CountDownLatch entered;
@@ -39,7 +39,7 @@ class SubAgentWorkDirLockTest {
 
         Blocking(int expected) {
             entered = new CountDownLatch(expected);
-            when(loop.runSubAgent(any(), any(), any(), any(), any(), any(), any())).thenAnswer(i -> {
+            when(loop.run(any())).thenAnswer(i -> {
                 maxRunning.accumulateAndGet(running.incrementAndGet(), Math::max);
                 entered.countDown();
                 try {

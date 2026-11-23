@@ -3,6 +3,7 @@ package org.kendar.llm.js;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.AgentHarness;
+import org.kendar.llm.harness.AgentHarnessBuilder;
 import org.kendar.llm.harness.agent.AgentEvent;
 import org.kendar.llm.harness.agent.AgentLoop;
 import org.kendar.llm.harness.tools.HarnessTool;
@@ -25,7 +26,7 @@ class JsPluginTest {
     Path base;
 
     private AgentHarness harness(ScriptedModel model) {
-        return AgentHarness.builder().modelClient(model).config(config(base)).plugin(new JsPlugin()).build();
+        return new AgentHarnessBuilder().modelClient(model).config(config(base)).plugin(new JsPlugin()).build();
     }
 
     /** A model response calling run_js; built directly because the test helper turns single quotes into double ones. */
@@ -45,7 +46,7 @@ class JsPluginTest {
         h.subscribe(chat, 0, ev -> {
             events.add(ev);
             if (ev.type().equals("approval_request")) {
-                h.resolveApproval(chat, ev.data().path("id").asText(), approve, null, false);
+                h.resolveApproval(chat, ev.data().path("id").asText(), approve, null, false, false);
             }
             if (ev.type().equals("run_finished")) done.countDown();
         });
@@ -143,7 +144,7 @@ class JsPluginTest {
             events.add(ev);
             if (ev.type().equals("approval_request")) {
                 boolean host = ev.data().path("type").asText().equals("host");
-                h.resolveApproval(chat, ev.data().path("id").asText(), !host, null, false);
+                h.resolveApproval(chat, ev.data().path("id").asText(), !host, null, false, false);
             }
             if (ev.type().equals("run_finished")) done.countDown();
         });

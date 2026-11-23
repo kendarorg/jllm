@@ -10,6 +10,7 @@ import org.kendar.llm.harness.util.ToolFilter;
 import org.kendar.llm.harness.tools.HarnessTool;
 import org.kendar.llm.harness.tools.SimpleTool;
 import org.kendar.llm.harness.tools.ToolKind;
+import org.kendar.llm.harness.tools.TruncationMode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -33,34 +34,19 @@ public final class McpToolProvider {
         if (!server.active()) return new ArrayList<>();
         try {
             return discover(server, http, mapper);
-        } catch (Exception e) {
+        } catch (Exception e) { // boundary: one broken MCP server must not stop the others
             if (e instanceof InterruptedException) Thread.currentThread().interrupt();
             log.warn("MCP server '{}' skipped: {}", server.name(), e.toString());
             return new ArrayList<>();
         }
     }
 
-    /** A client for the server's transport, not yet connected. */
-    public static McpClient connect(McpServerSettings server, HttpClient http, ObjectMapper mapper) {
-        return connect(server, http, mapper, null);
-    }
-
-    /** @param inheritedEnv patterns of the process variables a stdio server inherits; null: all */
-    public static McpClient connect(McpServerSettings server, HttpClient http, ObjectMapper mapper,
-                                    List<String> inheritedEnv) {
-        return connect(server, http, mapper, inheritedEnv, s -> null);
-    }
-
     /**
-     * @param oauth builds the auth provider of a server with {@code oauth: true}; the harness supplies it (the OAuth
-     *              login lives there), so this module needs no login code
-     */
-    public static McpClient connect(McpServerSettings server, HttpClient http, ObjectMapper mapper,
-                                    List<String> inheritedEnv, Function<McpServerSettings, AuthProvider> oauth) {
-        return connect(server, http, mapper, inheritedEnv, oauth, null);
-    }
-
-    /**
+     * A client for the server's transport, not yet connected.
+     *
+     * @param inheritedEnv  patterns of the process variables a stdio server inherits; null: all
+     * @param oauth         builds the auth provider of a server with {@code oauth: true}; the harness supplies it (the
+     *                      OAuth login lives there), so this module needs no login code; may return null
      * @param onUnavailable called once, with the reason, when the server is lost for good after it worked (an HTTP
      *                      session cannot be re-initialized, a stdio server cannot be restarted); its source should
      *                      then be disabled. Later calls of the client throw {@link McpUnavailableException}.
@@ -89,34 +75,23 @@ public final class McpToolProvider {
     /** Connects to the server and lists its tools. The tools keep the client, so it stays open. */
     public static List<HarnessTool> discover(McpServerSettings server, HttpClient http, ObjectMapper mapper)
             throws IOException, InterruptedException {
-        return tools(server, connect(server, http, mapper), mapper);
-    }
-
-    /** The tools of a connected client, named {@code mcp__<server>__<tool>}; calls go through the client. */
-    public static List<HarnessTool> tools(McpServerSettings server, McpClient client, ObjectMapper mapper)
-            throws IOException, InterruptedException {
-        return tools(server, client, mapper, Identity.ANONYMOUS);
+        return tools(server, connect(server, http, mapper, null, x -> null, null), mapper, Identity.ANONYMOUS, null,
+                TruncationMode.HEAD);
     }
 
     /**
-     * As {@link #tools(McpServerSettings, McpClient, ObjectMapper)}; each call is made for the principal of its chat,
-     * with the credentials that apply to that principal.
-     */
-    public static List<HarnessTool> tools(McpServerSettings server, McpClient client, ObjectMapper mapper,
-                                          Identity identity)
-            throws IOException, InterruptedException {
-        return tools(server, client, mapper, identity, null);
-    }
-
-    /**
-     * As {@link #tools(McpServerSettings, McpClient, ObjectMapper, Identity)}; the names are also taken in
-     * {@code claims} under the source {@code "mcp:<server>"}.
+     * The tools of a connected client, named {@code mcp__<server>__<tool>}; calls go through the client, each made for
+     * the principal of its chat with the credentials that apply to that principal. The names are also taken in
+     * {@code claims} (null: none) under the source {@code "mcp:<server>"}.
+     *
+     * @param truncation which end of an over-long result the harness keeps
      *
      * @throws ToolNames.CollisionException when two tools get the same name, within the server or with another
      *                                      source of {@code claims}
      */
     public static List<HarnessTool> tools(McpServerSettings server, McpClient client, ObjectMapper mapper,
-                                          Identity identity, ToolNames.Claims claims)
+                                          Identity identity, ToolNames.Claims claims,
+                                          TruncationMode truncation)
             throws IOException, InterruptedException {
         List<HarnessTool> out = new ArrayList<>();
         ToolNames.SourceNames names = new ToolNames.SourceNames();
@@ -146,7 +121,7 @@ public final class McpToolProvider {
                                 throw new LoginRequiredException(source, again);
                             }
                         }
-                    }));
+                    }, null, truncation));
         }
         if (out.isEmpty() && listed > 0) {
             log.warn("MCP server '{}': none of its {} tools passes allowList {} and denyList {}", server.name(),

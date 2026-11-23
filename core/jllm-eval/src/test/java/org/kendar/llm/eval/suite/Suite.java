@@ -18,10 +18,11 @@ import org.kendar.llm.eval.grade.judge.LlmJudge;
 import org.kendar.llm.eval.grade.judge.Rubric;
 import org.kendar.llm.eval.run.RecordedRequest;
 import org.kendar.llm.eval.run.TrialTrace;
-import org.kendar.llm.harness.AgentHarness;
+import org.kendar.llm.harness.AgentHarnessBuilder;
 import org.kendar.llm.harness.agent.AgentEvent;
 import org.kendar.llm.harness.context.ContextStrategyKind;
 import org.kendar.llm.harness.settings.HarnessSettings;
+import org.kendar.llm.harness.settings.HarnessSettingsLoader;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -136,7 +137,7 @@ public final class Suite {
             Path f = Files.createTempFile("jllm-eval-suite", ".json");
             try {
                 Files.writeString(f, M.writeValueAsString(root));
-                return HarnessSettings.load(f);
+                return HarnessSettingsLoader.load(f);
             } finally {
                 Files.deleteIfExists(f);
             }
@@ -169,7 +170,7 @@ public final class Suite {
     }
 
     /** The fixtures, then one MCP source of the server with extra fields (allowList, denyList...) in its entry. */
-    public static Consumer<AgentHarness.Builder> mcpWith(Fixtures fx, FakeServer server, boolean readOnly,
+    public static Consumer<AgentHarnessBuilder> mcpWith(Fixtures fx, FakeServer server, boolean readOnly,
                                                          Consumer<ObjectNode> entry) {
         return b -> {
             fx.harness().accept(b);

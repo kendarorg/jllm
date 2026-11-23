@@ -49,7 +49,7 @@ class ApprovalGateTest {
         Events ev = new Events();
         ev.also = (type, data) -> {
             if ("approval_request".equals(type)) {
-                assertTrue(rig.approvals.resolve(chatId, data.get("id").asText(), approve, edited));
+                assertTrue(rig.approvals.resolve(chatId, data.get("id").asText(), approve, edited, false, false));
             }
         };
         return ev;
@@ -66,7 +66,7 @@ class ApprovalGateTest {
         rig.model.enqueue(toolUse("t1", "bash", "{\"x\":\"ls\"}"), text("done"));
         Events ev = answering(true, null);
 
-        rig.loop.run(chatId, "run it", ev, () -> false);
+        rig.loop.run(chatId, "run it", ev, () -> false, null);
 
         assertEquals(1, executions.get());
         assertEquals(1, ev.ofType("approval_request").size());
@@ -83,7 +83,7 @@ class ApprovalGateTest {
         registerBash(true);
         rig.model.enqueue(toolUse("t1", "bash", "{\"x\":\"rm\"}"), text("ok"));
 
-        rig.loop.run(chatId, "run it", answering(false, null), () -> false);
+        rig.loop.run(chatId, "run it", answering(false, null), () -> false, null);
 
         assertEquals(0, executions.get());
         JsonNode tr = toolResultOf(1);
@@ -98,7 +98,7 @@ class ApprovalGateTest {
                 toolUse("t3", "bash", "{\"x\":\"rm -i\"}"), text("ok"));
         Events ev = answering(false, null);
 
-        rig.loop.run(chatId, "run it", ev, () -> false);
+        rig.loop.run(chatId, "run it", ev, () -> false, null);
 
         assertEquals(0, executions.get());
         assertEquals(AgentLoop.REJECTED, toolResultOf(1).get("content").asText());
@@ -116,8 +116,8 @@ class ApprovalGateTest {
                 toolUse("t2", "bash", "{\"x\":\"rm\"}"), text("ok"));
         Events ev = answering(false, null);
 
-        rig.loop.run(chatId, "run it", ev, () -> false);
-        rig.loop.run(chatId, "now run it", ev, () -> false);
+        rig.loop.run(chatId, "run it", ev, () -> false, null);
+        rig.loop.run(chatId, "now run it", ev, () -> false, null);
 
         assertEquals(2, ev.ofType("approval_request").size(), "a new run asks again");
         assertEquals(AgentLoop.REJECTED, toolResultOf(3).get("content").asText());
@@ -131,7 +131,7 @@ class ApprovalGateTest {
         long t0 = System.currentTimeMillis();
 
         Events ev = new Events();
-        rig.loop.run(chatId, "run it", ev, () -> false);
+        rig.loop.run(chatId, "run it", ev, () -> false, null);
 
         assertTrue(System.currentTimeMillis() - t0 < 4000);
         assertEquals(0, executions.get());
@@ -149,7 +149,7 @@ class ApprovalGateTest {
             if ("approval_request".equals(type)) stop.set(true);
         };
 
-        rig.loop.run(chatId, "run it", ev, stop::get);
+        rig.loop.run(chatId, "run it", ev, stop::get, null);
 
         assertEquals(0, executions.get());
         assertEquals(1, rig.model.requests.size());
@@ -167,7 +167,7 @@ class ApprovalGateTest {
             }
         };
 
-        rig.loop.run(chatId, "run it", ev, () -> false);
+        rig.loop.run(chatId, "run it", ev, () -> false, null);
 
         assertEquals(0, executions.get());
     }
@@ -180,12 +180,12 @@ class ApprovalGateTest {
         Events ev = new Events();
         ev.also = (type, data) -> {
             if ("approval_request".equals(type)) {
-                assertFalse(rig.approvals.resolve("other-chat", data.get("id").asText(), true, null));
-                assertFalse(rig.approvals.resolve(chatId, "bogus", true, null));
+                assertFalse(rig.approvals.resolve("other-chat", data.get("id").asText(), true, null, false, false));
+                assertFalse(rig.approvals.resolve(chatId, "bogus", true, null, false, false));
             }
         };
 
-        rig.loop.run(chatId, "run it", ev, () -> false);
+        rig.loop.run(chatId, "run it", ev, () -> false, null);
 
         assertEquals(0, executions.get());
     }
@@ -217,7 +217,7 @@ class ApprovalGateTest {
         rig.model.enqueue(toolUse("u1", "t", "{}"), text("fin"));
         Events ev = answering(true, null);
 
-        rig.loop.run(chatId, "go", ev, () -> false);
+        rig.loop.run(chatId, "go", ev, () -> false, null);
 
         switch (expect) {
             case "EXEC" -> {
@@ -246,13 +246,13 @@ class ApprovalGateTest {
         // denied
         rig.model.enqueue(toolUse("w1", "write_file", "{\"path\":\"note.txt\",\"content\":\"hello\"}"), text("a"));
         Events denied = answering(false, null);
-        rig.loop.run(chatId, "write", denied, () -> false);
+        rig.loop.run(chatId, "write", denied, () -> false, null);
         assertFalse(Files.exists(target));
         assertTrue(denied.ofType("approval_request").get(0).get("preview").asText().contains("+ hello"));
 
         // approved
         rig.model.enqueue(toolUse("w2", "write_file", "{\"path\":\"note.txt\",\"content\":\"hello\"}"), text("b"));
-        rig.loop.run(chatId, "write again", answering(true, null), () -> false);
+        rig.loop.run(chatId, "write again", answering(true, null), () -> false, null);
         assertEquals("hello", Files.readString(target));
     }
 
@@ -262,7 +262,7 @@ class ApprovalGateTest {
         rig.requiresApproval.put("write_file", true);
         rig.model.enqueue(toolUse("w1", "write_file", "{\"path\":\"../../evil.txt\",\"content\":\"x\"}"), text("b"));
 
-        rig.loop.run(chatId, "write", answering(true, null), () -> false);
+        rig.loop.run(chatId, "write", answering(true, null), () -> false, null);
 
         JsonNode tr = toolResultOf(1);
         assertTrue(tr.get("is_error").asBoolean());
@@ -280,7 +280,7 @@ class ApprovalGateTest {
         };
         Events ev = answering(true, null);
 
-        rig.loop.run(chatId, "go", ev, () -> false);
+        rig.loop.run(chatId, "go", ev, () -> false, null);
 
         assertEquals(0, executions.get());
         assertTrue(ev.ofType("approval_request").isEmpty());

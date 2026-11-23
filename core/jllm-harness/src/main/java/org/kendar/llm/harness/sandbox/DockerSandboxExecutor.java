@@ -14,6 +14,7 @@ import java.util.List;
  * read-only rootfs, non-root, only the per-chat directory mounted at /workspace.
  */
 public class DockerSandboxExecutor implements SandboxExecutor {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(DockerSandboxExecutor.class);
 
     private static final Duration CONTROL_TIMEOUT = Duration.ofSeconds(30);
 
@@ -79,7 +80,7 @@ public class DockerSandboxExecutor implements SandboxExecutor {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return null;
-        } catch (IOException | RuntimeException e) {
+        } catch (IOException | RuntimeException e) { // boundary: the context is optional
             return null;
         }
     }
@@ -214,7 +215,7 @@ public class DockerSandboxExecutor implements SandboxExecutor {
             kill(name);
             Thread.currentThread().interrupt();
             return new ExecutionResult("", "Interrupted", -1, false);
-        } catch (Exception e) {
+        } catch (Exception e) { // boundary: sandbox boundary: kill the container, report the failure
             kill(name);
             return new ExecutionResult("", "Execution failed: " + e.getMessage(), -1, false);
         }
@@ -226,8 +227,9 @@ public class DockerSandboxExecutor implements SandboxExecutor {
             runner.run(List.of(config.sandbox().docker().binary(), "kill", name), CONTROL_TIMEOUT);
         } catch (InterruptedException e) {
             interrupted = true;
-        } catch (Exception ignored) {
+        } catch (Exception ignored) { // boundary: the container may already be gone
             // container may already be gone
+            log.debug("Kill of {} failed: {}", name, ignored.toString());
         } finally {
             if (interrupted) Thread.currentThread().interrupt();
         }

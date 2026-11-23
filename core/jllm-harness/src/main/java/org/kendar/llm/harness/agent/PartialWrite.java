@@ -1,5 +1,6 @@
 package org.kendar.llm.harness.agent;
 
+import java.nio.file.InvalidPathException;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.kendar.llm.harness.llm.PartialToolCall;
 import org.kendar.llm.harness.tools.ToolContext;
@@ -42,7 +43,7 @@ final class PartialWrite {
             Files.createDirectories(dir);
             saved = dir.resolve(id + "-" + name).toAbsolutePath().normalize();
             Files.writeString(saved, kept, StandardCharsets.UTF_8);
-        } catch (IOException | RuntimeException e) {
+        } catch (IOException | InvalidPathException e) {
             return null;
         }
         return message(path, kept, saved.toString());
@@ -57,7 +58,7 @@ final class PartialWrite {
         String rel = "partial/" + id + "-" + name;
         try {
             ctx.files().write(ctx.files().writeTarget(rel, true), kept.getBytes(StandardCharsets.UTF_8), false);
-        } catch (IOException | RuntimeException e) {
+        } catch (IOException | RuntimeException e) { // boundary: a failing remote store only means no saved copy
             return null;
         }
         return message(path, kept, ctx.files().scratchRoot() + "/" + rel);

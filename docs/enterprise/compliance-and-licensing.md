@@ -8,9 +8,21 @@ on an application that embeds the library.
 
 ## Dependency footprint
 
-The harness core is deliberately small: Jackson, the JDK `HttpClient`, jsoup, swagger-parser and `slf4j-api`. No
-Spring, JPA or Micrometer in the library. Plugins bring their own dependencies only when you install them (`jllm-js`:
-GraalJS; `jllm-pdf`, `jllm-docs`: document readers; `jllm-workflows`). `jllm-web` adds Spring Boot.
+The harness core is deliberately small: Jackson, the JDK `HttpClient`, jsoup, json-schema-validator, swagger-parser (with its transitive libraries) and `slf4j-api` (full list: `mvn dependency:tree -pl core/jllm-harness`). No
+Spring, JPA or Micrometer in the library. Plugins bring their own dependencies only when you install them (`jllm-pdf`,
+`jllm-docs`: document readers; `jllm-workflows`). `jllm-web` adds Spring Boot.
+
+### Not bundled: GraalJS
+
+The `run_js` tool (`jllm-js`) needs GraalJS, which is not in any jllm jar: `jllm-cli`, `jllm-web` and the plugin declare
+it `provided`, and the release zip ships it in a replaceable `lib-ext/` folder together with a manifest (coordinate and
+SHA-256 per jar). The release scripts re-read the licence of every resolved pom, fail on anything but UPL, MIT, Apache,
+BSD or Unicode/ICU (the ICU4J shaded in GraalJS), and fail if a front-end jar contains GraalJS classes. Version caveat:
+from GraalJS 25.1 the central `js` pom declares UPL and MIT and `js-community` is a deprecated alias; earlier `js` poms
+pulled an enterprise artifact under Oracle terms. At the pinned version the non-community isolate (`js-isolate`) still
+declares the GraalVM Free Terms and Conditions: the shipped set uses `js-isolate-community`, and whoever installs the
+`oracle` set (`fetch-graaljs oracle`) accepts those terms. Who accepts the Oracle terms is the operator. Details:
+[js guide](../guides/js.md#licensing), [NOTICE](../../NOTICE).
 
 Generate the authoritative list for your build and feed it to your scanner:
 

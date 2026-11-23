@@ -94,16 +94,34 @@ Long chats and agent loops use many tokens: start with a small, cheap model and 
 Other global settings in `~/.jllm/settings.json`: permissions (allow/ask/deny rules), hooks, MCP servers, context
 strategy. Details: [usage](https://github.com/kendarorg/jllm/blob/main/docs/reference/usage.md).
 
+Symbolic links and junctions in the project whose target is outside it: `"files": { "externalLinks": "read" }` (the
+default; `none` refuses them, `readwrite` also lets the file tools write through them; the CLI flag is
+`--external-links`). The web app ignores this key and never follows such a link: it logs a warning at startup if the
+key is set to anything but `none`, so leave it out of the settings file the web app reads.
+
 ## Contents
 
 | Path | What |
 |---|---|
-| `jllm-cli.jar`, `jllm-web.jar` | the two front ends (the GraalJS libraries for `run_js` are inside) |
+| `jllm-cli.jar`, `jllm-web.jar` | the two front ends (they do not contain GraalJS) |
+| `lib-ext/` | the GraalJS libraries of `run_js` (community edition) and their manifest; replaceable, may be empty |
+| `fetch-graaljs.sh`, `.cmd`, `.ps1` | replace the contents of `lib-ext/` with the `community` or `oracle` set from Maven Central |
 | `plugins/` | `js` (`run_js`), `pdf` and `docs` (document readers), `jllm-workflows`, `jllm-workflow-web` |
 | `settings/settings.json` | enables the plugins above; remove an entry to disable one |
 | `application.properties` | web app properties (provider, model, key); all commented out |
 | `webauth/` | web users and roles (`users/<id>.json`, `permissions/<role>.json`); edit freely, no restart |
 | `examples/flows/writing-helper.json` | a first workflow with choices (see below) |
+
+## JavaScript (`run_js`)
+
+`run_js` runs model-written JavaScript in a sandbox. Its engine, GraalJS, is not inside the jars: it is in `lib-ext/`,
+which `run-cli` and `run-web` already put on the class path, so it works as unpacked. With an empty `lib-ext/` both
+front ends start normally and `run_js` is simply not offered (one warning in the log says why). To restore the set or
+switch edition: `./fetch-graaljs.sh community` or `./fetch-graaljs.sh oracle` (`fetch-graaljs.cmd` on Windows). It empties
+`lib-ext/*.jar` first, downloads from Maven Central and checks the SHA-256 of every jar. The `oracle` set declares the
+GraalVM Free Terms and Conditions: read them, then add `--accept-oracle-terms`; accepting them is your decision.
+Licences of what is shipped are listed in `NOTICE`. Details:
+[JS guide](https://github.com/kendarorg/jllm/blob/main/docs/guides/js.md).
 
 ## Example workflow
 

@@ -3,6 +3,7 @@ package org.kendar.llm.harness.hooks;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.AgentHarness;
+import org.kendar.llm.harness.AgentHarnessBuilder;
 import org.kendar.llm.harness.agent.AgentEvent;
 import org.kendar.llm.harness.plugin.HarnessPlugin;
 import org.kendar.llm.harness.tools.ToolKind;
@@ -23,8 +24,8 @@ class HooksTest {
     @TempDir
     Path base;
 
-    private AgentHarness.Builder builder(ScriptedModel model) {
-        return AgentHarness.builder().modelClient(model).config(config(base)).withoutStandardTools();
+    private AgentHarnessBuilder builder(ScriptedModel model) {
+        return new AgentHarnessBuilder().modelClient(model).config(config(base)).withoutStandardTools();
     }
 
     private List<AgentEvent> runTurn(AgentHarness h, String text) throws Exception {

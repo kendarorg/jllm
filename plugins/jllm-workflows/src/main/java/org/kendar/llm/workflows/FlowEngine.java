@@ -243,7 +243,7 @@ public final class FlowEngine {
                 answer = a.run(call);
             } catch (FlowException e) {
                 throw e;
-            } catch (Exception e) {
+            } catch (Exception e) { // boundary: helper boundary: any failure is a FlowException
                 throw new FlowException(FlowException.Kind.REQUEST, "Helper failed: " + e.getMessage(), e);
             }
             record(rec, kind, payload, by, "helper");
@@ -646,7 +646,7 @@ public final class FlowEngine {
                 return r == null ? Json.M.nullNode() : r;
             } catch (FlowException | WaitSignal e) {
                 throw e;
-            } catch (Exception e) {
+            } catch (Exception e) { // boundary: action boundary: any failure is a FlowException
                 throw new FlowException(FlowException.Kind.ACTION, "Action '" + name + "' failed: " + e.getMessage(), e);
             }
         }
@@ -803,7 +803,7 @@ public final class FlowEngine {
                 try {
                     String r = registry.classifier().classify(CLASSIFY_SYSTEM, "Reply:\n" + (raw.length() > 1500 ? raw.substring(raw.length() - 1500) : raw)).strip().toLowerCase();
                     v = r.startsWith("ask") ? "ask" : r.startsWith("proceed") ? "proceed" : "none";
-                } catch (Exception e) {
+                } catch (Exception e) { // boundary: a failing classifier never blocks the flow
                     v = "none"; // a failing classifier never blocks the flow
                 }
             }
@@ -833,7 +833,7 @@ public final class FlowEngine {
                     approve(id, key, step, e, approved);
                 } catch (FlowException | WaitSignal e) {
                     throw e; // e.g. a refused approval, already classified
-                } catch (Exception e) {
+                } catch (Exception e) { // boundary: model boundary: any failure is a FlowException
                     throw new FlowException(FlowException.Kind.ACTION, "Model call failed: " + e.getMessage(), e);
                 }
             }
@@ -964,7 +964,7 @@ public final class FlowEngine {
                 return new Registry.Choice(c.choose(call(id, key, s, null)), null);
             } catch (FlowException | WaitSignal e) {
                 throw e;
-            } catch (Exception e) {
+            } catch (Exception e) { // boundary: chooser boundary: any failure is a FlowException
                 throw new FlowException(FlowException.Kind.CHOOSER, "Chooser failed: " + e.getMessage(), e);
             }
         }
@@ -980,7 +980,7 @@ public final class FlowEngine {
                         prompt, rec.user, null, Set.of(), List.of()));
             } catch (FlowException e) {
                 throw e;
-            } catch (Exception e) {
+            } catch (Exception e) { // boundary: chooser boundary: any failure is a FlowException
                 throw new FlowException(FlowException.Kind.CHOOSER, "Model chooser failed: " + e.getMessage(), e);
             }
         }

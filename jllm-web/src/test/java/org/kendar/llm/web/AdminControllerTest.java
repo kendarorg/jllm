@@ -163,6 +163,23 @@ class AdminControllerTest {
     }
 
     @Test
+    void theCatalogEntryOfRunJsCarriesTheEngineStatusAndOthersHaveNone() throws Exception {
+        WebauthFixture f = new WebauthFixture(dir);
+        JsonNode cat = json(f.get(f.signIn("admin"), "/api/admin/catalog"));
+        JsonNode runJs = null;
+        JsonNode readFile = null;
+        for (JsonNode t : cat.path("tools")) {
+            if (t.path("name").asText().equals("run_js")) runJs = t;
+            if (t.path("name").asText().equals("read_file")) readFile = t;
+        }
+
+        assertNotNull(runJs);
+        assertEquals("edition community, profile isolated, isolate available", runJs.path("status").asText());
+        assertNotNull(readFile);
+        assertTrue(readFile.path("status").isNull(), "a tool with nothing to report has no status");
+    }
+
+    @Test
     void globalSkillsReachEveryUserAndShadowOwnOnes() throws Exception {
         WebauthFixture f = new WebauthFixture(dir);
         Cookie admin = f.signIn("admin");

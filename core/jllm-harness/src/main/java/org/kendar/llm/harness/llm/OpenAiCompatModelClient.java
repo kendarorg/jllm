@@ -517,7 +517,7 @@ public class OpenAiCompatModelClient implements ModelClient {
         if (auth != null) {
             try {
                 auth.headers().forEach(rb::header);
-            } catch (RuntimeException e) {
+            } catch (RuntimeException e) { // boundary: any auth provider failure becomes a ModelException
                 throw new ModelException("Authentication failed: " + e.getMessage(), e);
             }
         } else if (cfg.apiKey() != null && !cfg.apiKey().isBlank()) {

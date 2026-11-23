@@ -49,7 +49,7 @@ public class ToolClassifier {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return Verdict.UNSURE;
-        } catch (Exception e) {
+        } catch (Exception e) { // boundary: classifier boundary: unsure
             log.warn("Classifier failed for {}: {}", tool, e.getMessage());
             return Verdict.UNSURE;
         }
@@ -65,7 +65,8 @@ public class ToolClassifier {
                 case "unsafe" -> Verdict.UNSAFE;
                 default -> Verdict.UNSURE;
             };
-        } catch (Exception e) {
+        } catch (Exception e) { // boundary: classifier boundary: unsure
+            log.debug("Classifier reply not usable: {}", e.toString());
             return Verdict.UNSURE;
         }
     }

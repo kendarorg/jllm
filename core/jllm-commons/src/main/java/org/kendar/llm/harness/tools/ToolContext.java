@@ -19,22 +19,26 @@ import java.nio.file.Path;
  * @param hosts        asks the user before a web tool contacts a host; null allows every host
  * @param scope        what the calling agent can reach (its tool list and the invoke path); null outside a
  *                     model-driven call
+ * @param links        what the file tools do with a link that leaves the work dir ({@code files.externalLinks});
+ *                     null = {@link ExternalLinks#NONE}
  */
 public record ToolContext(String chatId, Path workDir, Path scratchDir, boolean readOnlyWork, String toolUseId,
-                          PermissionMode mode, AgentRun run, FileBackend files, String parent, RunScope scope, HostApprover hosts) {
+                          PermissionMode mode, AgentRun run, FileBackend files, String parent, RunScope scope,
+                          HostApprover hosts, ExternalLinks links) {
 
     public ToolContext {
         if (mode == null) mode = PermissionMode.DEFAULT;
+        if (links == null) links = ExternalLinks.NONE;
     }
 
     public ToolContext(String chatId, Path workDir, Path scratchDir, boolean readOnlyWork, String toolUseId,
                        PermissionMode mode, AgentRun run, FileBackend files) {
-        this(chatId, workDir, scratchDir, readOnlyWork, toolUseId, mode, run, files, null, null, null);
+        this(chatId, workDir, scratchDir, readOnlyWork, toolUseId, mode, run, files, null, null, null, null);
     }
 
     public ToolContext(String chatId, Path workDir, Path scratchDir, boolean readOnlyWork, String toolUseId,
                        PermissionMode mode, AgentRun run, FileBackend files, String parent, RunScope scope) {
-        this(chatId, workDir, scratchDir, readOnlyWork, toolUseId, mode, run, files, parent, scope, null);
+        this(chatId, workDir, scratchDir, readOnlyWork, toolUseId, mode, run, files, parent, scope, null, null);
     }
 
     public ToolContext(String chatId, Path workDir, Path scratchDir, boolean readOnlyWork, String toolUseId,
@@ -56,31 +60,38 @@ public record ToolContext(String chatId, Path workDir, Path scratchDir, boolean 
 
     public ToolContext withHosts(HostApprover hosts) {
         return new ToolContext(chatId, workDir, scratchDir, readOnlyWork, toolUseId, mode, run, files, parent, scope,
-                hosts);
+                hosts, links);
     }
 
     public ToolContext withToolUseId(String toolUseId) {
         return new ToolContext(chatId, workDir, scratchDir, readOnlyWork, toolUseId, mode, run, files, parent, scope,
-                hosts);
+                hosts, links);
     }
 
     public ToolContext withFiles(FileBackend files) {
         return new ToolContext(chatId, workDir, scratchDir, readOnlyWork, toolUseId, mode, run, files, parent, scope,
-                hosts);
+                hosts, links);
     }
 
     public ToolContext withParent(String parent) {
         return new ToolContext(chatId, workDir, scratchDir, readOnlyWork, toolUseId, mode, run, files, parent, scope,
-                hosts);
+                hosts, links);
     }
 
     public ToolContext withScope(RunScope scope) {
         return new ToolContext(chatId, workDir, scratchDir, readOnlyWork, toolUseId, mode, run, files, parent, scope,
-                hosts);
+                hosts, links);
+    }
+
+    /** The same context with the given policy for links that leave the work dir. */
+    public ToolContext withLinks(ExternalLinks links) {
+        return new ToolContext(chatId, workDir, scratchDir, readOnlyWork, toolUseId, mode, run, files, parent, scope,
+                hosts, links);
     }
 
     /** The same context with both {@code workDir} and {@code scratchDir} set to {@code root} (the file jail). */
     public ToolContext withRoot(Path root) {
-        return new ToolContext(chatId, root, root, readOnlyWork, toolUseId, mode, run, files, parent, scope, hosts);
+        return new ToolContext(chatId, root, root, readOnlyWork, toolUseId, mode, run, files, parent, scope, hosts,
+                links);
     }
 }

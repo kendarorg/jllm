@@ -1,7 +1,10 @@
-# Builds target\release\jllm-<version>.zip: cli + web + plugins + settings + users + runners.
-# Usage: release\release.ps1 [-Build] [-Out DIR]
+# Builds target\release\jllm-<version>.zip: cli + web + plugins + settings + users + runners + lib-ext (GraalJS).
+# Usage: release\release.ps1 [-Build] [-Out DIR] [-Graal community|oracle] [-AcceptOracleTerms]
+# GraalJS is not inside the front-end jars: it is resolved with release\graaljs and shipped in lib-ext\ (default edition
+# community). The manifests of both editions go to lib-ext\manifests\ for fetch-graaljs; the build fails if a front-end
+# jar contains GraalJS or if a resolved pom declares a licence other than UPL, MIT, Apache, BSD, Unicode/ICU.
 # Without -Build it asks whether to build (mvn clean install, with tests); the default is no: package the existing jars.
-param([switch]$Build, [string]$Out)
+param([switch]$Build, [string]$Out, [ValidateSet('community', 'oracle')][string]$Graal = 'community', [switch]$AcceptOracleTerms)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 if (-not $Out) { $Out = Join-Path $root 'target\release' }
@@ -50,6 +53,25 @@ if ($plugins.Count -lt 5) { throw "expected 5 plugin jars in target\plugins, fou
 Copy-Item $plugins.FullName (Join-Path $stage 'plugins')
 Copy-Item release\template\* $stage -Recurse -Force
 Copy-Item LICENSE, NOTICE $stage
+# neither front end may carry GraalJS (it is provided through lib-ext)
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+foreach ($j in 'jllm-cli.jar', 'jllm-web.jar') {
+  $zf = [IO.Compression.ZipFile]::OpenRead((Join-Path $stage $j))
+  try { $bad = @($zf.Entries | Where-Object { $_.FullName -match '^org/graalvm/|^com/oracle/truffle/|(^|/)(polyglot|truffle-[a-z]+|js-language|js-isolate[a-z0-9-]*|regex|graaljs)-[0-9][^/]*\.jar$' }) } finally { $zf.Dispose() }
+  if ($bad.Count -gt 0) { throw "$j contains GraalJS classes or jars: it must be provided through lib-ext, not bundled" }
+}
+$libExt = Join-Path $stage 'lib-ext'
+New-Item -ItemType Directory -Force (Join-Path $libExt 'manifests') | Out-Null
+$resolve = Join-Path $root 'release\graaljs\resolve.ps1'
+& $resolve -Edition $Graal -Out $libExt -AcceptTerms:$AcceptOracleTerms
+$other = if ($Graal -eq 'community') { 'oracle' } else { 'community' }
+# the other edition: manifest only (nothing of it is shipped; the operator accepts its terms when running fetch-graaljs)
+$tmpOther = Join-Path ([IO.Path]::GetTempPath()) ("jllm-graal-other-" + [guid]::NewGuid().ToString('N'))
+try {
+  & $resolve -Edition $other -Out $tmpOther -AcceptTerms
+  Copy-Item (Join-Path $tmpOther "graaljs-$other.manifest") (Join-Path $libExt 'manifests')
+} finally { Remove-Item -Recurse -Force $tmpOther -ErrorAction SilentlyContinue }
+Copy-Item (Join-Path $libExt "graaljs-$Graal.manifest") (Join-Path $libExt 'manifests')
 Compress-Archive -Path $stage -DestinationPath $zip
 $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
 "$hash  $name.zip" | Set-Content (Join-Path $Out 'SHA256SUMS') -Encoding ascii

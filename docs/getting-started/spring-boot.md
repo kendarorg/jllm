@@ -92,7 +92,7 @@ class AgentConfig {
     @Bean(destroyMethod = "close")
     AgentHarness agentHarness(ModelClient model, AgentProps p, ObjectProvider<HarnessTool> tools,
                               ObjectProvider<HarnessMetrics> metrics) {
-        return AgentHarness.builder()
+        return new AgentHarnessBuilder()
                 .modelClient(model)
                 .tools(tools.orderedStream().toList())     // every HarnessTool bean in the context
                 .settings(p.settings())                    // MCP servers, REST APIs, permissions

@@ -20,6 +20,7 @@ import java.util.function.Consumer;
 
 /** Holds approvals the agent loop is blocked on, per chat. Used for tool calls and context rewrites alike. */
 public class ApprovalService {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(ApprovalService.class);
 
     /** @param type "tool" or "context"; @param preview what to show (diff/old); @param proposed editable new content */
     public record PendingApproval(String id, String chatId, String type, String title,
@@ -118,7 +119,8 @@ public class ApprovalService {
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     return ApprovalDecision.REJECTED;
-                } catch (Exception e) {
+                } catch (Exception e) { // boundary: an approval listener failing means rejected
+                    log.debug("Approval failed, rejected: {}", e.toString());
                     return ApprovalDecision.REJECTED;
                 }
             }
@@ -129,17 +131,11 @@ public class ApprovalService {
         }
     }
 
-    /** @return false when the approval no longer exists (already resolved, timed out or wrong chat) */
-    public boolean resolve(String chatId, String approvalId, boolean approved, String edited) {
-        return resolve(chatId, approvalId, approved, edited, false);
-    }
-
-    /** @param remember allow the tool for the rest of the chat (parent and sub-agents) */
-    public boolean resolve(String chatId, String approvalId, boolean approved, String edited, boolean remember) {
-        return resolve(chatId, approvalId, approved, edited, remember, false);
-    }
-
-    /** @param rememberDir allow file writes in the directory of this call and its subdirectories, for this chat */
+    /**
+     * @return false when the approval no longer exists (already resolved, timed out or wrong chat)
+     * @param remember    allow the tool for the rest of the chat (parent and sub-agents)
+     * @param rememberDir allow file writes in the directory of this call and its subdirectories, for this chat
+     */
     public boolean resolve(String chatId, String approvalId, boolean approved, String edited, boolean remember,
                            boolean rememberDir) {
         Map<String, Pending> m = pending.get(chatId);

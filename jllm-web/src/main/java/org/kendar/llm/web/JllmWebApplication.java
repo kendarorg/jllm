@@ -1,5 +1,6 @@
 package org.kendar.llm.web;
 
+import java.io.IOException;
 import org.kendar.llm.web.commons.JllmProperties;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -61,7 +62,7 @@ public class JllmWebApplication {
         CompletableFuture<String> input = CompletableFuture.supplyAsync(() -> {
             try {
                 return new BufferedReader(new InputStreamReader(System.in)).readLine();
-            } catch (Exception e) {
+            } catch (IOException e) {
                 return null;
             }
         });
@@ -71,7 +72,8 @@ public class JllmWebApplication {
                 System.setProperty("jllm.api-key", typed.trim());
                 return;
             }
-        } catch (Exception ignored) {
+        } catch (InterruptedException | java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException e) {
+            if (e instanceof InterruptedException) Thread.currentThread().interrupt();
             // timeout or interrupted
         }
         System.out.println("No API key provided; starting without it.");

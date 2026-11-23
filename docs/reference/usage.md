@@ -130,7 +130,7 @@ ignored.
                            "safetyPercent": 2, "reserveCap": 0}},
   "output":     {"toolMaxChars": 30000, "eventMaxChars": 2000, "validation": "lenient"},
   "loop":       {"stuck": {"enabled": true, "repeat": 3, "alternationCycles": 3, "malformed": 3},
-                 "verify": {"maxReentries": 3}},
+                 "verify": {"maxReentries": 3}, "innerCallsPerTurn": 10},
   "hooks":      {"stop": [{"command": "mvn -q test", "timeoutSeconds": 600, "agents": ["main"],
                            "onlyIfChanged": true, "maxOutputChars": 8000}]},
   "smallModel": false
@@ -157,6 +157,7 @@ ignored.
 | `sandbox.outputLogMaxBytes` | default `51200`: cap of the spill log written when a `bash` output exceeds the kept 50 KB tail; `0` = unlimited. A capped log ends with `[log truncated at N bytes]` and the tool result says `log (itself truncated)` |
 | `instructionFiles` | default `["KENDAR.md", "AGENTS.md", "CLAUDE.md"]`, in that order, relative to the directory the harness runs in; `~` is the user home. Missing files are skipped, and so is a file with the same content as one already read (e.g. `CLAUDE.md` a symlink to `AGENTS.md`). A list in any settings layer replaces the default completely; `[]` loads none. A project with only `AGENTS.md` or only `CLAUDE.md` gets it with no configuration. See [SKILLS §2](../guides/skills.md#2-instruction-files) |
 | `files.maxReadBytes` | default `1000000`: the most text one `read_file` returns and the largest file `edit_file` changes (`grep` skips larger files); `<= 0` = default |
+| `files.externalLinks` | default `read`: what the file tools do with a symlink or junction inside the work dir whose target is **outside** it (a link whose target stays inside is always followed). `none`: refused for every tool ("is a link that leaves the work dir"). `read`: `read_file`, `ls`, `glob`, `grep`, `grep_code` and the document readers follow it and walkers enter a linked directory; `write_file`, `edit_file`, `web_download` and checkpoint undo refuse, and the message names this setting. `readwrite`: reads and writes follow it, and the approval prompt shows the resolved target instead of the link path. Recursive deletes never follow a link. `--external-links none\|read\|readwrite` overrides it. In docker daemon mode the container daemon receives the mode too. **The web app ignores this key**: it always uses `none` and logs one WARN at startup when the key has another value. See [TOOLS §2](../guides/tools.md#2-path-jail) |
 | `files.scopedInstructions` | default `true`: when a file tool (`read_file`, `write_file`, `edit_file`, `ls`, `glob`, `grep`, `grep_code`) works on a path inside the work dir, the files with the `instructionFiles` names found in each directory from the work dir down to that path are added to the conversation, once per chat. See [SKILLS §3](../guides/skills.md#3-directory-scoped-instruction-files). `false` turns it off |
 | `files.scopedInstructionsDepth` | default `8`: directory levels below the work dir looked at for scoped instruction files; deeper directories are ignored |
 | `web.fetchMaxBytes` | default `5242880` (5 MB): largest response body `web_fetch` reads; `<= 0` = default |
@@ -169,6 +170,8 @@ ignored.
 | `output.validation` | check of tool-call arguments against the tool schema: `off`, `lenient` (default, repairs `"5"` for 5 and `null` for optional fields) or `strict`; `/validation` overrides it per chat, see [TOOLS §5](../guides/tools.md#5-one-tool-call) |
 | `loop.stuck.*` | stuck detection, see [Stuck detection](#stuck-detection). `enabled` (default `true`), `repeat` (3: the same calls with the same results, or the same failing call, in a row), `alternationCycles` (3: A-B-A-B), `malformed` (3: responses whose calls cannot run: unknown tool, invalid arguments, cut off) |
 | `loop.verify.maxReentries` | default `3`: how many times a `STOP` hook may send the agent back to work before the run ends `unverified` |
+| `loop.innerCallsPerTurn` | default `10`: how many tool calls made from inside a `run_js` script count as one model turn against `maxTurns`; zero or less turns the counting off. See [JS limits](../guides/js.md#limits) |
+| `plugins.js.*` | `run_js` plugin: `enabled` and `settings` (`engine`, `policy`, `statementLimit`, `maxTimeoutSeconds`, `maxWallSeconds`, `gracefulSeconds`, `maxInnerCalls` (default `200`), `maxConcurrentRuns`, `maxHeapMemory`, `maxIsolateMemory`, `maxStackFrames`); defaults and meaning in [the JS guide](../guides/js.md#limits) |
 | `hooks.stop` | command hooks run when an agent is about to finish, see [Verify on stop](#verify-on-stop). Only from the user settings or `--settings`; one from the project file runs only once trusted, like a project stdio MCP server |
 
 ### System prompt files
@@ -403,7 +406,7 @@ messages enter the chat log only when applied.
 
 ```java
 ObjectMapper mapper = new ObjectMapper();
-AgentHarness h = AgentHarness.builder()
+AgentHarness h = new AgentHarnessBuilder()
         .modelClient(ModelClients.anthropic(AnthropicSettings.defaults(System.getenv("ANTHROPIC_API_KEY")), mapper))
         .settings(Path.of("harness.json"))
         .sessionStore(new InMemoryChatSessionStore())
@@ -435,7 +438,7 @@ for that chat.
 
 ```java
 record Staff(String id, Set<String> roles) {}                     // your own user model
-AgentHarness h = AgentHarness.builder()
+AgentHarness h = new AgentHarnessBuilder()
         .modelClient(model)
         // per call, after the chat's principal is known: tokens expire and refresh
         .credentialResolver((user, source) -> user == null ? Map.of()
