@@ -10,6 +10,27 @@ What I'd avoid is doing both: per-person provider credentials and LiteLLM in bet
 
 This is to caluclate cost prices limit. Now with litellm then add 
 
+o, LiteLLM is one good option, but not the only one. It does handle per-user limits well: a virtual key without a team gets its own individual spending limit, and on every request it checks the rpm/tpm limits globally, per virtual key, per user and per team.
+litellm
+litellm
+
+How it would fit with JLLM. Point JLLM's OpenAI-compatible client at the LiteLLM proxy and give each JLLM user their own LiteLLM virtual key. That slots naturally into your fork's per-user model credentials: the "user's model key" simply becomes their LiteLLM key, stored encrypted like the other tokens. Per-end-user budgets on a single shared key are still awkward; LiteLLM users describe creating one virtual key per end user as the workaround, at the cost of more complex key management.
+github
+
+Alternatives
+
+Provider-side limits. If each user brings their own provider key, which your per-user auth already allows, the provider's own spend limits apply per user automatically, with nothing extra to run. That's the simplest option for a pilot.
+Inside JLLM. The SQL store already records input and output tokens per chat and per user. A daily cap, checked before each model call and returning a 429 when exceeded, is a small feature, and it's what the maintainer's phase 5 plan describes. It needs no extra service, but you'd have to maintain price tables to cap money rather than tokens.
+Other AI gateways (Envoy AI Gateway, Kong, Portkey and others) do the same job as LiteLLM. Worth a look if you already run one of them.
+
+What no gateway covers. A gateway only limits model calls. Tool activity (shell commands in the Docker sandbox, web downloads, file storage) needs limits inside the app. JLLM already has some: per-container CPU, memory and process limits, fetchMaxBytes, and storage quotas. Per-user counts of tool calls or sandbox time would still be missing.
+
+If you choose LiteLLM, lock it down. It sits in front of all your provider keys, which makes it a prime target. In March 2026, attackers using credentials stolen from LiteLLM's own CI/CD pipeline published malicious versions 1.82.7 and 1.82.8 to PyPI with a credential stealer, and in October, malicious LiteLLM packages were served on both PyPI and Docker after attackers compromised GitHub CLI OAuth tokens. Pin the exact version or the Docker image digest, update deliberately, and run it isolated, holding only the provider keys.
+akamai
+securityweek
+
+For an internal pilot, I'd start with provider-side limits on per-user keys, or a simple token cap in JLLM, and only add LiteLLM if you need shared keys with per-user budgets
+
 
 
 
