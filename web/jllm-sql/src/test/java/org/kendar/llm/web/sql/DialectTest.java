@@ -101,8 +101,8 @@ class DialectTest {
     void schemaVersionRowIsOneInEveryDialect() {
         for (Dialect d : Dialect.values()) {
             List<String> st = Schema.statements(Schema.read(d));
-            assertTrue(st.stream().anyMatch(s -> s.matches("(?s)CREATE TABLE (IF NOT EXISTS )?schema_version \(version INT(EGER)? NOT NULL PRIMARY KEY\)")), d.name());
-            assertTrue(st.stream().anyMatch(s -> s.matches("INSERT (OR IGNORE )?INTO schema_version \(version\) VALUES \(1\)")), d.name());
+            assertTrue(st.stream().anyMatch(s -> s.matches("(?s)CREATE TABLE (IF NOT EXISTS )?schema_version \\(version INT(EGER)? NOT NULL PRIMARY KEY\\)")), d.name());
+            assertTrue(st.stream().anyMatch(s -> s.matches("INSERT (OR IGNORE )?INTO schema_version \\(version\\) VALUES \\(1\\)")), d.name());
         }
     }
 
@@ -114,6 +114,6 @@ class DialectTest {
 
     private static List<String> tables(Dialect d) {
         return Schema.statements(Schema.read(d)).stream()
-                .filter(s -> s.startsWith("CREATE TABLE")).map(s -> s.split("\\s+")[2]).toList();
+                .filter(s -> s.startsWith("CREATE TABLE")).map(s -> s.replace("IF NOT EXISTS ", "").split("\\s+")[2]).toList();
     }
 }
