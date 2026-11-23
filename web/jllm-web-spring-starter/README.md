@@ -16,7 +16,7 @@ Add `org.kendar.llm:jllm-web-spring-starter`. Its auto-configuration (`JllmWebAu
 | Bean | Role |
 |---|---|
 | `JllmProperties`, `OidcProperties` | the `jllm.*` and `jllm.auth.*` properties, bound from the environment |
-| `ModelClient`, `HarnessPricing`, `AgentHarness`, `WebPluginHost` | from `HarnessFactory`; beans of the application for `SettingsSource`, `ProjectMcpTrust`, `ChatSessionStore`, `SubAgentRunLog`, `MnemonicStore`, `StateStore` and `PluginStorages` replace the file defaults |
+| `ModelClient`, `HarnessPricing`, `AgentHarness`, `WebPluginHost` | from `HarnessFactory`; beans of the application (e.g. from [jllm-sql-spring-starter](../jllm-sql-spring-starter/README.md)) for `SettingsSource`, `ProjectMcpTrust`, `ChatSessionStore`, `SubAgentRunLog`, `MnemonicStore`, `StateStore` and `PluginStorages` replace the file defaults |
 | `WebAuthentication`, `ChatAccess`, `HarnessIdentity` | defaults (`@ConditionalOnMissingBean`): nobody signs in, no chat is visible, no tool is allowed |
 | `Gate`, `WebConfig` | the `/api/**` and `/api/admin/**` interceptors, both a one-line delegation to `Gate` |
 | `ChatApi`, `FilesApi`, `OAuthApi`, `PluginApi` | the handlers |

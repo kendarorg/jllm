@@ -619,8 +619,9 @@ ScriptedModel model = new ScriptedModel().enqueue(text("one row"));
 ## 13. Web storage
 
 A web application built on `jllm-web-spring-starter` keeps its users, roles, skills, sign-in sessions, settings and tokens
-behind interfaces. `jllm-web` ships file and in-memory implementations, wired when `jllm.store=file` (the default,
-`WebAuthConfiguration`); another store (e.g. SQL) sets `jllm.store` to another value and supplies its own beans. The
+behind interfaces. `jllm-web` ships file and in-memory implementations (`FileStoresAutoConfiguration`, used when no other bean of the
+type exists); `jllm-sql-spring-starter` ships SQL ones ([README](../../web/jllm-sql-spring-starter/README.md): SQLite,
+MySQL, PostgreSQL by JDBC url, plain JDBC). `jllm.store` is `file` or `sql` (anything else stops the start). The
 controllers and the harness depend only on the interfaces.
 
 ```mermaid
@@ -716,7 +717,8 @@ public interface SettingsSource {
 
 Wiring:
 - `UserRepository`, `RoleRepository`, `SkillRepository`, `LoginSessionRepository`: beans. The `jllm-web` ones are
-  `@ConditionalOnProperty(name = "jllm.store", havingValue = "file", matchIfMissing = true)`.
+  `@ConditionalOnMissingBean` in `FileStoresAutoConfiguration`, ordered after `JllmSqlAutoConfiguration`: supply your
+  own beans (or the SQL starter) and they win.
 - `SettingsSource`, `ProjectMcpTrust`: optional beans read by the starter's `JllmWebAutoConfiguration` (`ObjectProvider`); without
   them the files are used.
 - `TokenStore`: returned by your `HarnessIdentity.tokenStore()`; null = the store the `tokenStore` settings describe,
@@ -736,4 +738,5 @@ optional beans read by `JllmWebAutoConfiguration`; without them `HarnessFactory`
 `FileHistorySubAgentRunLog`, `FileMnemonicStore` and `FileStateStore` under each chat's history root
 (`<base>/<chatId>/.jllm/history`). Chat retention (`chatRetentionLimit`) picks the chats to delete from `ChatSessionStore.list()`.
 
-A sketch of a MySQL store (tables, mapping of errors, token table) is in [jllm-web/README.md](../../jllm-web/README.md#a-possible-extension-a-mysql-store).
+The SQL implementation is a worked example: [jllm-sql-spring-starter](../../web/jllm-sql-spring-starter/README.md) (tables, error
+mapping, token table with optional encryption, per-dialect migrations).

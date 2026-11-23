@@ -68,6 +68,9 @@ It does not protect against code already inside the container, and it has no TLS
 ## 4. Secrets
 
 - Settings accept `${ENV_VAR}` references; web user credentials are `env:NAME` references only.
+- With the SQL store (`jllm-sql-spring-starter`) the tokens are rows of `oauth_tokens`: encrypted with `JLLM_TOKEN_KEY`
+  when it is set, in clear otherwise (an invalid key stops the start); login sessions keep a hash of the token. The
+  database password comes from `jllm.sql.password` (use `${ENV}`).
 - OAuth tokens of MCP servers and REST APIs live in a `TokenStore`: a file encrypted with `JLLM_TOKEN_KEY` when there
   are users, the OS secret store (macOS Keychain, Windows DPAPI, Linux Secret Service) for one user, or your own
   implementation such as a database ([MCP](../guides/mcp.md#6-token-storage)).

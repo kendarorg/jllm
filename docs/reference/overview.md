@@ -26,6 +26,7 @@ They're not separate products or mandatory dependencies. They're working example
 | [jllm-harness](../../core/jllm-harness) | the library: framework-free (no Spring, JPA or Micrometer), Jackson, JDK `HttpClient`, jsoup, json-schema-validator, swagger-parser, `slf4j-api` (full list: `mvn dependency:tree -pl core/jllm-harness`) | [README](../../core/jllm-harness/README.md) |
 | [jllm-cli](../../jllm-cli) | terminal front end, one shaded runnable jar | [README](../../jllm-cli/README.md) |
 | [jllm-web-commons](../../web/jllm-web-commons) | framework-free handlers of the web API (chat, files, sign-in, users) and the `Gate` | [README](../../web/jllm-web-commons/README.md) |
+| [jllm-sql](../../web/jllm-sql), [jllm-sql-spring-starter](../../web/jllm-sql-spring-starter) | SQL stores (SQLite, MySQL, PostgreSQL by JDBC url; plain JDBC, no JPA) and the auto-configuration that selects them | [README](../../web/jllm-sql-spring-starter/README.md) |
 | [jllm-web-spring-starter](../../web/jllm-web-spring-starter) | Spring Boot controllers, interceptors and auto-configuration over them | [README](../../web/jllm-web-spring-starter/README.md) |
 | [jllm-web](../../jllm-web) | Spring Boot application: startup, sample sign-in and permissions, no-build Vue 3 chat UI, flow editor and runs screens | [README](../../jllm-web/README.md) |
 | [jllm-workflows](../../plugins/jllm-workflows) / [jllm-workflow-web](../../plugins/jllm-workflow-web) | optional plugins: the flow engine with chat commands and command line, and its web endpoints | [WORKFLOW](../guides/workflow.md) |

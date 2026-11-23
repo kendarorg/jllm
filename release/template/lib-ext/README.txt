@@ -14,4 +14,10 @@ jar with its SHA-256; manifests/ holds the manifests of both editions.
 * Other version: replace the jars by hand; the edition label is for diagnostics only and never changes behaviour.
 * manifests/ holds the manifests of both editions for the fetch script. Do not remove it.
 
+SQL store: lib-ext/sql holds the jars of the SQL store (shipped; jllm.store=file turns it off). The MySQL and PostgreSQL
+drivers are not shipped: setup, or fetch-sql-driver (.sh/.cmd/.ps1 one directory up) downloads them into this folder
+(mysql-connector-j-*.jar, postgresql-*.jar), verified against manifests/mysql.manifest and manifests/postgres.manifest.
+MySQL is GPLv2 with the FOSS exception and asks for acceptance. fetch-graaljs never removes them. Only the driver of
+jllm.sql.url is used. SQLite is bundled and needs nothing.
+
 Licences are those declared by the poms of the shipped version; see NOTICE.
