@@ -1,6 +1,6 @@
 package org.kendar.llm.web.auth;
 
-import org.kendar.llm.web.commons.users.LoginSessionRepository;
+import org.kendar.llm.harness.identity.LoginSessionRepository;
 import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Instant;

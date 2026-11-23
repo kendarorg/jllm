@@ -1,5 +1,7 @@
 package org.kendar.llm.web.commons;
 
+import org.kendar.llm.harness.identity.ChatAccess;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.kendar.llm.harness.AgentHarness;
 import org.springframework.context.annotation.Configuration;

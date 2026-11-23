@@ -2,9 +2,9 @@ package org.kendar.llm.web.auth;
 
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
-import org.kendar.llm.web.commons.users.LoginSessionRepository;
-import org.kendar.llm.web.commons.users.UserRepository;
-import org.kendar.llm.web.commons.users.WebUser;
+import org.kendar.llm.harness.identity.LoginSessionRepository;
+import org.kendar.llm.harness.identity.UserRepository;
+import org.kendar.llm.harness.identity.User;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
@@ -129,7 +129,7 @@ public class OidcController {
             }
             if (error != null) throw new OidcException("denied", "The provider refused: " + error.length() + " chars");
             if (code == null || code.isBlank()) throw new OidcException("denied", "No code");
-            WebUser user = resolve(client.exchange(code, p.verifier(), p.nonce()));
+            User user = resolve(client.exchange(code, p.verifier(), p.nonce()));
             throttle.success(key);
             String token = sessions.create(user.id());
             return ResponseEntity.status(HttpStatus.FOUND).header(HttpHeaders.LOCATION, "/")
@@ -145,7 +145,7 @@ public class OidcController {
 
     // ---- user resolution
 
-    private WebUser resolve(OidcClient.Identity id) throws OidcException {
+    private User resolve(OidcClient.Identity id) throws OidcException {
         var linked = users.findByExternal(id.issuer(), id.subject());
         if (linked.isPresent()) return linked.get();
         String email = id.email();
@@ -157,7 +157,7 @@ public class OidcController {
             throw new OidcException("domain_not_allowed", "Domain " + domain);
         }
         String externalKey = UserRepository.externalKey(id.issuer(), id.subject());
-        List<WebUser> byEmail = users.findByEmail(email);
+        List<User> byEmail = users.findByEmail(email);
         if (!byEmail.isEmpty()) {
             if (byEmail.size() == 1 && !byEmail.get(0).external()) {
                 return users.setExternalId(byEmail.get(0).id(), externalKey);
@@ -168,7 +168,7 @@ public class OidcController {
         throw new OidcException("unknown_user", "No user for the account");
     }
 
-    private WebUser provision(OidcClient.Identity id, String email, String externalKey) throws OidcException {
+    private User provision(OidcClient.Identity id, String email, String externalKey) throws OidcException {
         String base = sanitize(email.substring(0, Math.max(0, email.lastIndexOf('@'))));
         String name = id.name() == null || id.name().isBlank() ? null : id.name().strip();
         for (int n = 1; n < 1000; n++) {

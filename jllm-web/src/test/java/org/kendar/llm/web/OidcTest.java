@@ -22,7 +22,7 @@ import org.kendar.llm.web.auth.CookieAuthentication;
 import org.kendar.llm.web.auth.OidcClient;
 import org.kendar.llm.web.auth.OidcController;
 import org.kendar.llm.web.auth.OidcProperties;
-import org.kendar.llm.web.commons.users.WebUser;
+import org.kendar.llm.harness.identity.User;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -223,7 +223,7 @@ class OidcTest {
         assertTrue(s.binding().isHttpOnly());
 
         assertEquals("rita", signInAs(mvc, "sub-1", "rita@example.com"));
-        WebUser rita = f.users.find("rita").orElseThrow();
+        User rita = f.users.find("rita").orElseThrow();
         assertEquals(issuer + "#sub-1", rita.externalId());
         assertEquals("reader", rita.role());
         assertFalse(rita.usesDefaultPassword());
@@ -241,7 +241,7 @@ class OidcTest {
     void autoProvisionCreatesUserWithDefaultRoleAndSuffixesCollisions() throws Exception {
         MockMvc mvc = mvc(props("oidc", true, List.of()));
         assertEquals("ann", signInAs(mvc, "s1", "ann@example.com"));
-        WebUser ann = f.users.find("ann").orElseThrow();
+        User ann = f.users.find("ann").orElseThrow();
         assertEquals("reader", ann.role());
         assertEquals("Ann Example", ann.name());
         assertTrue(ann.passwordless());
@@ -396,7 +396,7 @@ class OidcTest {
     void passwordlessUserCannotUsePasswordLogin() throws Exception {
         MockMvc mvc = mvc(props("both", true, List.of()));
         signInAs(mvc, "s1", "ann@example.com");
-        WebUser ann = f.users.find("ann").orElseThrow();
+        User ann = f.users.find("ann").orElseThrow();
         assertFalse(ann.usesDefaultPassword());
         f.mvc.perform(post("/api/login").contentType("application/json").content("{\"id\":\"ann\",\"password\":\"ann\"}"))
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isUnauthorized());

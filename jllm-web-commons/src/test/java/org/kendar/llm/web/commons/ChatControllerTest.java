@@ -1,5 +1,7 @@
 package org.kendar.llm.web.commons;
 
+import org.kendar.llm.harness.identity.Principal;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -55,12 +57,12 @@ class ChatControllerTest {
     @Test
     void createListGetDelete() throws Exception {
         String created = mvc.perform(post("/api/chat").contentType(MediaType.APPLICATION_JSON).content("{}")
-                        .requestAttr(WebPrincipal.ATTR, ADMIN))
+                        .requestAttr(Principal.ATTR, ADMIN))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         String id = mapper.readTree(created).path("chatId").asText();
         assertTrue(!id.isBlank());
 
-        JsonNode list = mapper.readTree(mvc.perform(get("/api/chat").requestAttr(WebPrincipal.ATTR, ADMIN))
+        JsonNode list = mapper.readTree(mvc.perform(get("/api/chat").requestAttr(Principal.ATTR, ADMIN))
                 .andReturn().getResponse().getContentAsString());
         assertEquals(1, list.size());
 
@@ -131,7 +133,7 @@ class ChatControllerTest {
         MockMvc restarted = MockMvcBuilders.standaloneSetup(
                 TestUser.chatController(harness, mapper)).build();
 
-        JsonNode list = mapper.readTree(restarted.perform(get("/api/chat").requestAttr(WebPrincipal.ATTR, ADMIN))
+        JsonNode list = mapper.readTree(restarted.perform(get("/api/chat").requestAttr(Principal.ATTR, ADMIN))
                 .andReturn().getResponse().getContentAsString());
         assertEquals(1, list.size());
         assertEquals("c1", list.get(0).path("chatId").asText());

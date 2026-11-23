@@ -1,5 +1,7 @@
 package org.kendar.llm.web.commons;
 
+import org.kendar.llm.harness.identity.HarnessIdentity;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.kendar.llm.harness.AgentHarness;
 import org.kendar.llm.harness.AgentHarnessBuilder;
@@ -103,8 +105,8 @@ public class HarnessConfiguration {
             }
         }
         settings = withUntrustedScriptPolicy(settings);
-        services.publish(org.kendar.llm.web.commons.plugins.PluginsSettings.class,
-                new org.kendar.llm.web.commons.plugins.PluginsSettings(settings.plugins()));
+        services.publish(org.kendar.llm.harness.plugin.PluginsSettings.class,
+                new org.kendar.llm.harness.plugin.PluginsSettings(settings.plugins()));
         HarnessConfig config = HarnessConfigMapper.apply(settings, HarnessConfig.defaults());
         String searchKey = JllmProperties.blankToNull(p.searchApiKey());
         if (searchKey == null) searchKey = System.getenv("BRAVE_API_KEY");
@@ -116,7 +118,7 @@ public class HarnessConfiguration {
         HistoryRootLock.acquire(sandbox.location()); // one process per base directory; held until the process ends
         // plugins find the host's plugin storage in the shared registry (files unless the application supplies another)
         services.publish(org.kendar.llm.harness.plugin.PluginStorages.class, pluginStorages.getIfAvailable(() ->
-                new org.kendar.llm.web.commons.plugins.FilePluginStorage(
+                new org.kendar.llm.harness.plugin.FilePluginStorage(
                         projectDir.resolve(".jllm").resolve("plugin-data"), mapper)));
         AgentHarnessBuilder builder = new AgentHarnessBuilder().services(services);
         if (JllmProperties.blankToNull(p.pluginDir()) != null) builder.pluginDir(Path.of(p.pluginDir()));

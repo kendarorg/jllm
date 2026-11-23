@@ -1,4 +1,4 @@
-package org.kendar.llm.web.commons;
+package org.kendar.llm.harness.identity;
 
 import org.kendar.llm.harness.session.ChatSessionData;
 
@@ -9,5 +9,5 @@ public interface ChatAccess {
     /** No chat is visible. */
     ChatAccess NONE = (user, chat) -> false;
 
-    boolean canSee(WebPrincipal user, ChatSessionData chat);
+    boolean canSee(Principal user, ChatSessionData chat);
 }

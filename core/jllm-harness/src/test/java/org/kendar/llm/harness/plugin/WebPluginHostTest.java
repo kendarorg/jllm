@@ -1,15 +1,9 @@
-package org.kendar.llm.web.commons.plugins;
+package org.kendar.llm.harness.plugin;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.kendar.llm.harness.plugin.MemoryPluginStorage;
-import org.kendar.llm.harness.plugin.ServiceRegistry;
-import org.kendar.llm.harness.plugin.WebContext;
-import org.kendar.llm.harness.plugin.WebPlugin;
-import org.kendar.llm.harness.plugin.WebRequest;
-import org.kendar.llm.harness.plugin.WebResponse;
 
 import java.nio.file.Path;
 import java.util.ArrayList;

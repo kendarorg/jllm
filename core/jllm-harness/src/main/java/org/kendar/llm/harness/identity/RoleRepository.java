@@ -1,4 +1,4 @@
-package org.kendar.llm.web.commons.users;
+package org.kendar.llm.harness.identity;
 
 import java.util.List;
 import java.util.Optional;

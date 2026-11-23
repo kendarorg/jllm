@@ -1,4 +1,4 @@
-package org.kendar.llm.web.commons;
+package org.kendar.llm.harness.identity;
 
 import org.kendar.llm.harness.auth.CredentialResolver;
 import org.kendar.llm.harness.auth.HarnessPrincipal;

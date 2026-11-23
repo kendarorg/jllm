@@ -1,17 +1,7 @@
-package org.kendar.llm.web.commons.plugins;
+package org.kendar.llm.harness.plugin;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import org.kendar.llm.harness.plugin.HarnessPlugin;
-import org.kendar.llm.harness.plugin.PluginEvents;
-import org.kendar.llm.harness.plugin.PluginStorage;
-import org.kendar.llm.harness.plugin.PluginStorages;
-import org.kendar.llm.harness.plugin.ServiceRegistry;
-import org.kendar.llm.harness.plugin.WebContext;
-import org.kendar.llm.harness.plugin.WebHandler;
-import org.kendar.llm.harness.plugin.WebPlugin;
-import org.kendar.llm.harness.plugin.WebRequest;
-import org.kendar.llm.harness.plugin.WebResponse;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;

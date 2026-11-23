@@ -1,4 +1,4 @@
-package org.kendar.llm.web.commons.users;
+package org.kendar.llm.harness.identity;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;

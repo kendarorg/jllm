@@ -1,5 +1,8 @@
 package org.kendar.llm.web.commons;
 
+import org.kendar.llm.harness.identity.Principal;
+import org.kendar.llm.harness.identity.ChatAccess;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.kendar.llm.harness.AgentHarness;
 import org.kendar.llm.harness.HarnessPricing;
@@ -70,7 +73,7 @@ public class ChatController {
     }
 
     /** The slash-command caller of a web request: the user's id, admin flag; no user = no rights. */
-    static org.kendar.llm.harness.commands.SlashCommands.Caller caller(WebPrincipal user) {
+    static org.kendar.llm.harness.commands.SlashCommands.Caller caller(Principal user) {
         return user == null ? org.kendar.llm.harness.commands.SlashCommands.Caller.web(null, false)
                 : org.kendar.llm.harness.commands.SlashCommands.Caller.web(user.id(), user.admin());
     }
@@ -79,7 +82,7 @@ public class ChatController {
 
     @PostMapping("/api/chat")
     public Map<String, Object> create(@RequestBody(required = false) Map<String, String> body,
-                                      @RequestAttribute(value = WebPrincipal.ATTR, required = false) WebPrincipal user) {
+                                      @RequestAttribute(value = Principal.ATTR, required = false) Principal user) {
         ChatSessionData s = sessions.create(body == null ? null : body.get("title"), user == null ? null : user.id());
         agentService.commands().captureChatTools(s.chatId()); // /tools, /mcp, ... toggle within this set
         return summary(sessions.get(s.chatId()));
@@ -88,7 +91,7 @@ public class ChatController {
     /** The chats the signed-in user may see. */
     @GetMapping("/api/chat")
     public List<Map<String, Object>> list(
-            @RequestAttribute(value = WebPrincipal.ATTR, required = false) WebPrincipal user) {
+            @RequestAttribute(value = Principal.ATTR, required = false) Principal user) {
         if (user == null) return List.of();
         return sessions.list().stream()
                 .filter(s -> access.canSee(user, s))
@@ -185,8 +188,8 @@ public class ChatController {
 
     @PostMapping("/api/chat/{id}/messages")
     public ResponseEntity<Map<String, Object>> send(@PathVariable String id, @RequestBody Map<String, String> body,
-                                                    @RequestAttribute(value = WebPrincipal.ATTR, required = false)
-                                                    WebPrincipal user) {
+                                                    @RequestAttribute(value = Principal.ATTR, required = false)
+                                                    Principal user) {
         String text = body.get("text");
         if (text == null || text.isBlank()) {
             return ResponseEntity.badRequest().body(Map.of("error", "text is required"));
@@ -395,7 +398,7 @@ public class ChatController {
 
     @GetMapping("/api/chat/commands")
     public List<Map<String, String>> commands(jakarta.servlet.http.HttpServletRequest request) {
-        WebPrincipal user = request.getAttribute(WebPrincipal.ATTR) instanceof WebPrincipal u ? u
+        Principal user = request.getAttribute(Principal.ATTR) instanceof Principal u ? u
                 : authentication.current(request).orElse(null);
         List<Map<String, String>> out = new ArrayList<>();
         for (var c : agentService.commands().list(caller(user))) out.add(command(c.name(), c.description(), "server"));

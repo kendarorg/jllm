@@ -11,13 +11,13 @@ import org.kendar.llm.web.admin.ToolCatalogView;
 import org.kendar.llm.web.auth.CookieAuthentication;
 import org.kendar.llm.web.auth.LoginThrottle;
 import org.kendar.llm.web.auth.PasswordHasher;
-import org.kendar.llm.web.commons.users.LoginSessionRepository;
-import org.kendar.llm.web.commons.WebPrincipal;
+import org.kendar.llm.harness.identity.LoginSessionRepository;
+import org.kendar.llm.harness.identity.Principal;
 import org.kendar.llm.web.users.Permissions;
-import org.kendar.llm.web.commons.users.Role;
-import org.kendar.llm.web.commons.users.SkillRepository;
-import org.kendar.llm.web.commons.users.UserRepository;
-import org.kendar.llm.web.commons.users.WebUser;
+import org.kendar.llm.harness.identity.Role;
+import org.kendar.llm.harness.identity.SkillRepository;
+import org.kendar.llm.harness.identity.UserRepository;
+import org.kendar.llm.harness.identity.User;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -52,7 +52,7 @@ public class MeController {
         this.catalog = catalog;
     }
 
-    private Optional<WebUser> user(WebPrincipal principal) {
+    private Optional<User> user(Principal principal) {
         return principal == null ? Optional.empty() : users.find(principal.id());
     }
 
@@ -60,11 +60,11 @@ public class MeController {
 
     @PostMapping("/password")
     public ResponseEntity<Object> password(@RequestBody(required = false) Map<String, Object> body,
-                                           @RequestAttribute(value = WebPrincipal.ATTR, required = false)
-                                           WebPrincipal principal, HttpServletRequest request) {
-        Optional<WebUser> found = user(principal);
+                                           @RequestAttribute(value = Principal.ATTR, required = false)
+                                           Principal principal, HttpServletRequest request) {
+        Optional<User> found = user(principal);
         if (found.isEmpty()) return Api.error(HttpStatus.UNAUTHORIZED, "Sign in first");
-        WebUser u = found.get();
+        User u = found.get();
         if (u.passwordless()) return Api.error(HttpStatus.CONFLICT, "This account signs in through the identity provider");
         String key = "id:" + u.id();
         long locked = throttle.lockedFor(key);
@@ -95,9 +95,9 @@ public class MeController {
     // ---- tools
 
     @GetMapping("/tools")
-    public ResponseEntity<Object> tools(@RequestAttribute(value = WebPrincipal.ATTR, required = false)
-                                       WebPrincipal principal) {
-        Optional<WebUser> u = user(principal);
+    public ResponseEntity<Object> tools(@RequestAttribute(value = Principal.ATTR, required = false)
+                                       Principal principal) {
+        Optional<User> u = user(principal);
         if (u.isEmpty()) return Api.error(HttpStatus.UNAUTHORIZED, "Sign in first");
         Optional<Role> role = permissions.role(u.get().role());
         ToolCatalogView.Catalog c = role.map(r -> catalog.forUser(r, u.get()))
@@ -112,9 +112,9 @@ public class MeController {
 
     @PutMapping("/tools")
     public ResponseEntity<Object> setTools(@RequestBody(required = false) Map<String, Object> body,
-                                           @RequestAttribute(value = WebPrincipal.ATTR, required = false)
-                                           WebPrincipal principal) {
-        Optional<WebUser> u = user(principal);
+                                           @RequestAttribute(value = Principal.ATTR, required = false)
+                                           Principal principal) {
+        Optional<User> u = user(principal);
         if (u.isEmpty()) return Api.error(HttpStatus.UNAUTHORIZED, "Sign in first");
         List<String> disabled = strings(body, "disabled");
         if (disabled == null) return Api.error(HttpStatus.BAD_REQUEST, "'disabled' must be an array of strings");
@@ -127,7 +127,7 @@ public class MeController {
     // ---- skills
 
     /** Whether the user's role and settings let them use the {@code skill} tool at all. */
-    private boolean canUseSkills(WebUser u) {
+    private boolean canUseSkills(User u) {
         HarnessTool skill = harness.tools().get("skill");
         if (skill == null) skill = new SimpleTool("skill", "", null, "Skills", ToolKind.READ_ONLY, (c, i) -> "");
         HarnessTool tool = skill;
@@ -143,11 +143,11 @@ public class MeController {
     }
 
     @GetMapping("/skills")
-    public ResponseEntity<Object> skillList(@RequestAttribute(value = WebPrincipal.ATTR, required = false)
-                                            WebPrincipal principal) {
-        Optional<WebUser> found = user(principal);
+    public ResponseEntity<Object> skillList(@RequestAttribute(value = Principal.ATTR, required = false)
+                                            Principal principal) {
+        Optional<User> found = user(principal);
         if (found.isEmpty()) return Api.error(HttpStatus.UNAUTHORIZED, "Sign in first");
-        WebUser u = found.get();
+        User u = found.get();
         Set<String> off = new HashSet<>(u.disabledSkills());
         List<Map<String, Object>> list = new ArrayList<>();
         Set<String> shared = new HashSet<>();
@@ -182,9 +182,9 @@ public class MeController {
 
     @GetMapping("/skills/{name}")
     public ResponseEntity<Object> skill(@PathVariable String name,
-                                        @RequestAttribute(value = WebPrincipal.ATTR, required = false)
-                                        WebPrincipal principal) {
-        Optional<WebUser> u = user(principal);
+                                        @RequestAttribute(value = Principal.ATTR, required = false)
+                                        Principal principal) {
+        Optional<User> u = user(principal);
         if (u.isEmpty()) return Api.error(HttpStatus.UNAUTHORIZED, "Sign in first");
         Optional<SkillRepository.Skill> own = skills.findOwn(u.get().id(), name);
         if (own.isPresent()) return ResponseEntity.ok(body(own.get(), "own"));
@@ -210,9 +210,9 @@ public class MeController {
 
     @PutMapping("/skills/enabled")
     public ResponseEntity<Object> setEnabledSkills(@RequestBody(required = false) Map<String, Object> body,
-                                                   @RequestAttribute(value = WebPrincipal.ATTR, required = false)
-                                                   WebPrincipal principal) {
-        Optional<WebUser> u = user(principal);
+                                                   @RequestAttribute(value = Principal.ATTR, required = false)
+                                                   Principal principal) {
+        Optional<User> u = user(principal);
         if (u.isEmpty()) return Api.error(HttpStatus.UNAUTHORIZED, "Sign in first");
         List<String> disabled = strings(body, "disabled");
         if (disabled == null) return Api.error(HttpStatus.BAD_REQUEST, "'disabled' must be an array of strings");
@@ -224,11 +224,11 @@ public class MeController {
 
     @PostMapping("/skills")
     public ResponseEntity<Object> createSkill(@RequestBody(required = false) Map<String, Object> body,
-                                              @RequestAttribute(value = WebPrincipal.ATTR, required = false)
-                                              WebPrincipal principal) {
-        Optional<WebUser> found = user(principal);
+                                              @RequestAttribute(value = Principal.ATTR, required = false)
+                                              Principal principal) {
+        Optional<User> found = user(principal);
         if (found.isEmpty()) return Api.error(HttpStatus.UNAUTHORIZED, "Sign in first");
-        WebUser u = found.get();
+        User u = found.get();
         if (!canUseSkills(u)) return Api.error(HttpStatus.FORBIDDEN, "Skills are not available to your role");
         String name = Api.text(body, "name");
         if (!SkillRepository.validName(name)) {
@@ -246,11 +246,11 @@ public class MeController {
     @PutMapping("/skills/{name}")
     public ResponseEntity<Object> updateSkill(@PathVariable String name,
                                               @RequestBody(required = false) Map<String, Object> body,
-                                              @RequestAttribute(value = WebPrincipal.ATTR, required = false)
-                                              WebPrincipal principal) {
-        Optional<WebUser> found = user(principal);
+                                              @RequestAttribute(value = Principal.ATTR, required = false)
+                                              Principal principal) {
+        Optional<User> found = user(principal);
         if (found.isEmpty()) return Api.error(HttpStatus.UNAUTHORIZED, "Sign in first");
-        WebUser u = found.get();
+        User u = found.get();
         if (skills.findOwn(u.id(), name).isEmpty()) {
             return sharedNames().contains(name) ? Api.error(HttpStatus.FORBIDDEN, "Only your own skills can be edited")
                     : Api.error(HttpStatus.NOT_FOUND, "Unknown skill " + name);
@@ -271,11 +271,11 @@ public class MeController {
 
     @DeleteMapping("/skills/{name}")
     public ResponseEntity<Object> deleteSkill(@PathVariable String name,
-                                              @RequestAttribute(value = WebPrincipal.ATTR, required = false)
-                                              WebPrincipal principal) {
-        Optional<WebUser> found = user(principal);
+                                              @RequestAttribute(value = Principal.ATTR, required = false)
+                                              Principal principal) {
+        Optional<User> found = user(principal);
         if (found.isEmpty()) return Api.error(HttpStatus.UNAUTHORIZED, "Sign in first");
-        WebUser u = found.get();
+        User u = found.get();
         if (!skills.deleteOwn(u.id(), name)) {
             return sharedNames().contains(name) ? Api.error(HttpStatus.FORBIDDEN, "Only your own skills can be deleted")
                     : Api.error(HttpStatus.NOT_FOUND, "Unknown skill " + name);

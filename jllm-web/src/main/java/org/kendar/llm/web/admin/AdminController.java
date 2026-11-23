@@ -5,14 +5,14 @@ import org.kendar.llm.harness.skills.SkillCatalog;
 import org.kendar.llm.web.Api;
 import org.kendar.llm.web.auth.AuthController;
 import org.kendar.llm.web.auth.PasswordHasher;
-import org.kendar.llm.web.commons.users.LoginSessionRepository;
-import org.kendar.llm.web.commons.WebPrincipal;
+import org.kendar.llm.harness.identity.LoginSessionRepository;
+import org.kendar.llm.harness.identity.Principal;
 import org.kendar.llm.web.me.MeController;
 import org.kendar.llm.web.users.Permissions;
-import org.kendar.llm.web.commons.users.Role;
-import org.kendar.llm.web.commons.users.SkillRepository;
-import org.kendar.llm.web.commons.users.UserRepository;
-import org.kendar.llm.web.commons.users.WebUser;
+import org.kendar.llm.harness.identity.Role;
+import org.kendar.llm.harness.identity.SkillRepository;
+import org.kendar.llm.harness.identity.UserRepository;
+import org.kendar.llm.harness.identity.User;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -47,7 +47,7 @@ public class AdminController {
 
     // ---- users
 
-    private Map<String, Object> row(WebUser u) {
+    private Map<String, Object> row(User u) {
         Map<String, Object> m = new LinkedHashMap<>(AuthController.visible(u));
         m.put("ownSkills", skills.own(u.id()).size());
         m.put("disabledTools", u.disabledTools());
@@ -61,7 +61,7 @@ public class AdminController {
     }
 
     private long admins() {
-        return users.all().stream().filter(WebUser::admin).count();
+        return users.all().stream().filter(User::admin).count();
     }
 
     @GetMapping("/users")
@@ -94,17 +94,17 @@ public class AdminController {
 
     @PutMapping("/users/{id}")
     public ResponseEntity<Object> updateUser(@PathVariable String id, @RequestBody(required = false) Map<String, Object> body) {
-        Optional<WebUser> found = users.find(id);
+        Optional<User> found = users.find(id);
         if (found.isEmpty()) return Api.error(HttpStatus.NOT_FOUND, "Unknown user " + id);
         String name = Api.text(body, "name");
         String role = Api.text(body, "role");
         if (role != null) {
             if (permissions.role(role).isEmpty()) return Api.error(HttpStatus.BAD_REQUEST, "Unknown role " + role);
-            if (found.get().admin() && !WebUser.ADMIN_ROLE.equals(role) && admins() <= 1) {
+            if (found.get().admin() && !User.ADMIN_ROLE.equals(role) && admins() <= 1) {
                 return Api.error(HttpStatus.CONFLICT, "The last admin cannot lose the admin role");
             }
         }
-        WebUser updated = found.get();
+        User updated = found.get();
         if (body != null && body.containsKey("email")) {
             String email = Api.text(body, "email");
             if (emailTaken(email, id)) return Api.error(HttpStatus.CONFLICT, "Email " + email + " belongs to another user");
@@ -118,7 +118,7 @@ public class AdminController {
     /** Sets a new password, or resets to the default one when none is given; signs the user out everywhere. */
     @PostMapping("/users/{id}/password")
     public ResponseEntity<Object> setPassword(@PathVariable String id, @RequestBody(required = false) Map<String, Object> body) {
-        Optional<WebUser> target = users.find(id);
+        Optional<User> target = users.find(id);
         if (target.isEmpty()) return Api.error(HttpStatus.NOT_FOUND, "Unknown user " + id);
         if (target.get().passwordless()) {
             return Api.error(HttpStatus.CONFLICT, "This account signs in through the identity provider");
@@ -137,8 +137,8 @@ public class AdminController {
 
     @DeleteMapping("/users/{id}")
     public ResponseEntity<Object> deleteUser(@PathVariable String id,
-                                             @RequestAttribute(value = WebPrincipal.ATTR, required = false) WebPrincipal me) {
-        Optional<WebUser> found = users.find(id);
+                                             @RequestAttribute(value = Principal.ATTR, required = false) Principal me) {
+        Optional<User> found = users.find(id);
         if (found.isEmpty()) return Api.error(HttpStatus.NOT_FOUND, "Unknown user " + id);
         if (me != null && me.id().equals(id)) return Api.error(HttpStatus.CONFLICT, "You cannot delete your own account");
         if (found.get().admin() && admins() <= 1) return Api.error(HttpStatus.CONFLICT, "The last admin cannot be deleted");
@@ -151,7 +151,7 @@ public class AdminController {
 
     // ---- roles
 
-    private Map<String, Object> row(Role r, List<WebUser> all) {
+    private Map<String, Object> row(Role r, List<User> all) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("name", r.name());
         m.put("tools", r.tools());
@@ -167,14 +167,14 @@ public class AdminController {
 
     @GetMapping("/roles")
     public List<Map<String, Object>> roleList() {
-        List<WebUser> all = users.all();
+        List<User> all = users.all();
         return permissions.roles().stream().map(r -> row(r, all)).toList();
     }
 
     @PostMapping("/roles")
     public ResponseEntity<Object> createRole(@RequestBody(required = false) Map<String, Object> body) {
         String name = Api.text(body, "name");
-        if (WebUser.ADMIN_ROLE.equals(name)) return Api.error(HttpStatus.CONFLICT, "The admin role is fixed");
+        if (User.ADMIN_ROLE.equals(name)) return Api.error(HttpStatus.CONFLICT, "The admin role is fixed");
         if (!Permissions.validName(name)) return Api.error(HttpStatus.BAD_REQUEST, "Role: 1-64 of a-z, 0-9, '_' and '-'");
         if (permissions.role(name).isPresent()) return Api.error(HttpStatus.CONFLICT, "Role " + name + " exists");
         return saveRole(name, body, HttpStatus.CREATED);
@@ -182,7 +182,7 @@ public class AdminController {
 
     @PutMapping("/roles/{name}")
     public ResponseEntity<Object> updateRole(@PathVariable String name, @RequestBody(required = false) Map<String, Object> body) {
-        if (WebUser.ADMIN_ROLE.equals(name)) { // every tool stays; only the approval changes
+        if (User.ADMIN_ROLE.equals(name)) { // every tool stays; only the approval changes
             try {
                 return ResponseEntity.ok(row(permissions.save(Role.admin(Api.text(body, "approval"),
                         toolPermissions(body))), users.all()));
@@ -227,7 +227,7 @@ public class AdminController {
 
     @DeleteMapping("/roles/{name}")
     public ResponseEntity<Object> deleteRole(@PathVariable String name) {
-        if (WebUser.ADMIN_ROLE.equals(name)) return Api.error(HttpStatus.FORBIDDEN, "The admin role is fixed");
+        if (User.ADMIN_ROLE.equals(name)) return Api.error(HttpStatus.FORBIDDEN, "The admin role is fixed");
         if (permissions.role(name).isEmpty()) return Api.error(HttpStatus.NOT_FOUND, "Unknown role " + name);
         long holders = users.all().stream().filter(u -> name.equals(u.role())).count();
         if (holders > 0) return Api.error(HttpStatus.CONFLICT, "Role " + name + " is held by " + holders + " user(s)");

@@ -1,10 +1,12 @@
 package org.kendar.llm.web.commons.plugins;
 
+import org.kendar.llm.harness.plugin.WebPluginHost;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.servlet.http.HttpServletRequest;
 import org.kendar.llm.harness.plugin.WebRequest;
 import org.kendar.llm.harness.plugin.WebResponse;
-import org.kendar.llm.web.commons.WebPrincipal;
+import org.kendar.llm.harness.identity.Principal;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -33,7 +35,7 @@ public class WebPluginController {
     @RequestMapping("/api/plugins/{id}/**")
     public ResponseEntity<JsonNode> handle(@PathVariable String id, @RequestBody(required = false) JsonNode body,
                                            HttpServletRequest http) {
-        WebPrincipal user = (WebPrincipal) http.getAttribute(WebPrincipal.ATTR);
+        Principal user = (Principal) http.getAttribute(Principal.ATTR);
         if (user == null) return ResponseEntity.status(401).build();
         String prefix = http.getContextPath() + "/api/plugins/" + id;
         String path = http.getRequestURI().substring(prefix.length());
@@ -47,7 +49,7 @@ public class WebPluginController {
 
     @GetMapping("/api/plugins/{id}/events")
     public SseEmitter events(@PathVariable String id, HttpServletRequest http) {
-        WebPrincipal user = (WebPrincipal) http.getAttribute(WebPrincipal.ATTR);
+        Principal user = (Principal) http.getAttribute(Principal.ATTR);
         var events = host.events(id);
         if (user == null || events == null) {
             throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.NOT_FOUND);

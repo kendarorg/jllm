@@ -1,4 +1,4 @@
-package org.kendar.llm.web.commons.users;
+package org.kendar.llm.harness.identity;
 
 import java.util.List;
 import java.util.Map;
@@ -42,10 +42,10 @@ public interface UserRepository {
     }
 
     /** The user; empty for an invalid or unknown id, or an unreadable record (logged). */
-    Optional<WebUser> find(String id);
+    Optional<User> find(String id);
 
     /** Every readable user, by id. */
-    List<WebUser> all();
+    List<User> all();
 
     boolean exists(String id);
 
@@ -55,7 +55,7 @@ public interface UserRepository {
      * @throws IllegalArgumentException on an invalid id
      * @throws IllegalStateException    when the user exists
      */
-    WebUser create(String id, String name, String role, String passwordHash, String email);
+    User create(String id, String name, String role, String passwordHash, String email);
 
     /**
      * A user without a password, linked to an identity provider account.
@@ -64,37 +64,37 @@ public interface UserRepository {
      * @throws IllegalArgumentException on an invalid id
      * @throws IllegalStateException    when the user exists
      */
-    WebUser createExternal(String id, String name, String role, String email, String externalId);
+    User createExternal(String id, String name, String role, String email, String externalId);
 
     /** The user linked to the identity provider account {@code issuer}+{@code sub}. */
-    Optional<WebUser> findByExternal(String issuer, String sub);
+    Optional<User> findByExternal(String issuer, String sub);
 
     /** Users whose email equals {@code email}, ignoring case; empty for a blank address. */
-    List<WebUser> findByEmail(String email);
+    List<User> findByEmail(String email);
 
     /**
      * @param externalId null = unlink
      * @throws NoSuchElementException when the user does not exist
      */
-    WebUser setExternalId(String id, String externalId);
+    User setExternalId(String id, String externalId);
 
     /**
      * @param email null or blank = none
      * @throws NoSuchElementException when the user does not exist
      */
-    WebUser setEmail(String id, String email);
+    User setEmail(String id, String email);
 
     /** @throws NoSuchElementException when the user does not exist */
-    WebUser setName(String id, String name);
+    User setName(String id, String name);
 
     /** @throws NoSuchElementException when the user does not exist */
-    WebUser setRole(String id, String role);
+    User setRole(String id, String role);
 
     /**
      * @param passwordHash null = back to the default password
      * @throws NoSuchElementException when the user does not exist
      */
-    WebUser setPassword(String id, String passwordHash);
+    User setPassword(String id, String passwordHash);
 
     /**
      * Replaces the headers per call source ({@code mcp:<server>}, {@code api:<name>}).
@@ -102,13 +102,13 @@ public interface UserRepository {
      * @throws IllegalArgumentException on a value that is not an {@code env:NAME} reference
      * @throws NoSuchElementException   when the user does not exist
      */
-    WebUser setCredentials(String id, Map<String, Map<String, String>> credentials);
+    User setCredentials(String id, Map<String, Map<String, String>> credentials);
 
     /** @throws NoSuchElementException when the user does not exist */
-    WebUser setDisabledTools(String id, List<String> patterns);
+    User setDisabledTools(String id, List<String> patterns);
 
     /** @throws NoSuchElementException when the user does not exist */
-    WebUser setDisabledSkills(String id, List<String> names);
+    User setDisabledSkills(String id, List<String> names);
 
     /** @return whether the user existed */
     boolean delete(String id);

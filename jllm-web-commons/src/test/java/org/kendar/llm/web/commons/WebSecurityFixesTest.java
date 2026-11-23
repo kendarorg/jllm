@@ -1,5 +1,7 @@
 package org.kendar.llm.web.commons;
 
+import org.kendar.llm.harness.identity.Principal;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -65,7 +67,7 @@ class WebSecurityFixesTest {
 
     private String create(TestUser user) throws Exception {
         String body = chats.perform(post("/api/chat").contentType(MediaType.APPLICATION_JSON).content("{}")
-                .requestAttr(WebPrincipal.ATTR, user)).andExpect(status().isOk()).andReturn().getResponse()
+                .requestAttr(Principal.ATTR, user)).andExpect(status().isOk()).andReturn().getResponse()
                 .getContentAsString();
         return mapper.readTree(body).path("chatId").asText();
     }
@@ -73,7 +75,7 @@ class WebSecurityFixesTest {
     private JsonNode send(String chat, TestUser user, String text) throws Exception {
         return mapper.readTree(chats.perform(post("/api/chat/" + chat + "/messages")
                 .contentType(MediaType.APPLICATION_JSON).content(mapper.writeValueAsString(Map.of("text", text)))
-                .requestAttr(WebPrincipal.ATTR, user)).andReturn().getResponse().getContentAsString());
+                .requestAttr(Principal.ATTR, user)).andReturn().getResponse().getContentAsString());
     }
 
     @Test
@@ -97,7 +99,7 @@ class WebSecurityFixesTest {
 
     @Test
     void commandListHidesWhatTheUserCannotRun() throws Exception {
-        JsonNode cmds = mapper.readTree(chats.perform(get("/api/chat/commands").requestAttr(WebPrincipal.ATTR, ALICE))
+        JsonNode cmds = mapper.readTree(chats.perform(get("/api/chat/commands").requestAttr(Principal.ATTR, ALICE))
                 .andReturn().getResponse().getContentAsString());
         for (JsonNode c : cmds) {
             assertFalse(Set.of("/new", "/model").contains(c.path("name").asText()), c.toString());

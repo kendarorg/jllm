@@ -288,7 +288,7 @@ roles and skills, plugged in through the common module's `WebAuthentication`, `C
 | `me.MeController` | `/api/me/password`, `/api/me/tools`, `/api/me/skills*` |
 | `admin.AdminController`, `admin.AdminInterceptor`, `admin.AdminWebConfig` | `/api/admin/**`, admins only |
 | `admin.ToolCatalogView` | tools, MCP servers and REST APIs of the harness, for a role or a user |
-| `users.FileUserRepository` | `webauth/users/<id>.json` (a `UserRepository`, interface and `WebUser` in jllm-web-commons) |
+| `users.FileUserRepository` | `webauth/users/<id>.json` (a `UserRepository`, interface and `User` in jllm-web-commons) |
 | `users.FileRoleRepository` | `webauth/permissions/<role>.json` (a `RoleRepository`; `Role` in jllm-web-commons) |
 | `users.Permissions` | the fixed `admin` role over the stored ones; each user's `UserPolicy` (role narrowed by the user, with their skills) |
 | `users.FileSkillRepository` | `webauth/global-skills/` and `webauth/user-skills/<id>/` (a `SkillRepository`) |
@@ -311,7 +311,7 @@ Not implemented. The interfaces are in place, so whoever wants it can add it wit
 harness. A short list:
 
 - [ ] A module or package with `JdbcUserRepository`, `JdbcRoleRepository`, `JdbcSkillRepository`,
-      `JdbcLoginSessionRepository` (interfaces in jllm-web-commons `org.kendar.llm.web.commons.users`), wired when
+      `JdbcLoginSessionRepository` (interfaces in jllm-harness `org.kendar.llm.harness.identity`), wired when
       `jllm.store=mysql` (the file and in-memory beans are already `@ConditionalOnProperty(jllm.store=file)`);
       `spring-boot-starter-jdbc`, the MySQL driver, Flyway for the schema.
 - [ ] Tables, roughly: `roles(name, read_only, approval)` + `role_tools(role, pattern, ord)`;

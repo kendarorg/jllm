@@ -1,5 +1,7 @@
 package org.kendar.llm.web.commons;
 
+import org.kendar.llm.harness.identity.Principal;
+
 import jakarta.annotation.PostConstruct;
 import jakarta.servlet.http.HttpServletRequest;
 import org.kendar.llm.harness.AgentHarness;
@@ -107,8 +109,8 @@ public class OAuthController {
     public ResponseEntity<Object> start(@PathVariable String source,
                                         @RequestParam(value = "chatId", required = false) String chatId,
                                         @RequestParam(value = "shared", required = false) Boolean shared,
-                                        @RequestAttribute(value = WebPrincipal.ATTR, required = false)
-                                        WebPrincipal user) {
+                                        @RequestAttribute(value = Principal.ATTR, required = false)
+                                        Principal user) {
         if (user == null) return error(HttpStatus.UNAUTHORIZED, "Sign in first");
         String key;
         try {
@@ -126,7 +128,7 @@ public class OAuthController {
     }
 
     /** The store key of the user's login: their id for a per-user source; the shared login only for the admin. */
-    private String keyFor(WebPrincipal user, String source, boolean shared) {
+    private String keyFor(Principal user, String source, boolean shared) {
         if (!shared && harness.auth().oauth().perUser(source)) return user.id();
         if (!user.admin()) {
             throw new IllegalArgumentException(source + " has one login shared by every user: only the "
@@ -261,8 +263,8 @@ public class OAuthController {
         purge();
         Pending p = state == null ? null : pending.remove(state); // single use
         if (p == null) return page(HttpStatus.BAD_REQUEST, "This login link is unknown, already used or expired.");
-        Optional<WebPrincipal> user = authentication.current(request);
-        String who = user.map(WebPrincipal::id).orElse(null);
+        Optional<Principal> user = authentication.current(request);
+        String who = user.map(Principal::id).orElse(null);
         if (p.userId() != null && !p.userId().equals(who)) {
             p.code().completeExceptionally(new OAuthException("access_denied", "callback from another user"));
             return page(HttpStatus.FORBIDDEN, "This login was started by another user. Sign in as that user and"
@@ -302,7 +304,7 @@ public class OAuthController {
 
     /** The OAuth sources this user can see, with their own state. Never a token. */
     @GetMapping("/api/oauth")
-    public ResponseEntity<Object> list(@RequestAttribute(value = WebPrincipal.ATTR, required = false) WebPrincipal user) {
+    public ResponseEntity<Object> list(@RequestAttribute(value = Principal.ATTR, required = false) Principal user) {
         if (user == null) return error(HttpStatus.UNAUTHORIZED, "Sign in first");
         List<Map<String, Object>> out = new ArrayList<>();
         for (String source : harness.auth().oauth().names()) {
@@ -329,8 +331,8 @@ public class OAuthController {
     @DeleteMapping("/api/oauth/{source}")
     public ResponseEntity<Object> logout(@PathVariable String source,
                                          @RequestParam(value = "shared", required = false) Boolean shared,
-                                         @RequestAttribute(value = WebPrincipal.ATTR, required = false)
-                                         WebPrincipal user) {
+                                         @RequestAttribute(value = Principal.ATTR, required = false)
+                                         Principal user) {
         if (user == null) return error(HttpStatus.UNAUTHORIZED, "Sign in first");
         String key;
         try {

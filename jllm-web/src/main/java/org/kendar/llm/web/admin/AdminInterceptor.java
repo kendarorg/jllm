@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.kendar.llm.web.commons.WebAuthentication;
-import org.kendar.llm.web.commons.WebPrincipal;
+import org.kendar.llm.harness.identity.Principal;
 import org.springframework.web.servlet.HandlerInterceptor;
 
 import java.io.IOException;
@@ -28,10 +28,10 @@ public class AdminInterceptor implements HandlerInterceptor {
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler)
             throws IOException {
-        Optional<WebPrincipal> user = authentication.current(request);
+        Optional<Principal> user = authentication.current(request);
         if (user.isEmpty()) return reject(response, 401, "Sign in first");
         if (!user.get().admin()) return reject(response, 403, "Admins only");
-        request.setAttribute(WebPrincipal.ATTR, user.get());
+        request.setAttribute(Principal.ATTR, user.get());
         return true;
     }
 

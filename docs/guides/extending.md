@@ -48,7 +48,7 @@ repository; JDK 21).
 | `jllm-webbrowse` | web search and fetch tools | only with the tools and no harness |
 | `jllm-apimcp` | REST API and MCP tool providers | only with the tools and no harness |
 | `jllm-test-support` | `HarnessTestSupport`: `ScriptedModel`, `Rig`, `Events` ([12](#12-testing)) | tests (scope `test`) |
-| `jllm-web-commons` | Spring Boot REST + SSE chat and file API, storage interfaces ([13](#13-web-storage)) | building a web front end with its own sign-in and storage |
+| `jllm-web-commons` | Spring Boot REST + SSE chat and file API; its storage interfaces are in jllm-harness ([13](#13-web-storage)) | building a web front end with its own sign-in and storage |
 | `jllm-web` | the reference web application (file stores, cookie sign-in, admin) | running it, or as an example |
 
 A plugin jar (loaded from the plugin directory by the CLI and the web app):
@@ -622,8 +622,8 @@ controllers and the harness depend only on the interfaces.
 
 ```mermaid
 flowchart LR
-    subgraph WC["jllm-web-commons: org.kendar.llm.web.commons.users"]
-        UR["UserRepository / WebUser"]
+    subgraph WC["jllm-harness: org.kendar.llm.harness.identity"]
+        UR["UserRepository / User"]
         RR["RoleRepository / Role"]
         SR["SkillRepository"]
         LS["LoginSessionRepository"]
@@ -647,10 +647,10 @@ flowchart LR
 
 | Interface | Module, package | Default (jllm-web) | Holds |
 |---|---|---|---|
-| `UserRepository` | jllm-web-commons, `...web.commons.users` | `FileUserRepository`: `webauth/users/<id>.json` | `WebUser`: id, name, role, password hash, per-source credential headers (`env:NAME` only), disabled tools and skills |
-| `RoleRepository` | jllm-web-commons, `...web.commons.users` | `FileRoleRepository`: `webauth/permissions/<role>.json` | `Role`: tool patterns, read-only, approval `ask`/`off`; the fixed `admin` role is never stored |
-| `SkillRepository` | jllm-web-commons, `...web.commons.users` | `FileSkillRepository`: `webauth/global-skills/`, `webauth/user-skills/<id>/` | global and per-user skills (name, description, content) |
-| `LoginSessionRepository` | jllm-web-commons, `...web.commons.users` | `InMemoryLoginSessionRepository` (a restart signs everybody out) | cookie token → user id, sliding `TTL` of 7 days |
+| `UserRepository` | jllm-harness, `...harness.identity` | `FileUserRepository`: `webauth/users/<id>.json` | `User`: id, name, role, password hash, per-source credential headers (`env:NAME` only), disabled tools and skills |
+| `RoleRepository` | jllm-harness, `...harness.identity` | `FileRoleRepository`: `webauth/permissions/<role>.json` | `Role`: tool patterns, read-only, approval `ask`/`off`; the fixed `admin` role is never stored |
+| `SkillRepository` | jllm-harness, `...harness.identity` | `FileSkillRepository`: `webauth/global-skills/`, `webauth/user-skills/<id>/` | global and per-user skills (name, description, content) |
+| `LoginSessionRepository` | jllm-harness, `...harness.identity` | `InMemoryLoginSessionRepository` (a restart signs everybody out) | cookie token → user id, sliding `TTL` of 7 days |
 | `SettingsSource` | jllm-harness, `...harness.settings` | `FileSettingsSource`: `~/.jllm/settings.json`, `<project>/.jllm/settings.json`, `--settings`/`jllm.settings` | `SettingsLayer`s, `GLOBAL` → `PROJECT` → `EXPLICIT`, a later layer wins |
 | `ProjectMcpTrust` | jllm-harness, `...harness.settings` | `FileProjectMcpTrust.user()`: `~/.jllm/trusted-mcp.json` | trust answers for project MCP servers, tied to a SHA-256 of the definition |
 | `TokenStore` | jllm-harness, `...harness.auth` | `FileTokenStore` from the `tokenStore` settings | OAuth tokens per principal ([8](#token-stores)) |
@@ -659,16 +659,16 @@ flowchart LR
 
 ```java
 public interface UserRepository {
-    Optional<WebUser> find(String id);
-    List<WebUser> all();
+    Optional<User> find(String id);
+    List<User> all();
     boolean exists(String id);
-    WebUser create(String id, String name, String role, String passwordHash); // IllegalStateException if it exists
-    WebUser setName(String id, String name);                                   // setters: NoSuchElementException if unknown
-    WebUser setRole(String id, String role);
-    WebUser setPassword(String id, String passwordHash);                       // null = default password
-    WebUser setCredentials(String id, Map<String, Map<String, String>> credentials);
-    WebUser setDisabledTools(String id, List<String> patterns);
-    WebUser setDisabledSkills(String id, List<String> names);
+    User create(String id, String name, String role, String passwordHash); // IllegalStateException if it exists
+    User setName(String id, String name);                                   // setters: NoSuchElementException if unknown
+    User setRole(String id, String role);
+    User setPassword(String id, String passwordHash);                       // null = default password
+    User setCredentials(String id, Map<String, Map<String, String>> credentials);
+    User setDisabledTools(String id, List<String> patterns);
+    User setDisabledSkills(String id, List<String> names);
     boolean delete(String id);
 }
 

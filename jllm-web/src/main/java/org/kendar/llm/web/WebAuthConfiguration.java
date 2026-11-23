@@ -15,12 +15,12 @@ import org.kendar.llm.web.commons.JllmProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.kendar.llm.web.auth.LoginThrottle;
 import org.kendar.llm.web.auth.InMemoryLoginSessionRepository;
-import org.kendar.llm.web.commons.users.LoginSessionRepository;
-import org.kendar.llm.web.commons.HarnessIdentity;
-import org.kendar.llm.web.commons.users.RoleRepository;
-import org.kendar.llm.web.commons.users.SkillRepository;
-import org.kendar.llm.web.commons.users.UserRepository;
-import org.kendar.llm.web.commons.users.WebUser;
+import org.kendar.llm.harness.identity.LoginSessionRepository;
+import org.kendar.llm.harness.identity.HarnessIdentity;
+import org.kendar.llm.harness.identity.RoleRepository;
+import org.kendar.llm.harness.identity.SkillRepository;
+import org.kendar.llm.harness.identity.UserRepository;
+import org.kendar.llm.harness.identity.User;
 import org.kendar.llm.web.users.FileRoleRepository;
 import org.kendar.llm.web.users.FileSkillRepository;
 import org.kendar.llm.web.users.FileUserRepository;
@@ -141,7 +141,7 @@ public class WebAuthConfiguration {
         TokenStore tokenStore = tokenStoreBean.getIfAvailable();
         CredentialResolver credentials = new UserCredentialResolver(users);
         UserPolicyResolver policies = permissions.resolver(users, skills);
-        Function<String, HarnessPrincipal> principals = id -> users.find(id).map(WebUser::principal).orElse(null);
+        Function<String, HarnessPrincipal> principals = id -> users.find(id).map(User::principal).orElse(null);
         return new HarnessIdentity() {
             @Override
             public CredentialResolver credentials() {

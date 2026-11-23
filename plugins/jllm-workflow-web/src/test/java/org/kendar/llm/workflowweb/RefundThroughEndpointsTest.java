@@ -12,7 +12,7 @@ import org.kendar.llm.harness.plugin.PluginStorages;
 import org.kendar.llm.harness.plugin.ServiceRegistry;
 import org.kendar.llm.harness.tools.DocumentReader;
 import org.kendar.llm.harness.tools.HarnessTool;
-import org.kendar.llm.web.commons.plugins.WebPluginHost;
+import org.kendar.llm.harness.plugin.WebPluginHost;
 import org.kendar.llm.workflows.WorkflowsPlugin;
 import org.kendar.llm.harness.plugin.WebRequest;
 import org.kendar.llm.harness.plugin.WebResponse;

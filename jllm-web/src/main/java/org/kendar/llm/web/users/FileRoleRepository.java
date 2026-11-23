@@ -1,8 +1,8 @@
 package org.kendar.llm.web.users;
 
-import org.kendar.llm.web.commons.users.WebUser;
-import org.kendar.llm.web.commons.users.Role;
-import org.kendar.llm.web.commons.users.RoleRepository;
+import org.kendar.llm.harness.identity.User;
+import org.kendar.llm.harness.identity.Role;
+import org.kendar.llm.harness.identity.RoleRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;

@@ -1,5 +1,8 @@
 package org.kendar.llm.web.commons;
 
+import org.kendar.llm.harness.identity.ChatAccess;
+import org.kendar.llm.harness.identity.HarnessIdentity;
+
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -24,17 +27,17 @@ public class JllmWebCommonsAutoConfiguration {
 
     /** Loads the web plugins listed and enabled in the harness settings' {@code plugins} section (properties win); after the harness, whose plugins they may need. */
     @Bean(destroyMethod = "close")
-    public org.kendar.llm.web.commons.plugins.WebPluginHost webPluginHost(
+    public org.kendar.llm.harness.plugin.WebPluginHost webPluginHost(
             org.kendar.llm.harness.AgentHarness harness, JllmProperties p) {
         var storages = harness.services().lookup(org.kendar.llm.harness.plugin.PluginStorages.class).orElseThrow();
-        var listed = harness.services().lookup(org.kendar.llm.web.commons.plugins.PluginsSettings.class)
-                .map(org.kendar.llm.web.commons.plugins.PluginsSettings::plugins).orElse(null);
-        var host = new org.kendar.llm.web.commons.plugins.WebPluginHost(harness.services(), storages, listed);
+        var listed = harness.services().lookup(org.kendar.llm.harness.plugin.PluginsSettings.class)
+                .map(org.kendar.llm.harness.plugin.PluginsSettings::plugins).orElse(null);
+        var host = new org.kendar.llm.harness.plugin.WebPluginHost(harness.services(), storages, listed);
         String dir = JllmProperties.blankToNull(p.pluginDir());
         java.nio.file.Path pluginDir = dir != null ? java.nio.file.Path.of(dir)
                 : java.nio.file.Files.isDirectory(java.nio.file.Path.of("plugins")) ? java.nio.file.Path.of("plugins") : null;
-        host.load(org.kendar.llm.web.commons.plugins.WebPluginHost.discover(pluginDir));
-        host.warnings().forEach(w -> org.slf4j.LoggerFactory.getLogger(org.kendar.llm.web.commons.plugins.WebPluginHost.class).warn(w));
+        host.load(org.kendar.llm.harness.plugin.WebPluginHost.discover(pluginDir));
+        host.warnings().forEach(w -> org.slf4j.LoggerFactory.getLogger(org.kendar.llm.harness.plugin.WebPluginHost.class).warn(w));
         return host;
     }
 

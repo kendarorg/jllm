@@ -1,14 +1,14 @@
 package org.kendar.llm.web.auth;
 
-import org.kendar.llm.web.commons.users.LoginSessionRepository;
+import org.kendar.llm.harness.identity.LoginSessionRepository;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import org.kendar.llm.harness.session.ChatSessionData;
-import org.kendar.llm.web.commons.ChatAccess;
+import org.kendar.llm.harness.identity.ChatAccess;
 import org.kendar.llm.web.commons.WebAuthentication;
-import org.kendar.llm.web.commons.WebPrincipal;
-import org.kendar.llm.web.commons.users.UserRepository;
-import org.kendar.llm.web.commons.users.WebUser;
+import org.kendar.llm.harness.identity.Principal;
+import org.kendar.llm.harness.identity.UserRepository;
+import org.kendar.llm.harness.identity.User;
 
 import java.util.Optional;
 import java.util.Set;
@@ -44,13 +44,13 @@ public class CookieAuthentication implements WebAuthentication, ChatAccess {
     }
 
     /** The user of the request's live session, if it is a known user. */
-    public Optional<WebUser> signedIn(HttpServletRequest request) {
+    public Optional<User> signedIn(HttpServletRequest request) {
         return token(request).flatMap(sessions::find).flatMap(users::find);
     }
 
     @Override
-    public Optional<WebPrincipal> current(HttpServletRequest request) {
-        return signedIn(request).map(WebPrincipal.class::cast);
+    public Optional<Principal> current(HttpServletRequest request) {
+        return signedIn(request).map(Principal.class::cast);
     }
 
     @Override
@@ -63,7 +63,7 @@ public class CookieAuthentication implements WebAuthentication, ChatAccess {
      * visible to anyone: every chat of this sample is created with one.
      */
     @Override
-    public boolean canSee(WebPrincipal user, ChatSessionData chat) {
+    public boolean canSee(Principal user, ChatSessionData chat) {
         String owner = chat.principal();
         if (owner == null) return false;
         return user.admin() || owner.equals(user.id());

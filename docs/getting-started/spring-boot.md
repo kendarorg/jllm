@@ -34,14 +34,14 @@ Supply them as beans; they replace the defaults (`@ConditionalOnMissingBean`).
 @Bean
 WebAuthentication webAuthentication() {
     return new WebAuthentication() {
-        public Optional<WebPrincipal> current(HttpServletRequest req) {
+        public Optional<Principal> current(HttpServletRequest req) {
             // bridge from Spring Security
             var auth = SecurityContextHolder.getContext().getAuthentication();
             if (auth == null || !auth.isAuthenticated() || auth instanceof AnonymousAuthenticationToken) {
                 return Optional.empty();
             }
             boolean admin = auth.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_ADMIN"));
-            return Optional.of(new WebPrincipal() {
+            return Optional.of(new Principal() {
                 public String id() { return auth.getName(); }
                 public boolean admin() { return admin; }
             });

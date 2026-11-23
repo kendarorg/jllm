@@ -1,4 +1,4 @@
-package org.kendar.llm.web.commons.plugins;
+package org.kendar.llm.harness.plugin;
 
 import com.fasterxml.jackson.databind.JsonNode;
 

@@ -1,4 +1,4 @@
-package org.kendar.llm.web.commons;
+package org.kendar.llm.harness.fs;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -7,8 +7,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.kendar.llm.harness.sandbox.FileBackend;
 import org.kendar.llm.harness.sandbox.SandboxUnavailableException;
-import org.springframework.http.HttpStatus;
-import org.springframework.web.server.ResponseStatusException;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -120,9 +118,9 @@ class RemoteFsTest {
         fs = new RemoteFs(mem, "workspace");
     }
 
-    private static void status(HttpStatus expected, Executable call) {
-        var e = assertThrows(ResponseStatusException.class, call);
-        assertEquals(expected, HttpStatus.valueOf(e.getStatusCode().value()));
+    private static void status(int expected, Executable call) {
+        var e = assertThrows(FsException.class, call);
+        assertEquals(expected, e.status());
     }
 
     // ── root and paths ────────────────────────────────────────────────────────
@@ -131,21 +129,21 @@ class RemoteFsTest {
     void rootNameIsValidated() {
         assertDoesNotThrow(() -> new RemoteFs(mem, null));
         assertDoesNotThrow(() -> new RemoteFs(mem, "scratch"));
-        status(HttpStatus.BAD_REQUEST, () -> new RemoteFs(mem, "other"));
+        status(400, () -> new RemoteFs(mem, "other"));
     }
 
     @Test
     void pathsOutsideTheRootAreRejected() {
-        status(HttpStatus.BAD_REQUEST, () -> fs.read("../etc/passwd"));
-        status(HttpStatus.BAD_REQUEST, () -> fs.read("a/../../x"));
-        status(HttpStatus.BAD_REQUEST, () -> fs.read("/etc/passwd"));
-        status(HttpStatus.BAD_REQUEST, () -> fs.read("..\\x"));
+        status(400, () -> fs.read("../etc/passwd"));
+        status(400, () -> fs.read("a/../../x"));
+        status(400, () -> fs.read("/etc/passwd"));
+        status(400, () -> fs.read("..\\x"));
     }
 
     @Test
     void hiddenDirectoryIsNotFoundInTheWorkspaceOnly() {
-        status(HttpStatus.NOT_FOUND, () -> fs.read(".jllm/secret"));
-        status(HttpStatus.NOT_FOUND, () -> fs.read("x/.JLLM/y"));
+        status(404, () -> fs.read(".jllm/secret"));
+        status(404, () -> fs.read("x/.JLLM/y"));
         mem.files.put(".jllm/secret", "s".getBytes(StandardCharsets.UTF_8));
         assertEquals("s", new RemoteFs(mem, "scratch").read(".jllm/secret").get("content"));
     }
@@ -183,13 +181,13 @@ class RemoteFsTest {
 
     @Test
     void listOfAFileOrMissingDirectoryFails() {
-        status(HttpStatus.NOT_FOUND, () -> fs.list("a.txt"));
+        status(404, () -> fs.list("a.txt"));
     }
 
     @Test
     void globRequiresPatternAndHidesHarnessFiles() {
-        status(HttpStatus.BAD_REQUEST, () -> fs.glob(" "));
-        status(HttpStatus.BAD_REQUEST, () -> fs.glob(null));
+        status(400, () -> fs.glob(" "));
+        status(400, () -> fs.glob(null));
         assertEquals(List.of("B.txt", "a.txt", "src/main/X.java"), fs.glob("**/*"));
     }
 
@@ -204,21 +202,21 @@ class RemoteFsTest {
 
     @Test
     void readRejectsDirectoriesBinaryAndLargeFiles() {
-        status(HttpStatus.NOT_FOUND, () -> fs.read("src"));
-        status(HttpStatus.NOT_FOUND, () -> fs.read("missing.txt"));
+        status(404, () -> fs.read("src"));
+        status(404, () -> fs.read("missing.txt"));
         mem.files.put("bin", new byte[]{1, 0, 2});
-        status(HttpStatus.UNSUPPORTED_MEDIA_TYPE, () -> fs.read("bin"));
+        status(415, () -> fs.read("bin"));
         mem.files.put("big", new byte[(int) RemoteFs.MAX_TEXT_BYTES + 1]);
-        status(HttpStatus.PAYLOAD_TOO_LARGE, () -> fs.read("big"));
+        status(413, () -> fs.read("big"));
     }
 
     @Test
     void writeReplacesExistingFilesOnly() {
         fs.write("a.txt", "new");
         assertEquals("new", new String(mem.files.get("a.txt"), StandardCharsets.UTF_8));
-        status(HttpStatus.NOT_FOUND, () -> fs.write("nope.txt", "x"));
-        status(HttpStatus.BAD_REQUEST, () -> fs.write("src", "x"));
-        status(HttpStatus.BAD_REQUEST, () -> fs.write("", "x"));
+        status(404, () -> fs.write("nope.txt", "x"));
+        status(400, () -> fs.write("src", "x"));
+        status(400, () -> fs.write("", "x"));
     }
 
     @Test
@@ -231,20 +229,20 @@ class RemoteFsTest {
 
     @Test
     void createValidatesParentNameAndConflicts() {
-        status(HttpStatus.NOT_FOUND, () -> fs.create("a.txt", "n", false, ""));
-        status(HttpStatus.CONFLICT, () -> fs.create("", "a.txt", false, ""));
+        status(404, () -> fs.create("a.txt", "n", false, ""));
+        status(409, () -> fs.create("", "a.txt", false, ""));
         for (String bad : new String[]{"", " ", "a/b", "a\\b", ".", "..", ".jllm", ".JLLM"}) {
-            status(HttpStatus.BAD_REQUEST, () -> fs.create("", bad, false, ""));
+            status(400, () -> fs.create("", bad, false, ""));
         }
-        status(HttpStatus.BAD_REQUEST, () -> fs.create("", null, false, ""));
+        status(400, () -> fs.create("", null, false, ""));
     }
 
     @Test
     void uploadHonorsOverwrite() {
-        status(HttpStatus.CONFLICT, () -> fs.upload("", "a.txt", "z".getBytes(), false));
+        status(409, () -> fs.upload("", "a.txt", "z".getBytes(), false));
         assertEquals("a.txt", fs.upload("", "a.txt", "z".getBytes(), true));
         assertEquals("z", new String(mem.files.get("a.txt"), StandardCharsets.UTF_8));
-        status(HttpStatus.NOT_FOUND, () -> fs.upload("a.txt", "n", "z".getBytes(), false));
+        status(404, () -> fs.upload("a.txt", "n", "z".getBytes(), false));
     }
 
     // ── rename / delete ───────────────────────────────────────────────────────
@@ -258,16 +256,16 @@ class RemoteFsTest {
 
     @Test
     void renameErrors() {
-        status(HttpStatus.BAD_REQUEST, () -> fs.rename("", "x"));
-        status(HttpStatus.NOT_FOUND, () -> fs.rename("missing", "x"));
-        status(HttpStatus.CONFLICT, () -> fs.rename("a.txt", "B.txt"));
-        status(HttpStatus.BAD_REQUEST, () -> fs.rename("a.txt", "x/y"));
+        status(400, () -> fs.rename("", "x"));
+        status(404, () -> fs.rename("missing", "x"));
+        status(409, () -> fs.rename("a.txt", "B.txt"));
+        status(400, () -> fs.rename("a.txt", "x/y"));
     }
 
     @Test
     void deleteErrorsAndSuccess() {
-        status(HttpStatus.BAD_REQUEST, () -> fs.delete(""));
-        status(HttpStatus.NOT_FOUND, () -> fs.delete("missing"));
+        status(400, () -> fs.delete(""));
+        status(404, () -> fs.delete("missing"));
         fs.delete("a.txt");
         assertFalse(mem.files.containsKey("a.txt"));
     }
@@ -277,16 +275,16 @@ class RemoteFsTest {
     @Test
     void backendFailuresBecomeHttpStatuses() {
         mem.failure = new SandboxUnavailableException("daemon down");
-        status(HttpStatus.SERVICE_UNAVAILABLE, () -> fs.read("a.txt"));
+        status(503, () -> fs.read("a.txt"));
         mem.failure = new IllegalArgumentException("bad");
-        status(HttpStatus.BAD_REQUEST, () -> fs.read("a.txt"));
+        status(400, () -> fs.read("a.txt"));
         mem.failure = null;
         mem.ioFailure = new IOException("pipe");
-        var e = assertThrows(ResponseStatusException.class, () -> fs.read("a.txt"));
-        assertEquals(HttpStatus.BAD_GATEWAY.value(), e.getStatusCode().value());
-        assertTrue(e.getReason().contains("pipe"));
+        var e = assertThrows(FsException.class, () -> fs.read("a.txt"));
+        assertEquals(502, e.status());
+        assertTrue(e.getMessage().contains("pipe"));
         mem.ioFailure = new NoSuchFileException("a.txt");
-        status(HttpStatus.NOT_FOUND, () -> fs.read("a.txt"));
+        status(404, () -> fs.read("a.txt"));
     }
 
     // ── download ──────────────────────────────────────────────────────────────

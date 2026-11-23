@@ -1,10 +1,10 @@
 package org.kendar.llm.web.auth;
 
-import org.kendar.llm.web.commons.users.LoginSessionRepository;
+import org.kendar.llm.harness.identity.LoginSessionRepository;
 import jakarta.servlet.http.HttpServletRequest;
 import org.kendar.llm.web.Api;
-import org.kendar.llm.web.commons.users.UserRepository;
-import org.kendar.llm.web.commons.users.WebUser;
+import org.kendar.llm.harness.identity.UserRepository;
+import org.kendar.llm.harness.identity.User;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
@@ -56,7 +56,7 @@ public class AuthController {
         if (locked > 0) {
             return Api.error(HttpStatus.TOO_MANY_REQUESTS, "Too many failed sign-ins; retry in " + locked + " s");
         }
-        Optional<WebUser> user = users.find(id);
+        Optional<User> user = users.find(id);
         boolean ok;
         if (user.isPresent()) {
             if (user.get().passwordless()) {
@@ -94,7 +94,7 @@ public class AuthController {
     }
 
     /** What the page may show: no credentials, no password hash. */
-    public static Map<String, Object> visible(WebUser u) {
+    public static Map<String, Object> visible(User u) {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("id", u.id());
         out.put("name", u.name() == null ? u.id() : u.name());

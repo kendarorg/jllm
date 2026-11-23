@@ -1,6 +1,8 @@
 package org.kendar.llm.web.commons;
 
 import org.kendar.llm.harness.AgentHarness;
+import org.kendar.llm.harness.fs.FsException;
+import org.kendar.llm.harness.fs.RemoteFs;
 import org.kendar.llm.harness.sandbox.FileBackend;
 import org.kendar.llm.harness.tools.AtomicFiles;
 import org.kendar.llm.harness.tools.ExternalLinks;
@@ -394,6 +396,13 @@ public class FilesController {
         if (v == null || v.isBlank()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, key + " is required");
         return v;
     }
+
+    /** A failure of the docker file explorer, answered with the status it carries. */
+    @ExceptionHandler(FsException.class)
+    public void remoteFailure(FsException e, jakarta.servlet.http.HttpServletResponse response) throws IOException {
+        response.sendError(e.status(), e.getMessage());
+    }
+
 
     /** A link or path leaving the project, found while the jail did the I/O (also when swapped in meanwhile). */
     @ExceptionHandler(IllegalArgumentException.class)

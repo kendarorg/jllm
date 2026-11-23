@@ -1,5 +1,8 @@
 package org.kendar.llm.web.commons;
 
+import org.kendar.llm.harness.identity.Principal;
+import org.kendar.llm.harness.identity.ChatAccess;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -15,7 +18,7 @@ import java.util.regex.Pattern;
 
 /**
  * Every {@code /api/**} call except the open ones needs a signed-in user (401 otherwise), stored as
- * {@link WebPrincipal#ATTR}. A chat the user may not see answers 404, as if it did not exist.
+ * {@link Principal#ATTR}. A chat the user may not see answers 404, as if it did not exist.
  */
 public class ApiInterceptor implements HandlerInterceptor {
 
@@ -41,11 +44,11 @@ public class ApiInterceptor implements HandlerInterceptor {
             throws IOException {
         String path = request.getRequestURI();
         if (!path.startsWith("/api/") || OPEN.contains(path) || authentication.openPaths().contains(path)) return true;
-        Optional<WebPrincipal> user = authentication.current(request);
+        Optional<Principal> user = authentication.current(request);
         if (user.isEmpty()) {
             return reject(response, 401, "Sign in first");
         }
-        request.setAttribute(WebPrincipal.ATTR, user.get());
+        request.setAttribute(Principal.ATTR, user.get());
         Matcher m = CHAT.matcher(path);
         if (m.find() && !canSee(user.get(), m.group(1))) {
             return reject(response, 404, "Unknown chat " + m.group(1));
@@ -53,7 +56,7 @@ public class ApiInterceptor implements HandlerInterceptor {
         return true;
     }
 
-    private boolean canSee(WebPrincipal user, String chatId) {
+    private boolean canSee(Principal user, String chatId) {
         return sessions.find(chatId).map(chat -> access.canSee(user, chat)).orElse(false);
     }
 

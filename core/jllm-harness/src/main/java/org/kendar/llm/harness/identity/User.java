@@ -1,7 +1,6 @@
-package org.kendar.llm.web.commons.users;
+package org.kendar.llm.harness.identity;
 
 import org.kendar.llm.harness.auth.HarnessPrincipal;
-import org.kendar.llm.web.commons.WebPrincipal;
 
 import java.util.List;
 import java.util.Map;
@@ -20,13 +19,13 @@ import java.util.Set;
  * @param externalId     {@code <issuer>#<sub>} of the identity provider account linked to the user; null = none
  * @param email          optional address, used to link a pre-created user to an identity provider account
  */
-public record WebUser(String id, String name, String role, Map<String, Map<String, String>> credentials,
+public record User(String id, String name, String role, Map<String, Map<String, String>> credentials,
                       String password, List<String> disabledTools, List<String> disabledSkills, String externalId, String email)
-        implements WebPrincipal {
+        implements Principal {
 
     public static final String ADMIN_ROLE = "admin";
 
-    public WebUser {
+    public User {
         credentials = credentials == null ? Map.of() : credentials;
         disabledTools = disabledTools == null ? List.of() : List.copyOf(disabledTools);
         disabledSkills = disabledSkills == null ? List.of() : List.copyOf(disabledSkills);
@@ -34,7 +33,7 @@ public record WebUser(String id, String name, String role, Map<String, Map<Strin
         email = email == null || email.isBlank() ? null : email.strip();
     }
 
-    public WebUser(String id, String name, String role, Map<String, Map<String, String>> credentials) {
+    public User(String id, String name, String role, Map<String, Map<String, String>> credentials) {
         this(id, name, role, credentials, null, null, null, null, null);
     }
 

@@ -10,7 +10,7 @@ implementation locks the application instead of opening it.
 
 | Interface | Question it answers | Fallback |
 |---|---|---|
-| `WebAuthentication` | who sent this request (`WebPrincipal`: `id()`, `admin()`) and which `/api` paths are open | nobody; 401 |
+| `WebAuthentication` | who sent this request (`Principal`: `id()`, `admin()`) and which `/api` paths are open | nobody; 401 |
 | `ChatAccess` | may this user see this chat | none; 404 |
 | `HarnessIdentity` | the user's credentials, tool policy and principal; where OAuth tokens are kept | no credentials, no tools |
 

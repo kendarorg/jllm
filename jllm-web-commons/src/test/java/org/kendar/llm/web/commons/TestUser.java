@@ -1,11 +1,14 @@
 package org.kendar.llm.web.commons;
 
+import org.kendar.llm.harness.identity.Principal;
+import org.kendar.llm.harness.identity.ChatAccess;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.kendar.llm.harness.AgentHarness;
 import org.kendar.llm.harness.HarnessPricing;
 
 /** A stub principal and the owner-or-admin chat rule, for tests of the common API without a sign-in module. */
-record TestUser(String id, boolean admin) implements WebPrincipal {
+record TestUser(String id, boolean admin) implements Principal {
 
     static final ChatAccess OWNER_OR_ADMIN = (user, chat) -> chat.principal() != null
             && (user.admin() || chat.principal().equals(user.id()));

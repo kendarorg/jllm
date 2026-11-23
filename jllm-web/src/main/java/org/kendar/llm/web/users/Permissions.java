@@ -1,10 +1,10 @@
 package org.kendar.llm.web.users;
 
-import org.kendar.llm.web.commons.users.WebUser;
-import org.kendar.llm.web.commons.users.Role;
-import org.kendar.llm.web.commons.users.UserRepository;
-import org.kendar.llm.web.commons.users.RoleRepository;
-import org.kendar.llm.web.commons.users.SkillRepository;
+import org.kendar.llm.harness.identity.User;
+import org.kendar.llm.harness.identity.Role;
+import org.kendar.llm.harness.identity.UserRepository;
+import org.kendar.llm.harness.identity.RoleRepository;
+import org.kendar.llm.harness.identity.SkillRepository;
 import org.kendar.llm.harness.auth.UserPolicy;
 import org.kendar.llm.harness.auth.UserPolicyResolver;
 import org.kendar.llm.harness.auth.UserSkill;
@@ -40,7 +40,7 @@ public final class Permissions {
 
     /** The role, or empty when it has no valid record. {@code admin} always exists. */
     public Optional<Role> role(String name) {
-        if (WebUser.ADMIN_ROLE.equals(name)) {
+        if (User.ADMIN_ROLE.equals(name)) {
             return Optional.of(roles.find(name).map(r -> Role.admin(r.approval(), r.toolPermissions()))
                     .orElse(Role.ADMIN));
         }
@@ -68,7 +68,7 @@ public final class Permissions {
     }
 
     public boolean delete(String name) {
-        if (WebUser.ADMIN_ROLE.equals(name)) throw new IllegalArgumentException("The admin role cannot be deleted");
+        if (User.ADMIN_ROLE.equals(name)) throw new IllegalArgumentException("The admin role cannot be deleted");
         return validName(name) && roles.delete(name);
     }
 
@@ -89,8 +89,8 @@ public final class Permissions {
     public UserPolicyResolver resolver(UserRepository users, SkillRepository skills) {
         return principal -> {
             if (principal == null) return NOTHING;
-            Optional<WebUser> user = users == null ? Optional.empty() : users.find(principal.id());
-            String roleName = user.map(WebUser::role)
+            Optional<User> user = users == null ? Optional.empty() : users.find(principal.id());
+            String roleName = user.map(User::role)
                     .orElseGet(() -> principal.roles().stream().findFirst().orElse(null));
             if (users != null && user.isEmpty()) return NOTHING;
             Optional<Role> role = role(roleName);
@@ -101,7 +101,7 @@ public final class Permissions {
     }
 
     /** The role's policy narrowed by the user's settings, with the user's skills (global first, then own). */
-    public static UserPolicy policyOf(Role role, WebUser user, SkillRepository skills) {
+    public static UserPolicy policyOf(Role role, User user, SkillRepository skills) {
         List<String> disabledTools = user.disabledTools();
         Set<String> disabledSkills = new HashSet<>(user.disabledSkills());
         Predicate<HarnessTool> filter = t -> role.allows(t) && !Wildcard.matchesAny(disabledTools, t.name());

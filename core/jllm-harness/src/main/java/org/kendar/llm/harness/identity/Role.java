@@ -1,4 +1,4 @@
-package org.kendar.llm.web.commons.users;
+package org.kendar.llm.harness.identity;
 
 import org.kendar.llm.harness.auth.UserPolicy;
 import org.kendar.llm.harness.permission.ToolApprovalPolicy;
@@ -27,7 +27,7 @@ public record Role(String name, List<String> tools, boolean readOnly, String app
     public static final Role ADMIN = admin("ask", Map.of());
 
     public static Role admin(String approval, Map<String, ToolPermission> toolPermissions) {
-        return new Role(WebUser.ADMIN_ROLE, List.of("*"), false, approval, toolPermissions);
+        return new Role(User.ADMIN_ROLE, List.of("*"), false, approval, toolPermissions);
     }
 
     public Role {
@@ -56,7 +56,7 @@ public record Role(String name, List<String> tools, boolean readOnly, String app
     }
 
     public boolean fixed() {
-        return WebUser.ADMIN_ROLE.equals(name);
+        return User.ADMIN_ROLE.equals(name);
     }
 
     /** Whether the role lets the tool through (name patterns and read-only). */

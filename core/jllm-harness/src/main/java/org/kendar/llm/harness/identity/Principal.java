@@ -1,9 +1,9 @@
-package org.kendar.llm.web.commons;
+package org.kendar.llm.harness.identity;
 
 /** The signed-in user of a web request, as the common API sees it. Supplied by the authentication implementation. */
-public interface WebPrincipal {
+public interface Principal {
 
-    /** Request attribute holding the {@link WebPrincipal} of an authenticated {@code /api/**} call. */
+    /** Request attribute holding the {@link Principal} of an authenticated {@code /api/**} call. */
     String ATTR = "jllm.user";
 
     String id();

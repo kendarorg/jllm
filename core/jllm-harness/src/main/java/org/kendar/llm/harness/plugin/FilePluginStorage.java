@@ -1,9 +1,7 @@
-package org.kendar.llm.web.commons.plugins;
+package org.kendar.llm.harness.plugin;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.kendar.llm.harness.plugin.PluginStorage;
-import org.kendar.llm.harness.plugin.PluginStorages;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;

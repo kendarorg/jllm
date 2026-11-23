@@ -11,7 +11,7 @@ import org.kendar.llm.harness.tools.SimpleTool;
 import org.kendar.llm.harness.tools.ToolKind;
 import org.kendar.llm.web.users.UserCredentialResolver;
 import org.kendar.llm.web.users.Permissions;
-import org.kendar.llm.web.commons.users.UserRepository;
+import org.kendar.llm.harness.identity.UserRepository;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -88,7 +88,7 @@ class SampleUsersTest {
     @Test
     void toolPermissionsAreStoredAndDecideDenyThenAskThenAllow(@TempDir Path dir) throws Exception {
         Permissions perms = new Permissions(new FileRoleRepository(dir, new ObjectMapper()));
-        perms.save(new org.kendar.llm.web.commons.users.Role("ops", List.of("*"), false, "ask", Map.of(
+        perms.save(new org.kendar.llm.harness.identity.Role("ops", List.of("*"), false, "ask", Map.of(
                 "send_*", org.kendar.llm.harness.permission.ToolPermission.ALLOW,
                 "send_secret", org.kendar.llm.harness.permission.ToolPermission.DENY,
                 "bash", org.kendar.llm.harness.permission.ToolPermission.ASK)));

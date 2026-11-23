@@ -6,8 +6,8 @@ import org.kendar.llm.harness.integration.ToolNames;
 import org.kendar.llm.harness.tools.HarnessTool;
 import org.kendar.llm.harness.util.Wildcard;
 import org.kendar.llm.web.users.Permissions;
-import org.kendar.llm.web.commons.users.Role;
-import org.kendar.llm.web.commons.users.WebUser;
+import org.kendar.llm.harness.identity.Role;
+import org.kendar.llm.harness.identity.User;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -53,7 +53,7 @@ public final class ToolCatalogView {
     }
 
     /** What the role allows, with the user's {@code disabledTools} applied as {@code enabled}/{@code on}. */
-    public Catalog forUser(Role role, WebUser user) {
+    public Catalog forUser(Role role, User user) {
         return build(role, user);
     }
 
@@ -78,7 +78,7 @@ public final class ToolCatalogView {
         return out;
     }
 
-    private Catalog build(Role role, WebUser user) {
+    private Catalog build(Role role, User user) {
         List<String> disabled = user == null ? List.of() : user.disabledTools();
         List<Source> mcp = sources(ExternalSources.Kind.MCP, "mcp__", role, disabled);
         List<Source> api = sources(ExternalSources.Kind.API, "", role, disabled);
