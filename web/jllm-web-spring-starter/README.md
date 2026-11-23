@@ -18,10 +18,19 @@ Add `org.kendar.llm:jllm-web-spring-starter`. Its auto-configuration (`JllmWebAu
 | `JllmProperties`, `OidcProperties` | the `jllm.*` and `jllm.auth.*` properties, bound from the environment |
 | `ModelClient`, `HarnessPricing`, `AgentHarness`, `WebPluginHost` | from `HarnessFactory`; beans of the application (e.g. from [jllm-sql-spring-starter](../jllm-sql-spring-starter/README.md)) for `SettingsSource`, `ProjectMcpTrust`, `ChatSessionStore`, `SubAgentRunLog`, `MnemonicStore`, `StateStore` and `PluginStorages` replace the file defaults |
 | `WebAuthentication`, `ChatAccess`, `HarnessIdentity` | defaults (`@ConditionalOnMissingBean`): nobody signs in, no chat is visible, no tool is allowed |
-| `Gate`, `WebConfig` | the `/api/**` and `/api/admin/**` interceptors, both a one-line delegation to `Gate` |
+| `Gate`, `WebConfig` | the `/api/**` and `/api/admin/**` interceptors, delegating to `Gate`. `ApiInterceptor` strips the context path, takes the chat id from the matched handler pattern variable (`/api/chat/{id}/...`), and while a user is on the default password answers `403 password_change_required` (loopback exemption only when `server.address` is a loopback address and `jllm.web.enforce-password-change-on-loopback` is not true) |
+| `SecurityHeadersFilter` | `Content-Security-Policy` (`jllm.web.content-security-policy`: blank = built-in, `off` = none), `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` |
 | `ChatApi`, `FilesApi`, `OAuthApi`, `PluginApi` | the handlers |
 | `ChatController`, `FilesController`, `OAuthController`, `PluginController` | `/api/chat/**`, `/api/chat/{id}/fs/**`, OAuth, `/api/plugins/**` |
 | `AuthController`, `OidcController`, `MeController`, `AdminController` | mounted when the application defines the matching `AuthApi`, `OidcApi`, `MeApi` or `AdminApi` bean (they need the user, role and skill repositories, which the application chooses) |
+
+## SQL store
+
+The stores (users, roles, chats, tokens, settings) are beans of the application. With
+[jllm-sql-spring-starter](../jllm-sql-spring-starter/README.md) on the class path they live in SQL: SQLite by default,
+MySQL or PostgreSQL by `jllm.sql.url` (`jdbc:mysql:` / `jdbc:postgresql:`); `jllm.store=file` turns it off. The MySQL and
+PostgreSQL drivers are not bundled: fetch them with `scripts/fetch-sql-driver` (`.sh`, `.ps1`, `.cmd`). Tokens are
+encrypted with `JLLM_TOKEN_KEY` when set.
 
 ## Translation
 
@@ -40,5 +49,5 @@ The classes of `org.kendar.llm.web.spring` are registered by the auto-configurat
 An application whose own package is a parent of it (as `jllm-web` is) must not scan them too: see the
 `@ComponentScan` exclude filter of `JllmWebApplication`.
 
-Tests: `ChatControllerTest`, `FilesControllerTest`, `FilesControllerJailTest`, `WebSecurityFixesTest` (HTTP level),
+Tests: `ChatControllerTest`, `FilesControllerTest`, `FilesControllerJailTest`, `WebSecurityFixesTest` (HTTP level), `SecurityHeadersFilterTest`,
 `JllmWebAutoConfigurationTest` (boots with no bean of the application) (`mvn -pl web/jllm-web-spring-starter -am test`).

@@ -136,8 +136,10 @@ public class JllmWebAutoConfiguration {
     }
 
     @Bean
-    WebConfig jllmWebConfig(Gate gate, WebAuthentication authentication, ObjectMapper mapper, JllmProperties p) {
-        return new WebConfig(gate, authentication, mapper, p.web() != null && p.web().enforceOnLoopback());
+    WebConfig jllmWebConfig(Gate gate, WebAuthentication authentication, ObjectMapper mapper, JllmProperties p,
+                          Environment env) {
+        return new WebConfig(gate, authentication, mapper, p.web() != null && p.web().enforceOnLoopback(),
+                ApiInterceptor.isLoopbackAddress(env.getProperty("server.address")));
     }
 
     @Bean

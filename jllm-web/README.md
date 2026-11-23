@@ -49,8 +49,10 @@ The file tools never follow a symlink or junction that leaves a chat's work dir:
 | `jllm.pricing.input-per-million`, `output-per-million`, `cache-read-per-million`, `cache-write-per-million` | 0 | USD per million tokens, for the cost estimate |
 | `jllm.web.public-url` | none | the externally visible base URL (`https://jllm.example.com`); OAuth logins redirect to `<public-url>/oauth/callback`. Required when a per-user OAuth source uses the authorization code flow |
 | `jllm.web.use-real-password` | `false` | `true`: at startup every user still on the default password gets a random 24-character one. The admin password is logged once at WARN; other users are only logged as generated, an admin resets them. Never regenerated afterwards. Users linked to an identity provider are skipped |
-| `jllm.web.enforce-password-change-on-loopback` | `false` | A user on the default password can only change it, sign in or out: every other `/api` call answers `403 password_change_required`. Requests from the loopback address (without a forwarding header) are exempt unless this is `true` |
+| `jllm.web.allow-unencrypted-tokens` | `false` | Without `JLLM_TOKEN_KEY` the users' OAuth tokens are stored in clear (file and SQL stores). That starts with a loud WARN naming the variable when the server is local-only; it is refused (the server does not start) when `jllm.web.use-real-password=true` or `server.address` is not loopback (unset, `0.0.0.0` and `::` are not). `true` accepts clear-text tokens anyway, still with the WARN |
+| `jllm.web.enforce-password-change-on-loopback` | `false` | A user on the default password can only change it, sign in or out: every other `/api` call answers `403 password_change_required`. Requests from the loopback address are exempt unless this is `true`, a forwarding header (`X-Forwarded-For`, `Forwarded`, `X-Real-IP`) is present, or `server.address` is not a loopback address (unset, `0.0.0.0` and `::` count as non-loopback). A reverse proxy, tunnel or sidecar on the same host that sends no forwarding header makes remote requests look local: set this to `true` there |
 | `jllm.web.content-security-policy` | built-in | `Content-Security-Policy` value for every response. Blank: `default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'` (`unsafe-eval`: Vue compiles its templates in the browser; `unsafe-inline` styles: `style=""` attributes). `off`: no CSP header. Any other text replaces the policy. `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer` are always sent, unless a handler already set them |
+| `jllm.store`, `jllm.sql.url`, `.user`, `.password`, `.pool`, `.seed`, `.driver-dir` | `sql` with the SQL starter, else `file` | where users, roles, chats, tokens and settings live; see [SQL store](#sql-store). `jllm.webauth-dir` (default `webauth`) is the file store folder and the default place of the SQLite file |
 | `jllm.plugin-dir` | `./plugins` when it exists | directory of plugin jars |
 | `jllm.plugins.<id>.enabled`, `jllm.plugins.<id>.settings.*` | none | per-plugin switch and settings; win over the `plugins` section of the settings file |
 | env `JLLM_UPLOAD_MAX_FILE_SIZE`, `JLLM_UPLOAD_MAX_REQUEST_SIZE` | 100MB, 200MB | multipart upload limits |
@@ -67,7 +69,7 @@ This module is a reference implementation of the multi-user mechanism of
 [jllm-web-commons](../web/jllm-web-commons/README.md); the common module and the
 [starter](../web/jllm-web-spring-starter/README.md) stay generic and know none of what follows.
 
-Everything lives under one folder (property `jllm.webauth-dir`, default `webauth`, relative to the start folder).
+With `jllm.store=file` (or no SQL starter) everything lives under one folder (property `jllm.webauth-dir`, default `webauth`, relative to the start folder).
 The sample is `runConfig/webauth/`, which the IDE run configurations in `.run/` pass explicitly; they start in
 `runConfig/tmp/` (ignored by git). Files are read on each
 use, so changes (by hand or from the UI) apply without a restart.
@@ -170,7 +172,9 @@ user connects their own account, and every call of their chats carries their own
 - **Encryption is required**: set `JLLM_TOKEN_KEY` (32 random bytes in base64: `openssl rand -base64 32`). The tokens
   are kept in `<webauth>/tokens/users/<id>.json`, AES-GCM encrypted; the shared (admin) logins in
   `<webauth>/tokens/auth.json`. With a per-user source and no key, the server refuses to start: backups, other admins
-  and container volumes all see these files. To rotate, move the old key to `JLLM_TOKEN_KEY_OLD` and set a new one.
+  and container volumes all see these files. Without a key at all the server warns at startup, and refuses to start
+  when exposed (`jllm.web.use-real-password=true` or a non-loopback `server.address`) unless
+  `jllm.web.allow-unencrypted-tokens=true`; this applies to the file and the SQL token store alike. To rotate, move the old key to `JLLM_TOKEN_KEY_OLD` and set a new one.
 - **`jllm.web.public-url`**: the redirect URI is exact, so the authorization server must know
   `<public-url>/oauth/callback` (register it with the client, or it is registered dynamically). Without it, a per-user
   source with the authorization code flow is refused at startup; the device code flow needs no redirect.
@@ -251,6 +255,9 @@ subscription. The event types and their data are the harness ones (`run_started`
 `tool_call`, `tool_result`, `approval_request`, `usage`, `compaction`, `stuck`, `verify_failed`, `warning`, `error`,
 `cancelled`, `plan_ready`, `login_required`, `login`, `run_finished`): see the [front-end contract](../docs/reference/usage.md#front-end-contract).
 
+Each subscriber has a bounded queue drained on its own thread. A client that falls behind is dropped (`subscriber_dropped`)
+and its SSE stream is closed without that event: reconnect with `after=<last seq>` to replay.
+
 Streaming: `text_delta` (and `thinking_delta`, `text_reset`) are sent without an SSE `id` and with `seq` 0: they are
 live only and never replayed, so they must not move the client's last `seq`. The UI appends them to an open
 assistant bubble; the final `text` event replaces its content and closes it, `text_reset` drops it, a cancel or an
@@ -311,7 +318,7 @@ a `TokenStore` bean (passed through `HarnessIdentity.tokenStore()`) can replace 
 (`ChatSessionStore`, `SubAgentRunLog`, `MnemonicStore`, `StateStore`) is optional beans too; default: files under each
 chat's history root.
 
-Tests: `SampleUsersTest`, `LoginTest`, `MeControllerTest`, `AdminControllerTest`, `OAuthWebTest`, `OidcTest`, `JllmWebApplicationArgsTest`, `JllmWebBootTest`
+Tests: `SampleUsersTest`, `LoginTest`, `MeControllerTest`, `AdminControllerTest`, `OAuthWebTest`, `OidcTest`, `JllmWebApplicationArgsTest`, `JllmWebBootTest`, `RealPasswordInitializerTest`, `DefaultPasswordEnforcementTest`, `ChatUriVariantsTest` (chat ownership over URI variants), `FileStoresAutoConfigurationTest`, `SqlBootTest`, `SqlIntegrationTest`
 (`mvn -pl jllm-web -am test`).
 
 ## SQL store

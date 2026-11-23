@@ -27,8 +27,12 @@ public enum Dialect {
     public static Dialect of(String jdbcUrl) {
         if (jdbcUrl != null) {
             if (jdbcUrl.startsWith("jdbc:sqlite:")) return SQLITE;
-            if (jdbcUrl.startsWith("jdbc:mysql:") || jdbcUrl.startsWith("jdbc:mariadb:")) return MYSQL;
+            if (jdbcUrl.startsWith("jdbc:mysql:")) return MYSQL;
             if (jdbcUrl.startsWith("jdbc:postgresql:")) return POSTGRES;
+            if (jdbcUrl.startsWith("jdbc:mariadb:")) {
+                throw new IllegalArgumentException("MariaDB (jdbc:mariadb:) is not supported: use jdbc:mysql: with MySQL, "
+                        + "jdbc:postgresql: or jdbc:sqlite:");
+            }
         }
         throw new IllegalArgumentException(
                 "Unsupported JDBC url (jdbc:sqlite:, jdbc:mysql: or jdbc:postgresql: expected): " + jdbcUrl);

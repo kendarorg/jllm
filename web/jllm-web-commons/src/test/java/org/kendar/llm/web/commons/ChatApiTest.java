@@ -43,6 +43,11 @@ class ChatApiTest {
         assertFalse(harness.isRunning(id));
     }
 
+    private static void awaitSent(Fixtures.RecordingSink sink, long count) throws InterruptedException {
+        for (int i = 0; i < 200 && sink.sent.stream().filter(s -> s.id() != null).count() < count; i++)
+            Thread.sleep(25);
+    }
+
     @Test
     void listShowsOnlyTheChatsOfTheUserAndEverythingToTheAdmin() {
         String a = create(ALICE);
@@ -51,6 +56,34 @@ class ChatApiTest {
         assertEquals(2, chat.list(ADMIN).size());
         assertEquals(List.of(), chat.list(null));
         assertNotNull(b);
+    }
+
+    @Test
+    void listNeverLoadsOrShowsTheChatsOfOthers() {
+        var cookie = new org.kendar.llm.web.commons.auth.CookieAuthentication(null, null);
+        var narrowed = new java.util.ArrayList<org.kendar.llm.harness.session.ChatVisibility>();
+        org.kendar.llm.harness.identity.ChatAccess spy = new org.kendar.llm.harness.identity.ChatAccess() {
+            @Override
+            public boolean canSee(org.kendar.llm.harness.identity.Principal u, org.kendar.llm.harness.session.ChatSessionData c) {
+                return cookie.canSee(u, c);
+            }
+
+            @Override
+            public org.kendar.llm.harness.session.ChatVisibility visibility(org.kendar.llm.harness.identity.Principal u) {
+                var v = cookie.visibility(u);
+                narrowed.add(v);
+                return v;
+            }
+        };
+        ChatApi api = new ChatApi(harness, Fixtures.MAPPER, new org.kendar.llm.harness.HarnessPricing(0, 0, 0, 0), spy);
+        String a = (String) api.create(Map.of(), ALICE).get("chatId");
+        String b = (String) api.create(Map.of(), BOB).get("chatId");
+        harness.sessions().create("ownerless");
+        assertEquals(List.of(a), api.list(ALICE).stream().map(m -> m.get("chatId")).toList());
+        assertEquals(List.of(b), api.list(BOB).stream().map(m -> m.get("chatId")).toList());
+        assertEquals(2, api.list(ADMIN).size()); // the ownerless chat is nobody's, the admin's included
+        assertEquals(org.kendar.llm.harness.session.ChatVisibility.ownedBy("bob"), narrowed.get(1));
+        assertEquals(org.kendar.llm.harness.session.ChatVisibility.owned(), narrowed.get(2));
     }
 
     @Test
@@ -67,6 +100,7 @@ class ChatApiTest {
         Reply<Map<String, Object>> r = chat.send(id, Map.of("text", "hello"), ALICE);
         assertEquals(202, r.status());
         assertEquals(Map.of("started", true), r.body());
+        for (int i = 0; i < 200 && harness.isRunning(id); i++) Thread.sleep(25); // the run uses the temp dir
     }
 
     @Test
@@ -86,11 +120,13 @@ class ChatApiTest {
 
         Fixtures.RecordingSink all = new Fixtures.RecordingSink();
         chat.events(id, 0, all);
+        awaitSent(all, last); // delivery is asynchronous (one drain thread per subscriber)
         assertEquals(last, all.sent.stream().filter(s -> s.id() != null).count());
 
         long after = last - 2;
         Fixtures.RecordingSink tail = new Fixtures.RecordingSink();
         chat.events(id, after, tail);
+        awaitSent(tail, 2);
         assertEquals(List.of(String.valueOf(last - 1), String.valueOf(last)),
                 tail.sent.stream().map(Fixtures.RecordingSink.Sent::id).toList());
     }

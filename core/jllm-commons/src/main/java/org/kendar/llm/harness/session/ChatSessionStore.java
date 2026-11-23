@@ -11,8 +11,8 @@ public interface ChatSessionStore {
 
     Optional<ChatSessionData> find(String chatId);
 
-    /** Most recently updated first. */
-    List<ChatSessionData> list();
+    /** The chats {@code visibility} admits, most recently updated first; the filter runs in the store. */
+    List<ChatSessionData> list(ChatVisibility visibility);
 
     void delete(String chatId);
 }

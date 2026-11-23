@@ -81,8 +81,8 @@ public class ChatApi {
     /** The chats the signed-in user may see. */
     public List<Map<String, Object>> list(Principal user) {
         if (user == null) return List.of();
-        return sessions.list().stream()
-                .filter(s -> access.canSee(user, s))
+        return sessions.list(access.visibility(user)).stream()
+                .filter(s -> access.canSee(user, s)) // defence in depth: the store already filtered
                 .map(this::summary).toList();
     }
 

@@ -33,10 +33,12 @@ class JllmSqlAutoConfigurationTest {
 
     private static final Class<?>[] TYPES = {UserRepository.class, RoleRepository.class, SkillRepository.class,
             LoginSessionRepository.class, TokenStore.class, SettingsSource.class, ProjectMcpTrust.class,
-            ChatSessionStore.class, StateStore.class, MnemonicStore.class, SubAgentRunLog.class};
+            ChatSessionStore.class, StateStore.class, MnemonicStore.class, SubAgentRunLog.class,
+            org.kendar.llm.harness.plugin.PluginStorages.class};
 
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
-            .withConfiguration(AutoConfigurations.of(JllmSqlAutoConfiguration.class));
+            .withConfiguration(AutoConfigurations.of(JllmSqlAutoConfiguration.class))
+            .withPropertyValues("jllm.web.allow-unencrypted-tokens=true"); // no key and no server.address here
 
     private static String url(Path dir) {
         return "jllm.sql.url=jdbc:sqlite:" + dir.resolve("x.db").toString().replace(File.separatorChar, '/');
@@ -55,6 +57,30 @@ class JllmSqlAutoConfigurationTest {
             assertInstanceOf(SqlChatStores.Sessions.class, c.getBean(ChatSessionStore.class));
             assertTrue(Files.isRegularFile(dir.resolve("jllm.db")), "default file under jllm.webauth-dir");
         });
+    }
+
+    @Test
+    void noKeyOnAnExposedServerRefusesToStartUnlessOverridden(@TempDir Path dir) {
+        var base = new ApplicationContextRunner().withConfiguration(AutoConfigurations.of(JllmSqlAutoConfiguration.class));
+        env(base, Map.of()).withPropertyValues(url(dir)).run(c -> { // server.address unset
+            Throwable t = c.getStartupFailure();
+            assertNotNull(t);
+            while (t.getCause() != null) t = t.getCause();
+            assertTrue(t.getMessage().contains("JLLM_TOKEN_KEY"), t.getMessage());
+        });
+        env(base, Map.of()).withPropertyValues(url(dir), "server.address=127.0.0.1", "jllm.web.use-real-password=true")
+                .run(c -> assertNotNull(c.getStartupFailure()));
+        env(base, Map.of()).withPropertyValues(url(dir), "server.address=0.0.0.0")
+                .run(c -> assertNotNull(c.getStartupFailure()));
+        env(base, Map.of()).withPropertyValues(url(dir), "server.address=::")
+                .run(c -> assertNotNull(c.getStartupFailure()));
+        env(base, Map.of()).withPropertyValues(url(dir), "server.address=127.0.0.1")
+                .run(c -> assertNull(c.getStartupFailure()));
+        env(base, Map.of()).withPropertyValues(url(dir), "jllm.web.use-real-password=true",
+                "jllm.web.allow-unencrypted-tokens=true").run(c -> assertNull(c.getStartupFailure()));
+        String key = TokenCipher.newKey();
+        env(base, Map.of("JLLM_TOKEN_KEY", key)).withPropertyValues(url(dir), "jllm.web.use-real-password=true")
+                .run(c -> assertNull(c.getStartupFailure()));
     }
 
     @Test

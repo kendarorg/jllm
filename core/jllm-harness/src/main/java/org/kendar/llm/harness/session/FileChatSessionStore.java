@@ -241,7 +241,8 @@ public class FileChatSessionStore implements ChatSessionStore {
     }
 
     @Override
-    public synchronized List<ChatSessionData> list() {
+    public synchronized List<ChatSessionData> list(ChatVisibility visibility) {
+        if (visibility.kind() == ChatVisibility.Kind.NOTHING) return new ArrayList<>();
         if (!scanned) {
             for (Path dir : chatDirs.get()) {
                 ChatSessionData row = readRow(dir);
@@ -249,7 +250,7 @@ public class FileChatSessionStore implements ChatSessionStore {
             }
             scanned = true;
         }
-        List<ChatSessionData> out = new ArrayList<>(rows.values());
+        List<ChatSessionData> out = new ArrayList<>(rows.values().stream().filter(visibility::matches).toList());
         out.sort(Comparator.comparing(ChatSessionData::updatedAt).reversed());
         return out;
     }

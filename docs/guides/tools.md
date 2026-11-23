@@ -192,6 +192,12 @@ requests go to the user through the parent's event sink, titled `[<type> #n] <to
 one at a time. `PermissionGate` returns only `ALLOW` or `ASK`; `DENY` is what an `ASK` becomes in a loop run
 with `interactive=false` (the built-in main and sub-agent loops are both interactive).
 
+The permission step of the flowchart is one pure function, `ToolExecutor.decide(AuthorizeInput)` returning an
+`AuthorizeOutcome` (decision, taint warning, approval unavailable): free tool, read-only, admin rule, mode, gate answer,
+grants, taint and classifier verdict in; no side effects. `ToolExecutorAuthorizeTest` checks it against a copy of the
+previous logic over the whole input space. Taint (untrusted output in the chat) survives compaction: when a tool
+result is cleared (`ClearedResult.TEXT`), `TaintTracker.prune` keeps its taint until the next user message.
+
 ## 6. Output limits
 
 | Limit | Default | Where |

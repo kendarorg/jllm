@@ -113,7 +113,7 @@ class SampleUsersTest {
     void credentialsComeFromEnvironmentReferencesOnly(@TempDir Path dir) throws Exception {
         user(dir, "rita", "guest", "{\"mcp:docs\":{\"Authorization\":\"env:PATH\",\"X-Literal\":\"secret\"},"
                 + "\"api:pets\":{\"X-Key\":\"env:JLLM_SAMPLE_UNSET_VARIABLE\"}}");
-        UserCredentialResolver r = new UserCredentialResolver(new FileUserRepository(dir, mapper));
+        UserCredentialResolver r = new UserCredentialResolver(new FileUserRepository(dir, mapper, new FileRoleRepository(dir.resolve("permissions"), mapper)));
         HarnessPrincipal rita = HarnessPrincipal.of("rita");
 
         Map<String, String> docs = r.headers(rita, "mcp:docs");
@@ -127,7 +127,7 @@ class SampleUsersTest {
     @Test
     void unknownUserIdsAreRejected(@TempDir Path dir) throws Exception {
         user(dir, "rita", "guest", "{}");
-        UserRepository users = new FileUserRepository(dir, mapper);
+        UserRepository users = new FileUserRepository(dir, mapper, new FileRoleRepository(dir.resolve("permissions"), mapper));
         assertTrue(users.find("rita").isPresent());
         assertTrue(users.find("../rita").isEmpty());
         assertTrue(users.find("Rita").isEmpty());

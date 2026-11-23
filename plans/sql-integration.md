@@ -65,8 +65,7 @@ The importer of an existing `webauth/` folder is **deferred and optional (step 1
 6. **Known gaps from the jllm-sql author.**
    - Repository interfaces live in `jllm-harness` identity, not web-commons: leave (used by `AgentHarness`/`HarnessIdentity`;
      moving them inverts the dependency for no gain). Docs and the memory note should say so.
-   - No `users -> roles` FK: add `V2` migration for both dialects (through `Migrator`/`migrations.txt`, never edit V1) only
-     together with role-delete handling in `AdminApi` (refuse or detach; check current behavior first). Q4.
+   - `users -> roles` FK: done in V1 (ON DELETE RESTRICT, seeded admin row); `AdminApi` role delete answers 409.
    - `MAX_OWN` enforced in `MeApi` (check then insert, racy): acceptable for per-user interactive use; no change.
    - Chat messages as one `messages TEXT` per chat, rewritten per save: add a measuring test in `SqlStoresTest`
      (5k-message chat saved 100 times, log time). Change to a per-message table only if it is a problem; not in the

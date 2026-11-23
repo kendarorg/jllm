@@ -8,7 +8,7 @@ jar with its SHA-256; manifests/ holds the manifests of both editions.
 
 * Empty folder: jllm starts normally, run_js is not offered and one warning in the log says why.
 * Swap edition or restore the set: fetch-graaljs.sh | fetch-graaljs.cmd | fetch-graaljs.ps1  <community|oracle>
-  (one directory up). It empties lib-ext/*.jar first, downloads from Maven Central, verifies the SHA-256 of each jar and
+  (one directory up). It empties lib-ext/*.jar first (not the SQL drivers, not lib-ext/sql), downloads from Maven Central, verifies the SHA-256 of each jar and
   fails, deleting the file, on a mismatch. The oracle set declares terms (GraalVM Free Terms and Conditions) that you must
   read and accept: pass --accept-oracle-terms (-AcceptOracleTerms on Windows).
 * Other version: replace the jars by hand; the edition label is for diagnostics only and never changes behaviour.

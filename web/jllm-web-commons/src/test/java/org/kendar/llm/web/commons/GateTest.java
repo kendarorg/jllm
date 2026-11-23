@@ -79,18 +79,26 @@ class GateTest {
 
     @Test
     void aChatTheUserCannotSeeIs404NotForbidden() {
-        String path = "/api/chat/" + aliceChat;
-        expect(0, null, gate.decide(path, ALICE));
-        expect(0, null, gate.decide(path + "/messages", ALICE));
-        expect(0, null, gate.decide(path, ADMIN));
-        expect(404, "Unknown chat " + aliceChat, gate.decide(path, BOB));
-        expect(404, "Unknown chat " + aliceChat, gate.decide(path + "/fs/content", BOB));
-        expect(404, "Unknown chat nope", gate.decide("/api/chat/nope", ALICE));
+        expect(0, null, gate.decideChat(ALICE, aliceChat));
+        expect(0, null, gate.decideChat(ADMIN, aliceChat));
+        expect(404, "Unknown chat " + aliceChat, gate.decideChat(BOB, aliceChat));
+        expect(404, "Unknown chat nope", gate.decideChat(ALICE, "nope"));
     }
 
     @Test
     void theUnauthenticatedAnswerComesBeforeTheChatCheck() {
         expect(401, "Sign in first", gate.decide("/api/chat/nope", null));
+        expect(401, "Sign in first", gate.decideChat(null, "nope"));
+    }
+
+    @Test
+    void failsClosedOnPathsItCannotClassify() {
+        for (String p : new String[]{"api/chat", "/api", "/API/chat", "/Api/me", "/api//chat", "/api/./chat",
+                "/api/chat/../me", "/api;x/chat", "/api%2Fchat", "/x/../api/chat", "", "/a\b",
+                "/x//y", "/api/login/", "/api/ME"}) {
+            assertFalse(gate.isOpen(p), p);
+            expect(401, "Sign in first", gate.decide(p, null));
+        }
     }
 
     @Test

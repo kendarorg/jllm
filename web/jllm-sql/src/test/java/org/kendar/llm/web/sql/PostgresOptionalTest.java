@@ -19,9 +19,9 @@ class PostgresOptionalTest {
         try (SqlStores s = SqlStores.open(new SqlConfig(url, System.getenv("JLLM_TEST_PG_USER"),
                 System.getenv("JLLM_TEST_PG_PASSWORD"), 4, null), null)) {
             String id = "t" + Long.toString(System.nanoTime(), 36);
-            User u = s.users().create(id, "N", "dev", null, null);
+            User u = s.users().create(id, "N", "admin", null, null);
             assertEquals(id, u.id());
-            assertThrows(IllegalStateException.class, () -> s.users().create(id, "N", "dev", null, null));
+            assertThrows(IllegalStateException.class, () -> s.users().create(id, "N", "admin", null, null));
             assertTrue(s.users().delete(id));
         }
     }

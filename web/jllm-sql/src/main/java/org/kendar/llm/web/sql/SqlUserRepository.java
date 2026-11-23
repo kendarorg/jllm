@@ -1,5 +1,6 @@
 package org.kendar.llm.web.sql;
 
+import org.kendar.llm.harness.identity.UnknownRoleException;
 import org.kendar.llm.harness.identity.User;
 import org.kendar.llm.harness.identity.UserRepository;
 
@@ -56,6 +57,7 @@ public final class SqlUserRepository implements UserRepository {
     private User insert(String id, String name, String role, String passwordHash, String email, String externalId) {
         if (!UserRepository.validId(id)) throw new IllegalArgumentException("Invalid user id: " + id);
         return db.tx(tx -> {
+            requireRole(tx, role);
             try {
                 tx.update("INSERT INTO users (" + COLS + ") VALUES (?, ?, ?, ?, ?, ?)", id,
                         name == null || name.isBlank() ? id : name, role, passwordHash,
@@ -107,7 +109,10 @@ public final class SqlUserRepository implements UserRepository {
 
     @Override
     public User setRole(String id, String role) {
-        return set(id, "role", role);
+        return db.tx(tx -> {
+            requireRole(tx, role);
+            return set(tx, id, "role", role);
+        });
     }
 
     @Override
@@ -116,12 +121,18 @@ public final class SqlUserRepository implements UserRepository {
     }
 
     private User set(String id, String column, String value) {
-        return db.tx(tx -> {
-            if (!UserRepository.validId(id) || tx.update("UPDATE users SET " + column + " = ? WHERE id = ?", value, id) == 0) {
-                throw new NoSuchElementException("Unknown user " + id);
-            }
-            return load(tx, id).orElseThrow();
-        });
+        return db.tx(tx -> set(tx, id, column, value));
+    }
+
+    private static User set(Tx tx, String id, String column, String value) {
+        if (!UserRepository.validId(id) || tx.update("UPDATE users SET " + column + " = ? WHERE id = ?", value, id) == 0) {
+            throw new NoSuchElementException("Unknown user " + id);
+        }
+        return load(tx, id).orElseThrow();
+    }
+
+    private static void requireRole(Tx tx, String role) {
+        if (role == null || !tx.exists("SELECT 1 FROM roles WHERE name = ?", role)) throw new UnknownRoleException(role);
     }
 
     @Override
@@ -201,7 +212,7 @@ public final class SqlUserRepository implements UserRepository {
                     rs -> rs.getString(1), id);
             List<String> skills = tx.query("SELECT name FROM user_disabled_skills WHERE user_id = ? ORDER BY ord",
                     rs -> rs.getString(1), id);
-            return new User(r[0], r[1], r[2] == null ? "none" : r[2], creds, r[3], tools, skills, r[4], r[5]);
+            return new User(r[0], r[1], r[2], creds, r[3], tools, skills, r[4], r[5]);
         });
     }
 }

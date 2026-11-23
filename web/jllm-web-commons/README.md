@@ -35,7 +35,7 @@ receives only what it uses.
 | Interface | Role | Default when missing |
 |---|---|---|
 | `WebAuthentication` | the `Principal` of a request, from its `Cookies`; the `/api/...` paths open without sign-in | nobody is signed in (401) |
-| `ChatAccess` | whether a user may see a chat | no chat is visible (404) |
+| `ChatAccess` | whether a user may see a chat (`canSee`) and which chats a listing loads (`visibility`, a `ChatVisibility` the store applies) | no chat is visible (404) |
 | `HarnessIdentity` | per-user credentials, tool policy, principal by id, directory of the users' token files (`tokenDir()`), handed to the `AgentHarness` | no credentials, no tools |
 
 `ChatAccess`, `HarnessIdentity`, `Principal` and the user, role and skill repositories live in jllm-harness (`org.kendar.llm.harness.identity`).
@@ -55,10 +55,10 @@ Package `org.kendar.llm.web.commons`, with sub-packages `auth`, `me`, `admin`, `
 | `auth.AuthApi`, `auth.OidcApi` | password sign-in (throttled) and OpenID Connect sign-in, ending in the same session cookie |
 | `me.MeApi` | the user's own password, tools and skills |
 | `admin.AdminApi`, `admin.ToolCatalogView` | users, roles and global skills, the catalog a role can be granted |
-| `Gate` | `decide(path, principal)`: allow, 401, or 404 for a chat the user cannot see; `decideAdmin(principal)`: 401 or 403. A pure function of its inputs |
+| `Gate` | `decide(path, principal)`: allow or 401; `decideChat(principal, chatId)`: 401 or 404 for a chat the user cannot see (the framework layer passes the chat id it matched as path variable, never parsed from the URI); `decideAdmin(principal)`: 401 or 403. `isOpen(path)` takes the path without the context path and fails closed (dot, empty or encoded segments, `;`, `\` need sign-in). Pure functions of their inputs |
 | `HarnessFactory` | builds `ModelClient`, `HarnessPricing`, `AgentHarness` and the web plugin host (same wiring and precedence as the CLI); `sweepOrphanContainers` |
 | `JllmProperties`, `auth.OidcProperties` | the `jllm.*` and `jllm.auth.*` settings, plain records the framework layer binds |
-| `auth.CookieAuthentication` | `WebAuthentication` and `ChatAccess` by session cookie: the owner and the admin see a chat |
+| `auth.CookieAuthentication` | `WebAuthentication` and `ChatAccess` by session cookie: the owner and the admin see a chat; `visibility` is the same rule for the store |
 | `auth.PasswordHasher`, `auth.LoginThrottle`, `auth.OidcClient`, `users.Permissions`, `users.UserCredentialResolver` | password hashing, failed-attempt lock, the OIDC protocol, roles to tool policy, credentials per user |
 
 Tests: `ChatApiTest`, `FilesApiTest`, `GateTest`, `PluginApiTest`, `NoFrameworkTest`, `ExternalLinksWebTest`,

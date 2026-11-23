@@ -1,6 +1,6 @@
 # Feature matrix
 
-Legend: 🟢 yes, 🔴 no, uncoloured partial or unknown. Verification date: 2026-11-23. Every competitor cell comes from that project's official documentation or repository; the source URL and access date of each cell are in [harnesses-sources](harnesses-sources.md). `unknown` means the docs read did not settle the cell, and a `no` often means "not documented". The jllm column was checked against this repository (docs, `core/jllm-harness/README.md`, settings, tools). Competitor projects change quickly (Pi and OpenCode have released breaking versions recently), so treat the matrix as a snapshot. Known jllm gaps are also listed in [Roadmap and limits](../enterprise/roadmap-and-limits.md).
+Legend: 🟢 yes, 🔴 no, uncoloured partial or unknown. Verification date: 2026-11-23 (the [OpenHands section](#jllm-vs-openhands-and-openhands-enterprise) at the end: 2026-11-24). Every competitor cell comes from that project's official documentation or repository; the source URL and access date of each cell are in [harnesses-sources](harnesses-sources.md). `unknown` means the docs read did not settle the cell, and a `no` often means "not documented". The jllm column was checked against this repository (docs, `core/jllm-harness/README.md`, settings, tools). Competitor projects change quickly (Pi and OpenCode have released breaking versions recently), so treat the matrix as a snapshot. Known jllm gaps are also listed in [Roadmap and limits](../enterprise/roadmap-and-limits.md).
 
 <table>
 <tr><th>Functionality</th><th>mini-swe-agent</th><th>Pi</th><th>OpenCode</th><th>Qwen Code</th><th>Hermes Agent</th><th>Claude Code</th><th>jllm</th></tr>
@@ -75,6 +75,7 @@ Legend: 🟢 yes, 🔴 no, uncoloured partial or unknown. Verification date: 202
 - [jllm-harness vs Qwen Code](#jllm-harness-vs-qwen-code)
 - [jllm-harness vs Hermes Agent](#jllm-harness-vs-hermes-agent)
 - [jllm-harness vs Claude Code](#jllm-harness-vs-claude-code)
+- [jllm vs OpenHands and OpenHands Enterprise](#jllm-vs-openhands-and-openhands-enterprise) (verified 2026-11-24)
 
 ## Where jllm is weaker
 
@@ -347,3 +348,72 @@ Basis: Claude Code 2.1.330 from the official docs at code.claude.com (sources in
 
 - Surfaces (IDE, desktop, web, mobile, Slack, CI), checkpoints, session fork, cross-session memory, image input, scheduled tasks, hook breadth, LSP, hosted cloud sessions.
 - Its own weaknesses: Claude models only, closed source, high cost per developer (Anthropic quotes about $13 per active day), several features tied to a claude.ai login, no sandbox on native Windows, fast release cadence changes behavior often.
+
+---
+
+# jllm vs OpenHands and OpenHands Enterprise
+
+Basis: OpenHands (All Hands AI; GitHub organisation `OpenHands`) from its README, docs.openhands.dev and openhands.dev, read on 2026-11-24 (sources in [harnesses-sources](harnesses-sources.md#openhands)). OpenHands is not a column of the matrix above because its product is split in editions with different feature sets; this section compares jllm with each edition instead. Cells say `unknown` where the pages read did not settle them. The pages read are marketing and documentation pages; the source code was not inspected. jllm side from this repository ([roadmap and limits](../enterprise/roadmap-and-limits.md), [security model](../enterprise/security-model.md)).
+
+## Editions
+
+| Edition | What it is | Licence | Hosting | Source |
+| --- | --- | --- | --- | --- |
+| OpenHands (open source) | Agent Canvas front end, Agent Server (REST/WebSocket API from `software-agent-sdk`), Automation Server, Python SDK. | MIT (README, SDK repository). | Local or self-hosted; sandbox in Docker, one Docker container per conversation, or no sandbox (full filesystem access, with a warning). | GitHub README |
+| OpenHands Cloud | Hosted commercial service. | Commercial SaaS. | Hosted by the vendor. | Enterprise-vs-OSS page |
+| OpenHands Teams | Self-hosted plan with multi-user identity and RBAC, SSO/SAML, budgeting controls. | Commercial; licence name unknown. | Self-hosted. | Pricing page |
+| OpenHands Enterprise | Self-hosted commercial edition, installed on Kubernetes with a Helm chart. | Commercial. A docs search summary says the `enterprise/` directory is source-available (licence needed beyond one month) and the rest is MIT; the enterprise page read says only "Commercial". | Own infrastructure: on-premises, private cloud or VPC. | Enterprise docs |
+
+## Open-source OpenHands vs jllm
+
+| Aspect | OpenHands (open source) | jllm |
+| --- | --- | --- |
+| *Language and embedding* | *Python SDK (`software-agent-sdk`) and an Agent Server with REST/WebSocket API; agents run locally or in Docker or Kubernetes workspaces.* | *Java 21 library, ports for stores, sandbox, approvals, metrics; REST and SSE through jllm-web.* |
+| Architecture | Append-only event log that is the agent's memory and the hook for observers (SDK architecture docs); conversation state and condensation events are events. Replay and resume mechanics: unknown (page did not say). | Per-chat sessions in a store (files, or SQL: SQLite; MySQL and PostgreSQL experimental); SSE event stream to the browser. |
+| *Sandbox* | *Docker sandbox for the Agent Server, or one container per conversation; also runnable with no sandbox.* | *Opt-in Docker (local or remote), per-chat directory, path jail, optional GraalJS `run_js`; default has no isolation. The sandbox daemon speaks plain HTTP.* |
+| Approvals | Confirmation policies `AlwaysConfirm`, `NeverConfirm`, `ConfirmRisky`; a security analyzer rates actions LOW, MEDIUM, HIGH or UNKNOWN (default `LLMSecurityAnalyzer`; deterministic `PatternSecurityAnalyzer`, `PolicyRailSecurityAnalyzer` and an ensemble analyzer also exist). | Modes `plan`, default, `edit`, `auto`; regex deny/ask/allow rules; per-chat grants; fast-model classifier in `auto`. |
+| *Prompt-injection controls* | *Not found in the pages read (unknown).* | *Taint tracking of untrusted content with gating and an output sanitizer.* |
+| Integrations | Slack, GitHub, GitLab, Linear, Notion, Datadog; third-party agents (Claude Code, Codex, Gemini, Pi, OpenCode, any ACP agent) can be run; MCP and skills. | MCP, OpenAPI operations as tools with per-user OAuth; no chat-app gateway. |
+| *Automations* | *Scheduled, polling and event-driven automations (event-driven needs a reachable host on a VM).* | *None (no scheduled tasks).* |
+| Models | "Use with any LLM"; named providers Anthropic, OpenAI, Google, local (LM Studio, llama.cpp, Ollama); custom model string with base URL. | Anthropic and OpenAI-compatible endpoints; no image input, no native Gemini, Bedrock or Vertex. |
+| *Identity* | *Shared identity in the open-source edition (pricing page); no authentication or RBAC in Agent Canvas.* | *Cookie sessions, local users, OIDC sign-in (one provider), local role files with one role per user, sign-in lockout.* |
+| Benchmarks | The SDK README shows a SWE-bench badge of 77.6 linked to a spreadsheet (no variant or date on the page); the OpenHands Index leaderboard (index.openhands.dev, Hugging Face dataset) lists a top average of 71.88 over 5 categories (snapshot dated 2026-05-28). | `core/jllm-eval` module; no published scores. |
+| *Community* | *Main repository about 94.2k GitHub stars; SDK repository about 1.4k.* | *Small project, no star figure claimed.* |
+
+## Enterprise editions vs jllm
+
+OpenHands columns follow the vendor's own comparison page (docs.openhands.dev/enterprise/enterprise-vs-oss), the pricing page and the Kubernetes install guide. OpenCode and Claude Code are included for the cells where [harnesses-sources](harnesses-sources.md#rows-added-in-the-second-pass) already holds a source.
+
+| Capability | OpenHands Cloud | OpenHands Teams | OpenHands Enterprise | OpenCode (enterprise console) | Claude Code (managed) | jllm |
+| --- | --- | --- | --- | --- | --- | --- |
+| Self-hosted | No (hosted) | Yes | Yes (Kubernetes, Helm; EKS, AKS, GKE guides; chart currently for select customers per one docs page) | unknown | partial (cloud sessions; local CLI) | Yes (JVM jar; Spring Boot starters for the web API and SQL stores; no Kubernetes packaging shipped) |
+| Multi-user organisations | Yes | Yes (1 organisation) | Yes (unlimited organisations) | unknown | unknown | partial (users and roles in one deployment; no organisation model documented here) |
+| RBAC | Yes | Yes | Yes (Keycloak) | unknown | unknown | Yes (local role files, one role per user; no IdP group mapping) |
+| SSO | Yes | Yes (SSO / SAML) | SAML/SSO; Keycloak login. OIDC: not mentioned in the pages read | SSO (console) | unknown | One OIDC provider; no SAML (use an OIDC bridge); no group mapping |
+| SCIM | unknown | unknown | unknown | Yes (console) | unknown | No |
+| Audit log | unknown | unknown | "Centralized audit logs" (no detail given) | unknown | unknown | No (known gap) |
+| Observability | unknown | unknown | Laminar (listed) | unknown | unknown | No health or metrics endpoints; `HarnessMetrics` callbacks and estimated cost per chat (Micrometer/OTel are recipes, not shipped) |
+| LLM gateway and budgets | No | Budgeting controls | LiteLLM gateway and budgeting; enforce default LLMs | budgets | unknown | No per-user rate limits or spend caps (known gap); only a 30 s sign-in lockout exists |
+| Custom runtime images | No | unknown | Yes | unknown | unknown | Docker sandbox image configurable (see [sandbox guide](../guides/sandbox.md)) |
+| Source integrations | GitHub, GitLab, Slack (one-click) | Built-in integrations | GitHub Enterprise, GitLab (SaaS and self-hosted), Azure Repos, Bitbucket Data Center, Jira Data Center, Azure Boards, Slack | unknown | Slack, CI | None built in; MCP and OpenAPI tools |
+| Data residency | Vendor-hosted | Self-hosted | "All code and conversations stay on your infrastructure" | unknown | unknown | Self-hosted; sessions stay in the deployer's stores; prompts go to the configured model provider (local models possible) |
+| Database | unknown | unknown | Bundled PostgreSQL (evaluation only, no supported migration to external); external PostgreSQL supported; Redis | n/a | n/a | SQLite; MySQL and PostgreSQL experimental |
+| Pricing | Commercial SaaS; amount unknown | $500/month with 10 users, +$50 per extra seat, 5,000 sessions per month cap | Custom pricing; unlimited seats and sessions; BYOK | unknown | Per-developer usage (about $13 per active day quoted by Anthropic) | Apache-2.0, free |
+| Support | unknown | Best-effort email | Standard or Premium SLA | unknown | unknown | None |
+| Assurance | unknown | unknown | Dedicated customer engineer; certifications unknown | unknown | unknown | No external security audit, no certification |
+
+## Where each fits
+
+- **OpenHands open source**: ready-made agent platform with web front end, Docker sandboxes, automations and Slack/GitHub/GitLab use, for teams comfortable with Python.
+- **OpenHands Enterprise**: a commercial, vendor-supported self-hosted platform on Kubernetes with SAML, RBAC, budgets, observability and audit logs, when an enterprise agreement is acceptable.
+- **jllm**: an embeddable Java library with a reference web front end, for teams that want the agent inside a JVM application with own tools, taint tracking and approvals, and who accept the operational gaps below.
+
+## Where OpenHands leads
+
+- Maturity, community and vendor support; published benchmark figures.
+- Kubernetes deployment with sandbox isolation per conversation, scheduled and event-driven automations, ready-made GitHub, GitLab, Jira, Bitbucket, Azure and Slack integrations, SAML, LiteLLM budgets, centralized audit logs and observability (enterprise tier).
+
+## Where jllm leads or differs
+
+- Java embedding, Apache-2.0 licence with no commercial tier, permission modes with a classifier, taint tracking, OpenAPI tools with per-user OAuth, three context strategies, own OIDC and role model without a separate Keycloak.
+- Gaps against the enterprise tier: no audit log, no per-user rate limits or spend caps (only a 30 s sign-in lockout), no health or metrics endpoints, no TLS termination in jllm-web (use a reverse proxy), plain-HTTP sandbox daemon, MySQL and PostgreSQL stores experimental, no SAML or SCIM, no Kubernetes packaging, no support organisation.

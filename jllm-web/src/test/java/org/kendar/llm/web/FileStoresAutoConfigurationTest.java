@@ -31,13 +31,37 @@ class FileStoresAutoConfigurationTest {
     private ApplicationContextRunner runner(Class<?>... configs) {
         return new ApplicationContextRunner()
                 .withBean(ObjectMapper.class, ObjectMapper::new)
-                .withPropertyValues("jllm.webauth-dir=" + slashes(dir))
+                .withPropertyValues("jllm.webauth-dir=" + slashes(dir), "jllm.web.allow-unencrypted-tokens=true")
                 .withConfiguration(AutoConfigurations.of(configs));
     }
 
     private static String rootMessage(Throwable t) {
         while (t.getCause() != null) t = t.getCause();
         return String.valueOf(t.getMessage());
+    }
+
+    private ApplicationContextRunner exposedRunner(String key, String... props) {
+        java.util.function.Function<String, String> env = k -> "JLLM_TOKEN_KEY".equals(k) ? key : null;
+        return runner(FileStoresAutoConfiguration.class).withBean("jllmSqlEnv", java.util.function.Function.class, () -> env)
+                .withPropertyValues("jllm.web.allow-unencrypted-tokens=false").withPropertyValues(props);
+    }
+
+    @Test
+    void fileTokenStoreWithoutKeyOnAnExposedServerRefusesToStart() {
+        exposedRunner(null).run(c -> {
+            assertNotNull(c.getStartupFailure());
+            assertTrue(rootMessage(c.getStartupFailure()).contains("JLLM_TOKEN_KEY"), rootMessage(c.getStartupFailure()));
+        });
+        exposedRunner(null, "server.address=127.0.0.1", "jllm.web.use-real-password=true")
+                .run(c -> assertNotNull(c.getStartupFailure()));
+        exposedRunner(null, "jllm.web.allow-unencrypted-tokens=true").run(c -> assertNull(c.getStartupFailure()));
+    }
+
+    @Test
+    void fileTokenStoreWithoutKeyOnLoopbackStartsAndWithAKeyStarts() {
+        exposedRunner(null, "server.address=127.0.0.1").run(c -> assertNull(c.getStartupFailure()));
+        exposedRunner(org.kendar.llm.harness.auth.TokenCipher.newKey(), "jllm.web.use-real-password=true")
+                .run(c -> assertNull(c.getStartupFailure()));
     }
 
     @Test

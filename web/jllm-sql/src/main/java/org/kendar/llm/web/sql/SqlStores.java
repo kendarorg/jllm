@@ -4,6 +4,7 @@ import org.kendar.llm.harness.auth.TokenCipher;
 import org.kendar.llm.harness.auth.TokenStore;
 import org.kendar.llm.harness.context.mnemonic.MnemonicStore;
 import org.kendar.llm.harness.identity.LoginSessionRepository;
+import org.kendar.llm.harness.plugin.PluginStorages;
 import org.kendar.llm.harness.identity.RoleRepository;
 import org.kendar.llm.harness.identity.SkillRepository;
 import org.kendar.llm.harness.identity.UserRepository;
@@ -20,13 +21,13 @@ import org.kendar.llm.harness.state.StateStore;
 public record SqlStores(Database database, UserRepository users, RoleRepository roles, SkillRepository skills,
                         LoginSessionRepository sessions, TokenStore tokens, SqlSettingsSource settings,
                         ProjectMcpTrust mcpTrust, ChatSessionStore chats, StateStore state, MnemonicStore mnemonic,
-                        SubAgentRunLog subAgentRuns) implements AutoCloseable {
+                        SubAgentRunLog subAgentRuns, PluginStorages pluginStorages) implements AutoCloseable {
 
     public static SqlStores of(Database db, TokenCipher tokenCipher) {
         return new SqlStores(db, new SqlUserRepository(db), new SqlRoleRepository(db), new SqlSkillRepository(db),
                 new SqlLoginSessionRepository(db), new SqlTokenStore(db, tokenCipher), new SqlSettingsSource(db),
                 new SqlProjectMcpTrust(db), new SqlChatStores.Sessions(db), new SqlChatStores.State(db),
-                new SqlChatStores.Mnemonic(db), new SqlChatStores.Runs(db));
+                new SqlChatStores.Mnemonic(db), new SqlChatStores.Runs(db), new SqlPluginStorage(db));
     }
 
     /** Opens the database (migrating it) and builds the stores. */

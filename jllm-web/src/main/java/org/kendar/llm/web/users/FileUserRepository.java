@@ -1,5 +1,7 @@
 package org.kendar.llm.web.users;
 
+import org.kendar.llm.harness.identity.RoleRepository;
+import org.kendar.llm.harness.identity.UnknownRoleException;
 import org.kendar.llm.harness.identity.User;
 import org.kendar.llm.harness.identity.UserRepository;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -26,10 +28,19 @@ public final class FileUserRepository implements UserRepository {
 
     private final Path dir;
     private final ObjectMapper mapper;
+    private final RoleRepository roles;
 
-    public FileUserRepository(Path dir, ObjectMapper mapper) {
+    public FileUserRepository(Path dir, ObjectMapper mapper, RoleRepository roles) {
         this.dir = dir;
         this.mapper = mapper;
+        this.roles = roles;
+    }
+
+    /** The same rule the SQL foreign key enforces: the role exists ({@code admin} always does). */
+    private void requireRole(String role) {
+        if (role == null || !(User.ADMIN_ROLE.equals(role) || roles.find(role).isPresent())) {
+            throw new UnknownRoleException(role);
+        }
     }
 
     @Override
@@ -81,6 +92,7 @@ public final class FileUserRepository implements UserRepository {
 
     private User write(String id, String name, String role, String passwordHash, String email, String externalId) {
         if (!UserRepository.validId(id)) throw new IllegalArgumentException("Invalid user id: " + id);
+        requireRole(role);
         synchronized (JsonFiles.LOCK) {
             if (exists(id)) throw new IllegalStateException("User " + id + " exists");
             JsonFiles.update(mapper, dir.resolve(id + ".json"), n -> {
@@ -132,6 +144,7 @@ public final class FileUserRepository implements UserRepository {
 
     @Override
     public User setRole(String id, String role) {
+        requireRole(role);
         return update(id, n -> n.put("role", role));
     }
 

@@ -344,6 +344,26 @@ Companion to [harnesses-compare](harnesses-compare.md). Every competitor cell of
 | Fallback providers | partial | https://code.claude.com/docs/en/model-config | 2026-11-23 |
 | Per-user OAuth for REST/OpenAPI tools | no | https://code.claude.com/docs/en/mcp | 2026-11-23 |
 
+## OpenHands
+
+- Repository: https://github.com/OpenHands/OpenHands (MIT; about 94.2k stars; release list empty on the page, quickstart pins `agent-canvas:1.44.0`)
+- SDK repository: https://github.com/OpenHands/software-agent-sdk (MIT; about 1.4k stars; SWE-bench badge 77.6)
+- Caveat: Documentation and marketing pages only; no source inspection. Pages are summaries produced by a fetch tool, so wording is paraphrased. A claim that the `enterprise/` directory is source-available came from a search-result summary of docs.openhands.dev, not from a page read in full; the enterprise page read says only "Commercial".
+
+| Topic | Value | Source | Accessed |
+| --- | --- | --- | --- |
+| Architecture (Agent Canvas, Agent Server, Automation Server, sandbox options), integrations, stars | see section | https://github.com/OpenHands/OpenHands | 2026-11-24 |
+| SDK workspaces (local, Docker, Kubernetes), Agent Server REST/WebSocket, SWE-bench badge | see section | https://github.com/OpenHands/software-agent-sdk | 2026-11-24 |
+| Edition feature table (SAML, RBAC via Keycloak, LiteLLM budgeting, Laminar, audit logs, licences) | see section | https://docs.openhands.dev/enterprise/enterprise-vs-oss | 2026-11-24 |
+| Enterprise overview (VPC, on-premises, integrations, BYOK, data residency) | see section | https://docs.openhands.dev/enterprise | 2026-11-24 |
+| Kubernetes install (Helm 4, EKS/AKS/GKE, Keycloak, PostgreSQL, Redis, LiteLLM, S3, licence key, 30-day trial) | see section | https://docs.openhands.dev/enterprise/k8s-install/installation | 2026-11-24 |
+| Product page (self-hosted in VPC on AWS, Azure, Google Cloud; centralized audit logs; RBAC) | see section | https://openhands.dev/enterprise | 2026-11-24 |
+| Plans and prices (Open Source free; Teams $500/month, 10 users, +$50 per seat, 5,000 sessions cap; Enterprise custom) | see section | https://openhands.dev/pricing | 2026-11-24 |
+| Confirmation policies and security analyzers | see section | https://docs.openhands.dev/sdk/guides/security | 2026-11-24 |
+| Append-only event log | see section | https://docs.openhands.dev/sdk/arch/events | 2026-11-24 |
+| Local setup, model providers | see section | https://docs.openhands.dev/openhands/usage/run-openhands/local-setup | 2026-11-24 |
+| OpenHands Index (top average 71.88, snapshot 2026-05-28) | see section | https://openhands.dev/blog/openhands-index; https://huggingface.co/datasets/OpenHands/openhands-index | 2026-11-24 |
+
 ## Rows added in the second pass
 
 These rows come from the extra-capabilities and weaknesses notes of the same research, accessed 2026-11-23. Version and star counts are in the per-project headers above. A project not named for a row is `unknown` there.

@@ -404,6 +404,8 @@ Anthropic request layout (prompt-cache friendly):
 
 Cancel: `CancelToken` aborts the in-flight HTTP call and backoff sleeps (`ModelCancelledException`). `LimitedModelClient` waiters are interrupted by it too. A streamed call is aborted by closing the response body.
 
+The non-streamed call of every client goes through `StreamingCall.send` (retry with backoff, 401 refresh, `Retry-After`), the streamed one through `StreamingCall` too; the clients keep only the request building and the response parsing.
+
 Streaming (`ModelClient.stream`, provider setting `stream`, default on; the other call sites stay non-streaming):
 the clients read server-sent events (`StreamingCall`) and rebuild the JSON a non-streamed call returns (Anthropic:
 `message_start`, `content_block_*` with `text_delta`, `thinking_delta`, `signature_delta`, `input_json_delta`,
@@ -463,7 +465,7 @@ sequenceDiagram
     S-->>FE: run_finished {cancelled, outcome}
 ```
 
-Event types: `run_started`, `run_queued`, `text_delta`, `thinking_delta`, `text_reset`, `text`, `usage`, `retry`, `tool_call`, `tool_result`, `approval_request`, `approval_unavailable`, `classifier`, `compaction`, `todos`, `stuck`, `verify_failed`, `instructions_loaded`, `content_warning`, `login_required`, `login`, `steer_queued`, `steer_applied`, `warning`, `error`, `cancelled`, `plan_ready`, `run_finished`.
+Event types: `run_started`, `run_queued`, `text_delta`, `thinking_delta`, `text_reset`, `text`, `usage`, `retry`, `tool_call`, `tool_result`, `approval_request`, `approval_unavailable`, `classifier`, `compaction`, `todos`, `stuck`, `verify_failed`, `instructions_loaded`, `content_warning`, `login_required`, `login`, `steer_queued`, `steer_applied`, `warning`, `error`, `cancelled`, `plan_ready`, `run_finished`; `subscriber_dropped` is the last event of a subscriber whose queue overflowed (reconnect with `after` and replay).
 
 The deltas (`text_delta`, `thinking_delta`, `text_reset`) have `seq` 0 and are not buffered: a reconnecting client is
 not replayed them and gets the final `text` instead.

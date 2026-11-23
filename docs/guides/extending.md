@@ -449,7 +449,7 @@ Contract:
 public interface ChatSessionStore {
     ChatSessionData save(ChatSessionData session);     // insert or replace by chatId
     Optional<ChatSessionData> find(String chatId);
-    List<ChatSessionData> list();                      // most recently updated first
+    List<ChatSessionData> list(ChatVisibility visibility); // admitted chats, most recently updated first; filter in the store
     void delete(String chatId);
 }
 ```
@@ -652,7 +652,7 @@ flowchart LR
 | Interface | Module, package | Default (jllm-web) | Holds |
 |---|---|---|---|
 | `UserRepository` | jllm-harness, `...harness.identity` | `FileUserRepository`: `webauth/users/<id>.json` | `User`: id, name, role, email, external id, password hash, per-source credential headers (`env:NAME` only), disabled tools and skills |
-| `RoleRepository` | jllm-harness, `...harness.identity` | `FileRoleRepository`: `webauth/permissions/<role>.json` | `Role`: tool patterns, read-only, approval `ask`/`off`; the fixed `admin` role is never stored |
+| `RoleRepository` | jllm-harness, `...harness.identity` | `FileRoleRepository`: `webauth/permissions/<role>.json` | `Role`: tool patterns, read-only, approval `ask`/`off`; the fixed `admin` role may be stored (SQL: seeded row) and is never deleted |
 | `SkillRepository` | jllm-harness, `...harness.identity` | `FileSkillRepository`: `webauth/global-skills/`, `webauth/user-skills/<id>/` | global and per-user skills (name, description, content) |
 | `LoginSessionRepository` | jllm-harness, `...harness.identity` | `InMemoryLoginSessionRepository` (a restart signs everybody out) | cookie token → user id, sliding `TTL` of 7 days |
 | `SettingsSource` | jllm-harness, `...harness.settings` | `FileSettingsSource`: `~/.jllm/settings.json`, `<project>/.jllm/settings.json`, `--settings`/`jllm.settings` | `SettingsLayer`s, `GLOBAL` → `PROJECT` → `EXPLICIT`, a later layer wins |
@@ -736,7 +736,8 @@ Rules every store keeps (the helpers are static methods on the interfaces):
 Chat history: `ChatSessionStore`, `SubAgentRunLog`, `MnemonicStore` and `StateStore` ([8](#8-persistence)) are
 optional beans read by `JllmWebAutoConfiguration`; without them `HarnessFactory` uses `FileChatSessionStore`,
 `FileHistorySubAgentRunLog`, `FileMnemonicStore` and `FileStateStore` under each chat's history root
-(`<base>/<chatId>/.jllm/history`). Chat retention (`chatRetentionLimit`) picks the chats to delete from `ChatSessionStore.list()`.
+(`<base>/<chatId>/.jllm/history`). Chat retention (`chatRetentionLimit`) picks the chats to delete from `ChatSessionService.list()` (all chats).
+The web chat list asks the store only for what the user may see (`ChatAccess.visibility(user)` -> `ChatVisibility`: everything, owned, one owner, nothing); `canSee` stays the final check.
 
 The SQL implementation is a worked example: [jllm-sql-spring-starter](../../web/jllm-sql-spring-starter/README.md) (tables, error
 mapping, token table with optional encryption, per-dialect migrations).

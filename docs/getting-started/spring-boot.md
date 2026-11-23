@@ -66,6 +66,8 @@ HarnessIdentity harnessIdentity(MyToolPolicy policy) {
 }
 ```
 
+Override `ChatAccess.visibility(user)` (a `ChatVisibility`) to let the store filter the chat list; the default loads every chat and `canSee` filters.
+
 `ChatSessionData.principal()` is the user id given when the chat was created. Because the API reads the
 principal from `WebAuthentication`, the existing Spring Security filter chain and session or JWT handling stay yours.
 Keep `/api/**` authenticated and CSRF-protected the way you do for any browser API.

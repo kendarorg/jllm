@@ -61,6 +61,9 @@ public final class Fixtures implements AutoCloseable {
 
     private final List<Source> mcp = new ArrayList<>();
     private final List<Source> rest = new ArrayList<>();
+    private final List<Source> web = new ArrayList<>();
+    private Boolean blockLocalHost;
+    private List<String> blockExtraAddresses = List.of();
     private final Map<String, String> files = new LinkedHashMap<>();
     private final List<String> docNames = new ArrayList<>();
     private final Canaries canaries = new Canaries();
@@ -105,6 +108,22 @@ public final class Fixtures implements AutoCloseable {
     /** As {@link #rest(FakeRestServer)}, but the server is down when the harness starts. */
     public Fixtures restDownAtStart(FakeRestServer server) {
         rest.add(new Source(server, false, true));
+        return this;
+    }
+
+    /**
+     * Adds a fake web site: reset per trial and put into the extras like the other servers; it is not registered in
+     * the settings, since the model reaches it through {@code web_fetch} with the URL it is given.
+     */
+    public Fixtures web(FakeWebServer server) {
+        web.add(new Source(server, false, false));
+        return this;
+    }
+
+    /** Sets {@code web.blockLocalHost} and {@code web.blockExtraAddresses} of the settings (see AddressPolicy). */
+    public Fixtures webLimits(boolean blockLocalHost, String... blockExtraAddresses) {
+        this.blockLocalHost = blockLocalHost;
+        this.blockExtraAddresses = List.of(blockExtraAddresses);
         return this;
     }
 
@@ -169,6 +188,7 @@ public final class Fixtures implements AutoCloseable {
     private List<Source> concat() {
         List<Source> all = new ArrayList<>(mcp);
         all.addAll(rest);
+        all.addAll(web);
         return all;
     }
 
@@ -185,6 +205,11 @@ public final class Fixtures implements AutoCloseable {
             ArrayNode apis = root.putArray("restApis");
             for (Source s : rest) {
                 apis.addObject().put("name", s.server.name()).put("openApiUrl", s.server.url() + "/openapi.json");
+            }
+            if (blockLocalHost != null) {
+                ObjectNode w = root.putObject("web").put("blockLocalHost", blockLocalHost);
+                ArrayNode extra = w.putArray("blockExtraAddresses");
+                blockExtraAddresses.forEach(extra::add);
             }
             if (workflows) {
                 workflowDir = tempDir();

@@ -47,10 +47,42 @@ public final class DriverLoader {
         Dialect d = config.dialect();
         if (d == Dialect.SQLITE) return;
         Pin pin = pin(d);
-        List<Path> dirs = config.driverDir() != null ? List.of(config.driverDir())
-                : List.of(Path.of("lib-ext").toAbsolutePath().normalize(),
-                Path.of(".downloaded-libs", pin.db(), pin.version()).toAbsolutePath().normalize());
+        List<Path> dirs = config.driverDir() != null ? List.of(config.driverDir()) : defaultDirs(pin, appDirs());
         ensure(config.jdbcUrl(), dirs, pin);
+    }
+
+    /** The folders searched without {@code jllm.sql.driver-dir}: per base, {@code lib-ext/} then {@code .downloaded-libs/<db>/<version>/}. */
+    static List<Path> defaultDirs(Pin pin, List<Path> bases) {
+        java.util.Set<Path> dirs = new java.util.LinkedHashSet<>();
+        for (Path base : bases) {
+            dirs.add(base.resolve("lib-ext").toAbsolutePath().normalize());
+            dirs.add(base.resolve(".downloaded-libs").resolve(pin.db()).resolve(pin.version()).toAbsolutePath().normalize());
+        }
+        return List.copyOf(dirs);
+    }
+
+    /** The working directory, then the folder of the running jar (its parent when the jar sits in {@code lib-ext/sql}). */
+    private static List<Path> appDirs() {
+        List<Path> bases = new ArrayList<>();
+        bases.add(Path.of("").toAbsolutePath());
+        try {
+            var src = DriverLoader.class.getProtectionDomain().getCodeSource();
+            if (src != null && src.getLocation() != null && "file".equals(src.getLocation().getProtocol())) {
+                Path loc = Path.of(src.getLocation().toURI());
+                Path dir = Files.isDirectory(loc) ? null : loc.getParent(); // a class folder (tests) has no app dir
+                if (dir != null) {
+                    bases.add(dir);
+                    if (dir.getFileName() != null && dir.getFileName().toString().equals("sql") && dir.getParent() != null
+                            && dir.getParent().getFileName() != null
+                            && dir.getParent().getFileName().toString().equals("lib-ext")) {
+                        bases.add(dir.getParent().getParent());
+                    }
+                }
+            }
+        } catch (Exception | LinkageError ignored) {
+            // the working directory alone
+        }
+        return bases;
     }
 
     static synchronized void ensure(String url, List<Path> dirs, Pin pin) {

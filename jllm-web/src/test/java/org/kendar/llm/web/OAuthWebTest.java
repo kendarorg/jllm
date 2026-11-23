@@ -113,8 +113,9 @@ class OAuthWebTest {
                 """);
         RestApiSettings crm = api("crm", spec, true);
         RestApiSettings shared = api("shared", spec, false);
-        users = new FileUserRepository(root.resolve("users"), MAPPER);
-        Permissions permissions = new Permissions(new FileRoleRepository(root.resolve("permissions"), MAPPER));
+        FileRoleRepository roleRepo = new FileRoleRepository(root.resolve("permissions"), MAPPER);
+        users = new FileUserRepository(root.resolve("users"), MAPPER, roleRepo);
+        Permissions permissions = new Permissions(roleRepo);
         SkillRepository skills = new FileSkillRepository(root);
         store = new FileTokenStore(root.resolve("tokens"),
                 new TokenCipher(Base64.getDecoder().decode(TokenCipher.newKey()), null));
@@ -134,7 +135,7 @@ class OAuthWebTest {
                         new ChatController(new ChatApi(harness, MAPPER, new HarnessPricing(0, 0, 0, 0), auth), auth),
                         oauth)
                 .setControllerAdvice(new ApiExceptionAdvice())
-                .addInterceptors(new ApiInterceptor(gate, auth, MAPPER, false),
+                .addInterceptors(new ApiInterceptor(gate, auth, MAPPER, false, true),
                         new MappedInterceptor(new String[]{"/api/admin/**"}, new AdminInterceptor(gate, auth, MAPPER)))
                 .build();
     }

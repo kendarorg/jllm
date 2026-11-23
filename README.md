@@ -98,6 +98,7 @@ act under approval and isolation. Comparison: [JVM landscape](docs/comparisons/j
 | [jllm-cli](jllm-cli) | terminal front end, one shaded jar | [README](jllm-cli/README.md) |
 | [jllm-web-commons](web/jllm-web-commons) | framework-free handlers of the web API (chat, files, sign-in, users) | [README](web/jllm-web-commons/README.md) |
 | [jllm-web-spring-starter](web/jllm-web-spring-starter) | REST + SSE web API as a Spring Boot starter | [README](web/jllm-web-spring-starter/README.md) |
+| [jllm-sql](web/jllm-sql), [jllm-sql-spring-starter](web/jllm-sql-spring-starter) | SQL stores (SQLite, MySQL, PostgreSQL; plain JDBC) and their auto-configuration | [README](web/jllm-sql-spring-starter/README.md) |
 | [jllm-web](jllm-web) | reference web app: OIDC and password sign-in, roles, Vue chat UI, flow editor | [README](jllm-web/README.md) |
 | [jllm-workflows](plugins/jllm-workflows), [jllm-workflow-web](plugins/jllm-workflow-web) | optional flow engine and its web endpoints | [WORKFLOW](docs/guides/workflow.md) |
 | jllm-js, jllm-pdf, jllm-docs | optional plugins: JavaScript sandbox, document readers | [JS](docs/guides/js.md), [TOOLS](docs/guides/tools.md#document-readers) |
@@ -134,6 +135,16 @@ The release zip ships no GraalJS: `setup.sh` / `setup.ps1`, released next to it,
 > `scripts/setup` again.
 
 
+## SQL store
+
+`jllm-web` keeps users, roles, chats, tokens and settings in SQL by default: SQLite in `<jllm.webauth-dir>/jllm.db`
+(bundled, nothing to install), or MySQL / PostgreSQL (both experimental) chosen by the JDBC url alone:
+`jllm.sql.url=jdbc:postgresql://host:5432/jllm`, `jllm.sql.user`, `jllm.sql.password=${JLLM_SQL_PASSWORD}`. `jllm.store=file`
+keeps the files under `webauth/` instead. The MySQL (GPL) and PostgreSQL drivers are never shipped: run
+`scripts/fetch-sql-driver.sh mysql|postgres` (`.ps1` / `.cmd` on Windows; in a release zip the script next to it) or
+`scripts/setup --sql`; the jar is SHA-256 checked. Stored OAuth tokens are encrypted when `JLLM_TOKEN_KEY` is set.
+Details: [jllm-sql-spring-starter](web/jllm-sql-spring-starter/README.md).
+
 ## Maven Central
 
 All modules are available on Maven Central under the group `org.kendar.llm`.
@@ -153,7 +164,7 @@ judge. Every run is recorded in the [eval history](core/jllm-eval/eval-results/h
 
 | For | Start here |
 |---|---|
-| **Evaluating** | [Why JLLM](docs/why-jllm.md), [security model](docs/enterprise/security-model.md), [compliance](docs/enterprise/compliance-and-licensing.md), [limits](docs/enterprise/roadmap-and-limits.md) |
+| **Evaluating** | [Why JLLM](docs/why-jllm.md), [security model](docs/enterprise/security-model.md), [compliance](docs/enterprise/compliance-and-licensing.md), [limits](docs/enterprise/roadmap-and-limits.md), [securing a deployment](docs/enterprise/securing-and-enterprise-setup.md) |
 | **Integrating** | [Embed in Java](docs/getting-started/embed-in-java.md), [Spring Boot](docs/getting-started/spring-boot.md), [Extending](docs/guides/extending.md) |
 | **Operating** | [Deployment](docs/enterprise/deployment.md), [identity](docs/enterprise/identity-and-access.md), [observability](docs/enterprise/observability.md), [governance](docs/enterprise/governance-and-audit.md) |
 | **Everything** | [Docs index](docs/index.md), [long overview](docs/reference/overview.md) |
@@ -163,7 +174,7 @@ judge. Every run is recorded in the [eval history](core/jllm-eval/eval-results/h
 Today: single OIDC provider and no IdP role mapping; one global API key per model provider; the web app is a
 reference front end to run behind your proxy; no Spring Boot starter for the harness itself (only the web API starter `jllm-web-spring-starter`; harness beans are recipes); no external security audit.
 
-Stores (chat history, users, roles, tokens) are files by default. To use your own storage, implement the store
+Stores (chat history, users, roles, tokens): memory or files in the library and the CLI; `jllm-web` uses SQL when `jllm-sql-spring-starter` is present, else files. To use your own storage, implement the store
 interfaces and register them as beans or on the builder ([ports](docs/enterprise/governance-and-audit.md#ports-for-your-stores)).
 
 Next: IdP role mapping (token claims to roles) and per-user model credentials (own API key or OAuth login per

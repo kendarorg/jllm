@@ -19,15 +19,19 @@ CREATE TABLE role_permissions (
     PRIMARY KEY (role, ord),
     FOREIGN KEY (role) REFERENCES roles(name) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+-- The fixed admin role always has its row: users reference roles (ON DELETE RESTRICT) and admin users need it.
+INSERT INTO roles (name, read_only, approval) VALUES ('admin', 0, 'ask');
+INSERT INTO role_tools (role, ord, pattern) VALUES ('admin', 0, '*');
 CREATE TABLE users (
     id            VARCHAR(64) NOT NULL PRIMARY KEY,
     name          VARCHAR(255) NOT NULL,
-    role          VARCHAR(64) NULL,
+    role          VARCHAR(64) NOT NULL,
     password_hash VARCHAR(512) NULL,
     external_id   VARCHAR(512) NULL,
     email         VARCHAR(320) NULL,
     INDEX idx_users_external (external_id),
-    INDEX idx_users_email (email)
+    INDEX idx_users_email (email),
+    FOREIGN KEY (role) REFERENCES roles(name) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 CREATE TABLE user_credentials (
     user_id VARCHAR(64) NOT NULL,
@@ -102,7 +106,8 @@ CREATE TABLE chats (
     principal               VARCHAR(255) NULL,
     chat_tools              MEDIUMTEXT NULL,
     tainted_tool_uses       MEDIUMTEXT NULL,
-    INDEX idx_chats_updated (updated_at)
+    INDEX idx_chats_updated (updated_at),
+    INDEX idx_chats_principal (principal, updated_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 CREATE TABLE chat_log (
     chat_id  VARCHAR(255) NOT NULL PRIMARY KEY,
@@ -134,4 +139,12 @@ CREATE TABLE subagent_runs (
     cache_creation_tokens BIGINT NOT NULL,
     created_at            BIGINT NOT NULL,
     INDEX idx_runs_chat (chat_id, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+CREATE TABLE plugin_docs (
+    plugin_id  VARCHAR(64) NOT NULL,
+    owner      VARCHAR(128) NOT NULL,
+    collection VARCHAR(64) NOT NULL,
+    doc_id     VARCHAR(255) NOT NULL,
+    doc        MEDIUMTEXT NOT NULL,
+    PRIMARY KEY (plugin_id, owner, collection, doc_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;

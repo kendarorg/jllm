@@ -6,6 +6,7 @@ import org.kendar.llm.harness.identity.Principal;
 import org.kendar.llm.harness.identity.User;
 import org.kendar.llm.harness.identity.UserRepository;
 import org.kendar.llm.harness.session.ChatSessionData;
+import org.kendar.llm.harness.session.ChatVisibility;
 import org.kendar.llm.web.commons.Cookies;
 import org.kendar.llm.web.commons.WebAuthentication;
 
@@ -61,5 +62,11 @@ public class CookieAuthentication implements WebAuthentication, ChatAccess {
         String owner = chat.principal();
         if (owner == null) return false;
         return user.admin() || owner.equals(user.id());
+    }
+
+    /** The same rule as {@link #canSee}, for the store: the admin lists owned chats, anyone else their own. */
+    @Override
+    public ChatVisibility visibility(Principal user) {
+        return user.admin() ? ChatVisibility.owned() : ChatVisibility.ownedBy(user.id());
     }
 }

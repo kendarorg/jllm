@@ -137,4 +137,14 @@ class DriverLoaderTest {
         assertEquals(Path.of("drv").toAbsolutePath().normalize(), c.driverDir());
         assertNull(SqlConfig.fromProperties(k -> null, Path.of("d")).driverDir());
     }
+
+    @Test
+    void defaultDirsCoverEveryBaseWithoutDuplicates() {
+        DriverLoader.Pin pin = new DriverLoader.Pin("postgres", "1.2.3", "0".repeat(64), "postgresql-1.2.3.jar");
+        Path a = Path.of("a").toAbsolutePath();
+        Path b = Path.of("b").toAbsolutePath();
+        List<Path> dirs = DriverLoader.defaultDirs(pin, List.of(a, b, a));
+        assertEquals(List.of(a.resolve("lib-ext"), a.resolve(".downloaded-libs").resolve("postgres").resolve("1.2.3"),
+                b.resolve("lib-ext"), b.resolve(".downloaded-libs").resolve("postgres").resolve("1.2.3")), dirs);
+    }
 }

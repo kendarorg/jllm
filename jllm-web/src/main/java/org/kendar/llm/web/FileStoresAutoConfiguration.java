@@ -11,6 +11,10 @@ import org.kendar.llm.web.users.FileSkillRepository;
 import org.kendar.llm.web.users.FileUserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.kendar.llm.harness.auth.TokenKeyGuard;
+import org.kendar.llm.harness.auth.TokenStore;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -22,6 +26,7 @@ import org.springframework.util.ClassUtils;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Set;
+import java.util.function.Function;
 
 /**
  * The file stores of users, roles and skills (and in-memory sign-in sessions): the fallback when no other store bean
@@ -53,15 +58,32 @@ public class FileStoresAutoConfiguration {
     public record StoreSetting(String value) {
     }
 
+    /**
+     * The token key check of the file token store (the SQL starter does the same for its own): created only when no
+     * {@code TokenStore} bean replaces the files. Without {@code JLLM_TOKEN_KEY}: a warning, or no start when exposed.
+     */
+    @Bean
+    @ConditionalOnMissingBean(TokenStore.class)
+    public static TokenKeyCheck tokenKeyCheck(Environment env,
+                                              @Qualifier("jllmSqlEnv") ObjectProvider<Function<String, String>> envVars) {
+        boolean encrypted = TokenKeyGuard.check(envVars.getIfAvailable(() -> System::getenv), env::getProperty);
+        return new TokenKeyCheck(encrypted);
+    }
+
+    /** Outcome of the token key check; {@code encrypted} when a key is set. */
+    public record TokenKeyCheck(boolean encrypted) {
+    }
+
     /** {@code <webauth>/users}: one file per user. */
     @Bean
     @ConditionalOnMissingBean(UserRepository.class)
-    public UserRepository userRepository(@Value("${jllm.webauth-dir:webauth}") String webauthDir, ObjectMapper mapper) {
+    public UserRepository userRepository(@Value("${jllm.webauth-dir:webauth}") String webauthDir, ObjectMapper mapper,
+                                         RoleRepository roles) {
         Path dir = root(webauthDir).resolve("users");
         if (!Files.isDirectory(dir)) {
             log.warn("No users folder at {}: nobody can sign in. Set jllm.webauth-dir.", dir);
         }
-        return new FileUserRepository(dir, mapper);
+        return new FileUserRepository(dir, mapper, roles);
     }
 
     /** {@code <webauth>/permissions}: one file per role. */

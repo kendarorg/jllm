@@ -242,7 +242,7 @@ What changes:
   Executable bits are kept (by a `.jllm-exec` list in the archive).
 - Large projects (`node_modules`, build output, `.git`) are uploaded whole: start the agent from a smaller directory or
   clean first.
-- The port is published on all interfaces of the remote host (`0.0.0.0`). The daemon itself speaks plain HTTP, so unless
+- The port is published on all interfaces of the remote host (`0.0.0.0`). The daemon itself speaks plain HTTP (native TLS in the daemon is a TODO), so unless
   something in front of it terminates TLS the token, the commands and the files can be read by anyone on the path.
   - `remoteHost` may carry a scheme: `"https://docker.example.org"` makes the harness use TLS (JDK default trust store, or
     `sandbox.docker.trustStore` / `trustStorePassword`: a PKCS12 or `.jks` file). This needs a TLS-terminating proxy that

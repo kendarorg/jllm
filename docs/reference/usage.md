@@ -554,6 +554,7 @@ waits `delayMs` before retry `attempt` of `max`; it is followed by the normal ev
 | `warning`, `error` | `message` |
 | `cancelled` | — |
 | `plan_ready` | `message` |
+| `subscriber_dropped` | `message`, `seq` 0; last event of a subscriber whose bounded queue overflowed (it is detached; `jllm-web` closes the SSE stream instead of sending it): reconnect with the last `seq` and replay |
 | `login_required` | `source` (`api:<name>`, `mcp:<server>`), `agent` (sub-agent key, when not the main agent): a call needs a login the user has not done; once per run and source |
 | `login` | `source`, `ok`, `message`: a login started from this chat ended |
 | `run_finished` | `cancelled`, `outcome`: `completed`, `stuck`, `unverified`, `max_turns`, `truncated`, `refused`, `cancelled`, `failed` |

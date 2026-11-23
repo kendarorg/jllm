@@ -6,9 +6,10 @@
 |---|---|
 | Identity | one OpenID Connect provider; no IdP group or claim to role mapping; no SAML or SCIM ([Identity and access](identity-and-access.md)) |
 | Web application | a reference front end: no TLS termination, sign-in lockout is the only rate limit; run behind a proxy |
-| Stores | files and memory by default; no JDBC implementation shipped (interfaces are ready) |
+| Stores | memory and files in the library; `jllm-web` ships SQL stores (SQLite, MySQL, PostgreSQL); MySQL and PostgreSQL are experimental until run against real servers; no importer of an existing `webauth/` folder; one instance only (file mode), no shared run state |
+| Network guard | `web.blockLocalHost` resolves the name itself and the HTTP client resolves it again: a DNS rebinding window remains (no address pinning). The remote Docker daemon accepts plain http unless `sandbox.docker.allowInsecure=false`; the in-container daemon speaks plain HTTP only (https needs a TLS-terminating proxy in front of it; native TLS is a TODO) |
 | Integrations | no Spring Boot starter for the harness itself (`jllm-web-spring-starter` covers only the web REST and SSE API) and no Micrometer or OpenTelemetry module: [recipes](../getting-started/spring-boot.md) only |
-| Model credentials | one global API key per provider; per-user credentials are [in development](#in-development-per-user-model-credentials) |
+| Model credentials | one global API key per provider; per-user credentials are [in development](#planned-per-user-model-credentials) |
 | Flows | the `who` label of a question is shown, not enforced |
 | Isolation | the default sandbox has none; MCP stdio servers run as the JVM user |
 | Path jail | on Windows, and on file systems without secure directory streams, a junction swapped in between check and use is a residual race (accepted: creating one needs a host shell, which has no jail); the shell tools are not covered ([tools guide](../guides/tools.md#links-that-leave-the-work-dir-filesexternallinks)) |
@@ -79,7 +80,7 @@ Talk to the agent from Telegram, Discord, Slack, WhatsApp and similar apps inste
 ## Provider subscription logins
 
 Log in to a model provider with a subscription account instead of an API key (Pi, OpenCode, Qwen Code and Hermes Agent
-do). Per-user keys and generic OAuth per provider are [in development](#in-development-per-user-model-credentials); a login for a specific vendor's subscription is separate work. jllm has the generic OAuth utilities, MCP and REST API OAuth (per user or shared), the `TokenStore` (file or OS secret store) and `/login`, but no provider login.
+do). Per-user keys and generic OAuth per provider are [in development](#planned-per-user-model-credentials); a login for a specific vendor's subscription is separate work. jllm has the generic OAuth utilities, MCP and REST API OAuth (per user or shared), the `TokenStore` (file or OS secret store) and `/login`, but no provider login.
 
 - Implement `OAuthLogin` per provider, discovered through `ServiceLoader` as now, and let a provider entry in the
   settings use the stored token instead of `apiKey`, refreshing it when it expires.

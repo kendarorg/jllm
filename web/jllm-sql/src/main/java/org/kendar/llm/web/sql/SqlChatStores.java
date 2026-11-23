@@ -7,6 +7,7 @@ import org.kendar.llm.harness.context.mnemonic.MnemonicState;
 import org.kendar.llm.harness.context.mnemonic.MnemonicStore;
 import org.kendar.llm.harness.session.ChatSessionData;
 import org.kendar.llm.harness.session.ChatSessionStore;
+import org.kendar.llm.harness.session.ChatVisibility;
 import org.kendar.llm.harness.session.SubAgentRunData;
 import org.kendar.llm.harness.session.SubAgentRunLog;
 import org.kendar.llm.harness.state.StateStore;
@@ -83,9 +84,26 @@ public final class SqlChatStores {
         }
 
         @Override
-        public List<ChatSessionData> list() {
-            return db.tx(tx -> tx.query("SELECT " + COLS + " FROM chats ORDER BY updated_at DESC, chat_id",
-                    Sessions::row));
+        public List<ChatSessionData> list(ChatVisibility visibility) {
+            String where;
+            Object[] args;
+            switch (visibility.kind()) {
+                case NOTHING:
+                    return List.of();
+                case OWNED:
+                    where = " WHERE principal IS NOT NULL";
+                    args = new Object[0];
+                    break;
+                case OWNER:
+                    where = " WHERE principal = ?";
+                    args = new Object[]{visibility.owner()};
+                    break;
+                default:
+                    where = "";
+                    args = new Object[0];
+            }
+            return db.tx(tx -> tx.query("SELECT " + COLS + " FROM chats" + where + " ORDER BY updated_at DESC, chat_id",
+                    Sessions::row, args));
         }
 
         @Override

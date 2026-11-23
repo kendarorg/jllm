@@ -61,7 +61,7 @@ final class Fixtures {
         record Sent(String id, String event, String data) {
         }
 
-        final List<Sent> sent = new ArrayList<>();
+        final List<Sent> sent = java.util.Collections.synchronizedList(new ArrayList<>());
         final List<String> comments = new ArrayList<>();
         final List<Runnable> closeHooks = new ArrayList<>();
         final List<Runnable> timeoutHooks = new ArrayList<>();

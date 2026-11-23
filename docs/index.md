@@ -30,6 +30,7 @@ Pick the path that matches your role.
 | Page | Answers |
 |---|---|
 | [Deployment](enterprise/deployment.md) | shapes, hardening checklist, state and scaling |
+| [Securing a deployment](enterprise/securing-and-enterprise-setup.md) | hardening and enterprise setup, with a final checklist |
 | [Identity and access](enterprise/identity-and-access.md) | sign-in, roles, whose credentials a call uses |
 | [Governance and audit](enterprise/governance-and-audit.md) | approvals, hooks, events, ports |
 | [Observability](enterprise/observability.md) | metrics, tracing, cost (Micrometer and OTel recipes) |
@@ -41,4 +42,4 @@ Pick the path that matches your role.
 [FLOW](reference/flow.md) · [HISTORY](reference/history.md) · [PUBLISHING](reference/publishing.md)
 
 Module READMEs: [jllm-harness](../core/jllm-harness/README.md) · [jllm-cli](../jllm-cli/README.md) ·
-[jllm-web-commons](../web/jllm-web-commons/README.md) · [jllm-web-spring-starter](../web/jllm-web-spring-starter/README.md) · [jllm-web](../jllm-web/README.md)
+[jllm-web-commons](../web/jllm-web-commons/README.md) · [jllm-web-spring-starter](../web/jllm-web-spring-starter/README.md) · [jllm-sql-spring-starter](../web/jllm-sql-spring-starter/README.md) · [jllm-web](../jllm-web/README.md)

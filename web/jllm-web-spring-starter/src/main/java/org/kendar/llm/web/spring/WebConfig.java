@@ -12,8 +12,9 @@ class WebConfig implements WebMvcConfigurer {
     private final ApiInterceptor api;
     private final AdminInterceptor admin;
 
-    WebConfig(Gate gate, WebAuthentication authentication, ObjectMapper mapper, boolean enforceOnLoopback) {
-        this.api = new ApiInterceptor(gate, authentication, mapper, enforceOnLoopback);
+    WebConfig(Gate gate, WebAuthentication authentication, ObjectMapper mapper, boolean enforceOnLoopback,
+              boolean boundToLoopback) {
+        this.api = new ApiInterceptor(gate, authentication, mapper, enforceOnLoopback, boundToLoopback);
         this.admin = new AdminInterceptor(gate, authentication, mapper);
     }
 

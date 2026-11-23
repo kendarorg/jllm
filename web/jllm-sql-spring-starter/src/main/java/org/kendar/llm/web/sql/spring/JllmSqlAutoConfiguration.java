@@ -1,12 +1,14 @@
 package org.kendar.llm.web.sql.spring;
 
 import org.kendar.llm.harness.auth.TokenCipher;
+import org.kendar.llm.harness.auth.TokenKeyGuard;
 import org.kendar.llm.harness.auth.TokenStore;
 import org.kendar.llm.harness.context.mnemonic.MnemonicStore;
 import org.kendar.llm.harness.identity.LoginSessionRepository;
 import org.kendar.llm.harness.identity.RoleRepository;
 import org.kendar.llm.harness.identity.SkillRepository;
 import org.kendar.llm.harness.identity.UserRepository;
+import org.kendar.llm.harness.plugin.PluginStorages;
 import org.kendar.llm.harness.session.ChatSessionStore;
 import org.kendar.llm.harness.session.SubAgentRunLog;
 import org.kendar.llm.harness.settings.ProjectMcpTrust;
@@ -25,7 +27,8 @@ import java.util.function.Function;
 
 /**
  * With this starter on the class path (and {@code jllm.store} not {@code file}) every store of the web application is
- * kept in SQL: SQLite by default, MySQL with {@code jllm.sql.url}. Runs before the file stores of {@code jllm-web},
+ * kept in SQL: SQLite by default, MySQL or PostgreSQL with {@code jllm.sql.url}
+ * ({@code jdbc:mysql:} / {@code jdbc:postgresql:}; their drivers are fetched with {@code fetch-sql-driver}). Runs before the file stores of {@code jllm-web},
  * which only apply when no store bean exists.
  * <p>
  * Settings: {@code jllm.sql.url}, {@code jllm.sql.user}, {@code jllm.sql.password}, {@code jllm.sql.pool},
@@ -57,6 +60,7 @@ public class JllmSqlAutoConfiguration {
                 throw new java.io.UncheckedIOException("Cannot create " + dir, e);
             }
         }
+        TokenKeyGuard.check(jllmSqlEnv, env::getProperty); // no key: warn, or refuse when exposed
         TokenCipher cipher = TokenCipher.fromEnv(jllmSqlEnv); // null = tokens in clear; invalid key = startup fails
         SqlStores stores = SqlStores.open(config, cipher);
         try {
@@ -121,5 +125,10 @@ public class JllmSqlAutoConfiguration {
     @Bean
     public SubAgentRunLog sqlSubAgentRunLog(SqlStores s) {
         return s.subAgentRuns();
+    }
+
+    @Bean
+    public PluginStorages sqlPluginStorages(SqlStores s) {
+        return s.pluginStorages();
     }
 }

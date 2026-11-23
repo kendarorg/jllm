@@ -30,7 +30,7 @@ There is no dialect property. The scheme of `jllm.sql.url` selects it:
 |---|---|---|
 | none (default) | SQLite file `jllm.db` in `jllm.webauth-dir` when that is set, else `data/jllm.db` | bundled |
 | `jdbc:sqlite:<file>` | SQLite | bundled |
-| `jdbc:mysql:...` (also `jdbc:mariadb:`) | MySQL 8+, **experimental** until run against a real server | fetched, GPL |
+| `jdbc:mysql:...` (`jdbc:mariadb:` is rejected) | MySQL 8+, **experimental** until run against a real server | fetched, GPL |
 | `jdbc:postgresql:...` | PostgreSQL, **experimental** until run against a real server | fetched, BSD |
 
 Any other scheme is rejected at startup. Properties: `jllm.sql.url`, `jllm.sql.user`, `jllm.sql.password` (use
@@ -38,9 +38,15 @@ Any other scheme is rejected at startup. Properties: `jllm.sql.url`, `jllm.sql.u
 
 Schema: `db/<dialect>/V<n>__*.sql` listed in `migrations.txt`, applied at startup under a lock (MySQL `GET_LOCK`,
 PostgreSQL advisory lock); never edit an applied script, add the next one. All three dialects have the same tables
-(`DialectTest`). Not done: a `users -> roles` foreign key (the check stays in code; deleting a role does not touch its
-users), per-message chat rows (`messages` is one text per chat; `SqlStoresTest.largeChatSaveTiming` logs the cost of
+(`DialectTest`). `users.role` is a NOT NULL foreign key to `roles(name)` (`ON DELETE RESTRICT`): the `admin` role has a
+seeded row, a user needs an existing role, and deleting a role in use throws `RoleInUseException` (the admin API answers
+409 naming the users, with the files store too). There is no migration history yet: the schema is edited in `V1`, so an
+existing development database must be deleted. Not done: per-message chat rows (`messages` is one text per chat; `SqlStoresTest.largeChatSaveTiming` logs the cost of
 saving a 5,000-message chat 100 times: about 1.5 ms per save on SQLite).
+
+The chat list takes a `ChatVisibility` (`ChatSessionStore.list(visibility)`): the filter is a `WHERE` on `chats.principal`
+(everything, owned, one owner, nothing), so a user's listing never loads other users' chats; the index
+`(principal, updated_at)` is in `V1` for each dialect.
 
 ## JDBC drivers
 
@@ -63,7 +69,7 @@ bundled: their versions are pinned in the root pom (`mysql.version`, `postgresql
 ## Tokens and seeding
 
 OAuth tokens are encrypted when `JLLM_TOKEN_KEY` (and optionally `JLLM_TOKEN_KEY_OLD`, for rotation) is set, else stored
-in clear; an invalid key stops the start. A new database (no users and no roles) gets the roles and users of
+in clear; an invalid key stops the start. A new database (no users and no roles besides `admin`) gets the roles and users of
 `release/template/webauth` (admin, poweru, guest; password equal to the user name) unless `jllm.sql.seed=false`;
 `jllm.web.use-real-password=true` replaces those passwords with random ones at startup. Seeding happens when the stores
 are created, before anything reads the roles.
@@ -71,12 +77,14 @@ are created, before anything reads the roles.
 ## Not on SQL
 
 Workspace files (the chat directories, uploads, the sandbox) stay on disk by design. The plugin storage
-(`PluginStorages`) stays on files (`.jllm/plugin-data`) with SQL too.
+(`PluginStorages`: the workflows' flows and runs, and every other plugin's documents) is in SQL, table `plugin_docs`;
+with `jllm.store=file` it is files under `.jllm/plugin-data`. The tables are part of the initial schema: a development
+database created before them must be deleted.
 
 ## Tests
 
 `JllmSqlAutoConfigurationTest` (every store type; `jllm.store=file`; url; seeding; invalid key), `jllm-sql`: `SqlStoresTest`,
-`DialectTest`, `DriverLoaderTest`; `jllm-web`: `FileStoresAutoConfigurationTest`, `SqlBootTest` (the starter is a test
+`DialectTest`, `DriverLoaderTest`, `FetchSqlDriverScriptTest` (the fetch script), `SqlSeederTest`; `jllm-web`: `FileStoresAutoConfigurationTest`, `SqlBootTest` (the starter is a test
 dependency of `jllm-web`; `src/test/resources/application.properties` keeps the other tests on files).
 `MysqlOptionalTest` and `PostgresOptionalTest` run only with `JLLM_TEST_MYSQL_URL|USER|PASSWORD` or
 `JLLM_TEST_PG_URL|USER|PASSWORD` set (an empty disposable database); skipped otherwise, no Docker is started.

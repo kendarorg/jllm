@@ -109,9 +109,10 @@ key is set to anything but `none`, so leave it out of the settings file the web 
 Release files (next to each other)         Inside the zip: jllm-<version>/
 jllm-<version>.zip                         ├── jllm-cli.jar, jllm-web.jar
 SHA256SUMS                                 ├── run-cli.sh/.cmd, run-web.sh/.cmd
-setup.sh, setup.ps1                        ├── fetch-graaljs.sh/.cmd/.ps1
-                                           ├── lib-ext/            empty until setup / fetch-graaljs
-                                           │   └── manifests/      graaljs-community / graaljs-oracle
+setup.sh, setup.ps1                        ├── fetch-graaljs.sh/.cmd/.ps1, fetch-sql-driver.sh/.cmd/.ps1
+                                           ├── lib-ext/            GraalJS and SQL drivers: empty until setup / fetch-*
+                                           │   ├── sql/            the SQL store jars (shipped)
+                                           │   └── manifests/      graaljs-community / graaljs-oracle, mysql, postgres
                                            ├── plugins/            js, pdf, docs, workflows, workflow-web
                                            ├── settings/settings.json
                                            ├── webauth/            users/, permissions/
@@ -127,7 +128,7 @@ setup.sh, setup.ps1                        ├── fetch-graaljs.sh/.cmd/.ps1
 | `lib-ext/sql/` | the SQL store jars (shipped): with them users, chats and tokens live in SQL (SQLite file under `webauth/` by default); `jllm.store=file` keeps the files; see `application.properties` |
 | `fetch-graaljs.sh`, `.cmd`, `.ps1` | fill or replace `lib-ext/` with the `community` or `oracle` (commercial) set from Maven Central |
 | `plugins/` | `js` (`run_js`), `pdf` and `docs` (document readers), `jllm-workflows`, `jllm-workflow-web` |
-| `settings/settings.json` | enables the plugins above; remove an entry to disable one |
+| `settings/settings.json` | enables the plugins above (remove an entry to disable one) and sets `web.blockLocalHost=true`: `web_fetch` / `web_download` refuse loopback, link-local and private addresses (`false` to reach local services; `web.blockExtraAddresses` adds more) |
 | `application.properties` | web app properties (provider, model, key); all commented out |
 | `webauth/` | web users and roles (`users/<id>.json`, `permissions/<role>.json`); edit freely, no restart |
 | `examples/flows/writing-helper.json` | a first workflow with choices (see below) |

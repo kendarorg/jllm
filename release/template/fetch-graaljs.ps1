@@ -1,6 +1,6 @@
 # Replaces the GraalJS jars of lib-ext\ with the set of one edition, downloaded from Maven Central and verified.
 # Usage: .\fetch-graaljs.ps1 community|oracle [-AcceptOracleTerms]
-# Editions never mix: lib-ext\*.jar (but not the MySQL driver) is emptied first. A download whose SHA-256 differs from the manifest is deleted and
+# Editions never mix: lib-ext\*.jar (but not the SQL drivers mysql-connector-j-* and postgresql-*, nor lib-ext\sql) is emptied first. A download whose SHA-256 differs from the manifest is deleted and
 # the script fails (lib-ext is left as it was). The oracle set may declare terms (the manifest says so): read them,
 # then pass -AcceptOracleTerms. JLLM_MAVEN_REPO overrides the repository URL.
 param(
@@ -40,7 +40,7 @@ try {
     $n++
   }
   if ($n -eq 0) { throw "no jar listed in $manifest" }
-  Get-ChildItem lib-ext -File | Where-Object { $_.Name -like '*.jar' -and $_.Name -notlike 'mysql-connector-j-*' -or $_.Name -like 'graaljs*.manifest' } | Remove-Item -Force
+  Get-ChildItem lib-ext -File | Where-Object { $_.Name -like '*.jar' -and $_.Name -notlike 'mysql-connector-j-*' -and $_.Name -notlike 'postgresql-*' -or $_.Name -like 'graaljs*.manifest' } | Remove-Item -Force
   Move-Item "$stage\*.jar" lib-ext
   Copy-Item $manifest "lib-ext\graaljs-$Edition.manifest"
   $v = ($lines | Where-Object { $_ -like 'version=*' } | ForEach-Object { $_.Substring(8) } | Select-Object -First 1)

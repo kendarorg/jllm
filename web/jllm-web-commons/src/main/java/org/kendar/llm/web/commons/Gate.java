@@ -4,9 +4,8 @@ import org.kendar.llm.harness.identity.ChatAccess;
 import org.kendar.llm.harness.identity.Principal;
 import org.kendar.llm.harness.session.ChatSessionService;
 
+import java.util.Locale;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Who may call what. Every {@code /api/**} call except the open ones needs a signed-in user (401 otherwise). A chat
@@ -15,13 +14,12 @@ import java.util.regex.Pattern;
  */
 public final class Gate {
 
-    private static final Pattern CHAT = Pattern.compile("^/api/chat/([^/]+)");
     /** Open on the common API: the command list adapts to the caller, signed in or not. */
     private static final Set<String> OPEN = Set.of("/api/chat/commands");
 
     /** The verdict: allowed (status 0), or the status and message to answer. */
     public record Decision(int status, String message) {
-        static final Decision ALLOW = new Decision(0, null);
+        public static final Decision ALLOW = new Decision(0, null);
 
         public boolean allowed() {
             return status == 0;
@@ -38,17 +36,42 @@ public final class Gate {
         this.sessions = sessions;
     }
 
-    /** Whether the path is outside the gate: no user needs to be looked up. */
+    /**
+     * Whether the path is outside the gate: no user needs to be looked up. {@code path} is the request path without
+     * the context path. Fails closed: only the explicitly open API paths and well-formed paths outside {@code /api}
+     * (the static content) are open; anything malformed (dot segments, empty segments, {@code ;}, {@code %},
+     * backslash) or that cannot be classified needs a signed-in user.
+     */
     public boolean isOpen(String path) {
-        return !path.startsWith("/api/") || OPEN.contains(path) || authentication.openPaths().contains(path);
+        if (path == null || !wellFormed(path)) return false;
+        if (OPEN.contains(path) || authentication.openPaths().contains(path)) return true;
+        String lower = path.toLowerCase(Locale.ROOT);
+        return !(lower.equals("/api") || lower.startsWith("/api/"));
     }
 
-    /** The verdict for a call to {@code path} by {@code user} (null = nobody signed in). */
+    private static boolean wellFormed(String path) {
+        if (!path.startsWith("/")) return false;
+        for (int i = 0; i < path.length(); i++) {
+            char c = path.charAt(i);
+            if (c == ';' || c == '%' || c == '\\' || c < 0x20) return false;
+        }
+        for (String segment : path.substring(1).split("/", -1)) {
+            if (segment.equals(".") || segment.equals("..")) return false;
+        }
+        return !path.contains("//");
+    }
+
+    /** The verdict for a call to {@code path} by {@code user} (null = nobody signed in); chat ownership is {@link #decideChat}. */
     public Decision decide(String path, Principal user) {
         if (isOpen(path)) return Decision.ALLOW;
         if (user == null) return new Decision(401, "Sign in first");
-        Matcher m = CHAT.matcher(path);
-        if (m.find() && !canSee(user, m.group(1))) return new Decision(404, "Unknown chat " + m.group(1));
+        return Decision.ALLOW;
+    }
+
+    /** The verdict for a call on the chat the framework matched as {@code chatId}: 404 unless {@code user} may see it. */
+    public Decision decideChat(Principal user, String chatId) {
+        if (user == null) return new Decision(401, "Sign in first");
+        if (!canSee(user, chatId)) return new Decision(404, "Unknown chat " + chatId);
         return Decision.ALLOW;
     }
 

@@ -17,10 +17,13 @@ CREATE TABLE role_permissions (
     permission TEXT NOT NULL,
     PRIMARY KEY (role, ord)
 );
+-- The fixed admin role always has its row: users reference roles (ON DELETE RESTRICT) and admin users need it.
+INSERT INTO roles (name, read_only, approval) VALUES ('admin', 0, 'ask');
+INSERT INTO role_tools (role, ord, pattern) VALUES ('admin', 0, '*');
 CREATE TABLE users (
     id            TEXT PRIMARY KEY,
     name          TEXT NOT NULL,
-    role          TEXT,
+    role          TEXT NOT NULL REFERENCES roles(name) ON DELETE RESTRICT,
     password_hash TEXT,
     external_id   TEXT,
     email         TEXT
@@ -99,6 +102,7 @@ CREATE TABLE chats (
     tainted_tool_uses       TEXT
 );
 CREATE INDEX idx_chats_updated ON chats(updated_at);
+CREATE INDEX idx_chats_principal ON chats(principal, updated_at);
 CREATE TABLE chat_log (
     chat_id  TEXT PRIMARY KEY,
     messages TEXT NOT NULL
@@ -130,3 +134,11 @@ CREATE TABLE subagent_runs (
     created_at            INTEGER NOT NULL
 );
 CREATE INDEX idx_runs_chat ON subagent_runs(chat_id, created_at);
+CREATE TABLE plugin_docs (
+    plugin_id  TEXT NOT NULL,
+    owner      TEXT NOT NULL,
+    collection TEXT NOT NULL,
+    doc_id     TEXT NOT NULL,
+    doc        TEXT NOT NULL,
+    PRIMARY KEY (plugin_id, owner, collection, doc_id)
+);

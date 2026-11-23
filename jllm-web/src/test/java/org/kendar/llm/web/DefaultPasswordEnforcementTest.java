@@ -59,8 +59,49 @@ class DefaultPasswordEnforcementTest {
         Cookie c = f.signIn("rita");
         call(f.mvc, c, "/api/me/tools", "127.0.0.1").andExpect(status().isOk());
         call(f.mvc, c, "/api/me/tools", "0:0:0:0:0:0:0:1").andExpect(status().isOk());
-        MockMvc strict = f.mvc(true);
+        MockMvc strict = f.mvc(true, true);
         assertRequired(call(strict, c, "/api/me/tools", "127.0.0.1"));
+    }
+
+    @Test
+    void loopbackIsNotExemptWhenTheServerIsNotBoundToLoopback() throws Exception {
+        WebauthFixture f = new WebauthFixture(dir);
+        Cookie c = f.signIn("rita");
+        assertRequired(call(f.mvc(false, false), c, "/api/me/tools", "127.0.0.1"));
+        assertRequired(call(f.mvc(false, false), c, "/api/me/tools", "0:0:0:0:0:0:0:1"));
+        call(f.mvc(false, true), c, "/api/me/tools", "127.0.0.1").andExpect(status().isOk());
+    }
+
+    @Test
+    void serverAddressClassification() {
+        for (String a : new String[]{"127.0.0.1", "127.1.2.3", "::1", "[::1]", "localhost", " 127.0.0.1 "}) {
+            org.junit.jupiter.api.Assertions.assertTrue(
+                    org.kendar.llm.web.spring.ApiInterceptor.isLoopbackAddress(a), a);
+        }
+        for (String a : new String[]{null, "", " ", "0.0.0.0", "::", "0:0:0:0:0:0:0:0", "192.168.1.5", "example.com",
+                "not an address:x"}) {
+            org.junit.jupiter.api.Assertions.assertFalse(
+                    org.kendar.llm.web.spring.ApiInterceptor.isLoopbackAddress(a), String.valueOf(a));
+        }
+    }
+
+    @Test
+    void contextPathDoesNotSkipTheAuthentication() throws Exception {
+        WebauthFixture f = new WebauthFixture(dir);
+        f.mvc.perform(get("/jllm/api/chat").contextPath("/jllm")).andExpect(status().isUnauthorized());
+        f.mvc.perform(get("/jllm/api/chat/commands").contextPath("/jllm")).andExpect(status().isOk());
+        f.mvc.perform(post("/jllm/api/login").contextPath("/jllm").contentType("application/json")
+                .content("{\"id\":\"rita\",\"password\":\"nope\"}")).andExpect(status().isUnauthorized());
+        Cookie c = f.signIn("rita");
+        f.mvc.perform(get("/jllm/api/chat").contextPath("/jllm").cookie(c)).andExpect(status().isOk());
+        assertRequired(f.mvc.perform(get("/jllm/api/me/tools").contextPath("/jllm").cookie(c).with(r -> {
+            r.setRemoteAddr("203.0.113.5");
+            return r;
+        })));
+        f.mvc.perform(get("/jllm/api/me").contextPath("/jllm").cookie(c).with(r -> {
+            r.setRemoteAddr("203.0.113.5");
+            return r;
+        })).andExpect(status().isOk());
     }
 
     @Test
@@ -74,11 +115,11 @@ class DefaultPasswordEnforcementTest {
     void afterTheChangeEverythingIsOpen() throws Exception {
         WebauthFixture f = new WebauthFixture(dir);
         Cookie c = f.signIn("rita");
-        assertRequired(call(f.mvc(true), c, "/api/me/tools", "203.0.113.5"));
+        assertRequired(call(f.mvc(true, true), c, "/api/me/tools", "203.0.113.5"));
         f.send(c, "POST", "/api/me/password", Map.of("current", "rita", "next", "a-long-new-password"))
                 .andExpect(status().isNoContent());
         Cookie after = f.signIn("rita", "a-long-new-password");
-        call(f.mvc(true), after, "/api/me/tools", "203.0.113.5").andExpect(status().isOk());
+        call(f.mvc(true, true), after, "/api/me/tools", "203.0.113.5").andExpect(status().isOk());
     }
 
     @Test
@@ -87,6 +128,6 @@ class DefaultPasswordEnforcementTest {
         Cookie c = f.signIn("rita");
         f.send(c, "POST", "/api/me/password", Map.of("current", "rita", "next", "a-long-new-password"));
         Cookie after = f.signIn("rita", "a-long-new-password");
-        call(f.mvc(true), after, "/api/me/tools", "127.0.0.1").andExpect(status().isOk());
+        call(f.mvc(true, true), after, "/api/me/tools", "127.0.0.1").andExpect(status().isOk());
     }
 }

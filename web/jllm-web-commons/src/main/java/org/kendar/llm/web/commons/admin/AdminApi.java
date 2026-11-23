@@ -12,6 +12,8 @@ import org.kendar.llm.harness.identity.Principal;
 import org.kendar.llm.web.commons.me.MeApi;
 import org.kendar.llm.web.commons.users.Permissions;
 import org.kendar.llm.harness.identity.Role;
+import org.kendar.llm.harness.identity.RoleInUseException;
+import org.kendar.llm.harness.identity.UnknownRoleException;
 import org.kendar.llm.harness.identity.SkillRepository;
 import org.kendar.llm.harness.identity.UserRepository;
 import org.kendar.llm.harness.identity.User;
@@ -85,6 +87,8 @@ public class AdminApi {
         }
         try {
             return Reply.status(201, row(users.create(id, Api.text(body, "name"), role, hash, email)));
+        } catch (UnknownRoleException e) {
+            throw new ApiException(400, e.getMessage());
         } catch (IllegalStateException e) {
             throw new ApiException(409, e.getMessage());
         }
@@ -108,7 +112,13 @@ public class AdminApi {
             updated = users.setEmail(id, email);
         }
         if (name != null && !name.isBlank()) updated = users.setName(id, name);
-        if (role != null) updated = users.setRole(id, role);
+        if (role != null) {
+            try {
+                updated = users.setRole(id, role);
+            } catch (UnknownRoleException e) {
+                throw new ApiException(400, e.getMessage());
+            }
+        }
         return row(updated);
     }
 
@@ -218,9 +228,14 @@ public class AdminApi {
     public void deleteRole(String name) {
         if (User.ADMIN_ROLE.equals(name)) throw new ApiException(403, "The admin role is fixed");
         if (permissions.role(name).isEmpty()) throw new ApiException(404, "Unknown role " + name);
-        long holders = users.all().stream().filter(u -> name.equals(u.role())).count();
-        if (holders > 0) throw new ApiException(409, "Role " + name + " is held by " + holders + " user(s)");
-        permissions.delete(name);
+        // the same answer for every store: the file one cannot refuse by itself, the SQL one also has a foreign key
+        List<String> holders = users.all().stream().filter(u -> name.equals(u.role())).map(User::id).toList();
+        if (!holders.isEmpty()) throw new ApiException(409, new RoleInUseException(name, holders).getMessage());
+        try {
+            permissions.delete(name);
+        } catch (RoleInUseException e) { // a user got the role meanwhile
+            throw new ApiException(409, e.getMessage());
+        }
     }
 
     // ---- catalog

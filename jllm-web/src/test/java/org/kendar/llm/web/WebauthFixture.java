@@ -103,8 +103,9 @@ final class WebauthFixture {
         user("rita", "reader");
         user("gus", "guest");
         Path pdf = Files.writeString(root.resolve("pdf.md"), "---\ndescription: PDFs\n---\nUse pdftotext.");
-        users = new FileUserRepository(root.resolve("users"), MAPPER);
-        permissions = new Permissions(new FileRoleRepository(root.resolve("permissions"), MAPPER));
+        FileRoleRepository roleRepo = new FileRoleRepository(root.resolve("permissions"), MAPPER);
+        users = new FileUserRepository(root.resolve("users"), MAPPER, roleRepo);
+        permissions = new Permissions(roleRepo);
         skills = new FileSkillRepository(root);
         ModelClient unused = new ModelClient() {
             @Override
@@ -131,11 +132,11 @@ final class WebauthFixture {
         auth = new CookieAuthentication(users, sessions);
         catalog = new ToolCatalogView(harness);
         gate = new Gate(auth, auth, harness.sessions());
-        mvc = mvc(false);
+        mvc = mvc(false, true);
     }
 
-    /** The API with the default-password enforcement; {@code onLoopback}: also for loopback callers. */
-    MockMvc mvc(boolean onLoopback) {
+    /** The API with the default-password enforcement; {@code onLoopback}: also for loopback callers; {@code boundToLoopback}: the server listens on loopback only. */
+    MockMvc mvc(boolean onLoopback, boolean boundToLoopback) {
         return MockMvcBuilders.standaloneSetup(
                         new AuthController(new AuthApi(users, auth, sessions, throttle,
                                 new org.kendar.llm.web.commons.auth.OidcProperties(null, null))),
@@ -143,7 +144,7 @@ final class WebauthFixture {
                         new AdminController(new AdminApi(users, permissions, skills, sessions, harness, catalog)),
                         new ChatController(new ChatApi(harness, MAPPER, new HarnessPricing(0, 0, 0, 0), auth), auth))
                 .setControllerAdvice(new ApiExceptionAdvice())
-                .addInterceptors(new ApiInterceptor(gate, auth, MAPPER, onLoopback),
+                .addInterceptors(new ApiInterceptor(gate, auth, MAPPER, onLoopback, boundToLoopback),
                         new MappedInterceptor(new String[]{"/api/admin/**"}, new AdminInterceptor(gate, auth, MAPPER)))
                 .build();
     }

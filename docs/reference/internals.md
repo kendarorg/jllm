@@ -97,8 +97,12 @@ stateDiagram-v2
 
 - `serializeRuns` (config, default `true`): a fair semaphore with one permit across all chats.
 - The first message of a chat titled `New chat` sets the title (first 60 chars).
-- Events go to an in-memory buffer (max 2000 per chat, cleared at each `start`) and to listeners. A listener that
-  throws is removed. `subscribe(afterSeq)` replays the buffer then streams live events, deduplicated by `seq`.
+- Events go to an in-memory buffer (max 2000 per chat, an `ArrayDeque`, cleared at each `start`) and to listeners. Each
+  subscriber has its own bounded queue (4,048 events) drained by its own virtual thread, so a slow client (a stalled
+  SSE write) delays neither the run nor other subscribers. A queue that overflows detaches that subscriber with a final
+  `subscriber_dropped` event (`ChatApi.events` then closes the stream); it reconnects and replays from its last `seq`.
+  A listener that throws is removed. `subscribe(afterSeq)` replays the buffer then streams live events, deduplicated by
+  `seq`. The run state uses a `ReentrantLock` and `Condition`, no sleep polling.
 - `compact()` takes the same per-chat busy flag, so `/compact` is refused during a run.
 
 ## 5. The ReAct loop (`AgentLoop`)
@@ -277,7 +281,7 @@ strategy reports `logChanged`. The CLI and web use `FileChatSessionStore` (chats
 <root>/<chatId>/subagent-<runId>/         messages.jsonl, result.txt, run.json
 ```
 
-`find` reads the log lazily; `list()` scans the chat directories for `session.json` (no index file) and caches the rows.
+`find` reads the log lazily; `list(ChatVisibility)` scans the chat directories for `session.json` (no index file) and caches the rows.
 The log is written before the row, so a crash leaves a row at most one turn behind. A corrupt row is skipped with a
 warning. `InterruptedTurnRepair` completes an unanswered `tool_use` at the end of a loaded log. Restoring needs no
 extra step: the mnemonic, state and tool-group data are keyed by chat and agent id, which the row keeps, so the next

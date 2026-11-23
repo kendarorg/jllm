@@ -53,6 +53,7 @@ public interface UserRepository {
      * @param name         display name; blank = the id
      * @param passwordHash null = the default password
      * @throws IllegalArgumentException on an invalid id
+     * @throws UnknownRoleException     when the role does not exist ({@code admin} always does)
      * @throws IllegalStateException    when the user exists
      */
     User create(String id, String name, String role, String passwordHash, String email);
@@ -62,6 +63,7 @@ public interface UserRepository {
      *
      * @param externalId {@code <issuer>#<sub>}
      * @throws IllegalArgumentException on an invalid id
+     * @throws UnknownRoleException     when the role does not exist
      * @throws IllegalStateException    when the user exists
      */
     User createExternal(String id, String name, String role, String email, String externalId);
@@ -87,7 +89,10 @@ public interface UserRepository {
     /** @throws NoSuchElementException when the user does not exist */
     User setName(String id, String name);
 
-    /** @throws NoSuchElementException when the user does not exist */
+    /**
+     * @throws NoSuchElementException when the user does not exist
+     * @throws UnknownRoleException   when the role does not exist
+     */
     User setRole(String id, String role);
 
     /**

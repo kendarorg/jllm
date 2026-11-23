@@ -3,24 +3,16 @@ package org.kendar.llm.web;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.kendar.llm.web.RealHttpApp.Client;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.identity.User;
 import org.kendar.llm.harness.identity.UserRepository;
 import org.kendar.llm.web.sql.SqlUserRepository;
-import org.springframework.boot.WebApplicationType;
-import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.context.ConfigurableApplicationContext;
 
-import java.io.File;
-import java.net.CookieManager;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -32,37 +24,8 @@ class SqlBootTest {
     @TempDir
     Path home;
 
-    private static String slashes(Path p) {
-        return p.toString().replace(File.separatorChar, '/');
-    }
-
     private ConfigurableApplicationContext start(String work, String... extra) {
-        List<String> args = new ArrayList<>(List.of("--server.port=0", "--jllm.provider=ollama", "--jllm.store=sql",
-                "--jllm.workdir=" + slashes(home.resolve(work)),
-                "--jllm.sql.url=jdbc:sqlite:" + slashes(home.resolve("jllm.db")),
-                "--spring.main.banner-mode=off"));
-        args.addAll(List.of(extra));
-        return new SpringApplicationBuilder(JllmWebApplication.class).web(WebApplicationType.SERVLET)
-                .run(args.toArray(String[]::new));
-    }
-
-    private static final class Client {
-        final HttpClient http = HttpClient.newBuilder().cookieHandler(new CookieManager()).build();
-        final String base;
-
-        Client(ConfigurableApplicationContext c) {
-            base = "http://localhost:" + c.getEnvironment().getProperty("local.server.port");
-        }
-
-        HttpResponse<String> send(String method, String path, String body) throws Exception {
-            HttpRequest.Builder b = HttpRequest.newBuilder(URI.create(base + path)).header("Content-Type", "application/json");
-            b.method(method, body == null ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofString(body));
-            return http.send(b.build(), HttpResponse.BodyHandlers.ofString());
-        }
-
-        int login(String id, String password) throws Exception {
-            return send("POST", "/api/login", "{\"id\":\"" + id + "\",\"password\":\"" + password + "\"}").statusCode();
-        }
+        return RealHttpApp.start(home, work, extra);
     }
 
     @Test
@@ -94,11 +57,46 @@ class SqlBootTest {
     }
 
     @Test
+    void roleInUseIsRefusedWith409NamingTheUsers() throws Exception {
+        try (ConfigurableApplicationContext c = start("work5")) {
+            Client cl = new Client(c);
+            assertEquals(200, cl.login("admin", "admin"));
+            assertEquals(201, cl.send("POST", "/api/admin/roles", "{\"name\":\"docs\",\"tools\":[]}").statusCode());
+            assertEquals(201, cl.send("POST", "/api/admin/users", "{\"id\":\"dora\",\"role\":\"docs\"}").statusCode());
+            HttpResponse<String> refused = cl.send("DELETE", "/api/admin/roles/docs", null);
+            assertEquals(409, refused.statusCode(), refused.body());
+            assertTrue(refused.body().contains("dora"), refused.body());
+            assertEquals(400, cl.send("POST", "/api/admin/users", "{\"id\":\"x\",\"role\":\"nosuchrole\"}").statusCode());
+            assertEquals(400, cl.send("PUT", "/api/admin/users/dora", "{\"role\":\"nosuchrole\"}").statusCode());
+            assertEquals(403, cl.send("DELETE", "/api/admin/roles/admin", null).statusCode());
+            assertEquals(204, cl.send("DELETE", "/api/admin/users/dora", null).statusCode());
+            assertEquals(204, cl.send("DELETE", "/api/admin/roles/docs", null).statusCode());
+        }
+    }
+
+    @Test
     void realPasswordsReplaceTheSeededDefaults() throws Exception {
         try (ConfigurableApplicationContext c = start("work3", "--jllm.web.use-real-password=true")) {
             UserRepository users = c.getBean(UserRepository.class);
             for (User u : users.all()) assertFalse(u.usesDefaultPassword(), u.id());
             assertEquals(401, new Client(c).login("admin", "admin"));
+        }
+    }
+
+    @Test
+    void defaultPasswordIsEnforcedOverSqlUsers() throws Exception {
+        try (ConfigurableApplicationContext c = start("work4", "--jllm.web.enforce-password-change-on-loopback=true")) {
+            Client cl = new Client(c);
+            assertEquals(200, cl.login("admin", "admin"));
+            HttpResponse<String> blocked = cl.send("GET", "/api/me/tools", null);
+            assertEquals(403, blocked.statusCode(), blocked.body());
+            assertEquals("password_change_required", JSON.readTree(blocked.body()).path("error").asText());
+            assertEquals(200, cl.send("GET", "/api/me", null).statusCode(), "the password change stays reachable");
+            HttpResponse<String> changed = cl.send("POST", "/api/me/password",
+                    "{\"current\":\"admin\",\"next\":\"a-long-new-password\"}");
+            assertEquals(204, changed.statusCode(), changed.body());
+            assertFalse(c.getBean(UserRepository.class).find("admin").orElseThrow().usesDefaultPassword());
+            assertEquals(200, cl.send("GET", "/api/me/tools", null).statusCode(), "unblocked after the change");
         }
     }
 }

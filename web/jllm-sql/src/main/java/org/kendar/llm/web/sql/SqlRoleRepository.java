@@ -1,6 +1,8 @@
 package org.kendar.llm.web.sql;
 
 import org.kendar.llm.harness.identity.Role;
+import org.kendar.llm.harness.identity.RoleInUseException;
+import org.kendar.llm.harness.identity.User;
 import org.kendar.llm.harness.identity.RoleRepository;
 import org.kendar.llm.harness.permission.ToolPermission;
 
@@ -61,8 +63,11 @@ public final class SqlRoleRepository implements RoleRepository {
 
     @Override
     public boolean delete(String name) {
+        if (User.ADMIN_ROLE.equals(name)) throw new IllegalArgumentException("The admin role cannot be deleted");
         if (!valid(name)) return false;
         return db.tx(tx -> {
+            List<String> holders = tx.query("SELECT id FROM users WHERE role = ? ORDER BY id", rs -> rs.getString(1), name);
+            if (!holders.isEmpty()) throw new RoleInUseException(name, holders);
             tx.update("DELETE FROM role_tools WHERE role = ?", name);
             tx.update("DELETE FROM role_permissions WHERE role = ?", name);
             return tx.update("DELETE FROM roles WHERE name = ?", name) > 0;

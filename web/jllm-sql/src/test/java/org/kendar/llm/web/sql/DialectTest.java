@@ -44,7 +44,8 @@ class DialectTest {
     @Test
     void dialectComesOnlyFromTheUrlScheme() {
         assertEquals(Dialect.SQLITE, Dialect.of("jdbc:sqlite:/tmp/x.db"));
-        assertEquals(Dialect.MYSQL, Dialect.of("jdbc:mariadb://h/db"));
+        IllegalArgumentException maria = assertThrows(IllegalArgumentException.class, () -> Dialect.of("jdbc:mariadb://h/db"));
+        assertTrue(maria.getMessage().contains("MariaDB"), maria.getMessage());
         for (String bad : new String[]{"", "  ", "sqlite:x.db", "jdbc:h2:mem:x", "jdbc:oracle:thin:@h", "JDBC:SQLITE:x"}) {
             assertThrows(IllegalArgumentException.class, () -> Dialect.of(bad), bad);
         }
@@ -76,11 +77,27 @@ class DialectTest {
             assertTrue(st.size() > 15, d + " " + st.size());
             for (String s : st) {
                 assertFalse(s.endsWith(";"));
-                assertTrue(s.startsWith("CREATE "), s);
+                assertTrue(s.startsWith("CREATE ") || s.startsWith("INSERT INTO roles")
+                        || s.startsWith("INSERT INTO role_tools"), s);
             }
         }
         assertEquals(List.of("A", "B C"), Migrator.statements("-- c\nA;\nB\nC;\n").stream()
                 .map(s -> s.replace("\n", " ")).toList());
+    }
+
+    @Test
+    void usersRoleForeignKeyAndAdminRowInEveryDialect() {
+        for (Dialect d : Dialect.values()) {
+            String sql = String.join(" ", Migrator.statements(Migrator.read(d, "V1__initial.sql")));
+            assertTrue(sql.contains("INSERT INTO roles (name, read_only, approval) VALUES ('admin', 0, 'ask')"), d.name());
+            assertTrue(sql.contains("INSERT INTO role_tools (role, ord, pattern) VALUES ('admin', 0, '*')"), d.name());
+            String users = Migrator.statements(Migrator.read(d, "V1__initial.sql")).stream()
+                    .filter(s -> s.startsWith("CREATE TABLE users")).findFirst().orElseThrow();
+            assertTrue(users.contains("ON DELETE RESTRICT") && users.contains("REFERENCES roles(name)"), d.name());
+            assertTrue(users.matches("(?s).*\brole\s+(TEXT|VARCHAR\(64\))\s+NOT NULL.*"), d.name());
+            assertEquals(List.of("V1__initial.sql"), Migrator.read(d, "migrations.txt").lines()
+                    .map(String::strip).filter(l -> !l.isEmpty()).toList(), d.name());
+        }
     }
 
     @Test

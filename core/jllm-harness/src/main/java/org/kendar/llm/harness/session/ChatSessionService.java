@@ -68,13 +68,17 @@ public class ChatSessionService {
     }
 
     public List<ChatSessionData> list() {
-        return store.list();
+        return store.list(ChatVisibility.everything());
     }
 
-    /** The chats of {@code owner}; null = every chat (admin, CLI). */
+    /** The chats of {@code owner}; null = every chat (admin, CLI). The store filters. */
     public List<ChatSessionData> list(String owner) {
-        if (owner == null) return store.list();
-        return store.list().stream().filter(c -> owns(owner, c)).toList();
+        return store.list(owner == null ? ChatVisibility.everything() : ChatVisibility.ownedBy(owner));
+    }
+
+    /** The chats {@code visibility} admits; the store filters. */
+    public List<ChatSessionData> list(ChatVisibility visibility) {
+        return store.list(visibility);
     }
 
     /** True when {@code owner} may see the chat: a null owner sees everything, anyone else only their own chats. */

@@ -9,7 +9,7 @@ library; where the web application adds something, it says so.
 |---|---|---|
 | The model, or text it read, asks for a destructive action | tool kinds, approval policy, `deny` rules, hooks | [Tool control](#1-tool-control) |
 | The model reads or writes outside its workspace | path jail, sandbox | [Isolation](#2-isolation) |
-| The model sends data to an unexpected host | per-host approval, `deny` rules | [Network egress](#3-network-egress) |
+| The model sends data to an unexpected host | per-host approval, `deny` rules, optional address guard (`web.blockLocalHost`) | [Network egress](#3-network-egress) |
 | A user reaches tools or chats they should not | roles, per-user tool narrowing, chat access check | [Identity and access](identity-and-access.md) |
 | Secrets leak through settings, logs or tool output | `env:` references, token store encryption, redaction hooks | [Secrets](#4-secrets) |
 | Nobody can tell afterwards what the agent did | events, hooks, metrics | [Governance and audit](governance-and-audit.md) |
@@ -49,7 +49,7 @@ For your own tools, validate inside the tool as you would any user-supplied inpu
 For untrusted input or multi-user hosting, use `docker` in daemon mode or the JavaScript sandbox, and withhold `bash`
 from roles that do not need it. The daemon listens on `127.0.0.1` only, requires a per-container token compared in
 constant time, and strips `JLLM_*` variables from the commands it runs ([SANDBOX](../guides/sandbox.md#security)).
-It does not protect against code already inside the container, and it has no TLS.
+It does not protect against code already inside the container, and the daemon itself speaks plain HTTP (a remote host needs an `https://` `remoteHost` through a TLS proxy, an SSH tunnel or a private network; `sandbox.docker.allowInsecure=false` refuses plain http to a non-loopback host).
 
 ## 3. Network egress
 
@@ -58,6 +58,7 @@ It does not protect against code already inside the container, and it has no TLS
 - `web_fetch` and `web_download` ask before contacting a host. The user may grant a host
   and its subdomains for one chat. `web_download` writes a file, so it is also gated like `write_file` (approval,
   plan-mode scratch copy), and a `write_file` permission rule covers it too. A redirect to another host asks again; https to http redirects are refused.
+- `web.blockLocalHost=true` (settings; the web release template sets it) refuses loopback, link-local (cloud metadata), private and any-local addresses on the first URL and on every redirect, before the host question; `web.blockExtraAddresses` adds IPs, CIDRs, hosts and `*.suffix` entries. Default `false` for the CLI. The name is resolved by the guard and again by the HTTP client, so DNS rebinding is not covered.
 - An invalid TLS certificate asks separately, for that one call and host only.
 - `web_search` and `wikipedia_search` call fixed hosts.
 - MCP servers and REST APIs are reachable only if listed in the settings.
@@ -70,7 +71,12 @@ It does not protect against code already inside the container, and it has no TLS
 - Settings accept `${ENV_VAR}` references; web user credentials are `env:NAME` references only.
 - With the SQL store (`jllm-sql-spring-starter`) the tokens are rows of `oauth_tokens`: encrypted with `JLLM_TOKEN_KEY`
   when it is set, in clear otherwise (an invalid key stops the start); login sessions keep a hash of the token. The
-  database password comes from `jllm.sql.password` (use `${ENV}`).
+  database password comes from `jllm.sql.password` (use `${ENV}`). `JLLM_TOKEN_KEY` is base64 of 32 random bytes and
+  must be the same on every instance sharing the database; losing it makes the stored tokens unreadable. The SQL drivers
+  (MySQL, PostgreSQL) are downloaded by `fetch-sql-driver` and checked against pinned SHA-256 sums before loading.
+- No `JLLM_TOKEN_KEY` means clear-text tokens, in the file and the SQL store alike. The web server logs a loud WARN
+  at startup and refuses to start when it is exposed (`jllm.web.use-real-password=true` or a `server.address` that is
+  not loopback; unset, `0.0.0.0` and `::` are not) unless `jllm.web.allow-unencrypted-tokens=true`.
 - OAuth tokens of MCP servers and REST APIs live in a `TokenStore`: a file encrypted with `JLLM_TOKEN_KEY` when there
   are users, the OS secret store (macOS Keychain, Windows DPAPI, Linux Secret Service) for one user, or your own
   implementation such as a database ([MCP](../guides/mcp.md#6-token-storage)).
@@ -81,7 +87,13 @@ It does not protect against code already inside the container, and it has no TLS
 ## 5. Web application
 
 `jllm-web` is a reference front end: password and OpenID Connect sign-in, roles, per-user tool narrowing and lockout
-after repeated failed sign-ins. It does not terminate TLS; put it behind your reverse proxy. See
+after repeated failed sign-ins. It does not terminate TLS; put it behind your reverse proxy. Defaults and controls:
+the release listens on `127.0.0.1` only (`server.address`); a user still on the default password (password = login) is
+held to the password change by the server (`403 password_change_required`, loopback exempt only when the server is bound
+to loopback, no forwarding header is present and `jllm.web.enforce-password-change-on-loopback` is not true);
+`jllm.web.use-real-password=true` replaces default passwords with random ones; every response carries a
+`Content-Security-Policy` (`jllm.web.content-security-policy`), `X-Content-Type-Options` and `Referrer-Policy`; chat
+ownership is checked on the id the framework matched (not on the raw URI), and the chat list is filtered in the store. See
 [Identity and access](identity-and-access.md) and [Deployment](deployment.md).
 
 ## 6. What it does not cover
@@ -96,7 +108,9 @@ after repeated failed sign-ins. It does not terminate TLS; put it behind your re
 - MCP stdio servers run as child processes of the JVM user, outside any sandbox.
 - Model providers receive whatever is in the context. Choose the provider and its data terms yourself, or use a local
   OpenAI-compatible endpoint.
-- Chat history is not encrypted at rest (files under `.jllm/history`). Use disk encryption or your own
-  `ChatSessionStore`.
+- Chat history is not encrypted at rest (files under `.jllm/history`, or the `messages` column with the SQL store). Use
+  disk or database encryption, or your own `ChatSessionStore`.
 - No IdP role mapping yet ([limits](roadmap-and-limits.md)).
 - There has been no external security audit.
+
+Step-by-step hardening and enterprise setup: [Securing a jllm-web deployment](securing-and-enterprise-setup.md).

@@ -10,10 +10,13 @@ import org.kendar.llm.harness.auth.OAuthToken;
 import org.kendar.llm.harness.auth.TokenCipher;
 import org.kendar.llm.harness.context.mnemonic.MnemonicState;
 import org.kendar.llm.harness.identity.Role;
+import org.kendar.llm.harness.identity.RoleInUseException;
 import org.kendar.llm.harness.identity.SkillRepository;
+import org.kendar.llm.harness.identity.UnknownRoleException;
 import org.kendar.llm.harness.identity.User;
 import org.kendar.llm.harness.permission.ToolPermission;
 import org.kendar.llm.harness.session.ChatSessionData;
+import org.kendar.llm.harness.session.ChatVisibility;
 import org.kendar.llm.harness.session.SubAgentRunData;
 import org.kendar.llm.harness.settings.SettingsLayer;
 
@@ -50,6 +53,7 @@ class SqlStoresTest {
     @Test
     void migrationIsIdempotentAndSurvivesReopen() {
         assertEquals(1, s.database().schemaVersion());
+        saveRoles(s, "dev");
         s.users().create("bob", "Bob", "dev", null, null);
         s.close();
         s = SqlStores.open(SqlConfig.sqliteFile(tmp.resolve("t.db")), null);
@@ -60,6 +64,7 @@ class SqlStoresTest {
     @Test
     void memoryDatabase() {
         try (SqlStores m = SqlStores.open(SqlConfig.sqliteMemory(), null)) {
+            saveRoles(m, "dev");
             m.users().create("a", null, "dev", null, null);
             assertEquals("a", m.users().find("a").orElseThrow().name());
         }
@@ -68,6 +73,7 @@ class SqlStoresTest {
     @Test
     void usersCrudAndRules() {
         var u = s.users();
+        saveRoles(s, "dev", "ops");
         assertThrows(IllegalArgumentException.class, () -> u.create("Bad Id", "x", "dev", null, null));
         User bob = u.create("bob", " ", "dev", "pbkdf2$x", "  Bob@Example.com ");
         assertEquals("bob", bob.name());
@@ -104,6 +110,7 @@ class SqlStoresTest {
     @Test
     void externalUsers() {
         var u = s.users();
+        saveRoles(s, "dev");
         User x = u.createExternal("ext", "Ext", "dev", "e@x.org", "https://idp#123");
         assertTrue(x.external());
         assertTrue(x.passwordless());
@@ -133,11 +140,59 @@ class SqlStoresTest {
         assertEquals(List.of("*"), got.tools());
         assertTrue(got.toolPermissions().isEmpty());
         r.save(new Role("a", List.of(), false, "ask", Map.of()));
-        assertEquals(List.of("a", "dev"), r.all().stream().map(Role::name).toList());
+        assertEquals(List.of("a", "admin", "dev"), r.all().stream().map(Role::name).toList());
         assertTrue(r.find("Bad Name").isEmpty());
         assertTrue(r.delete("dev"));
         assertFalse(r.delete("dev"));
         assertTrue(r.find("dev").isEmpty());
+    }
+
+    private static void saveRoles(SqlStores st, String... names) {
+        for (String n : names) st.roles().save(new Role(n, List.of(), false, "ask", Map.of()));
+    }
+
+    @Test
+    void adminRoleIsSeededAndProtected() {
+        Role admin = s.roles().find(User.ADMIN_ROLE).orElseThrow();
+        assertEquals(List.of("*"), admin.tools());
+        assertEquals("ask", admin.approval());
+        assertEquals("admin", s.users().create("root", "Root", User.ADMIN_ROLE, null, null).role());
+        assertThrows(IllegalArgumentException.class, () -> s.roles().delete(User.ADMIN_ROLE));
+        assertTrue(s.roles().find(User.ADMIN_ROLE).isPresent());
+    }
+
+    @Test
+    void usersRoleIsAForeignKey() {
+        saveRoles(s, "dev", "ops");
+        assertThrows(UnknownRoleException.class, () -> s.users().create("u", "U", "ghost", null, null));
+        assertThrows(UnknownRoleException.class, () -> s.users().create("u", "U", null, null, null));
+        assertThrows(UnknownRoleException.class, () -> s.users().createExternal("u", "U", "ghost", null, "i#1"));
+        s.users().create("u", "U", "dev", null, null);
+        assertThrows(UnknownRoleException.class, () -> s.users().setRole("u", "ghost"));
+        assertEquals("dev", s.users().find("u").orElseThrow().role());
+        // the database itself refuses a dangling role, whatever the code does
+        assertThrows(RuntimeException.class, () -> s.database().run(tx ->
+                tx.update("UPDATE users SET role = 'ghost' WHERE id = 'u'")));
+        assertThrows(RuntimeException.class, () -> s.database().run(tx ->
+                tx.update("INSERT INTO users (id, name, role) VALUES ('v', 'V', 'ghost')")));
+        assertTrue(s.database().tx(tx -> tx.one("PRAGMA foreign_keys", rs -> rs.getInt(1)).orElse(0)) == 1);
+    }
+
+    @Test
+    void roleInUseCannotBeDeleted() {
+        saveRoles(s, "dev", "ops");
+        s.users().create("bob", "Bob", "dev", null, null);
+        s.users().create("amy", "Amy", "dev", null, null);
+        RoleInUseException e = assertThrows(RoleInUseException.class, () -> s.roles().delete("dev"));
+        assertEquals(List.of("amy", "bob"), e.userIds());
+        assertTrue(e.getMessage().contains("amy") && e.getMessage().contains("bob"), e.getMessage());
+        assertTrue(s.roles().find("dev").isPresent());
+        // the database restricts it too, bypassing the store
+        assertThrows(RuntimeException.class, () -> s.database().run(tx -> tx.update("DELETE FROM roles WHERE name = 'dev'")));
+        s.users().setRole("bob", "ops");
+        s.users().delete("amy");
+        assertTrue(s.roles().delete("dev"));
+        assertThrows(RoleInUseException.class, () -> s.roles().delete("ops"));
     }
 
     @Test
@@ -280,6 +335,30 @@ class SqlStoresTest {
     }
 
     @Test
+    void chatListFiltersByOwnerInTheQuery() {
+        var chats = s.chats();
+        chats.save(ChatSessionData.create("a1", "agent", "A1", "alice"));
+        chats.save(ChatSessionData.create("b1", "agent", "B1", "bob"));
+        chats.save(ChatSessionData.create("a2", "agent", "A2", "alice"));
+        chats.save(ChatSessionData.create("n1", "agent", "No owner"));
+        assertEquals(List.of("a2", "a1"), ids(chats.list(ChatVisibility.ownedBy("alice"))));
+        assertEquals(List.of("b1"), ids(chats.list(ChatVisibility.ownedBy("bob"))));
+        assertTrue(chats.list(ChatVisibility.ownedBy("carol")).isEmpty());
+        assertTrue(chats.list(ChatVisibility.ownedBy(null)).isEmpty());
+        assertTrue(chats.list(ChatVisibility.nothing()).isEmpty());
+        assertEquals(4, chats.list(ChatVisibility.everything()).size());
+        assertEquals(3, chats.list(ChatVisibility.owned()).size());
+        assertFalse(ids(chats.list(ChatVisibility.owned())).contains("n1"));
+        // the owner column is indexed (migration V2)
+        assertTrue(s.database().tx(tx -> tx.query("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_chats_principal'",
+                rs -> rs.getString(1)).size()) == 1);
+    }
+
+    private static List<String> ids(List<ChatSessionData> l) {
+        return l.stream().map(ChatSessionData::chatId).toList();
+    }
+
+    @Test
     void chats() {
         var chats = s.chats();
         var base = ChatSessionData.create("c1", "agent", "T", "bob");
@@ -293,7 +372,7 @@ class SqlStoresTest {
         assertEquals(4, got.cacheCreationTokens());
         assertEquals("x,y", got.taintedToolUses());
         assertEquals(base.createdAt(), got.createdAt());
-        List<ChatSessionData> list = chats.list();
+        List<ChatSessionData> list = chats.list(ChatVisibility.everything());
         assertEquals(List.of("c2", "c1"), list.stream().map(ChatSessionData::chatId).toList());
         assertEquals("", list.get(0).messagesJson());
         assertTrue(chats.find("none").isEmpty());
@@ -325,7 +404,7 @@ class SqlStoresTest {
     @Test
     void failedTransactionRollsBack() {
         assertThrows(IllegalStateException.class, () -> s.database().run(tx -> {
-            tx.update("INSERT INTO users (id, name) VALUES ('t', 't')");
+            tx.update("INSERT INTO users (id, name, role) VALUES ('t', 't', 'admin')");
             throw new IllegalStateException("boom");
         }));
         assertFalse(s.users().exists("t"));
