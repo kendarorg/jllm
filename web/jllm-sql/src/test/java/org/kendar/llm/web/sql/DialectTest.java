@@ -6,7 +6,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/** SQL generation and migration scripts: no database server needed. */
+/** SQL generation and schema scripts: no database server needed. */
 class DialectTest {
 
     @Test
@@ -69,35 +69,31 @@ class DialectTest {
     }
 
     @Test
-    void migrationScriptsSplitAndAreListedForEveryDialect() {
+    void schemaScriptSplitsForEveryDialect() {
         for (Dialect d : Dialect.values()) {
-            String list = Migrator.read(d, "migrations.txt");
-            assertTrue(list.contains("V1__initial.sql"));
-            List<String> st = Migrator.statements(Migrator.read(d, "V1__initial.sql"));
+            List<String> st = Schema.statements(Schema.read(d));
             assertTrue(st.size() > 15, d + " " + st.size());
             for (String s : st) {
                 assertFalse(s.endsWith(";"));
-                assertTrue(s.startsWith("CREATE ") || s.startsWith("INSERT INTO roles")
-                        || s.startsWith("INSERT INTO role_tools"), s);
+                assertTrue(s.startsWith("CREATE ") || s.contains("INTO roles")
+                        || s.contains("INTO role_tools"), s);
             }
         }
-        assertEquals(List.of("A", "B C"), Migrator.statements("-- c\nA;\nB\nC;\n").stream()
+        assertEquals(List.of("A", "B C"), Schema.statements("-- c\nA;\nB\nC;\n").stream()
                 .map(s -> s.replace("\n", " ")).toList());
     }
 
     @Test
     void usersRoleForeignKeyAndAdminRowInEveryDialect() {
         for (Dialect d : Dialect.values()) {
-            String sql = String.join(" ", Migrator.statements(Migrator.read(d, "V1__initial.sql")));
-            assertTrue(sql.contains("INSERT INTO roles (name, read_only, approval) VALUES ('admin', 0, 'ask')"), d.name());
-            assertTrue(sql.contains("INSERT INTO role_tools (role, ord, pattern) VALUES ('admin', 0, '*')"), d.name());
-            String users = Migrator.statements(Migrator.read(d, "V1__initial.sql")).stream()
-                    .filter(s -> s.startsWith("CREATE TABLE users")).findFirst().orElseThrow();
+            String sql = String.join(" ", Schema.statements(Schema.read(d)));
+            assertTrue(sql.contains("INTO roles (name, read_only, approval) VALUES ('admin', 0, 'ask')"), d.name());
+            assertTrue(sql.contains("INTO role_tools (role, ord, pattern) VALUES ('admin', 0, '*')"), d.name());
+            String users = Schema.statements(Schema.read(d)).stream()
+                    .filter(s -> s.matches("(?s)CREATE TABLE (IF NOT EXISTS )?users.*")).findFirst().orElseThrow();
             assertTrue(users.contains("ON DELETE RESTRICT") && users.contains("REFERENCES roles(name)"), d.name());
             String flat = users.replaceAll(" +", " ");
             assertTrue(flat.contains(" role TEXT NOT NULL") || flat.contains(" role VARCHAR(64) NOT NULL"), d.name());
-            assertEquals(List.of("V1__initial.sql"), Migrator.read(d, "migrations.txt").lines()
-                    .map(String::strip).filter(l -> !l.isEmpty()).toList(), d.name());
         }
     }
 
@@ -108,7 +104,7 @@ class DialectTest {
     }
 
     private static List<String> tables(Dialect d) {
-        return Migrator.statements(Migrator.read(d, "V1__initial.sql")).stream()
+        return Schema.statements(Schema.read(d)).stream()
                 .filter(s -> s.startsWith("CREATE TABLE")).map(s -> s.split("\\s+")[2]).toList();
     }
 }

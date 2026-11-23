@@ -208,6 +208,16 @@ class OAuthWebTest {
     }
 
     @Test
+    void startWithAChatIdNeedsThatChatToBeTheCallers() throws Exception {
+        String ritaChat = harness.sessions().create("t", "rita").chatId();
+        Cookie rita = signIn("rita");
+        Cookie gus = signIn("gus");
+        mvc.perform(post("/api/oauth/api:crm/start").param("chatId", ritaChat).cookie(rita)).andExpect(status().isOk());
+        mvc.perform(post("/api/oauth/api:crm/start").param("chatId", ritaChat).cookie(gus)).andExpect(status().isNotFound());
+        mvc.perform(post("/api/oauth/api:crm/start").param("chatId", "nope").cookie(gus)).andExpect(status().isNotFound());
+    }
+
+    @Test
     void callbackStoresTheTokenForThatUserOnly() throws Exception {
         Cookie rita = signIn("rita");
         Map<String, String> q = start(rita);

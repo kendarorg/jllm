@@ -18,7 +18,7 @@ public enum Dialect {
         this.dir = dir;
     }
 
-    /** Classpath folder of the migrations: {@code db/<dir>/}. */
+    /** Classpath folder of the schema script: {@code db/<dir>/}. */
     public String dir() {
         return dir;
     }

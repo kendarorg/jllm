@@ -144,7 +144,7 @@ in a source checkout in `.downloaded-libs/<db>/<version>`. The SHA-256 is checke
 and at load; a mismatch is refused. MySQL asks to accept the GPL terms. Only the driver of the URL is used.
 
 Multi-instance:
-- Same database, same `JLLM_TOKEN_KEY` everywhere; schema migrations run under a database lock at startup.
+- Same database, same `JLLM_TOKEN_KEY` everywhere; the schema is created at startup when missing (race-safe across instances).
 - A running chat lives in one process (virtual thread plus event buffer): use sticky routing per chat.
 - Not on SQL: workspace files (chat directories, uploads). Share or pin them per instance. Plugin storage (workflows'
   flows and runs included) is in SQL; with `jllm.store=file` it is `.jllm/plugin-data`.
@@ -221,7 +221,7 @@ Example settings fragment (rule syntax: [usage](../reference/usage.md#5-settings
   64 KB per user, approval wait 600 s.
 - Cost: `jllm.pricing.*` gives an estimate only; nothing enforces it.
 - Updates: dependencies are pinned in the poms, SQL drivers and GraalJS by SHA-256 manifests; no vulnerability scan is
-  shipped. Schema migrations are forward-only: back up before upgrading.
+  shipped. The SQL schema has no upgrade path: changing it means deleting the database.
 - Metrics and tracing: recipes in [Observability](observability.md).
 
 ## Known gaps

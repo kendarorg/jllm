@@ -47,7 +47,7 @@ public class JllmSqlAutoConfiguration {
         return System::getenv;
     }
 
-    /** The database; migrated and, when empty, seeded. Closed with the context. */
+    /** The database; schema created and, when empty, seeded. Closed with the context. */
     @Bean(destroyMethod = "close")
     public SqlStores sqlStores(Environment env, Function<String, String> jllmSqlEnv) {
         String webauth = env.getProperty("jllm.webauth-dir");

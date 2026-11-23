@@ -377,6 +377,9 @@ signatures changed and callers were fixed.
   (SQLite default, MySQL, PostgreSQL) comes from the JDBC URL alone; with the starter on the class path every store
   (users, roles, sessions, tokens, settings, chats, state, mnemonic, run logs, plugin documents incl. workflows) is
   in SQL, without it the file stores stay. Chat listing filters by principal in the query (`ChatVisibility`).
+  `users.role` is a foreign key to `roles` (`ON DELETE RESTRICT`, `admin` is a seeded row); deleting a role still
+  in use is a 409 naming the users, in both the file and the SQL store. The schema is one script per
+  dialect (`schema.sql`); changing it means deleting the database.
   MySQL and PostgreSQL drivers are downloaded with SHA-256 manifests into `.downloaded-libs/` (checkout, replacing
   `.graal/`) or `lib-ext/` (release), never bundled.
 - **Tests and docs:** eval cases for the SSRF guard, taint across compaction, symlinks, admin approval and web

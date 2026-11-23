@@ -30,7 +30,7 @@ public record SqlStores(Database database, UserRepository users, RoleRepository 
                 new SqlChatStores.Mnemonic(db), new SqlChatStores.Runs(db), new SqlPluginStorage(db));
     }
 
-    /** Opens the database (migrating it) and builds the stores. */
+    /** Opens the database (creating the schema when missing) and builds the stores. */
     public static SqlStores open(SqlConfig config, TokenCipher tokenCipher) {
         return of(Database.open(config), tokenCipher);
     }

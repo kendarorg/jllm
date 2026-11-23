@@ -10,12 +10,11 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
-/** A pooled connection to the database, migrated to the current schema. Close it to release the pool. */
+/** A pooled connection to the database, with the schema created when missing. Close it to release the pool. */
 public final class Database implements AutoCloseable {
 
     private final HikariDataSource pool;
     private final Dialect dialect;
-    private final int schemaVersion;
 
     private Database(SqlConfig config) {
         this.dialect = config.dialect();
@@ -34,17 +33,20 @@ public final class Database implements AutoCloseable {
             h.setMaxLifetime(0);
             h.setIdleTimeout(0);
             h.setMinimumIdle(config.maxPoolSize());
+            // several instances opening one new file together: the journal_mode switch can hit SQLITE_BUSY/CANTOPEN
+            // before the busy timeout applies; keep retrying the first connection instead of failing at once
+            h.setInitializationFailTimeout(30_000);
         }
         this.pool = new HikariDataSource(h);
         try {
-            this.schemaVersion = new Migrator(this).migrate();
+            Schema.ensure(this);
         } catch (RuntimeException e) {
             pool.close();
             throw e;
         }
     }
 
-    /** Opens the pool and applies the pending migrations. */
+    /** Opens the pool and creates the schema when missing. */
     public static Database open(SqlConfig config) {
         return new Database(config);
     }
@@ -55,11 +57,6 @@ public final class Database implements AutoCloseable {
 
     public DataSource dataSource() {
         return pool;
-    }
-
-    /** The schema version after the migrations. */
-    public int schemaVersion() {
-        return schemaVersion;
     }
 
     /** Runs the work in one transaction: commit on return, rollback on any exception. Never nest calls. */
@@ -90,19 +87,19 @@ public final class Database implements AutoCloseable {
         });
     }
 
-    /** Runs the action holding the migration lock (MySQL: a named server lock; SQLite: the file serializes). */
+    /** Runs the action holding the schema lock (MySQL: a named server lock; Postgres: an advisory lock; SQLite: the idempotent script and the file lock serialize). */
     <T> T locked(Supplier<T> action) {
         if (dialect == Dialect.SQLITE) return action.get();
         if (dialect == Dialect.POSTGRES) return lockedPostgres(action);
         try (Connection c = pool.getConnection()) {
-            try (var ps = c.prepareStatement("SELECT GET_LOCK('jllm_sql_migrate', 60)");
+            try (var ps = c.prepareStatement("SELECT GET_LOCK('jllm_sql_schema', 60)");
                  var rs = ps.executeQuery()) {
-                if (!rs.next() || rs.getInt(1) != 1) throw new IllegalStateException("Cannot get the migration lock");
+                if (!rs.next() || rs.getInt(1) != 1) throw new IllegalStateException("Cannot get the schema lock");
             }
             try {
                 return action.get();
             } finally {
-                try (var ps = c.prepareStatement("SELECT RELEASE_LOCK('jllm_sql_migrate')")) {
+                try (var ps = c.prepareStatement("SELECT RELEASE_LOCK('jllm_sql_schema')")) {
                     ps.executeQuery().close();
                 }
             }

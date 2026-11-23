@@ -3,7 +3,7 @@
 With this starter on the class path the web application keeps everything in SQL instead of files: users, roles, skills,
 sign-in sessions, OAuth tokens, harness settings, MCP project trust, chats (with their state, mnemonic state and
 sub-agent runs). Without it the file stores of `jllm-web` apply. Built on `jllm-sql` (plain JDBC + HikariCP, a small
-`Tx` helper and versioned migrations: **no JPA, Hibernate or Spring Data anywhere**, and none is a dependency of
+`Tx` helper and one schema script per dialect: **no JPA, Hibernate or Spring Data anywhere**, and none is a dependency of
 `jllm-sql` or of this starter).
 
 ```
@@ -36,17 +36,16 @@ There is no dialect property. The scheme of `jllm.sql.url` selects it:
 Any other scheme is rejected at startup. Properties: `jllm.sql.url`, `jllm.sql.user`, `jllm.sql.password` (use
 `${ENV}`), `jllm.sql.pool` (SQLite 1, others 10), `jllm.sql.seed` (default true), `jllm.sql.driver-dir`.
 
-Schema: `db/<dialect>/V<n>__*.sql` listed in `migrations.txt`, applied at startup under a lock (MySQL `GET_LOCK`,
-PostgreSQL advisory lock); never edit an applied script, add the next one. All three dialects have the same tables
+Schema: `db/<dialect>/schema.sql`, applied at startup when the `users` table is missing (MySQL `GET_LOCK` and
+PostgreSQL advisory lock around the creation; the SQLite script is idempotent). Changing the schema means deleting the database. All three dialects have the same tables
 (`DialectTest`). `users.role` is a NOT NULL foreign key to `roles(name)` (`ON DELETE RESTRICT`): the `admin` role has a
 seeded row, a user needs an existing role, and deleting a role in use throws `RoleInUseException` (the admin API answers
-409 naming the users, with the files store too). There is no migration history yet: the schema is edited in `V1`, so an
-existing development database must be deleted. Not done: per-message chat rows (`messages` is one text per chat; `SqlStoresTest.largeChatSaveTiming` logs the cost of
+409 naming the users, with the files store too). Not done: per-message chat rows (`messages` is one text per chat; `SqlStoresTest.largeChatSaveTiming` logs the cost of
 saving a 5,000-message chat 100 times: about 1.5 ms per save on SQLite).
 
 The chat list takes a `ChatVisibility` (`ChatSessionStore.list(visibility)`): the filter is a `WHERE` on `chats.principal`
 (everything, owned, one owner, nothing), so a user's listing never loads other users' chats; the index
-`(principal, updated_at)` is in `V1` for each dialect.
+`(principal, updated_at)` is in `schema.sql` for each dialect.
 
 ## JDBC drivers
 

@@ -49,7 +49,7 @@ files and sessions in memory, so a restart signs everyone out). That fits one in
   chosen by the scheme of `jllm.sql.url` alone; plain JDBC, no JPA/Hibernate/Spring Data. The release ships it in
   `lib-ext/sql` (SQL by default; `jllm.store=file` keeps the files). The MySQL (GPL) and PostgreSQL drivers are not
   bundled: `setup` / `fetch-sql-driver` download them with a pinned SHA-256. Set `JLLM_TOKEN_KEY` to encrypt stored tokens.
-  The schema is edited in place (`V1`): delete an existing development database after upgrading. Plugin storage (workflows included) is in SQL too (files under `.jllm/plugin-data` with `jllm.store=file`); workspace files stay on disk.
+  Changing the schema means deleting the database. Plugin storage (workflows included) is in SQL too (files under `.jllm/plugin-data` with `jllm.store=file`); workspace files stay on disk.
 - A `TokenStore` that reports `crossProcess()` can be shared between instances.
 - A running chat is a virtual thread and an event buffer in one process. Route a chat to one instance (sticky
   routing) unless you supply your own stores and accept that a run does not move.

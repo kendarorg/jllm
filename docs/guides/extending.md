@@ -740,4 +740,4 @@ optional beans read by `JllmWebAutoConfiguration`; without them `HarnessFactory`
 The web chat list asks the store only for what the user may see (`ChatAccess.visibility(user)` -> `ChatVisibility`: everything, owned, one owner, nothing); `canSee` stays the final check.
 
 The SQL implementation is a worked example: [jllm-sql-spring-starter](../../web/jllm-sql-spring-starter/README.md) (tables, error
-mapping, token table with optional encryption, per-dialect migrations).
+mapping, token table with optional encryption, per-dialect schema script).

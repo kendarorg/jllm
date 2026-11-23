@@ -51,13 +51,11 @@ class SqlStoresTest {
     }
 
     @Test
-    void migrationIsIdempotentAndSurvivesReopen() {
-        assertEquals(1, s.database().schemaVersion());
+    void schemaIsKeptOnReopen() {
         saveRoles(s, "dev");
         s.users().create("bob", "Bob", "dev", null, null);
         s.close();
         s = SqlStores.open(SqlConfig.sqliteFile(tmp.resolve("t.db")), null);
-        assertEquals(1, s.database().schemaVersion());
         assertTrue(s.users().exists("bob"));
     }
 
@@ -349,7 +347,7 @@ class SqlStoresTest {
         assertEquals(4, chats.list(ChatVisibility.everything()).size());
         assertEquals(3, chats.list(ChatVisibility.owned()).size());
         assertFalse(ids(chats.list(ChatVisibility.owned())).contains("n1"));
-        // the owner column is indexed (migration V2)
+        // the owner column is indexed
         assertTrue(s.database().tx(tx -> tx.query("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_chats_principal'",
                 rs -> rs.getString(1)).size()) == 1);
     }

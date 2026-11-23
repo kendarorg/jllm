@@ -59,6 +59,7 @@ public class ApiInterceptor implements HandlerInterceptor {
         }
         Gate.Decision decision = gate.decide(path, user);
         if (decision.allowed() && !gate.isOpen(path)) decision = decideChat(request, user);
+        if (decision.allowed() && !gate.isOpen(path)) decision = decideChatParameter(request, user);
         if (decision.allowed() && mustChangePassword(path, user, request)) {
             response.setStatus(403);
             response.setContentType("application/json");
@@ -88,6 +89,16 @@ public class ApiInterceptor implements HandlerInterceptor {
                 HandlerMapping.URI_TEMPLATE_VARIABLES_ATTRIBUTE);
         String id = vars == null ? null : vars.get(m.group(1));
         if (id == null) return new Gate.Decision(404, "Unknown chat");
+        return gate.decideChat(user, id);
+    }
+
+    /**
+     * A {@code chatId} query parameter on any gated call (e.g. {@code POST /api/oauth/{source}/start?chatId=}, whose
+     * login result is posted into that chat's stream) names a chat the caller must own.
+     */
+    private Gate.Decision decideChatParameter(HttpServletRequest request, Principal user) {
+        String id = request.getParameter("chatId");
+        if (id == null || id.isBlank()) return Gate.Decision.ALLOW;
         return gate.decideChat(user, id);
     }
 
