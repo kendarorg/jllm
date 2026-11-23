@@ -317,7 +317,7 @@ final class StepRunner {
             prompt += "\n\nYour previous reply was:\n" + raw + "\n\nThe user answered:\n" + a.path("value").asText()
                     + "\n\nContinue and complete the task.";
         }
-        return AnswerShape.validate(task.path("answer"), raw);
+        return FlowRequests.AnswerShape.validate(task.path("answer"), raw);
         } catch (WaitSignal w) {
             waiting = true; // the replies stay journaled: the resume must not call the model again
             throw w;
@@ -464,7 +464,7 @@ final class StepRunner {
         }
     }
 
-    List<String> names(JsonNode outcomes) {
+    static List<String> names(JsonNode outcomes) {
         List<String> l = new ArrayList<>();
         outcomes.fieldNames().forEachRemaining(l::add);
         return l;

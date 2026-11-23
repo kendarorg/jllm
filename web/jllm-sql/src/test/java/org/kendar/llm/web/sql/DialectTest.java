@@ -76,7 +76,7 @@ class DialectTest {
             for (String s : st) {
                 assertFalse(s.endsWith(";"));
                 assertTrue(s.startsWith("CREATE ") || s.contains("INTO roles")
-                        || s.contains("INTO role_tools"), s);
+                        || s.contains("INTO role_tools") || s.contains("INTO schema_version"), s);
             }
         }
         assertEquals(List.of("A", "B C"), Schema.statements("-- c\nA;\nB\nC;\n").stream()
@@ -94,6 +94,15 @@ class DialectTest {
             assertTrue(users.contains("ON DELETE RESTRICT") && users.contains("REFERENCES roles(name)"), d.name());
             String flat = users.replaceAll(" +", " ");
             assertTrue(flat.contains(" role TEXT NOT NULL") || flat.contains(" role VARCHAR(64) NOT NULL"), d.name());
+        }
+    }
+
+    @Test
+    void schemaVersionRowIsOneInEveryDialect() {
+        for (Dialect d : Dialect.values()) {
+            List<String> st = Schema.statements(Schema.read(d));
+            assertTrue(st.stream().anyMatch(s -> s.matches("(?s)CREATE TABLE (IF NOT EXISTS )?schema_version \(version INT(EGER)? NOT NULL PRIMARY KEY\)")), d.name());
+            assertTrue(st.stream().anyMatch(s -> s.matches("INSERT (OR IGNORE )?INTO schema_version \(version\) VALUES \(1\)")), d.name());
         }
     }
 

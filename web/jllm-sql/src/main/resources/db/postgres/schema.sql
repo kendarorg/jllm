@@ -142,3 +142,6 @@ CREATE TABLE plugin_docs (
     doc        TEXT NOT NULL,
     PRIMARY KEY (plugin_id, owner, collection, doc_id)
 );
+-- Records the schema version; nothing reads it.
+CREATE TABLE schema_version (version INTEGER NOT NULL PRIMARY KEY);
+INSERT INTO schema_version (version) VALUES (1);

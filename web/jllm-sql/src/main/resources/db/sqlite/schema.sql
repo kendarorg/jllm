@@ -142,3 +142,6 @@ CREATE TABLE IF NOT EXISTS plugin_docs (
     doc        TEXT NOT NULL,
     PRIMARY KEY (plugin_id, owner, collection, doc_id)
 );
+-- Records the schema version; nothing reads it.
+CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL PRIMARY KEY);
+INSERT OR IGNORE INTO schema_version (version) VALUES (1);

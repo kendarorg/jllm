@@ -148,3 +148,6 @@ CREATE TABLE plugin_docs (
     doc        MEDIUMTEXT NOT NULL,
     PRIMARY KEY (plugin_id, owner, collection, doc_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+-- Records the schema version; nothing reads it.
+CREATE TABLE schema_version (version INT NOT NULL PRIMARY KEY);
+INSERT INTO schema_version (version) VALUES (1);
