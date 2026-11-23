@@ -64,7 +64,7 @@ Case ids are `feature/name`; sources are in `src/test/java/org/kendar/llm/eval/s
 
 ## Cache and strategy cases (thresholds guessed)
 
-- `3-prompt-cache/cached-ratio-on-long-context` (`cachedRatioAtLeast(0.5)`): needs a server that reports cached tokens and a prompt above the provider's minimum cacheable size (open point 3 of the plan); otherwise not measurable.
+- `3-prompt-cache/cached-ratio-on-long-context` (`cachedRatioAtLeast(0.5)`): needs a server that reports cached tokens and a prompt above the provider's minimum cacheable size; otherwise not measurable.
 - `3-prompt-cache/risk-no-unexpected-break-in-long-chat` (`prefixStable(1.0)`): noise-command pruning or the per-turn note (date change at midnight) can break the prefix legitimately.
 - `3-prompt-cache/edge-no-change-no-break`: a day change or tokenizer normalization on OpenAI-compatible servers can show as a system break.
 - `4-strategies/*`: the budget (10000 tokens; 30000 for the scope strategy in every session but `session-research-large-outputs`, because scope keeps a ~4.7k-token system prompt and tool list plus the whole turn in progress and ended every request over 10000; the research session keeps 10000 so scope still offloads) and file sizes were chosen by estimate; compaction is guaranteed by the explicit `/compact` actions, so `eventPresent("compaction")` does not depend on the budget. `keepTokens` is 1500.

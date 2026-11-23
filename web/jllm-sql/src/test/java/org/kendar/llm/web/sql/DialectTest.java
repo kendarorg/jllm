@@ -94,7 +94,8 @@ class DialectTest {
             String users = Migrator.statements(Migrator.read(d, "V1__initial.sql")).stream()
                     .filter(s -> s.startsWith("CREATE TABLE users")).findFirst().orElseThrow();
             assertTrue(users.contains("ON DELETE RESTRICT") && users.contains("REFERENCES roles(name)"), d.name());
-            assertTrue(users.matches("(?s).*\brole\s+(TEXT|VARCHAR\(64\))\s+NOT NULL.*"), d.name());
+            String flat = users.replaceAll(" +", " ");
+            assertTrue(flat.contains(" role TEXT NOT NULL") || flat.contains(" role VARCHAR(64) NOT NULL"), d.name());
             assertEquals(List.of("V1__initial.sql"), Migrator.read(d, "migrations.txt").lines()
                     .map(String::strip).filter(l -> !l.isEmpty()).toList(), d.name());
         }

@@ -189,8 +189,7 @@ parallel by area:
 - **Layout:** the per-workdir runtime directory `.kendhar` became `.jllm`, the same name as the configuration
   directory. Existing `.kendhar` directories are not migrated.
 
-New settings: `files.maxReadBytes`, `web.fetchMaxBytes`, `sandbox.outputLogMaxBytes`. The decisions and plans were in
-a root `todo.md` (no longer in the repository).
+New settings: `files.maxReadBytes`, `web.fetchMaxBytes`, `sandbox.outputLogMaxBytes`.
 
 ## 10. Web commons
 `jllm-web` was split in two. `jllm-web-commons` holds the chat and file API, the harness wiring and the `jllm.*`
@@ -352,7 +351,39 @@ The first runs exposed model-facing wording and guard rails that were then tight
   `run-command` action (exit code and output tail); steps take a `with` object of parameters, checked at save time;
   `Registry.ExplainingChooser` journals the reason of a choice. The sample `develop-app` flow reaches `done` only after
   a real test exit code 0.
-- Plan for these items: `evolution.md` (no longer in the repository).
+
+## 22. Hardening 4: shared deployments
+A second review of the web application, aimed at running it for several users. No backward compatibility was kept:
+signatures changed and callers were fixed.
+- **Network and defaults:** `web_fetch`/`web_download` got an address guard (`blockLocalHost`, `blockExtraAddresses`)
+  checked on the first URL and on every redirect hop; DNS pinning is a known gap. The release template binds
+  `127.0.0.1` and no longer turns admin approvals off. `jllm.web.use-real-password` replaces default passwords with
+  random ones at startup (the admin one is logged once). A user on the default password is refused server-side except
+  for the password change, logout and auth paths; the loopback exemption is off when `server.address` is not loopback
+  or a forwarding header is present. The remote sandbox client accepts `https` (trust store, `allowInsecure`); the
+  Python daemon still speaks plain HTTP and says so in a `TODO`. A Content-Security-Policy and two other security
+  headers are sent on every response.
+- **Auth gate:** `Gate.isOpen` fails closed and strips the context path (a `/jllm` prefix used to skip authentication);
+  chat ownership uses the path variable Spring matched instead of a regex on the raw URI. `TokenKeyGuard` warns
+  without `JLLM_TOKEN_KEY` and refuses to start for shared setups unless `allow-unencrypted-tokens` is set.
+- **Concurrency:** `AgentService` uses `ReentrantLock`s and a bounded queue per subscriber drained on its own virtual
+  thread; a subscriber that overflows is dropped with a `subscriber_dropped` event and replays from the run's events.
+- **Permission core:** `ToolExecutor.decide` became a pure function, checked against the old logic over the whole
+  input space. Taint now survives compaction until the next user message (`ClearedResult.TEXT` is the one shared
+  marker). Path rules resolve real paths on every OS, so a symlink cannot dodge a deny rule.
+- **Model clients:** the non-streamed retry, backoff and 401-refresh loop moved into `StreamingCall.send`
+  (about 130 lines fewer across the three clients).
+- **SQL storage:** new modules `jllm-sql` (plain JDBC, HikariCP; no JPA) and `jllm-sql-spring-starter`. The dialect
+  (SQLite default, MySQL, PostgreSQL) comes from the JDBC URL alone; with the starter on the class path every store
+  (users, roles, sessions, tokens, settings, chats, state, mnemonic, run logs, plugin documents incl. workflows) is
+  in SQL, without it the file stores stay. Chat listing filters by principal in the query (`ChatVisibility`).
+  MySQL and PostgreSQL drivers are downloaded with SHA-256 manifests into `.downloaded-libs/` (checkout, replacing
+  `.graal/`) or `lib-ext/` (release), never bundled.
+- **Tests and docs:** eval cases for the SSRF guard, taint across compaction, symlinks, admin approval and web
+  injection (`FEATURES.md` section 5); real-HTTP integration tests over SQLite; an enterprise setup guide and an
+  OpenHands comparison.
+- **Left as `TODO` comments:** constant-time default-password check and the PBKDF2 iteration cap (`PasswordHasher`),
+  TLS in the sandbox daemon. Not started: rate limits and spend caps, audit log, health and metrics, backups.
 
 ## Overall direction
 - **Where it lives:** an embedded component, then a standalone library with a CLI, then a web front end, then a
@@ -362,7 +393,8 @@ The first runs exposed model-facing wording and guard rails that were then tight
   rewrites the log, then a budgeted one with offloading and a task list.
 - **Permissions:** one approval flag, then a mode-by-tool-kind matrix, then sub-agents inheriting the parent's
   permissions, then per-user roles narrowed by each user's own settings.
-- **Hardening:** a full review pass closing jail escapes, races and unbounded reads before adding features.
+- **Hardening:** a full review pass closing jail escapes, races and unbounded reads before adding features, then a
+  second one for shared deployments (address guard, fail-closed gate, token key, SQL storage).
 - **Verification:** scripted fake models, then a live eval suite against real models with a recorded history and
   baselines, whose failures drive the wording of what the model is told.
 - **Unchanged throughout:** the prompt-cache prefix must stay byte-stable.

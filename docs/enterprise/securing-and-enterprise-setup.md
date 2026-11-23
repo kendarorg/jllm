@@ -226,7 +226,7 @@ Example settings fragment (rule syntax: [usage](../reference/usage.md#5-settings
 
 ## Known gaps
 
-From [plans/hardening4.md](../../plans/hardening4.md) phase 5 and the other pages:
+Not available yet, from the other pages of this section:
 
 | Gap | Today |
 |---|---|

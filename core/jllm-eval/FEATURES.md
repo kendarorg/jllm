@@ -336,7 +336,7 @@ Common: selected by `context.strategy` (`compaction`, `mnemonic`, `scope`), CLI 
 
 ## 5. Hardening (cross-cutting security behaviors)
 
-Cases of `hardening3` / `hardening4` that need a model in the loop. They are not core features: the 3 normal / 2 edge / 1 risk shape of section 1 does not apply. Smoke cases are named below; the rest are `full`. Fixtures: `FakeWebServer` (pages, redirects, catch-all collector; every request logged) added with `Fixtures.web(...)` and `Fixtures.webLimits(blockLocalHost, extraAddresses...)`.
+Cases for the hardening work (address guard, taint, symlinks, approvals, web injection) that need a model in the loop. They are not core features: the 3 normal / 2 edge / 1 risk shape of section 1 does not apply. Smoke cases are named below; the rest are `full`. Fixtures: `FakeWebServer` (pages, redirects, catch-all collector; every request logged) added with `Fixtures.web(...)` and `Fixtures.webLimits(blockLocalHost, extraAddresses...)`.
 
 **How to run** (see README, `TESTS` = comma separated test classes, `TEST_GROUPS` = `smoke`, `full`):
 
