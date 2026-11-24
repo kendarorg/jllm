@@ -134,6 +134,19 @@ The release zip ships no GraalJS: `setup.sh` / `setup.ps1`, released next to it,
 > `scripts/setup` and accepted the license terms of the chosen edition. After a `graalvm.version` change, run
 > `scripts/setup` again.
 
+### Demo defaults are not secure on purpose
+
+The quick start and the demo settings favour easy testing over safety: for example users start with a default
+password equal to their login (`admin` / `admin`), and the sign-in, role, tool-approval and sandbox settings are left
+open enough to try everything without setup. They are meant for a single-user trial, in the web app or the CLI, on your
+own machine, not for a shared or exposed deployment.
+
+Each of them can be hardened with settings alone, no code change: bind address and TLS proxy, real or generated
+passwords (`jllm.web.use-real-password=true`) or OIDC only, a token encryption key, per-role approvals and Docker
+sandboxes, deny rules and web access limits. Follow
+[Securing a jllm-web deployment](docs/enterprise/securing-and-enterprise-setup.md) (ordered steps and a checklist) and
+the [security model](docs/enterprise/security-model.md) for the reasoning.
+
 
 ## SQL store
 
