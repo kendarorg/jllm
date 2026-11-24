@@ -110,7 +110,7 @@ public class AnthropicModelClient implements ModelClient {
             try {
                 data = mapper.readTree(ev.data());
             } catch (IOException e) {
-                throw new ModelException("Anthropic API returned a malformed stream event: " + truncate(ev.data()));
+                throw new ModelException("Anthropic API returned a malformed stream event: " + StreamingCall.truncate(ev.data()));
             }
             String type = data.path("type").asText(ev.event() == null ? "" : ev.event());
             switch (type) {
@@ -193,7 +193,7 @@ public class AnthropicModelClient implements ModelClient {
                     String em = data.path("error").path("message").asText("");
                     boolean retry = et.equals("overloaded_error") || et.equals("api_error");
                     throw new StreamingCall.StreamError("Anthropic API error: " + (et.isEmpty() ? "" : et + ": ")
-                            + truncate(em.isEmpty() ? data.toString() : em), retry);
+                            + StreamingCall.truncate(em.isEmpty() ? data.toString() : em), retry);
                 }
                 default -> { } // ping and unknown events
             }
@@ -237,7 +237,7 @@ public class AnthropicModelClient implements ModelClient {
             String type = err.path("type").asText("");
             String message = err.path("message").asText("");
             throw new ModelException("Anthropic API error: " + (type.isEmpty() ? "" : type + ": ")
-                    + (message.isEmpty() ? truncate(json.toString()) : truncate(message)));
+                    + (message.isEmpty() ? StreamingCall.truncate(json.toString()) : StreamingCall.truncate(message)));
         }
 
         ArrayNode content = json.path("content").isArray() ? (ArrayNode) json.get("content") : mapper.createArrayNode();
@@ -536,7 +536,7 @@ public class AnthropicModelClient implements ModelClient {
         if (auth != null) {
             try {
                 auth.headers().forEach(rb::header);
-            } catch (RuntimeException e) {
+            } catch (RuntimeException e) { // boundary: any auth provider failure becomes a ModelException
                 throw new ModelException("Authentication failed: " + e.getMessage(), e);
             }
         } else {
@@ -553,59 +553,8 @@ public class AnthropicModelClient implements ModelClient {
             throw new ModelException("Cannot serialize request", e);
         }
         boolean binding = bindsThinking(body);
-        java.util.function.Supplier<HttpRequest> build = () -> request(payload, binding);
-        HttpRequest request = build.get();
-        boolean authRetried = false;
-
-        int attempt = 0;
-        RetryBudget budget = new RetryBudget();
-        while (true) {
-            try {
-                HttpResponse<String> resp = cancel.send(http, request);
-                int status = resp.statusCode();
-                if (status == 200) {
-                    return readJson(resp.body());
-                }
-                if (status == 401 && auth != null && !authRetried) {
-                    authRetried = true;
-                    auth.onUnauthorized();
-                    request = build.get();
-                    continue;
-                }
-                boolean retryable = status == 429 || status == 529 || status >= 500;
-                if (!retryable || attempt >= props.maxRetries()) {
-                    throw new ModelException("Anthropic API error " + status + ": " + truncate(resp.body())
-                            + StreamingCall.rateLimitHint(resp));
-                }
-                attempt++;
-                long delayMs = budget.reserve(attempt, backoffBaseMs,
-                                resp.headers().firstValue("retry-after").map(AnthropicModelClient::parseSeconds))
-                        .orElseThrow(() -> new ModelException("Anthropic API error " + status + ": "
-                                + truncate(resp.body()) + StreamingCall.rateLimitHint(resp) + " (retry wait budget of " + RetryBudget.MAX_WAIT_MS
-                                + " ms exhausted)"));
-                log.warn("Anthropic API {} — retry {} in {} ms{}", status, attempt, delayMs, StreamingCall.rateLimitHint(resp));
-                cancel.retrying(status, attempt, props.maxRetries(), delayMs);
-                cancel.sleep(delayMs);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new ModelException("Interrupted while calling the model", e);
-            } catch (IOException e) {
-                if (attempt >= props.maxRetries()) {
-                    throw new ModelException("Anthropic API call failed: " + e.getMessage(), e);
-                }
-                attempt++;
-                long netDelay = budget.reserve(attempt, backoffBaseMs, Optional.empty())
-                        .orElseThrow(() -> new ModelException("Anthropic API call failed: " + e.getMessage()
-                                + " (retry wait budget of " + RetryBudget.MAX_WAIT_MS + " ms exhausted)", e));
-                cancel.retrying(0, attempt, props.maxRetries(), netDelay);
-                try {
-                    cancel.sleep(netDelay);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    throw new ModelException("Interrupted while calling the model", ie);
-                }
-            }
-        }
+        return readJson(StreamingCall.send(http, () -> request(payload, binding), auth, cancel, props.maxRetries(), backoffBaseMs,
+                st -> st == 429 || st == 529 || st >= 500, st -> "Anthropic" + " API error " + st, "Anthropic" + " API call failed: "));
     }
 
     /** A 200 body must be a JSON object; anything else (HTML from a proxy or a wrong baseUrl) fails at once. */
@@ -616,18 +565,8 @@ public class AnthropicModelClient implements ModelClient {
         } catch (IOException e) {
             // not JSON: reported below
         }
-        throw new ModelException("Anthropic API returned a non-JSON response (check baseUrl): " + truncate(body));
+        throw new ModelException("Anthropic API returned a non-JSON response (check baseUrl): " + StreamingCall.truncate(body));
     }
 
-    private static long parseSeconds(String v) {
-        try {
-            return Math.min(120_000L, (long) (Double.parseDouble(v.trim()) * 1000));
-        } catch (NumberFormatException e) {
-            return 2000L;
-        }
-    }
 
-    private static String truncate(String s) {
-        return s != null && s.length() > 1000 ? s.substring(0, 1000) + "…" : s;
-    }
 }

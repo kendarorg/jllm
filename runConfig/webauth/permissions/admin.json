@@ -1,4 +1,8 @@
 {
-  "tools": ["*"],
-  "approval": "off"
+  "tools" : [ "*" ],
+  "approval" : "off",
+  "readOnly" : false,
+  "sandbox" : {
+    "kind" : "docker-open"
+  }
 }

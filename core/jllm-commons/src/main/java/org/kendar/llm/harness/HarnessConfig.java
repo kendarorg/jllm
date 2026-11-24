@@ -1,6 +1,7 @@
 package org.kendar.llm.harness;
 
 import org.kendar.llm.harness.context.ContextStrategyKind;
+import org.kendar.llm.harness.tools.ExternalLinks;
 
 import java.util.Set;
 
@@ -10,7 +11,7 @@ public record HarnessConfig(String agentId, int maxTurns, int maxTokens, boolean
                             int contextBudgetTokens, int keepRecentTurns, Set<String> coreGroups,
                             Sandbox sandbox, Web web, Compaction compaction, Output output,
                             ContextStrategyKind contextStrategy, Mnemonic mnemonic, boolean useContextStack,
-                            Loop loop) {
+                            Loop loop, ExternalLinks externalLinks) {
 
     /** @param localDirSandboxAllowed allow falling back to a plain local directory when docker is unavailable */
     public record Sandbox(String baseDir, int timeoutSeconds, boolean localDirSandboxAllowed, Docker docker) {
@@ -20,34 +21,59 @@ public record HarnessConfig(String agentId, int maxTurns, int maxTokens, boolean
     }
 
     /**
-     * @param network {@code oneshot} mode only: docker network of the throwaway container ({@code none} = no network);
-     *                daemon mode uses docker's default network
-     * @param mode    {@code oneshot} (default: one {@code docker run --rm} per command) or {@code daemon} (a
-     *                long-running container with an HTTP exec daemon, see docs/guides/sandbox.md)
-     * @param remote  daemon mode only: the docker daemon is not on this machine. Nothing can be bind-mounted, so the
+     * Settings of the container runner ({@code sandbox.backend=docker}): one long-running container with an exec
+     * daemon, see docs/guides/sandbox.md.
+     *
+     * @param network {@code hardened} profile only: {@code none} (default: no network at all) or {@code default}
+     *                (docker's default network, an explicit grant); the {@code standard} profile always uses docker's
+     *                default network
+     * @param remote  the docker daemon is not on this machine. Nothing can be bind-mounted, so the
      *                workspace is uploaded to the container when it is created and downloaded back as a backup
      * @param remoteHost address at which this machine reaches the ports published by the remote docker host; blank:
-     *                taken from {@code DOCKER_HOST}
+     *                taken from {@code DOCKER_HOST}. A {@code https://} prefix makes the daemon traffic TLS
+     * @param allowInsecure remote daemon: accept plain http to a non-loopback host (token and commands travel in
+     *                cleartext); false refuses it; default true (http allowed)
+     * @param trustStore path of a PKCS12/JKS truststore for https daemon URLs; blank: the JDK default trust store
+     * @param trustStorePassword password of {@code trustStore}; blank: empty password
+     * @param profile {@code standard} (default) or {@code hardened}: hardened has no network by default (see
+     *                {@code network}) and is meant for temporary users
+     * @param scope   {@code chat} (default: one container per chat) or {@code user} (one container per user, one
+     *                work dir per chat inside it)
+     * @param cleanup what happens to idle containers
      */
     public record Docker(String binary, String image, String memory, String cpus, int pidsLimit, String user,
-                         String network, String mode, boolean remote, String remoteHost) {
-        public Docker(String binary, String image, String memory, String cpus, int pidsLimit, String user,
-                      String network) {
-            this(binary, image, memory, cpus, pidsLimit, user, network, "oneshot", false, "");
-        }
-
-        public Docker(String binary, String image, String memory, String cpus, int pidsLimit, String user,
-                      String network, String mode) {
-            this(binary, image, memory, cpus, pidsLimit, user, network, mode, false, "");
-        }
+                         String network, boolean remote, String remoteHost,
+                         boolean allowInsecure, String trustStore, String trustStorePassword,
+                         String profile, String scope, Cleanup cleanup) {
 
         public static Docker defaults() {
-            return new Docker("docker", "python:3.12-slim", "512m", "1.0", 256, "1000:1000", "none", "oneshot", false, "");
+            return new Docker("docker", "python:3.12-slim", "512m", "1.0", 256, "1000:1000", "none", false, "", true,
+                    "", "", "standard", "chat", Cleanup.defaults());
         }
 
-        /** True for the long-running container with the exec daemon. */
-        public boolean daemon() {
-            return "daemon".equalsIgnoreCase(mode);
+        /** True for the hardened profile. */
+        public boolean hardened() {
+            return "hardened".equalsIgnoreCase(profile);
+        }
+
+        /** True when one container serves all the chats of a user. */
+        public boolean userScope() {
+            return "user".equalsIgnoreCase(scope);
+        }
+    }
+
+    /**
+     * What the sweep does with a container nobody used for a while.
+     *
+     * @param idleMinutes       inactivity after which {@code action} applies; 0 = never
+     * @param action            {@code stop}, {@code backup-remove} (back the workspace up and commit an image, then
+     *                          remove the container; both are restored on next use) or {@code remove}
+     * @param retentionDays     days a backup (tarball and image) is kept; 0 = forever
+     * @param maxWorkspaceBytes largest workspace (volume) allowed; 0 = no limit. Checked at backup and by the sweep
+     */
+    public record Cleanup(int idleMinutes, String action, int retentionDays, long maxWorkspaceBytes) {
+        public static Cleanup defaults() {
+            return new Cleanup(0, "stop", 0, 0);
         }
     }
 
@@ -166,72 +192,63 @@ public record HarnessConfig(String agentId, int maxTurns, int maxTokens, boolean
         if (contextStrategy == null) contextStrategy = ContextStrategyKind.COMPACTION;
         if (mnemonic == null) mnemonic = Mnemonic.defaults();
         if (loop == null) loop = Loop.defaults();
+        if (externalLinks == null) externalLinks = ExternalLinks.DEFAULT;
     }
 
     public static HarnessConfig defaults() {
         return new HarnessConfig("agent", 40, 8192, true, true, 12, 600, 100_000, 6,
                 Set.of("Files", "Shell"), Sandbox.defaults(), Web.defaults(), Compaction.defaults(), Output.defaults(),
-                ContextStrategyKind.COMPACTION, Mnemonic.defaults(), true, Loop.defaults());
+                ContextStrategyKind.COMPACTION, Mnemonic.defaults(), true, Loop.defaults(), ExternalLinks.DEFAULT);
     }
 
     public HarnessConfig withAgentId(String v) {
         return new HarnessConfig(v, maxTurns, maxTokens, parallelToolUse, serializeRuns, toolBatchThreshold,
-                approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, web, compaction, output, contextStrategy, mnemonic, useContextStack, loop);
+                approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, web, compaction, output, contextStrategy, mnemonic, useContextStack, loop, externalLinks);
     }
 
     public HarnessConfig withMaxTurns(int v) {
         return new HarnessConfig(agentId, v, maxTokens, parallelToolUse, serializeRuns, toolBatchThreshold,
-                approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, web, compaction, output, contextStrategy, mnemonic, useContextStack, loop);
+                approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, web, compaction, output, contextStrategy, mnemonic, useContextStack, loop, externalLinks);
     }
 
     public HarnessConfig withMaxTokens(int v) {
         return new HarnessConfig(agentId, maxTurns, v, parallelToolUse, serializeRuns, toolBatchThreshold,
-                approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, web, compaction, output, contextStrategy, mnemonic, useContextStack, loop);
-    }
-
-    public HarnessConfig withParallelToolUse(boolean v) {
-        return new HarnessConfig(agentId, maxTurns, maxTokens, v, serializeRuns, toolBatchThreshold,
-                approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, web, compaction, output, contextStrategy, mnemonic, useContextStack, loop);
-    }
-
-    public HarnessConfig withSerializeRuns(boolean v) {
-        return new HarnessConfig(agentId, maxTurns, maxTokens, parallelToolUse, v, toolBatchThreshold,
-                approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, web, compaction, output, contextStrategy, mnemonic, useContextStack, loop);
+                approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, web, compaction, output, contextStrategy, mnemonic, useContextStack, loop, externalLinks);
     }
 
     public HarnessConfig withToolBatchThreshold(int v) {
         return new HarnessConfig(agentId, maxTurns, maxTokens, parallelToolUse, serializeRuns, v,
-                approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, web, compaction, output, contextStrategy, mnemonic, useContextStack, loop);
+                approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, web, compaction, output, contextStrategy, mnemonic, useContextStack, loop, externalLinks);
     }
 
     public HarnessConfig withApprovalTimeoutSeconds(int v) {
         return new HarnessConfig(agentId, maxTurns, maxTokens, parallelToolUse, serializeRuns, toolBatchThreshold,
-                v, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, web, compaction, output, contextStrategy, mnemonic, useContextStack, loop);
+                v, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, web, compaction, output, contextStrategy, mnemonic, useContextStack, loop, externalLinks);
     }
 
     public HarnessConfig withContextBudgetTokens(int v) {
         return new HarnessConfig(agentId, maxTurns, maxTokens, parallelToolUse, serializeRuns, toolBatchThreshold,
-                approvalTimeoutSeconds, v, keepRecentTurns, coreGroups, sandbox, web, compaction, output, contextStrategy, mnemonic, useContextStack, loop);
+                approvalTimeoutSeconds, v, keepRecentTurns, coreGroups, sandbox, web, compaction, output, contextStrategy, mnemonic, useContextStack, loop, externalLinks);
     }
 
     public HarnessConfig withKeepRecentTurns(int v) {
         return new HarnessConfig(agentId, maxTurns, maxTokens, parallelToolUse, serializeRuns, toolBatchThreshold,
-                approvalTimeoutSeconds, contextBudgetTokens, v, coreGroups, sandbox, web, compaction, output, contextStrategy, mnemonic, useContextStack, loop);
+                approvalTimeoutSeconds, contextBudgetTokens, v, coreGroups, sandbox, web, compaction, output, contextStrategy, mnemonic, useContextStack, loop, externalLinks);
     }
 
     public HarnessConfig withCoreGroups(Set<String> v) {
         return new HarnessConfig(agentId, maxTurns, maxTokens, parallelToolUse, serializeRuns, toolBatchThreshold,
-                approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, v, sandbox, web, compaction, output, contextStrategy, mnemonic, useContextStack, loop);
+                approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, v, sandbox, web, compaction, output, contextStrategy, mnemonic, useContextStack, loop, externalLinks);
     }
 
     public HarnessConfig withSandbox(Sandbox v) {
         return new HarnessConfig(agentId, maxTurns, maxTokens, parallelToolUse, serializeRuns, toolBatchThreshold,
-                approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, v, web, compaction, output, contextStrategy, mnemonic, useContextStack, loop);
+                approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, v, web, compaction, output, contextStrategy, mnemonic, useContextStack, loop, externalLinks);
     }
 
     public HarnessConfig withWeb(Web v) {
         return new HarnessConfig(agentId, maxTurns, maxTokens, parallelToolUse, serializeRuns, toolBatchThreshold,
-                approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, v, compaction, output, contextStrategy, mnemonic, useContextStack, loop);
+                approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, v, compaction, output, contextStrategy, mnemonic, useContextStack, loop, externalLinks);
     }
 
     public HarnessConfig withSandboxBaseDir(String dir) {
@@ -245,13 +262,29 @@ public record HarnessConfig(String agentId, int maxTurns, int maxTokens, boolean
     public HarnessConfig withDockerImage(String image) {
         Docker d = sandbox.docker();
         return withDocker(new Docker(d.binary(), image, d.memory(), d.cpus(), d.pidsLimit(), d.user(), d.network(),
-                d.mode(), d.remote(), d.remoteHost()));
+                d.remote(), d.remoteHost(), d.allowInsecure(), d.trustStore(), d.trustStorePassword(), d.profile(),
+                d.scope(), d.cleanup()));
     }
 
-    public HarnessConfig withDockerMode(String mode) {
+    public HarnessConfig withDockerProfile(String profile) {
         Docker d = sandbox.docker();
         return withDocker(new Docker(d.binary(), d.image(), d.memory(), d.cpus(), d.pidsLimit(), d.user(), d.network(),
-                mode, d.remote(), d.remoteHost()));
+                d.remote(), d.remoteHost(), d.allowInsecure(), d.trustStore(), d.trustStorePassword(), profile,
+                d.scope(), d.cleanup()));
+    }
+
+    public HarnessConfig withDockerScope(String scope) {
+        Docker d = sandbox.docker();
+        return withDocker(new Docker(d.binary(), d.image(), d.memory(), d.cpus(), d.pidsLimit(), d.user(), d.network(),
+                d.remote(), d.remoteHost(), d.allowInsecure(), d.trustStore(), d.trustStorePassword(), d.profile(),
+                scope, d.cleanup()));
+    }
+
+    public HarnessConfig withDockerRemote(boolean remote, String remoteHost) {
+        Docker d = sandbox.docker();
+        return withDocker(new Docker(d.binary(), d.image(), d.memory(), d.cpus(), d.pidsLimit(), d.user(), d.network(),
+                remote, remoteHost, d.allowInsecure(), d.trustStore(), d.trustStorePassword(), d.profile(),
+                d.scope(), d.cleanup()));
     }
 
     public HarnessConfig withSandboxTimeoutSeconds(int secs) {
@@ -276,18 +309,18 @@ public record HarnessConfig(String agentId, int maxTurns, int maxTokens, boolean
 
     public HarnessConfig withCompaction(Compaction v) {
         return new HarnessConfig(agentId, maxTurns, maxTokens, parallelToolUse, serializeRuns, toolBatchThreshold,
-                approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, web, v, output, contextStrategy, mnemonic, useContextStack, loop);
+                approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, web, v, output, contextStrategy, mnemonic, useContextStack, loop, externalLinks);
     }
 
     public HarnessConfig withOutput(Output v) {
         return new HarnessConfig(agentId, maxTurns, maxTokens, parallelToolUse, serializeRuns, toolBatchThreshold,
-                approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, web, compaction, v, contextStrategy, mnemonic, useContextStack, loop);
+                approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, web, compaction, v, contextStrategy, mnemonic, useContextStack, loop, externalLinks);
     }
 
     public HarnessConfig withContextStrategy(ContextStrategyKind v) {
         return new HarnessConfig(agentId, maxTurns, maxTokens, parallelToolUse, serializeRuns, toolBatchThreshold,
                 approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, web, compaction, output,
-                v, mnemonic, useContextStack, loop);
+                v, mnemonic, useContextStack, loop, externalLinks);
     }
 
     /**
@@ -299,13 +332,13 @@ public record HarnessConfig(String agentId, int maxTurns, int maxTokens, boolean
     public HarnessConfig withUseContextStack(boolean v) {
         return new HarnessConfig(agentId, maxTurns, maxTokens, parallelToolUse, serializeRuns, toolBatchThreshold,
                 approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, web, compaction, output,
-                contextStrategy, mnemonic, v, loop);
+                contextStrategy, mnemonic, v, loop, externalLinks);
     }
 
     public HarnessConfig withMnemonic(Mnemonic v) {
         return new HarnessConfig(agentId, maxTurns, maxTokens, parallelToolUse, serializeRuns, toolBatchThreshold,
                 approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, web, compaction, output,
-                contextStrategy, v, useContextStack, loop);
+                contextStrategy, v, useContextStack, loop, externalLinks);
     }
 
     /**
@@ -313,15 +346,19 @@ public record HarnessConfig(String agentId, int maxTurns, int maxTokens, boolean
      *
      * @param stuck  detection of an agent that repeats itself
      * @param verify re-entry after a STOP hook vetoed the stop
+     * @param innerCallsPerTurn tool calls made by {@code run_js} scripts that cost one model turn of the budget; zero
+     *                          or less: inner calls are not counted
      */
-    public record Loop(Stuck stuck, Verify verify) {
+    public record Loop(Stuck stuck, Verify verify, int innerCallsPerTurn) {
+        public static final int DEFAULT_INNER_CALLS_PER_TURN = 10;
+
         public Loop {
             if (stuck == null) stuck = Stuck.defaults();
             if (verify == null) verify = Verify.defaults();
         }
 
         public static Loop defaults() {
-            return new Loop(Stuck.defaults(), Verify.defaults());
+            return new Loop(Stuck.defaults(), Verify.defaults(), DEFAULT_INNER_CALLS_PER_TURN);
         }
     }
 
@@ -354,9 +391,16 @@ public record HarnessConfig(String agentId, int maxTurns, int maxTokens, boolean
         }
     }
 
+    /** {@code files.externalLinks}: what the file tools do with a link that leaves the work dir. */
+    public HarnessConfig withExternalLinks(ExternalLinks v) {
+        return new HarnessConfig(agentId, maxTurns, maxTokens, parallelToolUse, serializeRuns, toolBatchThreshold,
+                approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, web, compaction, output,
+                contextStrategy, mnemonic, useContextStack, loop, v);
+    }
+
     public HarnessConfig withLoop(Loop v) {
         return new HarnessConfig(agentId, maxTurns, maxTokens, parallelToolUse, serializeRuns, toolBatchThreshold,
                 approvalTimeoutSeconds, contextBudgetTokens, keepRecentTurns, coreGroups, sandbox, web, compaction, output,
-                contextStrategy, mnemonic, useContextStack, v);
+                contextStrategy, mnemonic, useContextStack, v, externalLinks);
     }
 }

@@ -49,7 +49,7 @@ class SettingsSourceTest {
         List<SettingsLayer> layers = List.of(
                 layer(SettingsLayer.Kind.GLOBAL, "{\"smallModel\":true,\"permissions\":{\"deny\":[\"a\"]}}"),
                 layer(SettingsLayer.Kind.PROJECT, "{\"smallModel\":false,\"permissions\":{\"deny\":[\"b\"]}}"));
-        HarnessSettings s = HarnessSettings.loadLayered(() -> layers, project, k -> null, ProjectMcpTrust.Prompt.NONE,
+        HarnessSettings s = HarnessSettingsLoader.loadLayered(() -> layers, project, k -> null, ProjectMcpTrust.Prompt.NONE,
                 new MemoryTrust(), warnings::add,
                 new org.kendar.llm.harness.safety.ContentWarnings());
         assertFalse(s.isSmallModel());
@@ -62,18 +62,18 @@ class SettingsSourceTest {
         List<SettingsLayer> layers = List.of(layer(SettingsLayer.Kind.PROJECT, server));
         MemoryTrust trust = new MemoryTrust();
 
-        HarnessSettings refused = HarnessSettings.loadLayered(() -> layers, project, k -> null,
+        HarnessSettings refused = HarnessSettingsLoader.loadLayered(() -> layers, project, k -> null,
                 ProjectMcpTrust.Prompt.NONE, trust, warnings::add,
                 new org.kendar.llm.harness.safety.ContentWarnings());
         assertTrue(refused.mcpServers() == null || refused.mcpServers().isEmpty());
 
-        HarnessSettings asked = HarnessSettings.loadLayered(() -> layers, project, k -> null,
+        HarnessSettings asked = HarnessSettingsLoader.loadLayered(() -> layers, project, k -> null,
                 (dir, name, line) -> true, trust, warnings::add,
                 new org.kendar.llm.harness.safety.ContentWarnings());
         assertEquals(1, asked.mcpServers().size());
         assertEquals(1, trust.answers.size(), "the answer is remembered in the given store");
 
-        HarnessSettings remembered = HarnessSettings.loadLayered(() -> layers, project, k -> null,
+        HarnessSettings remembered = HarnessSettingsLoader.loadLayered(() -> layers, project, k -> null,
                 ProjectMcpTrust.Prompt.NONE, trust, warnings::add,
                 new org.kendar.llm.harness.safety.ContentWarnings());
         assertEquals(1, remembered.mcpServers().size());
@@ -83,7 +83,7 @@ class SettingsSourceTest {
     void sameServerInAnExplicitLayerNeedsNoTrust() throws Exception {
         String server = "{\"mcpServers\":[{\"name\":\"x\",\"command\":\"run-me\"}]}";
         List<SettingsLayer> layers = List.of(layer(SettingsLayer.Kind.EXPLICIT, server));
-        HarnessSettings s = HarnessSettings.loadLayered(() -> layers, project, k -> null,
+        HarnessSettings s = HarnessSettingsLoader.loadLayered(() -> layers, project, k -> null,
                 ProjectMcpTrust.Prompt.NONE, new MemoryTrust(), warnings::add,
                 new org.kendar.llm.harness.safety.ContentWarnings());
         assertEquals(1, s.mcpServers().size());
@@ -92,7 +92,7 @@ class SettingsSourceTest {
     @Test
     void projectLayerWithoutProjectIsRefused() throws Exception {
         List<SettingsLayer> layers = List.of(layer(SettingsLayer.Kind.PROJECT, "{\"smallModel\":true}"));
-        assertThrows(IllegalArgumentException.class, () -> HarnessSettings.loadLayered(() -> layers, null,
+        assertThrows(IllegalArgumentException.class, () -> HarnessSettingsLoader.loadLayered(() -> layers, null,
                 k -> null, ProjectMcpTrust.Prompt.NONE, new MemoryTrust(), warnings::add,
                 new org.kendar.llm.harness.safety.ContentWarnings()));
     }
@@ -101,7 +101,7 @@ class SettingsSourceTest {
     void nonObjectLayerIsIgnoredWithItsOrigin() throws Exception {
         List<SettingsLayer> layers = List.of(layer(SettingsLayer.Kind.GLOBAL, "[1]"),
                 layer(SettingsLayer.Kind.EXPLICIT, "{\"smallModel\":true}"));
-        HarnessSettings s = HarnessSettings.loadLayered(() -> layers, project, k -> null,
+        HarnessSettings s = HarnessSettingsLoader.loadLayered(() -> layers, project, k -> null,
                 ProjectMcpTrust.Prompt.NONE, new MemoryTrust(), warnings::add,
                 new org.kendar.llm.harness.safety.ContentWarnings());
         assertTrue(s.isSmallModel());

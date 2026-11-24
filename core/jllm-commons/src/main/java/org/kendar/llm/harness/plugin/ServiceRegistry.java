@@ -20,8 +20,4 @@ public final class ServiceRegistry {
     public <T> Optional<T> lookup(Class<T> type) {
         return Optional.ofNullable(type.cast(services.get(type)));
     }
-
-    public <T> void withdraw(Class<T> type) {
-        services.remove(type);
-    }
 }

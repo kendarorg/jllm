@@ -14,7 +14,7 @@
     <artifactId>jllm-js</artifactId>
     <packaging>jar</packaging>
     <name>jllm-js</name>
-    <description>run_js plugin for jllm-harness: a JavaScript sandbox (GraalJS community) over the harness tools.</description>
+    <description>run_js plugin for jllm-harness: a JavaScript sandbox (GraalJS) over the harness tools.</description>
 
     <url>https://github.com/kendarorg/jllm</url>
 
@@ -38,16 +38,10 @@
             <version>${project.version}</version>
             <scope>test</scope>
         </dependency>
-        <!-- GraalJS is carried by the host (jllm-cli, jllm-web), not bundled in the plugin jar -->
+        <!-- GraalJS for run_js: provided, never bundled; downloaded by scripts/setup into .downloaded-libs/graal/, the release ships it in lib-ext/ -->
         <dependency>
-            <groupId>org.graalvm.polyglot</groupId>
-            <artifactId>polyglot</artifactId>
-            <version>${graalvm.version}</version>
-            <scope>provided</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.graalvm.polyglot</groupId>
-            <artifactId>js</artifactId>
+            <groupId>org.kendar.llm.graal</groupId>
+            <artifactId>jllm-graal-set</artifactId>
             <version>${graalvm.version}</version>
             <type>pom</type>
             <scope>provided</scope>
@@ -61,6 +55,12 @@
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- captures the plugin's log warnings in tests -->
+        <dependency>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -115,4 +115,5 @@
             </plugin>
         </plugins>
     </build>
+
 </project>

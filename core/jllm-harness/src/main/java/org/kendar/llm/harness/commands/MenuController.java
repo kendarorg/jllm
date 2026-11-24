@@ -157,7 +157,7 @@ final class MenuController {
             PermissionMode m = MODES.get(number - 1);
             try {
                 harness.sessions().setMode(chatId, m);
-            } catch (RuntimeException e) {
+            } catch (RuntimeException e) { // boundary: a failing command is shown to the user as text
                 return SlashCommands.Result.text("error: " + e.getMessage());
             }
             return new SlashCommands.Result("Mode: " + m.name(), null, true);
@@ -175,7 +175,7 @@ final class MenuController {
         String message;
         try {
             message = st.perChat ? runInChat(chatId, st, action) : run(st, action);
-        } catch (RuntimeException e) {
+        } catch (RuntimeException e) { // boundary: a failing command is shown to the user as text
             message = "error: " + e.getMessage();
         }
         st.selected = null;
@@ -189,7 +189,7 @@ final class MenuController {
             if (number != 1) return render(chatId, "Model unchanged");
             try {
                 return finishSwitch(chatId, harness.switchModel(chatId, name, true));
-            } catch (RuntimeException e) {
+            } catch (RuntimeException e) { // boundary: a failing command is shown to the user as text
                 return render(chatId, "error: " + e.getMessage());
             }
         }
@@ -199,7 +199,7 @@ final class MenuController {
         AgentHarness.SwitchResult r;
         try {
             r = harness.switchModel(chatId, name, false);
-        } catch (RuntimeException e) {
+        } catch (RuntimeException e) { // boundary: a failing command is shown to the user as text
             return render(chatId, e.getMessage());
         }
         if (r.status() == AgentHarness.SwitchStatus.NEEDS_COMPACTION) {

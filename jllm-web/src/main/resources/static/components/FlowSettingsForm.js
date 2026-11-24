@@ -1,4 +1,4 @@
-import {computed} from 'vue';
+import {computed} from '../vendor/vue.esm-browser.prod.js';
 import {setNum, setOpt} from '../flowModel.js';
 import StepPicker from './StepPicker.js';
 import AcceptsEditor from './AcceptsEditor.js';

@@ -30,31 +30,25 @@
     </properties>
 
     <dependencies>
-        <!-- GraalJS for the jllm-js plugin, which does not bundle it -->
+        <!-- GraalJS for run_js: provided, never bundled; downloaded by scripts/setup into .downloaded-libs/graal/, the release ships it in lib-ext/ -->
         <dependency>
-            <groupId>org.graalvm.polyglot</groupId>
-            <artifactId>polyglot</artifactId>
-            <version>${graalvm.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.graalvm.polyglot</groupId>
-            <artifactId>js</artifactId>
+            <groupId>org.kendar.llm.graal</groupId>
+            <artifactId>jllm-graal-set</artifactId>
             <version>${graalvm.version}</version>
             <type>pom</type>
+            <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>org.kendar.llm</groupId>
-            <artifactId>jllm-web-commons</artifactId>
+            <artifactId>jllm-web-spring-starter</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <!-- test only: the release ships the SQL jars in lib-ext/sql; the existing tests stay on files (src/test/resources) -->
         <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-web</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>com.nimbusds</groupId>
-            <artifactId>nimbus-jose-jwt</artifactId>
-            <version>9.37.3</version>
+            <groupId>org.kendar.llm</groupId>
+            <artifactId>jllm-sql-spring-starter</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -76,6 +70,13 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <version>${spring-boot.version}</version>
+                <configuration>
+                    <!-- ZIP layout: the jar starts through PropertiesLauncher, so "java -jar" keeps working and an
+                         external folder (lib-ext) can be added with -Dloader.path=lib-ext -->
+                    <layout>ZIP</layout>
+                    <!-- GraalJS is provided, and provided jars are otherwise repackaged: the release ships it in lib-ext/ -->
+                    <excludeGroupIds>org.graalvm.polyglot,org.graalvm.js,org.graalvm.regex,org.graalvm.truffle,org.graalvm.sdk,org.graalvm.shadowed</excludeGroupIds>
+                </configuration>
                 <executions>
                     <execution>
                         <goals>

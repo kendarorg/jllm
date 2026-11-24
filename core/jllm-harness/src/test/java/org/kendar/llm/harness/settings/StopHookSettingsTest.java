@@ -45,7 +45,7 @@ class StopHookSettingsTest {
     }
 
     private HarnessSettings load(ProjectMcpTrust.Prompt prompt) {
-        return HarnessSettings.loadLayered(new FileSettingsSource(null, project), project, k -> null, prompt, trust, warnings::add,
+        return HarnessSettingsLoader.loadLayered(new FileSettingsSource(null, project), project, k -> null, prompt, trust, warnings::add,
                 new org.kendar.llm.harness.safety.ContentWarnings());
     }
 
@@ -54,7 +54,7 @@ class StopHookSettingsTest {
         write(home.resolve(".jllm/settings.json"), HOOK);
         HarnessSettings s = load((d, n, l) -> { throw new AssertionError("not asked"); });
         assertEquals(1, s.stopHooks().size());
-        HarnessSettings.StopHook h = s.stopHooks().get(0);
+        StopHook h = s.stopHooks().get(0);
         assertEquals(60, h.timeout());
         assertEquals(List.of("main"), h.agents());
         assertTrue(h.changedOnly());
@@ -75,7 +75,7 @@ class StopHookSettingsTest {
         AtomicInteger asked = new AtomicInteger();
         assertEquals(1, load((d, n, l) -> {
             asked.incrementAndGet();
-            assertTrue(n.startsWith(HarnessSettings.STOP_HOOK_TRUST_PREFIX));
+            assertTrue(n.startsWith(ProjectTrustFilter.STOP_HOOK_TRUST_PREFIX));
             assertEquals("mvn -q test", l);
             return true;
         }).stopHooks().size());
@@ -89,11 +89,11 @@ class StopHookSettingsTest {
     void loopSettingsOverrideTheDefaults() throws Exception {
         write(home.resolve(".jllm/settings.json"),
                 "{\"loop\":{\"stuck\":{\"enabled\":false,\"repeat\":5},\"verify\":{\"maxReentries\":1}}}");
-        HarnessConfig c = load(ProjectMcpTrust.Prompt.NONE).applyTo(HarnessConfig.defaults());
+        HarnessConfig c = HarnessConfigMapper.apply(load(ProjectMcpTrust.Prompt.NONE), HarnessConfig.defaults());
         assertFalse(c.loop().stuck().enabled());
         assertEquals(5, c.loop().stuck().repeat());
         assertEquals(3, c.loop().stuck().alternationCycles());
         assertEquals(1, c.loop().verify().maxReentries());
-        assertEquals(HarnessConfig.Loop.defaults(), HarnessSettings.empty().applyTo(HarnessConfig.defaults()).loop());
+        assertEquals(HarnessConfig.Loop.defaults(), HarnessConfigMapper.apply(HarnessSettings.empty(), HarnessConfig.defaults()).loop());
     }
 }

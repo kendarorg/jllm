@@ -77,7 +77,7 @@ class SandboxLinksAndOutputTest {
 
     @Test
     void returnsWhenTheShellExitsWhileABackgroundChildHoldsTheOutput() throws Exception {
-        LocalDirSandboxExecutor box = new LocalDirSandboxExecutor(config(tmp));
+        LocalSandboxExecutor box = LocalSandboxExecutor.of(config(tmp));
         String cmd = WINDOWS ? "start /b ping -n 9 127.0.0.1 & echo started" : "sleep 8 & echo started";
         long t0 = System.currentTimeMillis();
         ExecutionResult r = box.execute("bg1", cmd, Duration.ofSeconds(60));
@@ -154,7 +154,7 @@ class SandboxLinksAndOutputTest {
     @Test
     void deletingAChatRemovesTheLinkNotItsTarget() throws Exception {
         Path out = outside();
-        ChatDirSandboxExecutor box = new ChatDirSandboxExecutor(config(tmp.resolve("x")), tmp.resolve("chats"));
+        LocalSandboxExecutor box = new LocalSandboxExecutor(new ChatDirLayout(tmp.resolve("chats")));
         Path work = box.workDir("c1");
         Files.createDirectories(work.resolve("sub"));
         Files.writeString(work.resolve("sub/f.txt"), "f");
@@ -168,7 +168,7 @@ class SandboxLinksAndOutputTest {
     void cwdScratchDeleteDoesNotFollowLinks() throws Exception {
         Path out = outside();
         Path project = Files.createDirectories(tmp.resolve("project"));
-        CwdSandboxExecutor box = new CwdSandboxExecutor(config(tmp.resolve("x")), project);
+        LocalSandboxExecutor box = new LocalSandboxExecutor(new CwdLayout(config(tmp.resolve("x")), project));
         Path scratch = box.scratchDir("c1", "main");
         link(scratch.resolve("j"), out);
         box.deleteWorkDir("c1");
@@ -179,7 +179,7 @@ class SandboxLinksAndOutputTest {
     @Test
     void defaultDeleteWorkDirDoesNotFollowLinks() throws Exception {
         Path out = outside();
-        LocalDirSandboxExecutor box = new LocalDirSandboxExecutor(config(tmp.resolve("base")));
+        LocalSandboxExecutor box = LocalSandboxExecutor.of(config(tmp.resolve("base")));
         link(box.workDir("c1").resolve("j"), out);
         box.deleteWorkDir("c1");
         assertEquals("keep", Files.readString(out.resolve("precious.txt")));

@@ -10,11 +10,15 @@ Requirements: Java 21 or newer (`java -version`).
 | Browser (http://localhost:8080) | `./run-web.sh` | `run-web.cmd` |
 
 Sign in to the web app with `admin/admin`, `poweru/poweru` or `guest/guest`. The password of each user is its login
-until the user picks another one: change it before exposing the app beyond localhost.
+until the user picks another one. The app listens on `127.0.0.1` only (`server.address` in `application.properties`).
+To expose it: `server.address=0.0.0.0`, `jllm.web.use-real-password=true` (random passwords, the admin's is in the
+startup log) and a TLS reverse proxy. Meanwhile a user on the default password can only change it: the API answers
+`403 password_change_required` (requests from the local machine are exempt unless
+`jllm.web.enforce-password-change-on-loopback=true`).
 
 | User | Can use |
 |---|---|
-| `admin` | every tool, no approvals; manages global flows and users |
+| `admin` | every tool; manages global flows and users |
 | `poweru` | files, shell, web and scripts |
 | `guest` | scripts and web only |
 
@@ -94,16 +98,52 @@ Long chats and agent loops use many tokens: start with a small, cheap model and 
 Other global settings in `~/.jllm/settings.json`: permissions (allow/ask/deny rules), hooks, MCP servers, context
 strategy. Details: [usage](https://github.com/kendarorg/jllm/blob/main/docs/reference/usage.md).
 
+Symbolic links and junctions in the project whose target is outside it: `"files": { "externalLinks": "read" }` (the
+default; `none` refuses them, `readwrite` also lets the file tools write through them; the CLI flag is
+`--external-links`). The web app ignores this key and never follows such a link: it logs a warning at startup if the
+key is set to anything but `none`, so leave it out of the settings file the web app reads.
+
 ## Contents
+
+```
+Release files (next to each other)         Inside the zip: jllm-<version>/
+jllm-<version>.zip                         ├── jllm-cli.jar, jllm-web.jar
+SHA256SUMS                                 ├── run-cli.sh/.cmd, run-web.sh/.cmd
+setup.sh, setup.ps1                        ├── fetch-graaljs.sh/.cmd/.ps1, fetch-sql-driver.sh/.cmd/.ps1
+                                           ├── lib-ext/            GraalJS and SQL drivers: empty until setup / fetch-*
+                                           │   ├── sql/            the SQL store jars (shipped)
+                                           │   └── manifests/      graaljs-community / graaljs-oracle, mysql, postgres
+                                           ├── plugins/            js, pdf, docs, workflows, workflow-web
+                                           ├── settings/settings.json
+                                           ├── webauth/            users/, permissions/
+                                           ├── examples/flows/
+                                           └── application.properties, README.md, LICENSE, NOTICE
+```
 
 | Path | What |
 |---|---|
-| `jllm-cli.jar`, `jllm-web.jar` | the two front ends (the GraalJS libraries for `run_js` are inside) |
+| `jllm-cli.jar`, `jllm-web.jar` | the two front ends (they do not contain GraalJS) |
+| `lib-ext/` | the GraalJS libraries of `run_js`: empty in the zip, filled by `setup` / `fetch-graaljs`; holds the manifests of both editions |
+| `fetch-sql-driver.sh`, `.cmd`, `.ps1` | download the MySQL / PostgreSQL JDBC driver into `lib-ext/` (SHA-256 checked; MySQL is GPL and asks to accept). SQLite is bundled. `setup --sql mysql\|postgres\|all\|none` does it too (default all) |
+| `lib-ext/sql/` | the SQL store jars (shipped): with them users, chats and tokens live in SQL (SQLite file under `webauth/` by default); `jllm.store=file` keeps the files; see `application.properties` |
+| `fetch-graaljs.sh`, `.cmd`, `.ps1` | fill or replace `lib-ext/` with the `community` or `oracle` (commercial) set from Maven Central |
 | `plugins/` | `js` (`run_js`), `pdf` and `docs` (document readers), `jllm-workflows`, `jllm-workflow-web` |
-| `settings/settings.json` | enables the plugins above; remove an entry to disable one |
+| `settings/settings.json` | enables the plugins above (remove an entry to disable one) and sets `web.blockLocalHost=true`: `web_fetch` / `web_download` refuse loopback, link-local and private addresses (`false` to reach local services; `web.blockExtraAddresses` adds more) |
 | `application.properties` | web app properties (provider, model, key); all commented out |
 | `webauth/` | web users and roles (`users/<id>.json`, `permissions/<role>.json`); edit freely, no restart |
 | `examples/flows/writing-helper.json` | a first workflow with choices (see below) |
+
+## JavaScript (`run_js`)
+
+`run_js` runs model-written JavaScript in a sandbox. Its engine, GraalJS, is neither inside the jars nor in this zip:
+`setup.sh` / `setup.ps1`, released next to the zip, unzip it, ask the edition (commercial or community; the commercial
+terms are shown and must be accepted) and fill `lib-ext/`, which `run-cli` and `run-web` put on the class path. With an empty `lib-ext/` both
+front ends start normally and `run_js` is simply not offered (one warning in the log says why). To restore the set or
+switch edition: `./fetch-graaljs.sh community` or `./fetch-graaljs.sh oracle` (`fetch-graaljs.cmd` on Windows). It empties
+`lib-ext/*.jar` first, downloads from Maven Central and checks the SHA-256 of every jar. The `oracle` set declares the
+GraalVM Free Terms and Conditions: read them, then add `--accept-oracle-terms`; accepting them is your decision.
+Licences of what is shipped are listed in `NOTICE`. Details:
+[JS guide](https://github.com/kendarorg/jllm/blob/main/docs/guides/js.md).
 
 ## Example workflow
 

@@ -9,14 +9,13 @@ import javax.xml.stream.XMLStreamReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InterruptedIOException;
-import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
 import java.util.Set;
 import java.util.zip.ZipEntry;
-import java.util.zip.ZipFile;
+import java.util.zip.ZipInputStream;
 
 /**
  * Reads {@code word/document.xml} of a docx: paragraphs, headings ({@code #}), list items ({@code -}) and tables (rows as
@@ -36,15 +35,15 @@ public final class DocxReader implements DocumentReader {
     }
 
     @Override
-    public String extract(Path file) throws IOException {
-        String name = file.getFileName().toString().toLowerCase();
-        if (name.endsWith(".doc")) throw new IOException("legacy .doc not supported, convert to docx");
-        try (ZipFile zip = new ZipFile(file.toFile())) {
-            ZipEntry entry = zip.getEntry("word/document.xml");
-            if (entry == null) throw new IOException("Not a docx file (no word/document.xml)");
-            try (InputStream in = new LimitedInputStream(zip.getInputStream(entry), MAX_XML_BYTES)) {
-                return parse(in);
+    public String extract(InputStream in, String fileName) throws IOException {
+        if (fileName.toLowerCase().endsWith(".doc")) throw new IOException("legacy .doc not supported, convert to docx");
+        try (ZipInputStream zip = new ZipInputStream(in)) {
+            for (ZipEntry entry; (entry = zip.getNextEntry()) != null; ) {
+                if (entry.getName().equals("word/document.xml")) {
+                    return parse(new LimitedInputStream(zip, MAX_XML_BYTES));
+                }
             }
+            throw new IOException("Not a docx file (no word/document.xml)");
         } catch (java.util.zip.ZipException e) {
             throw new IOException("Not a valid docx file: " + e.getMessage());
         } catch (XMLStreamException e) {

@@ -56,6 +56,19 @@ public final class WorkspaceArchive {
         return any[0];
     }
 
+    /** Total uncompressed size of the files in a zip made by {@link #pack} or the daemon's backup. */
+    public static long totalBytes(byte[] zipBytes) throws IOException {
+        long total = 0;
+        byte[] buf = new byte[64 * 1024];
+        try (ZipInputStream z = new ZipInputStream(new ByteArrayInputStream(zipBytes))) {
+            while (z.getNextEntry() != null) {
+                int n;
+                while ((n = z.read(buf)) > 0) total += n;
+            }
+        }
+        return total;
+    }
+
     /** Zips {@code dir}. */
     public static byte[] pack(Path dir) throws IOException {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();

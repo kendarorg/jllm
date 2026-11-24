@@ -60,7 +60,7 @@ public final class CaseExpander {
                             run.config().target().smallModel(), run.config().caseTimeoutSeconds(),
                             run.config().systemPromptExtra()));
             return new CaseExecutor(runner, run.outputDir(), run.config().trials(), run.config().maxTrials(),
-                    run.metadata());
+                    run.config().passK(), run.metadata());
         };
     }
 }

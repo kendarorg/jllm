@@ -1,5 +1,6 @@
 package org.kendar.llm.harness.context.compaction;
 
+import org.kendar.llm.harness.context.ClearedResult;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -41,18 +42,8 @@ import java.util.regex.Pattern;
 public class ContextManager {
 
     private static final Logger log = LoggerFactory.getLogger(ContextManager.class);
-    static final String CLEARED = "[tool result cleared to save context]";
-    private static final String SUMMARY_PREFIX = "[Summary of the earlier conversation]\n";
-    /** Starts the summary of the older tool rounds of the turn in progress (see {@link #compactOverflow}). */
-    static final String TURN_SUMMARY_PREFIX = "[Summary of the earlier steps of this request]\n";
-    /** Stands in for an assistant message that held nothing but reasoning once the reasoning is dropped. */
-    public static final String REASONING_OMITTED = "[reasoning omitted]";
-    private static final String OMITTED = "[earlier history omitted]\n";
-    private static final int SUMMARY_TOKENS = 3000;
     /** Manual compaction leaves a conversation alone when what it would summarize is smaller than this. */
     static final int MIN_SUMMARY_SOURCE_TOKENS = 500;
-    /** Highest {@link #render(ArrayNode, int)} level: user text only. */
-    private static final int MAX_SHRINK = 3;
     /** Attempt n of a too-long summary request is cut to this share of the first refused size (attempt 0: whole). */
     private static final double[] SHRINK = {1.0, 0.85, 0.70, 0.50, 0.35};
 
@@ -78,47 +69,15 @@ public class ContextManager {
         this.mapper = mapper;
     }
 
-    public long estimateTokens(ArrayNode messages, Usage lastUsage) {
-        long chars = TokenEstimate.tokens(messages.toString().length());
-        return lastUsage == null ? chars : Math.max(chars, lastUsage.contextTokens());
-    }
-
-    /** Tokens of the fixed part of a request (system text and tool schemas), estimated from its characters. */
-    public static long fixedTokens(RequestPrefix prefix) {
-        return TokenEstimate.tokens(fixedChars(prefix));
-    }
-
-    /** Characters of the fixed part of a request (system text and tool schemas). */
-    public static long fixedChars(RequestPrefix prefix) {
-        if (prefix == null) return 0;
-        long chars = (prefix.pinned() == null ? 0 : prefix.pinned().length())
-                + (prefix.extra() == null ? 0 : prefix.extra().length());
-        if (prefix.tools() != null) {
-            for (HarnessTool tool : prefix.tools()) {
-                chars += tool.name().length() + tool.description().length() + tool.inputSchema().toString().length();
-            }
-        }
-        return chars;
-    }
-
     /**
      * True when the whole request (messages plus the fixed part) is over {@code budget}: by the estimate corrected
      * with {@code ratio}, or as the provider measured it.
      */
     private boolean over(ArrayNode messages, Usage lastUsage, RequestPrefix prefix, long budget, double ratio) {
-        long est = estimateTokens(messages, null) + fixedTokens(prefix);
-        return est > scaled(budget, ratio) || (lastUsage != null && lastUsage.contextTokens() > budget);
+        long est = TokenEstimator.estimateTokens(messages, null) + TokenEstimator.fixedTokens(prefix);
+        return est > TokenEstimator.scaled(budget, ratio) || (lastUsage != null && lastUsage.contextTokens() > budget);
     }
 
-    /** {@code budget} in the unit of the uncorrected estimate. */
-    private static long scaled(long budget, double ratio) {
-        return ratio > 0 ? (long) (budget / ratio) : budget;
-    }
-
-    /** The span [0, cut) is only an earlier summary: summarizing it again adds nothing. */
-    private static boolean onlySummary(ArrayNode messages, int cut) {
-        return cut == 1 && startsWithSummary(messages);
-    }
 
     /** Rewrites {@code messages} in place when over budget. @return true if anything changed. */
     public boolean compactIfNeeded(String chatId, ArrayNode messages, Usage lastUsage,
@@ -156,10 +115,10 @@ public class ContextManager {
                                    boolean allowRewrite, RequestPrefix prefix, double ratio) {
         if (!config.compaction().auto()) return false;
         // rewriting history invalidates the signed thinking blocks of the turn in progress: optionally wait for it to end
-        if (config.compaction().deferOnThinkingOverflow() && currentTurnHasThinking(messages)) return false;
+        if (config.compaction().deferOnThinkingOverflow() && CutPlanner.currentTurnHasThinking(messages)) return false;
         boolean changed = compactTo(chatId, messages, lastUsage, sink, cancelled, usageSink, allowRewrite,
                 config.compaction().ceiling(config.contextBudgetTokens()), prefix, ratio);
-        if (changed) stripThinking(messages, true);
+        if (changed) CutPlanner.stripThinking(messages, true);
         return changed;
     }
 
@@ -197,51 +156,51 @@ public class ContextManager {
         if ((!force && !config.compaction().auto()) || inherited[0] <= 0) {
             return compactIfNeeded(chatId, messages, lastUsage, sink, () -> false, usageSink, false, prefix, ratio);
         }
-        if (!force && config.compaction().deferOnThinkingOverflow() && currentTurnHasThinking(messages)) return false;
-        long ceiling = scaled(budget, ratio);
-        long fixed = fixedTokens(prefix);
+        if (!force && config.compaction().deferOnThinkingOverflow() && CutPlanner.currentTurnHasThinking(messages)) return false;
+        long ceiling = TokenEstimator.scaled(budget, ratio);
+        long fixed = TokenEstimator.fixedTokens(prefix);
         if (!force && !over(messages, lastUsage, prefix, budget, ratio)) return false;
         ArrayNode originalCopy = original != null && original.size() == messages.size()
                 ? slice(original, 0, inherited[0]) : null;
         ArrayNode copy = slice(messages, 0, inherited[0]);
         ArrayNode own = slice(messages, inherited[0], messages.size());
         boolean changed = false;
-        long room = ceiling - fixed - estimateTokens(copy, null);
+        long room = ceiling - fixed - TokenEstimator.estimateTokens(copy, null);
         boolean ownDone = room > 0;
         if (room > 0) {
             try {
                 changed = force ? compactOverflow(own, room, usageSink).changed()
                         : compactTo(chatId, own, null, sink, () -> false, usageSink, false, room, null, 1.0);
-            } catch (RuntimeException e) {
+            } catch (RuntimeException e) { // boundary: a failing summary call degrades compaction, the run goes on
                 log.warn("Compaction of the agent's own messages failed: {}", e.getMessage());
             }
         }
-        boolean copyIsSummary = copy.size() == 2 && startsWithSummary(copy);
-        if (estimateTokens(copy, null) + estimateTokens(own, null) + fixed > ceiling
+        boolean copyIsSummary = copy.size() == 2 && SummaryBuilder.startsWithSummary(copy);
+        if (TokenEstimator.estimateTokens(copy, null) + TokenEstimator.estimateTokens(own, null) + fixed > ceiling
                 || (force && !changed && !copyIsSummary)) {
             try {
                 String summary = summarizeSpan(copy, copy.size(), null, usageSink, null, originalCopy);
                 if (summary == null) throw new IllegalStateException("Nothing to compact yet");
                 copy = mapper.createArrayNode();
                 copy.addObject().put("role", "user").putArray("content").addObject().put("type", "text")
-                        .put("text", SUMMARY_PREFIX + summary);
+                        .put("text", SummaryBuilder.SUMMARY_PREFIX + summary);
                 copy.addObject().put("role", "assistant").putArray("content").addObject().put("type", "text")
                         .put("text", "Understood.");
                 inherited[0] = 2;
                 metrics.compaction(2);
                 sink.emit("compaction", obj("tier", 2, "inherited", true));
                 changed = true;
-            } catch (RuntimeException e) {
+            } catch (RuntimeException e) { // boundary: a failing summary call degrades compaction, the run goes on
                 log.warn("Compaction of the inherited context failed: {}", e.getMessage());
             }
         }
         // the copy alone left no room for the agent's own messages: they get their turn now that it is a summary
-        long left = ceiling - fixed - estimateTokens(copy, null);
-        if (!ownDone && left > 0 && estimateTokens(own, null) > left) {
+        long left = ceiling - fixed - TokenEstimator.estimateTokens(copy, null);
+        if (!ownDone && left > 0 && TokenEstimator.estimateTokens(own, null) > left) {
             try {
                 changed |= force ? compactOverflow(own, left, usageSink).changed()
                         : compactTo(chatId, own, null, sink, () -> false, usageSink, false, left, null, 1.0);
-            } catch (RuntimeException e) {
+            } catch (RuntimeException e) { // boundary: a failing summary call degrades compaction, the run goes on
                 log.warn("Compaction of the agent's own messages failed: {}", e.getMessage());
             }
         }
@@ -250,7 +209,7 @@ public class ContextManager {
             messages.addAll(copy);
             messages.addAll(own);
             // the copy's thinking signatures were bound to a history that is now rewritten
-            stripThinking(messages, true);
+            CutPlanner.stripThinking(messages, true);
         }
         return changed;
     }
@@ -266,7 +225,7 @@ public class ContextManager {
         // the provider measured the request over the budget, whatever the estimate says
         boolean measuredOver = lastUsage != null && lastUsage.contextTokens() > budget;
         // what the messages alone may take: the checks below measure messages only
-        long room = scaled(budget, ratio) - fixedTokens(prefix);
+        long room = TokenEstimator.scaled(budget, ratio) - TokenEstimator.fixedTokens(prefix);
         // the log before tier 1: the provider has it cached, and the summaries must see the tool results tier 1 blanks
         ArrayNode original = messages.deepCopy();
 
@@ -279,7 +238,7 @@ public class ContextManager {
             sink.emit("compaction", obj("tier", 1, "cleared", cleared));
         }
         // after tier 1 the old usage figure is stale: rely on the size estimate
-        if (estimateTokens(messages, null) <= room && !(measuredOver && cleared == 0)) return changed;
+        if (TokenEstimator.estimateTokens(messages, null) <= room && !(measuredOver && cleared == 0)) return changed;
 
         // tier 2
         boolean summarized = false;
@@ -288,19 +247,19 @@ public class ContextManager {
                 changed = true;
                 summarized = true;
                 metrics.compaction(2);
-                sink.emit("compaction", obj("tier", 2, "estimatedTokens", estimateTokens(messages, null)));
+                sink.emit("compaction", obj("tier", 2, "estimatedTokens", TokenEstimator.estimateTokens(messages, null)));
             }
-        } catch (RuntimeException e) {
+        } catch (RuntimeException e) { // boundary: a failing summary call degrades compaction, the run goes on
             log.warn("Tier-2 compaction failed: {}", e.getMessage());
             sink.emit("warning", obj("message", "Context summarization failed: " + e.getMessage()));
         }
-        long size = estimateTokens(messages, null);
+        long size = TokenEstimator.estimateTokens(messages, null);
         // still too large (one long turn has no turn boundary to cut at): summarize its older tool rounds
         if (size > room || (measuredOver && !changed)) {
-            if (cutInsideTurn(messages, room, usageSink, SUMMARY_TOKENS)) {
+            if (cutInsideTurn(messages, room, usageSink, SummaryBuilder.SUMMARY_TOKENS)) {
                 changed = true;
                 metrics.compaction(2);
-                size = estimateTokens(messages, null);
+                size = TokenEstimator.estimateTokens(messages, null);
                 sink.emit("compaction", obj("tier", 2, "inTurn", true));
             }
         }
@@ -310,11 +269,11 @@ public class ContextManager {
         if (!allowRewrite) return changed;
         Long declinedAt = declined.get(chatId);
         if (declinedAt != null && size < declinedAt * 1.2) return changed;
-        int cut = cutIndex(messages, 1);
+        int cut = CutPlanner.cutIndex(messages, 1);
         if (cut <= 0) return changed;
         // only an earlier summary before the current turn: a rewrite helps when the rest would fit without it, not
         // when the turn in progress is what is too large
-        if (onlySummary(messages, cut)
+        if (CutPlanner.onlySummary(messages, cut)
                 && size - TokenEstimate.tokens(messages.get(0).toString().length()) > room) return changed;
         try {
             // without a tier-2 rewrite the indexes still match the uncleared log
@@ -322,7 +281,7 @@ public class ContextManager {
             if (proposed == null) return changed;
             ArrayNode preview = slice(messages, 0, cut);
             ApprovalService.ApprovalDecision d = approvals.await(chatId, "context",
-                    "Context is over budget — approve a rewrite", render(preview), proposed,
+                    "Context is over budget — approve a rewrite", SummaryBuilder.render(preview), proposed,
                     a -> sink.emit("approval_request", mapper.valueToTree(a)), cancelled);
             if (d.approved()) {
                 String text = d.edited() != null && !d.edited().isBlank() ? d.edited() : proposed;
@@ -331,12 +290,12 @@ public class ContextManager {
                 changed = true;
                 metrics.compaction(3);
                 metrics.approval("context", true);
-                sink.emit("compaction", obj("tier", 3, "estimatedTokens", estimateTokens(messages, null)));
+                sink.emit("compaction", obj("tier", 3, "estimatedTokens", TokenEstimator.estimateTokens(messages, null)));
             } else {
                 metrics.approval("context", false);
                 declined.put(chatId, size);
             }
-        } catch (RuntimeException e) {
+        } catch (RuntimeException e) { // boundary: a failing summary call is reported as a warning
             sink.emit("warning", obj("message", "Context rewrite proposal failed: " + e.getMessage()));
         }
         return changed;
@@ -362,17 +321,17 @@ public class ContextManager {
      */
     public CompactResult compactNow(ArrayNode messages, String focus, java.util.function.Consumer<Usage> usageSink,
                                     RequestPrefix prefix, ArrayNode original) {
-        long before = estimateTokens(messages, null);
+        long before = TokenEstimator.estimateTokens(messages, null);
         // summarized from the log as it was before the tool results are cleared (same indexes)
         if (original == null || original.size() != messages.size()) original = messages.deepCopy();
         int cleared = microcompact(messages, 1);
         boolean summarized = false;
-        int cut = cutIndex(messages, 1);
+        int cut = CutPlanner.cutIndex(messages, 1);
         // a summary is never smaller than its template: below this size the model call (slow, and a weak model then
         // summarizes the instructions instead of the conversation) buys nothing
-        long spanTokens = cut > 0 ? estimateTokens(slice(original, 0, cut), null) : 0;
+        long spanTokens = cut > 0 ? TokenEstimator.estimateTokens(slice(original, 0, cut), null) : 0;
         boolean tooSmall = cut > 0 && spanTokens < MIN_SUMMARY_SOURCE_TOKENS;
-        if (cut > 0 && !tooSmall && !onlySummary(messages, cut)) {
+        if (cut > 0 && !tooSmall && !CutPlanner.onlySummary(messages, cut)) {
             String summary = summarizeSpan(messages, cut, focus, usageSink, prefix, original);
             if (summary != null) { // null: even the shortest form was rejected, nothing to compact yet
                 replaceSpan(messages, cut, summary);
@@ -380,10 +339,10 @@ public class ContextManager {
                 metrics.compaction(2);
             }
         }
-        if (cleared > 0 || summarized) stripThinking(messages, true);
+        if (cleared > 0 || summarized) CutPlanner.stripThinking(messages, true);
         String note = tooSmall && !summarized && cleared == 0
                 ? "Nothing worth compacting: only about " + spanTokens + " tokens precede the latest turn" : null;
-        return new CompactResult(cleared > 0 || summarized, before, estimateTokens(messages, null), cleared, note);
+        return new CompactResult(cleared > 0 || summarized, before, TokenEstimator.estimateTokens(messages, null), cleared, note);
     }
 
     /**
@@ -395,12 +354,12 @@ public class ContextManager {
      * @param room tokens the messages may take
      */
     public CompactResult compactOverflow(ArrayNode messages, long room, java.util.function.Consumer<Usage> usageSink) {
-        long before = estimateTokens(messages, null);
+        long before = TokenEstimator.estimateTokens(messages, null);
         ArrayNode original = messages.deepCopy();
         int cleared = microcompact(messages, 1);
         boolean summarized = false;
-        int cut = cutIndex(messages, 1);
-        if (cut > 0 && !onlySummary(messages, cut)) {
+        int cut = CutPlanner.cutIndex(messages, 1);
+        if (cut > 0 && !CutPlanner.onlySummary(messages, cut)) {
             try {
                 String summary = summarizeSpan(messages, cut, null, usageSink, null, original);
                 if (summary != null) {
@@ -408,19 +367,19 @@ public class ContextManager {
                     summarized = true;
                     metrics.compaction(2);
                 }
-            } catch (RuntimeException e) {
+            } catch (RuntimeException e) { // boundary: a failing summary call degrades compaction, the run goes on
                 log.warn("Summary of the earlier turns failed: {}", e.getMessage());
             }
         }
-        if (!summarized || estimateTokens(messages, null) > room) {
+        if (!summarized || TokenEstimator.estimateTokens(messages, null) > room) {
             if (cutInsideTurn(messages, room, usageSink)) {
                 summarized = true;
                 metrics.compaction(2);
             }
         }
         boolean changed = cleared > 0 || summarized;
-        if (changed) stripThinking(messages, true);
-        return new CompactResult(changed, before, estimateTokens(messages, null), cleared);
+        if (changed) CutPlanner.stripThinking(messages, true);
+        return new CompactResult(changed, before, TokenEstimator.estimateTokens(messages, null), cleared);
     }
 
     /**
@@ -436,38 +395,24 @@ public class ContextManager {
 
     /** @param minFreed nothing is done unless the summarized rounds hold at least this many tokens */
     public boolean cutInsideTurn(ArrayNode messages, long room, java.util.function.Consumer<Usage> usageSink, long minFreed) {
-        int p = cutIndex(messages, 1);
-        int n = messages.size();
-        if (p >= n || !isPlainUserText(messages.get(p))) return false;
-        long head = 0;
-        for (int i = 0; i <= p; i++) head += TokenEstimate.tokens(messages.get(i).toString().length());
-        long target = Math.min(config.compaction().keepTokens(), room - head - SUMMARY_TOKENS);
-        long[] suffix = new long[n + 1];
-        for (int i = n - 1; i > p; i--) suffix[i] = suffix[i + 1] + TokenEstimate.tokens(messages.get(i).toString().length());
-        int k = -1;
-        int latest = -1;
-        for (int i = p + 2; i < n; i++) {
-            if (!"assistant".equals(messages.get(i).path("role").asText())
-                    || !"user".equals(messages.get(i - 1).path("role").asText())) continue;
-            latest = i;
-            if (k < 0 && suffix[i] <= target) k = i;
-        }
-        if (k < 0) k = latest;
-        if (k < 0) return false; // a single tool round: nothing to cut inside the turn
-        if (suffix[p + 1] - suffix[k] < minFreed) return false; // a summary would not be smaller
+        CutPlanner.InTurnCut plan = CutPlanner.inTurnCut(messages, room, config.compaction().keepTokens(),
+                SummaryBuilder.SUMMARY_TOKENS, minFreed);
+        if (plan == null) return false;
+        int p = plan.prompt();
+        int k = plan.cut();
         ArrayNode span = slice(messages, p, k); // the prompt gives the rounds their context
         String summary;
         try {
             summary = summarizeSpan(span, span.size(), "the steps already taken for the request in progress, their "
                     + "findings and what is left to do; the request itself stays verbatim", usageSink, null, null);
-        } catch (RuntimeException e) {
+        } catch (RuntimeException e) { // boundary: a failing summary call degrades compaction, the run goes on
             log.warn("Summary of the current turn failed: {}", e.getMessage());
             return false;
         }
         if (summary == null) return false;
         ObjectNode first = (ObjectNode) messages.get(k);
         ArrayNode blocks = mapper.createArrayNode();
-        blocks.addObject().put("type", "text").put("text", TURN_SUMMARY_PREFIX + summary);
+        blocks.addObject().put("type", "text").put("text", SummaryBuilder.TURN_SUMMARY_PREFIX + summary);
         JsonNode c = first.path("content");
         if (c.isTextual()) blocks.addObject().put("type", "text").put("text", c.asText());
         else if (c.isArray()) blocks.addAll((ArrayNode) c);
@@ -478,7 +423,7 @@ public class ContextManager {
 
     /** Blanks tool_result bodies older than the last {@code keepTurns} turns. @return number of blocks cleared. */
     int microcompact(ArrayNode messages, int keepTurns) {
-        int cut = cutIndex(messages, keepTurns);
+        int cut = CutPlanner.cutIndex(messages, keepTurns);
         int cleared = 0;
         for (int i = 0; i < cut; i++) {
             JsonNode content = messages.get(i).path("content");
@@ -486,60 +431,21 @@ public class ContextManager {
             for (JsonNode block : content) {
                 if (!"tool_result".equals(block.path("type").asText())) continue;
                 String text = block.path("content").isTextual() ? block.path("content").asText() : block.path("content").toString();
-                if (text.length() > CLEARED.length() + 50) {
-                    ((ObjectNode) block).put("content", CLEARED);
+                if (text.length() > ClearedResult.TEXT.length() + 50) {
+                    ((ObjectNode) block).put("content", ClearedResult.TEXT);
                     cleared++;
                 }
             }
         }
-        if (cleared > 0) stripThinking(messages, false);
+        if (cleared > 0) CutPlanner.stripThinking(messages, false);
         return cleared;
     }
 
-    /**
-     * Anthropic binds a thinking block's signature to the content before it; once earlier content is rewritten the
-     * block is rejected (400 "Invalid signature"). Reasoning of finished turns is not needed, so drop it.
-     *
-     * @param includeCurrent also drop the blocks of the turn in progress; the caller must then stop requesting
-     *                       thinking for the rest of that turn (the API wants them in a tool loop while it is on)
-     */
-    public static void stripThinking(ArrayNode messages, boolean includeCurrent) {
-        int cut = includeCurrent ? messages.size() : cutIndex(messages, 1);
-        for (int i = 0; i < cut; i++) {
-            JsonNode m = messages.get(i);
-            if (!"assistant".equals(m.path("role").asText()) || !m.path("content").isArray()) continue;
-            ArrayNode content = (ArrayNode) m.path("content");
-            boolean dropped = false;
-            for (int j = content.size() - 1; j >= 0; j--) {
-                if (isThinkingBlock(content.get(j))) {
-                    content.remove(j);
-                    dropped = true;
-                }
-            }
-            // an assistant message cannot be empty: one that only held reasoning keeps a placeholder
-            if (dropped && content.isEmpty()) content.addObject().put("type", "text").put("text", REASONING_OMITTED);
-        }
-    }
-
-    /** True when the turn in progress (after the last plain user message) holds a thinking block. */
-    public static boolean currentTurnHasThinking(ArrayNode messages) {
-        for (int i = cutIndex(messages, 1); i < messages.size(); i++) {
-            JsonNode m = messages.get(i);
-            if (!"assistant".equals(m.path("role").asText()) || !m.path("content").isArray()) continue;
-            for (JsonNode b : m.path("content")) if (isThinkingBlock(b)) return true;
-        }
-        return false;
-    }
-
-    private static boolean isThinkingBlock(JsonNode b) {
-        String t = b.path("type").asText();
-        return "thinking".equals(t) || "redacted_thinking".equals(t);
-    }
 
     private boolean summarize(ArrayNode messages, int keepTurns, java.util.function.Consumer<Usage> usageSink,
                               RequestPrefix prefix, ArrayNode original) {
-        int cut = Math.max(cutIndex(messages, keepTurns), tokenCutIndex(messages, config.compaction().keepTokens()));
-        if (cut <= 0 || onlySummary(messages, cut)) return false;
+        int cut = Math.max(CutPlanner.cutIndex(messages, keepTurns), CutPlanner.tokenCutIndex(messages, config.compaction().keepTokens()));
+        if (cut <= 0 || CutPlanner.onlySummary(messages, cut)) return false;
         String summary = summarizeSpan(messages, cut, null, usageSink, prefix, original);
         if (summary == null) return false;
         replaceSpan(messages, cut, summary);
@@ -553,7 +459,7 @@ public class ContextManager {
     /**
      * Summary of the first {@code cut} messages. When an earlier summary starts the span the "update" prompt merges it
      * with the newer history. A conversation too long for the model is sent in a shorter form (see
-     * {@link #render(ArrayNode, int)}), up to user text only.
+     * {@link #SummaryBuilder.render(ArrayNode, int)}), up to user text only.
      *
      * @param original when not null, the log the span is taken from (same indexes as {@code messages}): the log
      *                 before tool results were cleared, also what the provider has cached
@@ -561,13 +467,13 @@ public class ContextManager {
     private String summarizeSpan(ArrayNode messages, int cut, String focus, java.util.function.Consumer<Usage> usageSink,
                                  RequestPrefix prefix, ArrayNode original) {
         ArrayNode span = slice(original != null ? original : messages, 0, cut);
-        String instruction = startsWithSummary(span) ? CompactionPrompt.update(focus) : CompactionPrompt.create(focus);
+        String instruction = SummaryBuilder.startsWithSummary(span) ? CompactionPrompt.update(focus) : CompactionPrompt.create(focus);
         long rejected = -1; // size in chars of the first request the provider refused as too long
         int first = 0;
         if (usable(prefix) && original != null) {
             try {
                 String s = summaryOnPrefix(prefix, span, instruction, usageSink);
-                if (s != null) return withKeptSections(s, span);
+                if (s != null) return SummaryBuilder.withKeptSections(s, span);
             } catch (ModelException e) {
                 if (!ModelException.isContextOverflow(e)) throw e;
                 rejected = span.toString().length() + instruction.length();
@@ -577,11 +483,11 @@ public class ContextManager {
         // plain text requests, each shorter than the last: clip outputs, drop outputs, user text only, and cut the
         // oldest history down to 85/70/50/35% of the first refused size (an earlier summary is always kept whole)
         for (int attempt = first; attempt < SHRINK.length; attempt++) {
-            int level = Math.min(attempt, MAX_SHRINK);
-            String body = render(span, level);
+            int level = Math.min(attempt, SummaryBuilder.MAX_SHRINK);
+            String body = SummaryBuilder.render(span, level);
             if (rejected > 0) {
                 int cap = (int) (rejected * SHRINK[attempt]);
-                if (body.length() > cap) body = shorten(span, level, cap);
+                if (body.length() > cap) body = SummaryBuilder.shorten(span, level, cap);
                 if (body == null) {
                     log.warn("The previous summary alone is over the size the model accepts: it is kept unchanged");
                     return null;
@@ -589,8 +495,8 @@ public class ContextManager {
             }
             String user = instruction + "\n\n<conversation>\n" + body + "</conversation>";
             try {
-                String s = model.simpleComplete(CompactionPrompt.SYSTEM, user, SUMMARY_TOKENS, usageSink);
-                return s == null ? null : withKeptSections(s, span);
+                String s = model.simpleComplete(CompactionPrompt.SYSTEM, user, SummaryBuilder.SUMMARY_TOKENS, usageSink);
+                return s == null ? null : SummaryBuilder.withKeptSections(s, span);
             } catch (ModelException e) {
                 if (!ModelException.isContextOverflow(e)) throw e;
                 if (rejected < 0) rejected = user.length();
@@ -599,22 +505,6 @@ public class ContextManager {
         return null; // mostly fixed instructions and tool schemas: shortening the history cannot help
     }
 
-    /**
-     * {@code span} rendered within {@code cap} chars: an earlier summary that starts the span whole, then the newest
-     * history that fits, starting on a line boundary. @return null when the earlier summary alone does not fit
-     */
-    String shorten(ArrayNode span, int level, int cap) {
-        boolean prior = startsWithSummary(span);
-        String head = prior ? render(slice(span, 0, 1), level) : "";
-        String rest = render(prior ? slice(span, 1, span.size()) : span, level);
-        int avail = cap - head.length();
-        if (avail <= 0) return null;
-        if (rest.length() <= avail) return head + rest;
-        String tail = rest.substring(rest.length() - avail);
-        int nl = tail.indexOf('\n');
-        if (nl >= 0) tail = tail.substring(nl + 1); // no half line at the start
-        return head + OMITTED + tail;
-    }
 
     /** The agent's own request with the summary instruction as one more user turn; null if no text came back. */
     private String summaryOnPrefix(RequestPrefix prefix, ArrayNode span, String instruction,
@@ -638,8 +528,8 @@ public class ContextManager {
         }
         ((ArrayNode) last.get("content")).addObject().put("type", "text").put("text", ask);
         org.kendar.llm.harness.llm.ModelResponse resp = model.complete(new org.kendar.llm.harness.llm.ModelRequest(
-                prefix.pinned(), prefix.extra(), req, prefix.tools(), SUMMARY_TOKENS, null,
-                prefix.disableParallelToolUse()));
+                prefix.pinned(), prefix.extra(), req, prefix.tools(), SummaryBuilder.SUMMARY_TOKENS, null,
+                prefix.disableParallelToolUse(), null, null));
         if (usageSink != null && resp.usage() != null) usageSink.accept(resp.usage());
         StringBuilder text = new StringBuilder();
         for (JsonNode b : resp.content()) {
@@ -648,273 +538,22 @@ public class ContextManager {
         return text.toString().isBlank() ? null : text.toString().strip();
     }
 
-    /** Sections an update must never lose: the goal, the facts the user gave and where the work stands. */
-    static final List<String> KEPT_SECTIONS = List.of("## Objective", "## User-Stated Facts", "## Work State");
-    /** The section whose bullets are merged line by line with the prior summary's (see {@link #keptSections}). */
-    static final String FACTS = "## User-Stated Facts";
-    /** Characters the summary may take: the room every compaction reserves for it ({@link #SUMMARY_TOKENS}). */
-    static final int SUMMARY_CHARS = (int) (SUMMARY_TOKENS * TokenEstimate.CHARS_PER_TOKEN);
-    private static final Pattern BULLET = Pattern.compile("^\\s*(?:[-*+]|\\d+[.)])\\s+(.*)$");
-    /** Label of a fact: the words before the first ': ' or '=', else before the first ' is ' / ' are ' / ' was '. */
-    private static final Pattern LABEL = Pattern.compile("^(.{1,80}?)(?::\\s|:$|\\s*=|\\s+(?:is|are|was|were)\\s)");
-    private static final int MAX_LABEL_WORDS = 8;
 
-    /** An updated summary after {@link #keptSections}, with the prior user facts that did not fit its size. */
-    record Kept(String summary, List<String> droppedFacts) { }
-
-    /** {@link #keptSections} within {@link #SUMMARY_CHARS}; prior facts that do not fit are logged, never fatal. */
-    static String withKeptSections(String summary, ArrayNode span) {
-        Kept k = keptSections(summary, span, SUMMARY_CHARS);
-        if (!k.droppedFacts().isEmpty()) {
-            log.warn("Compaction: {} user-stated fact(s) of the previous summary did not fit the summary size ({} chars) "
-                    + "and were dropped: {}", k.droppedFacts().size(), SUMMARY_CHARS, k.droppedFacts());
-        }
-        return k.summary();
-    }
-
-    /**
-     * {@code summary} with what the model lost while updating an earlier summary copied back from that summary: a
-     * weak model rewriting the checkpoint can omit the goal, or keep the facts heading with only the newest fact.
-     * <ul>
-     *   <li>every {@link #KEPT_SECTIONS} heading the update dropped comes back whole, in front;</li>
-     *   <li>under {@link #FACTS}, every bullet of the prior section the update does not repeat (normalised: no
-     *   marker, case, markdown emphasis or trailing punctuation) is appended to the section, unless the update
-     *   replaced it: a new bullet with the same label, the words before ': ', '=' or ' is ' ("Reviewer is Priya"
-     *   is replaced by "Reviewer is Sam").</li>
-     * </ul>
-     * Restoring never blocks the compaction: the prior facts are added oldest first (their order in the prior
-     * summary), each one only while the summary stays within {@code maxChars}; those that do not fit are returned
-     * as dropped.
-     */
-    static Kept keptSections(String summary, ArrayNode span, int maxChars) {
-        if (!startsWithSummary(span)) return new Kept(summary, List.of());
-        String prior = text(span.get(0)).substring(SUMMARY_PREFIX.length());
-        StringBuilder missing = new StringBuilder();
-        for (String heading : KEPT_SECTIONS) {
-            if (hasHeading(summary, heading)) continue;
-            String section = section(prior, heading);
-            if (section != null) missing.append(section).append("\n\n");
-        }
-        String out = missing.isEmpty() ? summary : missing + summary;
-        if (!hasHeading(summary, FACTS)) return new Kept(out, List.of());
-        List<String> lost = lostFacts(section(prior, FACTS), section(summary, FACTS));
-        if (lost.isEmpty()) return new Kept(out, List.of());
-        List<String> restored = new ArrayList<>();
-        List<String> dropped = new ArrayList<>();
-        int room = maxChars - out.length();
-        for (String fact : lost) {
-            if (fact.length() + 1 <= room) {
-                restored.add(fact);
-                room -= fact.length() + 1;
-            } else {
-                dropped.add(fact);
-            }
-        }
-        return new Kept(restored.isEmpty() ? out : appendToSection(out, FACTS, restored), dropped);
-    }
-
-    /** Bullets of {@code prior} that {@code updated} neither repeats nor replaces, in their order, stripped. */
-    private static List<String> lostFacts(String prior, String updated) {
-        if (prior == null) return List.of();
-        Set<String> facts = new HashSet<>();
-        Set<String> labels = new HashSet<>();
-        for (String b : bullets(updated)) {
-            String n = normalised(b);
-            facts.add(n);
-            String l = label(n);
-            if (l != null) labels.add(l);
-        }
-        List<String> lost = new ArrayList<>();
-        for (String b : bullets(prior)) {
-            String n = normalised(b);
-            if (n.isEmpty() || facts.contains(n)) continue;
-            String l = label(n);
-            if (l != null && labels.contains(l)) continue;
-            lost.add(b.strip());
-        }
-        return lost;
-    }
-
-    private static List<String> bullets(String section) {
-        List<String> out = new ArrayList<>();
-        if (section == null) return out;
-        for (String line : section.split("\n")) if (BULLET.matcher(line).matches()) out.add(line);
-        return out;
-    }
-
-    /** A bullet without its marker, markdown emphasis, case, extra spaces and trailing punctuation. */
-    static String normalised(String bullet) {
-        Matcher m = BULLET.matcher(bullet);
-        String s = m.matches() ? m.group(1) : bullet;
-        s = s.replace("**", "").replace("`", "").toLowerCase(Locale.ROOT).replaceAll("\\s+", " ").strip();
-        return s.replaceAll("[.;,]+$", "").strip();
-    }
-
-    /** The label of a normalised fact without a leading "the"; null when it has none or it is too long. */
-    static String label(String fact) {
-        Matcher m = LABEL.matcher(fact);
-        if (!m.find()) return null;
-        String l = m.group(1).strip().replaceFirst("^the ", "");
-        if (l.isEmpty() || l.split(" ").length > MAX_LABEL_WORDS) return null;
-        return l;
-    }
-
-    /** {@code text} with {@code lines} added at the end of its {@code heading} section, before the next heading. */
-    private static String appendToSection(String text, String heading, List<String> lines) {
-        List<String> all = new ArrayList<>(List.of(text.split("\n", -1)));
-        int start = -1;
-        for (int i = 0; i < all.size(); i++) {
-            if (all.get(i).strip().equals(heading)) {
-                start = i;
-                break;
-            }
-        }
-        int end = start + 1;
-        while (end < all.size() && !all.get(end).startsWith("## ")) end++;
-        int at = end;
-        while (at > start + 1 && all.get(at - 1).isBlank()) at--;
-        all.addAll(at, lines);
-        return String.join("\n", all);
-    }
-
-    private static boolean hasHeading(String text, String heading) {
-        for (String line : text.split("\n")) if (line.strip().equals(heading)) return true;
-        return false;
-    }
-
-    /** The {@code heading} section of {@code text} up to the next level-2 heading, stripped; null if absent. */
-    static String section(String text, String heading) {
-        String[] lines = text.split("\n");
-        int start = -1;
-        for (int i = 0; i < lines.length; i++) {
-            if (lines[i].strip().equals(heading)) {
-                start = i;
-                break;
-            }
-        }
-        if (start < 0) return null;
-        StringBuilder sb = new StringBuilder(lines[start].strip());
-        for (int i = start + 1; i < lines.length && !lines[i].startsWith("## "); i++) sb.append('\n').append(lines[i]);
-        return sb.toString().strip();
-    }
-
-    private static String text(JsonNode msg) {
-        JsonNode c = msg.path("content");
-        return c.isTextual() ? c.asText() : c.path(0).path("text").asText("");
-    }
-
-    private static boolean startsWithSummary(ArrayNode span) {
-        if (span.isEmpty()) return false;
-        JsonNode c = span.get(0).path("content");
-        String text = c.isTextual() ? c.asText() : c.path(0).path("text").asText("");
-        return text.startsWith(SUMMARY_PREFIX);
-    }
-
-    /**
-     * Start of the newest run of whole turns that fits in {@code keepTokens}: what stays verbatim beside the
-     * summary. The latest turn is always kept, even when it alone is larger.
-     */
-    public int tokenCutIndex(ArrayNode messages, int keepTokens) {
-        long size = 0;
-        int cut = -1;
-        for (int i = messages.size() - 1; i >= 0; i--) {
-            size += TokenEstimate.tokens(messages.get(i).toString().length());
-            if (!isPlainUserText(messages.get(i))) continue;
-            if (size > keepTokens) break;
-            cut = i;
-        }
-        return cut >= 0 ? cut : cutIndex(messages, 1);
-    }
 
     private void replaceSpan(ArrayNode messages, int cut, String summary) {
         ArrayNode tail = slice(messages, cut, messages.size());
         messages.removeAll();
         ObjectNode m = messages.addObject();
         m.put("role", "user");
-        m.putArray("content").addObject().put("type", "text").put("text", SUMMARY_PREFIX + summary);
+        m.putArray("content").addObject().put("type", "text").put("text", SummaryBuilder.SUMMARY_PREFIX + summary);
         messages.addAll(tail);
-        stripThinking(messages, false);
-    }
-
-    /**
-     * Index of the plain-user-text message that starts the {@code keepTurns}-th most recent turn, so a cut there
-     * never separates a tool_use from its tool_result. 0 when there are not enough turns to cut.
-     */
-    static int cutIndex(ArrayNode messages, int keepTurns) {
-        int turns = 0;
-        for (int i = messages.size() - 1; i >= 0; i--) {
-            if (isPlainUserText(messages.get(i)) && ++turns == Math.max(1, keepTurns)) {
-                return i;
-            }
-        }
-        return 0;
-    }
-
-    static boolean isPlainUserText(JsonNode msg) {
-        if (!"user".equals(msg.path("role").asText())) return false;
-        JsonNode c = msg.path("content");
-        if (c.isTextual()) return true;
-        if (!c.isArray() || c.isEmpty()) return false;
-        for (JsonNode b : c) {
-            if (!"text".equals(b.path("type").asText())) return false;
-        }
-        return true;
+        CutPlanner.stripThinking(messages, false);
     }
 
     private ArrayNode slice(ArrayNode src, int from, int to) {
         ArrayNode out = mapper.createArrayNode();
         for (int i = from; i < to; i++) out.add(src.get(i));
         return out;
-    }
-
-    /** Plain-text transcript used for summarization and for the old-vs-new diff view. */
-    String render(ArrayNode messages) {
-        return render(messages, 0);
-    }
-
-    /**
-     * @param level 0 whole exchanges (long outputs clipped); 1 shorter outputs and inputs; 2 no tool outputs; 3 user
-     *              text only
-     */
-    String render(ArrayNode messages, int level) {
-        int inputMax = level == 0 ? 400 : level == 1 ? 200 : 80;
-        int resultMax = level == 0 ? 600 : 200;
-        StringBuilder sb = new StringBuilder();
-        for (JsonNode m : messages) {
-            if (level >= 3 && !isPlainUserText(m)) continue;
-            sb.append(m.path("role").asText().toUpperCase()).append(": ");
-            JsonNode c = m.path("content");
-            if (c.isTextual()) {
-                sb.append(c.asText()).append('\n');
-                continue;
-            }
-            for (JsonNode b : c) {
-                switch (b.path("type").asText()) {
-                    case "text" -> sb.append(b.path("text").asText());
-                    case "tool_use" -> sb.append("[tool_use ").append(b.path("name").asText()).append(' ')
-                            .append(cut(b.path("input").toString(), inputMax)).append(']');
-                    case "tool_result" -> {
-                        JsonNode r = b.path("content");
-                        if (level >= 2) sb.append("[tool_result omitted]");
-                        else sb.append("[tool_result ").append(clip(r.isTextual() ? r.asText() : r.toString(), resultMax))
-                                .append(']');
-                    }
-                    default -> { /* thinking etc. are not worth summarizing */ }
-                }
-                sb.append('\n');
-            }
-        }
-        return sb.toString();
-    }
-
-    /** Head and tail of a long text. */
-    private static String clip(String s, int max) {
-        if (s.length() <= max) return s;
-        return s.substring(0, max / 2) + " … " + s.substring(s.length() - max / 2);
-    }
-
-    private static String cut(String s, int max) {
-        return s.length() > max ? s.substring(0, max) + "…" : s;
     }
 
     private ObjectNode obj(String k, Object v) {

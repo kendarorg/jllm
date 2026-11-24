@@ -1,5 +1,6 @@
 package org.kendar.llm.harness.context.compaction;
 
+import org.kendar.llm.harness.context.ClearedResult;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import org.junit.jupiter.api.BeforeEach;
@@ -83,7 +84,7 @@ class ContextManagerCompactionTest {
         assertTrue(model.simpleUserPrompts.isEmpty(), "tier 1 must not call the model");
         assertEquals(1, ev.ofType("compaction").size());
         assertEquals(1, ev.ofType("compaction").get(0).get("tier").asInt());
-        assertEquals(ContextManager.CLEARED, m.get(2).get("content").get(0).get("content").asText());
+        assertEquals(ClearedResult.TEXT, m.get(2).get("content").get(0).get("content").asText());
         // recent turns keep their results
         assertEquals(1100, m.get(m.size() - 1).get("content").get(0).get("content").asText().length());
         assertEquals(12, m.size(), "no message was removed");
@@ -160,7 +161,7 @@ class ContextManagerCompactionTest {
     private boolean compactWithUser(ArrayNode m, Events ev, boolean approve, String edited) {
         ev.also = (type, data) -> {
             if ("approval_request".equals(type)) {
-                assertTrue(approvals.resolve("c", data.get("id").asText(), approve, edited));
+                assertTrue(approvals.resolve("c", data.get("id").asText(), approve, edited, false, false));
             }
         };
         return manager.compactIfNeeded("c", m, null, ev, () -> false);

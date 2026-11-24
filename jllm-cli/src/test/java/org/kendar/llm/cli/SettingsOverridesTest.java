@@ -48,11 +48,12 @@ class SettingsOverridesTest {
     }
 
     @Test
-    void sandboxFlagsSelectDockerDaemon() {
+    void sandboxFlagsSelectDocker() {
         HarnessSettings s = SettingsOverrides.applyToSettings(args("sandbox", "docker", "docker-image", "img:1",
-                "docker-mode", "daemon", "docker-remote-host", "tcp://h:2375"), HarnessSettings.empty());
+                "sandbox-scope", "user", "sandbox-profile", "hardened", "docker-remote-host", "tcp://h:2375"), HarnessSettings.empty());
         assertTrue(s.dockerSandbox());
-        assertTrue(s.dockerDaemon());
+        assertEquals("user", s.sandbox().docker().scope());
+        assertEquals("hardened", s.sandbox().docker().profile());
         assertEquals("img:1", s.sandbox().docker().image());
         assertEquals("tcp://h:2375", s.sandbox().docker().remoteHost());
         assertNull(s.sandbox().docker().remote(), "only the host was given");
@@ -66,7 +67,7 @@ class SettingsOverridesTest {
         assertThrows(IllegalArgumentException.class,
                 () -> SettingsOverrides.applyToSettings(args("sandbox", "vm"), HarnessSettings.empty()));
         assertThrows(IllegalArgumentException.class,
-                () -> SettingsOverrides.applyToSettings(args("docker-mode", "forever"), HarnessSettings.empty()));
+                () -> SettingsOverrides.applyToSettings(args("sandbox-scope", "forever"), HarnessSettings.empty()));
     }
 
     @Test
@@ -106,5 +107,19 @@ class SettingsOverridesTest {
                 () -> SettingsOverrides.applyToConfig(args("max-turns", "many"), HarnessConfig.defaults(), null));
         assertThrows(NumberFormatException.class,
                 () -> SettingsOverrides.applyToSettings(args("context-tokens", "big"), HarnessSettings.empty()));
+    }
+    @Test
+    void externalLinksFlagReplacesTheSetting() {
+        assertEquals(org.kendar.llm.harness.tools.ExternalLinks.READ, HarnessSettings.empty().externalLinks());
+        for (var m : org.kendar.llm.harness.tools.ExternalLinks.values()) {
+            HarnessSettings s = SettingsOverrides.applyToSettings(args("external-links", m.settingValue()),
+                    HarnessSettings.empty());
+            assertEquals(m, s.externalLinks());
+        }
+        assertEquals(org.kendar.llm.harness.tools.ExternalLinks.READ_WRITE,
+                SettingsOverrides.applyToSettings(args("external-links", "ReadWrite"), HarnessSettings.empty()).externalLinks());
+        assertThrows(IllegalArgumentException.class,
+                () -> SettingsOverrides.applyToSettings(args("external-links", "write"), HarnessSettings.empty()));
+        assertTrue(CliArgs.USAGE.contains("--external-links none|read|readwrite"));
     }
 }

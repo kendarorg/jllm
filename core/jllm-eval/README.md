@@ -42,12 +42,14 @@ contain keys: the script refuses any `*API_KEY*` line.
 
 | Preset | Target | Judge |
 |---|---|---|
-| `anthropic.env` | Haiku 5.5 | Haiku 5.5 (self-graded) |
+| `anthropic.env` | Haiku 5.5 | Sonnet 5.5 |
+| `decent-anthropic.env` | Haiku 5.5, 4 trials (max 6), rpm 500, parallelism 50 | Sonnet 5.5 |
 | `anthropic-sonnet.env` | Sonnet 5.5, medium effort | Sonnet 5.5 |
 | `nvidia.env` | NVIDIA NIM muse-glimmer-30b | same model (self-graded) |
 | `nvidia-judge-anthropic.env` | NVIDIA NIM muse-glimmer-30b | Haiku 5.5 |
-| `ollama.env` | Ollama qwen3:30b reported as `Qwen3.6-35B`, thinking minimal | same model (self-graded) |
+| `ollama.env` | Ollama qwen3:30b, thinking minimal | same model (self-graded) |
 | `llamacpp-qwen-judge-sonnet.env` | llama.cpp `qwen-local`, reported as `Qwen3.6-35B`, at `http://192.168.1.96:17001` | Sonnet 5.5, medium effort |
+| `decent-llamacpp-qwen-judge-sonnet.env` | as `llamacpp-qwen-judge-sonnet.env`, 4 trials (max 6) | Sonnet 5.5, medium effort |
 
 To add a setup, copy a preset and change it.
 
@@ -88,7 +90,9 @@ Shared:
 | `TESTS` | empty | Optional comma separated test classes (`-Dtest`). |
 | `TRIALS` | `1` | Trials per case (`eval.trials`). |
 | `MAX_TRIALS` | `2` | Cap on the trials of any case (`eval.maxTrials`). |
-| `UPDATE_BASELINE` | `0` | `1`: store this run as the model baseline (`eval.updateBaseline`). |
+| `UPDATE_BASELINE` | `0` | `1`: store this run as the model baseline (`eval.updateBaseline`). Always refused from a dirty tree. |
+| `PASS_K` | empty | Comma list of k for pass@k and pass^k (`eval.passK`); empty = `1` and `MAX_TRIALS`. |
+| `DIRTY_TREE` | `warn` | `refuse`, `warn` or `allow` (`eval.dirtyTree`): what to do when tracked files differ from HEAD. |
 | `TIMEOUT_SECONDS` | `300` | Per model request, and warm-up. |
 | `CASE_TIMEOUT_SECONDS` | `TIMEOUT_SECONDS` | Cap on each user turn of a case (`eval.caseTimeoutSeconds`). |
 | `COMPACTION_CTX_TOKENS` | `65536` | Context of the `compaction` group (`eval.compaction.contextTokens`). |
@@ -117,7 +121,51 @@ clone has only the Markdown). The `vs baseline` column reads:
 | `baseline` | No previous baseline; this run was stored as the first one. |
 | `no baseline` | No baseline stored and this run was not stored either. |
 
-The recap's `Baseline` section says the same in words.
+The recap's `Baseline` section says the same in words. The index also shows the short commit (with `(dirty)` when the
+tree had tracked changes) and pass@k and pass^k at the run's largest k, with that k printed in each cell.
+
+### pass@k and pass^k
+
+Every case runs all its trials; there is no early stop, not even for risk cases. From the `n` trials of a case, of which
+`c` passed, the report estimates for each configured k (`eval.passK`, default `1` and `eval.maxTrials`):
+
+- pass@k, the chance that at least one of k trials passes (how much a retry helps): one minus the share of k-subsets
+  with no success;
+- pass^k, the chance that all k trials pass (reliability): the share of k-subsets with only successes.
+
+Both are computed as running products, without factorials. For k of 1 they equal the plain pass rate. A k greater than
+the trials of a case is not measured for that case: it is left out of the average, the `cases measured` column and the
+coverage in `summary.json` say how many cases had enough trials, and when none had, the report says "k greater than
+trials: not measured" instead of a number. When only some cases had k trials the cell shows the value with
+`(m of n cases)`. Averages are macro averages over cases. Regressions against a baseline still use the per-case pass
+rate with Wilson separation; the baseline also stores the pass@k and pass^k maps. Result files hold `passAtK` and
+`passPowK` maps by k next to the raw per-trial flags. Results, baselines and history written by an earlier format are
+not converted: the loader fails with a message, delete them.
+
+### Pinning a run
+
+`run.json` records what the results were measured with, so a later run can be compared fairly:
+
+- build: commit, branch, dirty flag, the changed tracked files (at most 50), a hash of the uncommitted diff, untracked
+  files (information only, they never make the tree dirty), `git describe`, project version, Java and OS. Git is run
+  without a shell in the repository top level; without git, or outside a repository, the git fields are `unknown`.
+  Dirty means tracked changes against HEAD, apart from the eval results folder. The project version comes from the
+  `jllm.project.version` system property that the module's surefire configuration sets; it is `unknown` from an IDE.
+  The diff hash is taken over what git reports, so the line-ending settings of git (`core.autocrlf`) apply to it.
+- `settingsHash` and `settings.json`: SHA-256 over canonical (sorted keys) JSON of the resolved `eval.*` keys, the trial
+  settings and the harness configuration the trials start from. Secrets are never part of it, and `settings.json` is
+  saved with secrets masked, so a mismatch between two runs can be diffed. Keys that only say where results go or what
+  to do with them (`eval.outputDir`, `eval.updateBaseline`, `eval.dirtyTree`) are left out.
+- `promptsHash`: SHA-256 of the harness prompt resources. Every `result.json` also carries the `caseHash` of its case
+  (description, checks, thresholds and the configuration after the case customisation; code in a case harness
+  callback cannot be hashed, the commit and diff hash cover it) and the run metadata.
+- the k list, the dirty-tree policy, and the run_js engine found (`isolated` or `constrained`, edition, version, the
+  `jllm.graal.dir` folder (`.downloaded-libs/graal/<version>`, set by `scripts/setup`)).
+
+`eval.dirtyTree` (`DIRTY_TREE` in the smoke scripts): `refuse` stops before the warm-up call and lists the changed
+files; `warn` (default) runs, logs a banner and marks `run.json`, `summary.json` and the report; `allow` runs without a
+banner. A baseline update from a dirty tree is refused under every policy. The report header shows the commit with a
+dirty marker, the version and the short settings hash; the merged report adds a commit row.
 
 ## Quick start
 
@@ -185,6 +233,9 @@ object descriptions, exception messages, connection-check output and `run.json`.
 | `eval.judge.modelName` | Name of the judge in results and reports; default the judge model id (recorded as `judgeModelId`). |
 | `eval.judge.anthropic.model` | Judge model when the judge is `anthropic`. It uses the `eval.anthropic.*` address and key. |
 | `eval.judge.openai.baseUrl`, `.model`, `.contextTokens`, `.timeoutSeconds` | Judge endpoint when the judge is `openai`. |
+| `eval.judge.openai.apiKey`, `.name`, `.maxRpm`, `.thinking` | Optional judge endpoint settings (key from the environment or command line). |
+| `eval.<anthropic|remote.<name>|judge.openai>.maxRpm` / `.thinking` | Pacing and thinking effort per endpoint (set by the smoke scripts from `*_RPM` and `*_THINKING`). |
+| `eval.price.*` | Optional prices used by the report cost estimate. |
 | `eval.fast` | Fast model: `target` (default), `anthropic` or `remote.<name>`. |
 | `eval.fast.anthropic.model` | Fast model when `eval.fast=anthropic`. |
 | `eval.local.port` | Host port of the local llama.cpp server. |
@@ -200,6 +251,8 @@ object descriptions, exception messages, connection-check output and `run.json`.
 | `eval.timeout.warmup` | Seconds allowed for the warm-up call. |
 | `eval.trials` | Default number of trials. |
 | `eval.maxTrials` | Cap on the trials of any case, including cases that set their own count. Default `10`. The smoke script sets it from `MAX_TRIALS` (presets: `2`). |
+| `eval.passK` | k values of pass@k and pass^k, comma separated; values above `eval.maxTrials` are clipped to it, duplicates removed. Default `1` and `eval.maxTrials`. Recorded in `run.json`. |
+| `eval.dirtyTree` | `refuse`, `warn` (default) or `allow`: what to do when tracked files differ from HEAD (the results folder excluded). See "Pinning a run". |
 | `eval.compaction.contextTokens` | Context size for the cases tagged `compaction` only; every other case uses the target's `contextTokens`. Default `65536`. The smoke scripts set it from `COMPACTION_CTX_TOKENS`. |
 | `eval.rateLimit.retries` / `waitSeconds` / `stepSeconds` | On an HTTP 429 from a paced endpoint (one with `maxRpm`) every call to that host pauses for `waitSeconds` (default 10), plus `stepSeconds` (default 5) per further repeat, and the call is repeated, up to `retries` times (default 5: 10 s, 15 s, 20 s, 25 s, 30 s), on top of the harness client's own short retry. |
 | `eval.systemPrompt.extra` | Text added to the system prompt of every case (empty by default). The smoke script sets, by default when the target is `nvidia`, a reminder to call tools through the structured interface, because some hosted models write a tool call as plain text; `SYSTEM_PROMPT_EXTRA=none` turns it off. A case's own `systemPrompt` setup replaces it. Because it changes the prompt under test, results with and without it are not comparable. |
@@ -343,7 +396,9 @@ own `contextTokens`; set a smaller `CTX_TOKENS` to force a shorter context in te
 
 At startup the run writes `run.json` to its output folder. It records the target type and name, the model
 identifier, the quantization when it can be read from the file name, the context size, the server or image
-version, the judge, the fast model, the self-graded flag, the start time, the git commit and the warm-up times.
+version, the judge, the fast model, the self-graded flag, the start time, the build (git commit and state, versions),
+the settings and prompts hashes, the k list, the dirty-tree policy, the run_js engine and the warm-up times; see
+"Pinning a run". `settings.json` beside it holds the hashed settings.
 
 ## Getting model clients
 
@@ -361,5 +416,10 @@ All classes are under `src/test/java/org/kendar/llm/eval`.
 | `Secrets` | The secret values of one configuration (`EvalConfig.secrets()`); masks them in output. Per config, not global. |
 | `ConnectionCheck` | Reachability, served model and warm-up. |
 | `RunMetadata` | Describes the run and writes `run.json`. |
+| `pin.BuildInfo` | Git state and versions of the build (git run without a shell, with a timeout; `unknown` without git). |
+| `pin.Fingerprint` | Settings, prompts and per-case hashes over canonical JSON. |
+| `pin.DirtyTree` | Applies `eval.dirtyTree` before any model is touched. |
+| `pin.JsInfo` | The GraalJS engine, edition and version the run_js tool had. |
+| `report.PassAtK` | The pass@k and pass^k estimators. |
 | `EvalRun` | Sets up the run once and shares it with all tests. |
 | `EvalModels` | Entry point for the target, judge and fast clients. |

@@ -1,4 +1,4 @@
-import {computed, onMounted, reactive, ref, watch} from 'vue';
+import {computed, onMounted, reactive, ref, watch} from '../vendor/vue.esm-browser.prod.js';
 import {api} from '../api.js';
 import {store, toast} from '../store.js';
 

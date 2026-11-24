@@ -56,7 +56,7 @@ public final class JsonSchemaToolInputValidator implements ToolInputValidator {
             JsonSchema s = factory.getSchema(schemaNode);
             cache.put(name, new Compiled(schemaNode.deepCopy(), s));
             return s;
-        } catch (RuntimeException e) {
+        } catch (RuntimeException e) { // boundary: schema library boundary: an unusable schema is skipped
             log.warn("Input schema of tool '{}' cannot be used for validation, skipped: {}", name, e.getMessage());
             return null;
         }

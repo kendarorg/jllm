@@ -94,7 +94,7 @@ public class FileChatSessionStore implements ChatSessionStore {
         } catch (IOException e) {
             logs.remove(id); // the file may hold anything now: read it again on the next save or load
             throw new UncheckedIOException("Cannot save chat " + id, e);
-        } catch (RuntimeException e) {
+        } catch (RuntimeException e) { // boundary: forget the log, rethrown unchanged
             logs.remove(id);
             throw e;
         }
@@ -179,7 +179,7 @@ public class FileChatSessionStore implements ChatSessionStore {
                     n.hasNonNull("principal") ? n.get("principal").asText() : null,
                     n.hasNonNull("chatTools") ? n.get("chatTools").asText() : null,
                     n.hasNonNull("taintedToolUses") ? n.get("taintedToolUses").asText() : null);
-        } catch (Exception e) {
+        } catch (Exception e) { // boundary: a corrupt chat row is skipped and logged
             log.warn("Skipping chat in {}: cannot read {}: {}", dir, ROW, e.getMessage());
             return null;
         }
@@ -241,7 +241,8 @@ public class FileChatSessionStore implements ChatSessionStore {
     }
 
     @Override
-    public synchronized List<ChatSessionData> list() {
+    public synchronized List<ChatSessionData> list(ChatVisibility visibility) {
+        if (visibility.kind() == ChatVisibility.Kind.NOTHING) return new ArrayList<>();
         if (!scanned) {
             for (Path dir : chatDirs.get()) {
                 ChatSessionData row = readRow(dir);
@@ -249,7 +250,7 @@ public class FileChatSessionStore implements ChatSessionStore {
             }
             scanned = true;
         }
-        List<ChatSessionData> out = new ArrayList<>(rows.values());
+        List<ChatSessionData> out = new ArrayList<>(rows.values().stream().filter(visibility::matches).toList());
         out.sort(Comparator.comparing(ChatSessionData::updatedAt).reversed());
         return out;
     }

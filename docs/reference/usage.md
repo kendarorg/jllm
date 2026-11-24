@@ -26,7 +26,7 @@ This jar is the library only. The front ends are separate modules:
 
 Flags, startup directories, the interactive session and the approval prompt are in the
 [CLI README](../../jllm-cli/README.md); `jllm.*` properties and the REST/SSE API are in the
-[web README](../../jllm-web/README.md). Both build the same `AgentHarness`, with `CwdSandboxExecutor` and the
+[web README](../../jllm-web/README.md). Both build the same `AgentHarness`, with `CwdLayout` (built through `SandboxFactory`) and the
 `FileChatSessionStore` and `FileHistory*` stores, and have **no isolation**: shell commands run as the current user.
 
 ## 3. Slash commands
@@ -94,7 +94,7 @@ switch leaves the cached tool block and the text before it intact (see [CACHES �
 directory), then the file given with `--settings` / `jllm.settings`. Missing global and project files are skipped;
 a missing explicit file is an error. Objects are merged key by key; arrays (`mcpServers`, `providers`,
 `instructionFiles`, ...) and scalars of a later file replace the earlier value. Keep API keys in the global file.
-`${ENV_VAR}` is expanded after merging. Embedding: `HarnessSettings.loadLayered(explicit, projectDir)`.
+`${ENV_VAR}` is expanded after merging. `permissions.deny` is the exception: the union of every layer. The project file cannot set `tokenStore` nor name a literal client secret. Embedding: `HarnessSettingsLoader.loadLayered(source, projectDir, env, prompt, trust, warn, contentWarnings)` with a `SettingsSource` (`FileSettingsSource`).
 
 Every key is optional. `${ENV_VAR}` is expanded in every string; a missing variable fails the load. Unknown keys are
 ignored.
@@ -130,7 +130,7 @@ ignored.
                            "safetyPercent": 2, "reserveCap": 0}},
   "output":     {"toolMaxChars": 30000, "eventMaxChars": 2000, "validation": "lenient"},
   "loop":       {"stuck": {"enabled": true, "repeat": 3, "alternationCycles": 3, "malformed": 3},
-                 "verify": {"maxReentries": 3}},
+                 "verify": {"maxReentries": 3}, "innerCallsPerTurn": 10},
   "hooks":      {"stop": [{"command": "mvn -q test", "timeoutSeconds": 600, "agents": ["main"],
                            "onlyIfChanged": true, "maxOutputChars": 8000}]},
   "smallModel": false
@@ -152,14 +152,17 @@ ignored.
 | `toolsWhitelistedEnvVars` | default `["*"]`: the same for the processes of tools, i.e. MCP stdio servers; the `env` of a server in the settings is always added on top. The model keys (`<PROVIDER>_API_KEY`), `BRAVE_API_KEY` and the `${ENV_VAR}` of the settings file are read by the harness itself and are not affected |
 | `smallModel` | default `false`: append the small-model rules (`prompts/small-model.md`) to the system prompt; `--small-model` sets it |
 | `sandbox.tempDir`, `sandbox.timeoutSeconds` | scratch root; default shell timeout (the tool caps it at 600 s) |
-| `sandbox.backend`, `sandbox.localFallback`, `sandbox.docker.*` | `local` (default) or `docker`; fall back to local when docker is missing (default `true`); `binary`, `image`, `memory`, `cpus`, `pidsLimit`, `user`, `network`, `mode` (`oneshot` or `daemon`, a long-running container), `remote`, `remoteHost` (docker on another machine). See [SANDBOX](../guides/sandbox.md). CLI and web: `--sandbox`, `--docker-image`, `--docker-mode`, `--docker-remote`, `--docker-remote-host` |
+| `sandbox.backend`, `sandbox.localFallback`, `sandbox.docker.*` | CLI and library: `local` (default) or `docker` (the web chooses the sandbox per role, see [Sandboxes](../guides/sandbox.md#the-web-a-sandbox-per-role)); fall back to local when docker is missing (default `true`); `binary`, `image`, `profile` (`standard` or `hardened`), `scope` (`chat` or `user`), `memory`, `cpus`, `pidsLimit`, `user`, `network` (hardened: `none` or `default`), `cleanup` (idle policy), `remote`, `remoteHost` (docker on another machine; `https://` prefix = TLS), `allowInsecure` (default `true`: plain http to a non-loopback host is allowed with a WARN; `false` refuses it, recommended for shared deployments), `trustStore`, `trustStorePassword` (https only). See [SANDBOX](../guides/sandbox.md). CLI and web: `--sandbox`, `--docker-image`, `--sandbox-profile`, `--sandbox-scope`, `--docker-remote`, `--docker-remote-host` |
 | `sandbox.shell` | local backend: shell of the `bash` tool (`cmd`, `powershell`, `pwsh`, `bash`, `zsh`, `sh` or a path); default the OS one (`cmd` on Windows, `zsh` on macOS, `bash` elsewhere). See [SANDBOX](../guides/sandbox.md) |
 | `sandbox.outputLogMaxBytes` | default `51200`: cap of the spill log written when a `bash` output exceeds the kept 50 KB tail; `0` = unlimited. A capped log ends with `[log truncated at N bytes]` and the tool result says `log (itself truncated)` |
 | `instructionFiles` | default `["KENDAR.md", "AGENTS.md", "CLAUDE.md"]`, in that order, relative to the directory the harness runs in; `~` is the user home. Missing files are skipped, and so is a file with the same content as one already read (e.g. `CLAUDE.md` a symlink to `AGENTS.md`). A list in any settings layer replaces the default completely; `[]` loads none. A project with only `AGENTS.md` or only `CLAUDE.md` gets it with no configuration. See [SKILLS §2](../guides/skills.md#2-instruction-files) |
 | `files.maxReadBytes` | default `1000000`: the most text one `read_file` returns and the largest file `edit_file` changes (`grep` skips larger files); `<= 0` = default |
+| `files.externalLinks` | default `read`: what the file tools do with a symlink or junction inside the work dir whose target is **outside** it (a link whose target stays inside is always followed). `none`: refused for every tool ("is a link that leaves the work dir"). `read`: `read_file`, `ls`, `glob`, `grep`, `grep_code` and the document readers follow it and walkers enter a linked directory; `write_file`, `edit_file`, `web_download` and checkpoint undo refuse, and the message names this setting. `readwrite`: reads and writes follow it, and the approval prompt shows the resolved target instead of the link path. Recursive deletes never follow a link. `--external-links none\|read\|readwrite` overrides it. In docker daemon mode the container daemon receives the mode too. **The web app ignores this key**: it always uses `none` and logs one WARN at startup when the key has another value. See [TOOLS §2](../guides/tools.md#2-path-jail) |
 | `files.scopedInstructions` | default `true`: when a file tool (`read_file`, `write_file`, `edit_file`, `ls`, `glob`, `grep`, `grep_code`) works on a path inside the work dir, the files with the `instructionFiles` names found in each directory from the work dir down to that path are added to the conversation, once per chat. See [SKILLS §3](../guides/skills.md#3-directory-scoped-instruction-files). `false` turns it off |
 | `files.scopedInstructionsDepth` | default `8`: directory levels below the work dir looked at for scoped instruction files; deeper directories are ignored |
 | `web.fetchMaxBytes` | default `5242880` (5 MB): largest response body `web_fetch` reads; `<= 0` = default |
+| `web.blockLocalHost` | default `false`: `true` makes `web_fetch` and `web_download` refuse loopback, link-local (cloud metadata), site-local, any-local and IPv6 unique-local addresses, redirects included. See [tools §6](../guides/tools.md#6-output-limits) |
+| `web.blockExtraAddresses` | default `[]`: further IPs, CIDRs, host names or `*.suffix` to refuse. DNS rebinding between the check and the connection is not covered |
 | `context.noiseCommands` | default `true`: after a run, shell commands that add no information (`mkdir`, `rm`, `cd`, ...) are replaced in the context by a stub, see [INTERNALS §9](internals.md#noise-commands). `false` turns it off |
 | `context.todos` | default `true`: offer `todo_write` and `todo_read` with every context strategy (`false` hides them, except with `scope`), plus a short system-prompt section about them. The list is saved per chat and agent in the `StateStore` (`<history>/<chat>/state/todos-<agent>.json` in the CLI and web), so it survives a resume. The `scope` strategy always offers them, whatever this setting, and also shows the list in every request ([CACHES §5](caches.md#5-scope-strategy)) |
 | `context.deferCompactionOnThinkingOverflow` | Anthropic extended thinking, default `false`. Compaction rewrites history, which voids the signed thinking blocks (API 400 "Invalid `signature` in `thinking` block"). `false`: finished turns lose their thinking blocks; if compaction fires in the middle of a tool loop, thinking is switched off for the rest of that turn. `true`: compaction is skipped while the turn in progress holds thinking blocks, so thinking stays on but the prompt can exceed the budget until the turn ends. **This can incur increased charges** (larger prompts, and a rewrite after the turn invalidates the prompt cache) |
@@ -169,6 +172,8 @@ ignored.
 | `output.validation` | check of tool-call arguments against the tool schema: `off`, `lenient` (default, repairs `"5"` for 5 and `null` for optional fields) or `strict`; `/validation` overrides it per chat, see [TOOLS §5](../guides/tools.md#5-one-tool-call) |
 | `loop.stuck.*` | stuck detection, see [Stuck detection](#stuck-detection). `enabled` (default `true`), `repeat` (3: the same calls with the same results, or the same failing call, in a row), `alternationCycles` (3: A-B-A-B), `malformed` (3: responses whose calls cannot run: unknown tool, invalid arguments, cut off) |
 | `loop.verify.maxReentries` | default `3`: how many times a `STOP` hook may send the agent back to work before the run ends `unverified` |
+| `loop.innerCallsPerTurn` | default `10`: how many tool calls made from inside a `run_js` script count as one model turn against `maxTurns`; zero or less turns the counting off. See [JS limits](../guides/js.md#limits) |
+| `plugins.js.*` | `run_js` plugin: `enabled` and `settings` (`engine`, `policy`, `statementLimit`, `maxTimeoutSeconds`, `maxWallSeconds`, `gracefulSeconds`, `maxInnerCalls` (default `200`), `maxConcurrentRuns`, `maxHeapMemory`, `maxIsolateMemory`, `maxStackFrames`); defaults and meaning in [the JS guide](../guides/js.md#limits) |
 | `hooks.stop` | command hooks run when an agent is about to finish, see [Verify on stop](#verify-on-stop). Only from the user settings or `--settings`; one from the project file runs only once trusted, like a project stdio MCP server |
 
 ### System prompt files
@@ -207,7 +212,7 @@ told too; the warning is a message, never stored with a chat, in the history nor
 - **Startup files** (settings, skills, instruction files, agent prompts, system prompt additions): reported once per
   process. The CLI prints them under the startup lines (`[content warning] <file>: ...`, one line per finding); the
   web page reads `GET /api/content-warnings` when it loads and shows them in a banner until dismissed. Embedders:
-  create a `ContentWarnings`, pass it to `HarnessSettings.loadLayered(...)` and `builder.contentWarnings(...)`, then
+  create a `ContentWarnings`, pass it to `HarnessSettingsLoader.loadLayered(...)` and `builder.contentWarnings(...)`, then
   read `harness.contentWarnings()`.
 - **Scoped instruction files**, loaded during a chat: a transient `content_warning` event (seq 0, never buffered nor
   replayed), once per file and chat. The CLI prints it like the startup ones; the web shows it as a notice in the
@@ -313,8 +318,9 @@ the character-based size estimate; the per-agent calibration against measured us
 - `thinking` (`minimal` | `low` | `medium` | `high`) sets the reasoning effort, on a provider and on an agent type.
   Resolved request, then agent type, then provider, then unset; unset leaves the client's own default (Anthropic:
   no thinking, OpenAI-compatible: nothing sent).
-  - Anthropic: extended-thinking budget of 2048 (`low`), 8192 (`medium`) or 16384 (`high`) tokens; `minimal` turns
-    thinking off. `max_tokens` is raised to fit the budget, and a forced `toolChoice` is ignored while thinking is on.
+  - Anthropic, older models: extended-thinking budget of 2048 (`low`), 8192 (`medium`) or 16384 (`high`) tokens; `minimal` turns
+    thinking off. `max_tokens` is raised to fit the budget. Opus/Sonnet 4.6 and later, every 5.x (the default), Fable and Mythos think adaptively:
+    the level is sent as `output_config.effort` (`minimal` and `low` both `low`), thinking cannot be turned off, and a forced `toolChoice` is ignored.
   - `openaiGpt62`: sent as `reasoning.effort`; `minimal` is `low`.
   - OpenAI-compatible (openai, gemini, grok, qwen, llamacpp, ollama): sent as `reasoning_effort`; `minimal` is `minimal`, or `none`
     on Ollama. A server that rejects it gets a retry: `minimal`/`none` steps down to `low`, anything else is
@@ -403,7 +409,7 @@ messages enter the chat log only when applied.
 
 ```java
 ObjectMapper mapper = new ObjectMapper();
-AgentHarness h = AgentHarness.builder()
+AgentHarness h = new AgentHarnessBuilder()
         .modelClient(ModelClients.anthropic(AnthropicSettings.defaults(System.getenv("ANTHROPIC_API_KEY")), mapper))
         .settings(Path.of("harness.json"))
         .sessionStore(new InMemoryChatSessionStore())
@@ -418,7 +424,7 @@ h.sessions().setMode(chatId, PermissionMode.EDIT);
 Runnable unsubscribe = h.subscribe(chatId, 0, ev -> {
     switch (ev.type()) {
         case "text" -> System.out.println(ev.data().path("text").asText());
-        case "approval_request" -> h.resolveApproval(chatId, ev.data().path("id").asText(), true, null, false);
+        case "approval_request" -> h.resolveApproval(chatId, ev.data().path("id").asText(), true, null, false, false);
         default -> { }
     }
 });
@@ -435,7 +441,7 @@ for that chat.
 
 ```java
 record Staff(String id, Set<String> roles) {}                     // your own user model
-AgentHarness h = AgentHarness.builder()
+AgentHarness h = new AgentHarnessBuilder()
         .modelClient(model)
         // per call, after the chat's principal is known: tokens expire and refresh
         .credentialResolver((user, source) -> user == null ? Map.of()
@@ -462,8 +468,8 @@ String owner = h.sessions().principal(chat);                      // "alice"; re
   per-user tool lists are not supported yet.
 - OAuth REST APIs and MCP servers with `perUser` use each principal's own token, kept in the `TokenStore`
   (`Builder.tokenStore(...)`, or `tokenStoreDir(...)` for the file store; encrypt it with `JLLM_TOKEN_KEY`). The
-  harness adds its OAuth resolver after yours, so its header wins. Logins: `harness.logins()`, `harness.saveLogin`,
-  `harness.logout`; a deleted user: `harness.forgetUser(id)`. A web front end starts logins with
+  harness adds its OAuth resolver after yours, so its header wins. Logins: `harness.auth().logins()`, `saveLogin`,
+  `logout`; a deleted user: `harness.auth().forgetUser(id)`. A web front end starts logins with
   `OAuthLogin.login(ui, redirectTarget)` and its own callback ([jllm-web](../../jllm-web/README.md#oauth-logins) does);
   `harness.commands().webLogin(...)` routes `/login` typed in a chat through it.
 
@@ -472,6 +478,25 @@ String owner = h.sessions().principal(chat);                      // "alice"; re
 
 The `jllm-web` module is a reference implementation of the wiring: password or OpenID Connect sign-in ([setup](../../jllm-web/README.md#sign-in-with-openid-connect)), roles, per-user tool and skill
 settings and an administration page; see its README.
+
+### Web application storage
+
+`jllm-web` keeps users, roles, skills, sessions, tokens, settings and chats in SQL when `jllm-sql-spring-starter` is on
+the class path (the release ships it), else in files under `jllm.webauth-dir` (default `webauth`; with SQL that folder
+only holds the default SQLite file).
+
+| Property | Meaning |
+|---|---|
+| `jllm.store` | `sql` or `file` (anything else stops the start); default: `sql` with the starter, else `file` |
+| `jllm.sql.url` | JDBC url; its scheme alone picks the database: `jdbc:sqlite:`, `jdbc:mysql:` or `jdbc:postgresql:` (others rejected). Default: SQLite `<jllm.webauth-dir>/jllm.db`, else `data/jllm.db` |
+| `jllm.sql.user`, `jllm.sql.password`, `jllm.sql.pool` | credentials (use `${ENV}`), pool size (SQLite 1, others 10) |
+| `jllm.sql.seed` | default true: a new database gets the users admin, poweru, guest (as `release/template/webauth`) |
+| `jllm.sql.driver-dir` | folder of the MySQL/PostgreSQL driver jar; default `lib-ext`, then `.downloaded-libs/<db>/<version>` |
+| `JLLM_TOKEN_KEY` (environment) | encrypts stored OAuth tokens; unset = in clear |
+
+MySQL and PostgreSQL are experimental until run against a real server and their drivers are not bundled: run
+`scripts/setup` (checkout) or `setup` / `fetch-sql-driver` (release); see the
+[starter README](../../web/jllm-sql-spring-starter/README.md). Plain JDBC: no JPA, Hibernate or Spring Data.
 
 ### Front-end contract
 
@@ -493,9 +518,9 @@ sequenceDiagram
     L-->>FE: text_delta (live only), usage, text, tool_call, tool_result, compaction, classifier, warning, retry
     L-->>FE: stuck, verify_failed
     L-->>FE: approval_request {id, type, title, preview, proposed, agent?}
-    FE->>H: resolveApproval(chatId, id, approved, edited, remember)
+    FE->>H: resolveApproval(chatId, id, approved, edited, remember, rememberDir)
     opt cancel
-        FE->>H: cancel(chatId)
+        FE->>H: cancel(chatId, kill)
         L-->>FE: cancelled
     end
     L-->>FE: plan_ready (plan mode only), error (on failure)
@@ -524,9 +549,12 @@ waits `delayMs` before retry `attempt` of `max`; it is followed by the normal ev
 | `classifier` | `tool`, `verdict` |
 | `compaction` | compaction: `tier`, `cleared`/`estimatedTokens`; mnemonic: `kind`, `masked`, `savedTokens`, `estimatedTokens`; scope: `strategy`, `estimatedTokens` |
 | `todos` | `todos`: the complete list written by `todo_write` (`id`, `content`, `status`) |
+| `approval_unavailable` | `tool`: a call needed approval and nobody could answer |
+| `steer_queued`, `steer_applied` | `text`; `kind` (`steer`, `followup`) on `steer_applied` |
 | `warning`, `error` | `message` |
 | `cancelled` | — |
 | `plan_ready` | `message` |
+| `subscriber_dropped` | `message`, `seq` 0; last event of a subscriber whose bounded queue overflowed (it is detached; `jllm-web` closes the SSE stream instead of sending it): reconnect with the last `seq` and replay |
 | `login_required` | `source` (`api:<name>`, `mcp:<server>`), `agent` (sub-agent key, when not the main agent): a call needs a login the user has not done; once per run and source |
 | `login` | `source`, `ok`, `message`: a login started from this chat ended |
 | `run_finished` | `cancelled`, `outcome`: `completed`, `stuck`, `unverified`, `max_turns`, `truncated`, `refused`, `cancelled`, `failed` |

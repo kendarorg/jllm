@@ -15,6 +15,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @Tag("unit")
@@ -41,7 +42,13 @@ class ReportTest {
         long ok = 0;
         for (boolean b : passes) if (b) ok++;
         doc.put("passRate", (double) ok / passes.length);
-        doc.put("passK", ok == passes.length);
+        ObjectNode at = doc.putObject("passAtK");
+        ObjectNode pow = doc.putObject("passPowK");
+        for (int k = 1; k <= 3; k++) {
+            int kk = k;
+            PassAtK.passAt(passes.length, (int) ok, k).ifPresent(v -> at.put(String.valueOf(kk), v));
+            PassAtK.passPow(passes.length, (int) ok, k).ifPresent(v -> pow.put(String.valueOf(kk), v));
+        }
         doc.put("passed", ok == passes.length);
         ArrayNode trials = doc.putArray("trials");
         for (int i = 0; i < passes.length; i++) {
@@ -83,6 +90,11 @@ class ReportTest {
     }
 
     private Path synthetic(String name, String model, String judge, boolean self, boolean[] failing) throws IOException {
+        return synthetic(name, model, judge, self, failing, false, "warn");
+    }
+
+    private Path synthetic(String name, String model, String judge, boolean self, boolean[] failing, boolean dirty,
+                           String dirtyPolicy) throws IOException {
         Path run = tmp.resolve(name);
         Files.createDirectories(run);
         ObjectNode meta = M.createObjectNode();
@@ -92,6 +104,15 @@ class ReportTest {
         meta.put("selfGraded", self);
         meta.put("trials", 3);
         meta.put("startTime", "2026-01-01T00:00:00Z");
+        meta.putArray("passK").add(1).add(2).add(3);
+        ObjectNode build = meta.putObject("build");
+        build.put("commit", "0123456789abcdef");
+        build.put("dirty", dirty);
+        build.put("dirtyFileCount", dirty ? 2 : 0);
+        build.put("projectVersion", "1.2.3");
+        meta.put("settingsHash", "ab12cd34ef56ab12cd34ef56");
+        meta.put("promptsHash", "99aa88bb77cc99aa88bb77cc");
+        meta.put("dirtyTree", dirtyPolicy);
         Files.writeString(run.resolve("run.json"), M.writeValueAsString(meta));
         writeCase(run, "files", "read", "compaction", null, failing, "tool-called", "no tool call", 80, 20);
         writeCase(run, "files", "read", "mnemonic", null, new boolean[]{true, true, true}, null, null, 90, 10);
@@ -127,7 +148,14 @@ class ReportTest {
         assertEquals(2, comp.path("cases").asInt());
         // compaction: case read 2/3, retention-case 1/3 -> 0.5
         assertEquals(0.5, comp.path("passRate").asDouble(), 1e-9);
-        assertEquals(0.0, comp.path("passKRate").asDouble(), 1e-9);
+        // pass@k / pass^k: case read has 2 of 3, retention-case 1 of 3, macro average over the 2 cases
+        assertEquals(0.5, comp.path("passAtK").path("1").asDouble(), 1e-9);
+        assertEquals(0.5, comp.path("passPowK").path("1").asDouble(), 1e-9);
+        assertEquals((1.0 + 2.0 / 3) / 2, comp.path("passAtK").path("2").asDouble(), 1e-9);
+        assertEquals((1.0 / 3 + 0.0) / 2, comp.path("passPowK").path("2").asDouble(), 1e-9);
+        assertEquals(1.0, comp.path("passAtK").path("3").asDouble(), 1e-9);
+        assertEquals(0.0, comp.path("passPowK").path("3").asDouble(), 1e-9);
+        assertEquals(2, comp.path("coverage").path("3").asInt());
         assertEquals(1.0 / 3, comp.path("retention").asDouble(), 1e-9);
         assertEquals(2, comp.path("turnCacheRatio").size());
         assertEquals(0.0, comp.path("turnCacheRatio").get(0).asDouble(), 1e-9);
@@ -190,6 +218,120 @@ class ReportTest {
         Path same = synthetic("c", "m3", "j1", false, new boolean[]{true, true, true});
         JsonNode m2 = ReportMerger.merge(List.of(a, same), tmp.resolve("merged2"));
         assertEquals(0, m2.path("warnings").size());
+    }
+
+    private void setPassK(Path run, int... ks) throws IOException {
+        ObjectNode meta = (ObjectNode) M.readTree(run.resolve("run.json").toFile());
+        ArrayNode a = meta.putArray("passK");
+        for (int k : ks) a.add(k);
+        Files.writeString(run.resolve("run.json"), M.writeValueAsString(meta));
+    }
+
+    @Test
+    void reportShowsTheLargestKWithItsHeaderAndAReliabilityTable() throws IOException {
+        Path run = synthetic("r1", "m1", "j1", false, new boolean[]{true, true, false});
+        JsonNode s = ReportBuilder.build(run, false);
+        assertEquals(3, s.path("run").path("reportK").asInt());
+        String md = Files.readString(run.resolve("report.md"));
+        assertTrue(md.contains("pass@3") && md.contains("pass^3"), md);
+        assertTrue(md.contains("Reliability by k"), md);
+        assertTrue(md.contains("unbiased"), md);
+        assertFalse(md.contains("| k greater than trials"), md);
+        assertTrue(md.contains("0123456789abcdef".substring(0, 8)) && md.contains("1.2.3") && md.contains("ab12cd34ef56"), md);
+    }
+
+    @Test
+    void partialCoverageIsShownAndAKAboveEveryCasesTrialsIsNotMeasured() throws IOException {
+        Path run = tmp.resolve("cov");
+        Files.createDirectories(run);
+        Files.writeString(run.resolve("run.json"), "{\"targetModel\":\"m\",\"passK\":[1,3],\"trials\":3}");
+        writeCase(run, "f", "long", "scope", null, new boolean[]{true, true, false}, "x", "bad", 0, 1);
+        writeCase(run, "f", "short", "scope", null, new boolean[]{true, true}, null, null, 0, 1);
+        JsonNode s = ReportBuilder.build(run, false);
+        JsonNode ov = s.path("overall");
+        assertEquals(1, ov.path("coverage").path("3").asInt());
+        assertEquals(2, ov.path("coverage").path("1").asInt());
+        assertEquals(1.0, ov.path("passAtK").path("3").asDouble(), 1e-9);
+        assertEquals(0.0, ov.path("passPowK").path("3").asDouble(), 1e-9);
+        assertTrue(Files.readString(run.resolve("report.md")).contains("(1 of 2 cases)"));
+
+        Path none = tmp.resolve("none");
+        Files.createDirectories(none);
+        Files.writeString(none.resolve("run.json"), "{\"targetModel\":\"m\",\"passK\":[1,3],\"trials\":2}");
+        writeCase(none, "f", "a", "scope", null, new boolean[]{true, false}, "x", "bad", 0, 1);
+        JsonNode n = ReportBuilder.build(none, false);
+        assertFalse(n.path("overall").path("passAtK").has("3"));
+        assertEquals(0, n.path("overall").path("coverage").path("3").asInt());
+        assertTrue(Files.readString(none.resolve("report.md")).contains("| k greater than trials: not measured |"));
+    }
+
+    @Test
+    void oldFormatFoldersFailClearly() throws IOException {
+        Path run = synthetic("old", "m1", "j1", false, new boolean[]{true, true, true});
+        Path result = run.resolve("files/read/compaction/result.json");
+        ObjectNode doc = (ObjectNode) M.readTree(result.toFile());
+        doc.remove("passAtK");
+        doc.remove("passPowK");
+        doc.put("passK", true);
+        Files.writeString(result, M.writeValueAsString(doc));
+        IllegalStateException e = assertThrows(IllegalStateException.class, () -> ResultLoader.load(run));
+        assertTrue(e.getMessage().contains("old result format"), e.getMessage());
+
+        Path noKs = synthetic("old2", "m1", "j1", false, new boolean[]{true, true, true});
+        ObjectNode meta = (ObjectNode) M.readTree(noKs.resolve("run.json").toFile());
+        meta.remove("passK");
+        Files.writeString(noKs.resolve("run.json"), M.writeValueAsString(meta));
+        IllegalStateException e2 = assertThrows(IllegalStateException.class, () -> ReportBuilder.build(noKs, false));
+        assertTrue(e2.getMessage().contains("old result format"), e2.getMessage());
+    }
+
+    @Test
+    void aDirtyTreeIsWarnedInTheSummaryAndTheReport() throws IOException {
+        Path run = synthetic("d1", "m1", "j1", false, new boolean[]{true, true, true}, true, "warn");
+        JsonNode s = ReportBuilder.build(run, false);
+        assertTrue(s.path("warnings").toString().contains("dirty working tree"), s.path("warnings").toString());
+        assertTrue(s.path("run").path("dirty").asBoolean());
+        String md = Files.readString(run.resolve("report.md"));
+        assertTrue(md.contains("dirty working tree") && md.contains("(DIRTY)"), md);
+
+        Path allowed = synthetic("d2", "m1", "j1", false, new boolean[]{true, true, true}, true, "allow");
+        assertFalse(ReportBuilder.build(allowed, false).path("warnings").toString().contains("dirty working tree"));
+
+        Path clean = synthetic("d3", "m1", "j1", false, new boolean[]{true, true, true});
+        assertEquals(0, ReportBuilder.build(clean, false).path("warnings").size());
+    }
+
+    @Test
+    void aBaselineIsNeverStoredFromADirtyTree() throws IOException {
+        Path run = synthetic("d1", "m1", "j1", false, new boolean[]{true, true, true}, true, "allow");
+        assertThrows(IllegalStateException.class, () -> ReportBuilder.build(run, true));
+        assertFalse(Files.exists(tmp.resolve("baselines").resolve("m1.json")));
+    }
+
+    @Test
+    void theBaselineStoresTheKMaps() throws IOException {
+        Path run = synthetic("b1", "m1", "j1", false, new boolean[]{true, true, false});
+        ReportBuilder.build(run, true);
+        JsonNode base = M.readTree(tmp.resolve("baselines").resolve("m1.json").toFile());
+        assertTrue(base.path("overall").path("passAtK").has("3"));
+        assertTrue(base.path("overall").path("passPowK").has("2"));
+        assertTrue(base.path("cases").path("files/read/compaction").path("passPowK").has("1"));
+    }
+
+    @Test
+    void mergerShowsCommitAndTheKOfEachRunWhenTheyDiffer() throws IOException {
+        Path a = synthetic("a", "m1", "j1", false, new boolean[]{true, true, true});
+        Path same = synthetic("b", "m2", "j1", false, new boolean[]{true, true, true});
+        ReportMerger.merge(List.of(a, same), tmp.resolve("same"));
+        String md = Files.readString(tmp.resolve("same").resolve("merged.md"));
+        assertTrue(md.contains("| commit | 01234567 | 01234567 |"), md);
+        assertTrue(md.contains("| pass@3 |") && md.contains("| pass^3 |"), md);
+
+        Path c = synthetic("c", "m3", "j1", false, new boolean[]{true, true, true});
+        setPassK(c, 1, 2);
+        ReportMerger.merge(List.of(a, c), tmp.resolve("diff"));
+        String md2 = Files.readString(tmp.resolve("diff").resolve("merged.md"));
+        assertTrue(md2.contains("| pass@k |") && md2.contains("(k=3)") && md2.contains("(k=2)"), md2);
     }
 
     @Test

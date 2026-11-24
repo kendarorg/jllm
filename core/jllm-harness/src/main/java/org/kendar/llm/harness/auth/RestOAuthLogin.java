@@ -136,7 +136,7 @@ public final class RestOAuthLogin implements OAuthLogin {
         // read with the static headers only: a spec behind specAuth needs its endpoints in the settings
         try {
             return RestApiToolProvider.specOAuth(api, flow, Map.of());
-        } catch (RuntimeException e) {
+        } catch (RuntimeException e) { // boundary: the spec cannot be read now
             return null; // the spec cannot be read now: the explicit settings must be enough
         }
     }

@@ -5,6 +5,7 @@ import org.kendar.llm.harness.safety.ToolOutputSanitizer;
 import org.kendar.llm.harness.sandbox.ExecutionResult;
 import org.kendar.llm.harness.sandbox.SandboxExecutor;
 import org.kendar.llm.harness.settings.HarnessSettings;
+import org.kendar.llm.harness.settings.StopHook;
 
 import java.time.Duration;
 import java.util.List;
@@ -19,13 +20,13 @@ class CommandStopHookTest {
 
     private final SandboxExecutor box = mock(SandboxExecutor.class);
 
-    private CommandStopHook hook(HarnessSettings.StopHook spec, boolean changed) {
+    private CommandStopHook hook(StopHook spec, boolean changed) {
         return new CommandStopHook(spec, box, (chat, agent) -> changed,
                 new ToolOutputSanitizer(ToolOutputSanitizer.Mode.OFF, List.of()));
     }
 
-    private static HarnessSettings.StopHook spec(List<String> agents, Boolean onlyIfChanged, Integer max) {
-        return new HarnessSettings.StopHook("mvn -q test", 30, agents, onlyIfChanged, max);
+    private static StopHook spec(List<String> agents, Boolean onlyIfChanged, Integer max) {
+        return new StopHook("mvn -q test", 30, agents, onlyIfChanged, max);
     }
 
     private static HookContext stop(String agent) {

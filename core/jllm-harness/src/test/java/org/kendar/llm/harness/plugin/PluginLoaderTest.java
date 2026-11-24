@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.kendar.llm.harness.settings.HarnessSettings;
+import org.kendar.llm.harness.settings.HarnessSettingsLoader;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -131,7 +132,7 @@ class PluginLoaderTest {
             java.nio.file.Files.createDirectories(dir.resolve(".jllm"));
             java.nio.file.Files.writeString(dir.resolve(".jllm").resolve("settings.json"), "{\"plugins\":" + base + "}");
             System.setProperty("jllm.home", dir.toString());
-            var s = HarnessSettings.loadLayered(new org.kendar.llm.harness.settings.FileSettingsSource(f2, null), null,
+            var s = HarnessSettingsLoader.loadLayered(new org.kendar.llm.harness.settings.FileSettingsSource(f2, null), null,
                     k -> null, null,
                     new org.kendar.llm.harness.settings.FileProjectMcpTrust(dir.resolve("trust.json")), w -> { },
                 new org.kendar.llm.harness.safety.ContentWarnings());
@@ -141,7 +142,7 @@ class PluginLoaderTest {
             assertEquals(2, s.plugins().get("a").get("settings").get("j").asInt());
             assertFalse(s.plugins().get("b").get("enabled").asBoolean());
 
-            var flagged = s.withPlugin("b", true).withPlugin("c", true);
+            var flagged = s.withPlugin("b", true, null).withPlugin("c", true, null);
             assertTrue(flagged.plugins().get("b").get("enabled").asBoolean());
             assertTrue(flagged.plugins().get("c").get("enabled").asBoolean());
             assertFalse(s.plugins().get("b").get("enabled").asBoolean()); // original untouched

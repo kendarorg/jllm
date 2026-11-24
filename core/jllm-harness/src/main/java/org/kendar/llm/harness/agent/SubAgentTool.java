@@ -27,7 +27,7 @@ public class SubAgentTool implements HarnessTool {
 
     private static final int MAX_PROMPTS = 8;
 
-    private final Supplier<AgentLoop> loop;
+    private final Supplier<SubAgentRunner> loop;
     private final ObjectMapper mapper;
     private final AgentCatalog agents;
     private final boolean parallel;
@@ -36,16 +36,16 @@ public class SubAgentTool implements HarnessTool {
             WORK_DIR_LOCKS = new java.util.concurrent.ConcurrentHashMap<>();
     private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
 
-    public SubAgentTool(Supplier<AgentLoop> loop, ObjectMapper mapper) {
+    public SubAgentTool(Supplier<SubAgentRunner> loop, ObjectMapper mapper) {
         this(loop, mapper, new AgentCatalog(List.of()));
     }
 
-    public SubAgentTool(Supplier<AgentLoop> loop, ObjectMapper mapper, AgentCatalog agents) {
+    public SubAgentTool(Supplier<SubAgentRunner> loop, ObjectMapper mapper, AgentCatalog agents) {
         this(loop, mapper, agents, true);
     }
 
     /** @param parallel false runs the prompts one after the other, in order */
-    public SubAgentTool(Supplier<AgentLoop> loop, ObjectMapper mapper, AgentCatalog agents, boolean parallel) {
+    public SubAgentTool(Supplier<SubAgentRunner> loop, ObjectMapper mapper, AgentCatalog agents, boolean parallel) {
         this.loop = loop;
         this.mapper = mapper;
         this.agents = agents;
@@ -99,7 +99,7 @@ public class SubAgentTool implements HarnessTool {
         AgentDefinition type = agents.get(typeName);
         if (type == null) throw new IllegalArgumentException("Unknown agent type '" + typeName + "'");
 
-        AgentLoop agentLoop = loop.get();
+        SubAgentRunner runner = loop.get();
         PermissionMode mode = ctx.mode();
         // writers that land in the working directory would race on the same files: run them one after the other
         boolean serial = !parallel
@@ -120,13 +120,13 @@ public class SubAgentTool implements HarnessTool {
                 if (dirLock != null) {
                     while (!dirLock.tryLock(200, java.util.concurrent.TimeUnit.MILLISECONDS)) {
                         if (cancelled.getAsBoolean()) {
-                            throw new AgentLoop.SubAgentIncompleteException("cancelled", "",
+                            throw new SubAgentIncompleteException("cancelled", "",
                                     "Cancelled while waiting for another sub-agent writing in the same directory");
                         }
                     }
                 }
                 try {
-                    return agentLoop.runSubAgent(ctx.chatId(), ctx.toolUseId(), prompt, type, mode, ctx.run(), runId);
+                    return runner.run(new SubAgentRequest(ctx.chatId(), ctx.toolUseId(), prompt, type, mode, ctx.run(), runId));
                 } finally {
                     if (dirLock != null) dirLock.unlock();
                 }
@@ -151,9 +151,9 @@ public class SubAgentTool implements HarnessTool {
                 } catch (java.util.concurrent.CancellationException e) {
                     r.put("status", "cancelled");
                     r.put("result", "");
-                } catch (Exception e) {
+                } catch (Exception e) { // boundary: sub-agent boundary: an incomplete run is reported, any other failure rethrown
                     Throwable cause = e.getCause() != null ? e.getCause() : e;
-                    if (cause instanceof AgentLoop.SubAgentIncompleteException inc) {
+                    if (cause instanceof SubAgentIncompleteException inc) {
                         // ended without a final answer: what it produced, and why it is incomplete
                         r.put("status", inc.status());
                         r.put("result", inc.partial());

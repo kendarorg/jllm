@@ -1,8 +1,13 @@
 package org.kendar.llm.web;
 
+import java.io.IOException;
 import org.kendar.llm.web.commons.JllmProperties;
 import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.AutoConfigurationExcludeFilter;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.context.TypeExcludeFilter;
+import org.springframework.context.annotation.ComponentScan;
+import org.springframework.context.annotation.FilterType;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -11,7 +16,15 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * The starter's classes ({@code org.kendar.llm.web.spring}) are registered by its auto-configuration, which knows
+ * which of them apply: they are not component-scanned.
+ */
 @SpringBootApplication
+@ComponentScan(excludeFilters = {
+        @ComponentScan.Filter(type = FilterType.CUSTOM, classes = TypeExcludeFilter.class),
+        @ComponentScan.Filter(type = FilterType.CUSTOM, classes = AutoConfigurationExcludeFilter.class),
+        @ComponentScan.Filter(type = FilterType.REGEX, pattern = "org[.]kendar[.]llm[.]web[.]spring[.].*")})
 public class JllmWebApplication {
     static final String ASK_TOKEN = "ASK_TOKEN";
     static final int TOKEN_WAIT_SECONDS = 30;
@@ -22,7 +35,7 @@ public class JllmWebApplication {
             + "[--base-url U] [--api-key K] [--workdir DIR] [--system-prompt TEXT] [--max-turns N] "
             + "[--context-tokens TOKENS] [--search-api-key BRAVE_KEY] [--settings FILE] "
             + "[--context-strategy compaction|mnemonic|scope] [--max-tokens TOKENS] [--small-model] "
-            + "[--sandbox local|docker] [--docker-image IMAGE] [--docker-mode oneshot|daemon] "
+            + "[--docker-image IMAGE] [--docker-scope chat|user] "
             + "[--docker-remote] [--docker-remote-host ADDRESS]"
             + System.lineSeparator() + "Flags take --flag value or --flag=value. Spring's own flags (--server.port=9000) work too.";
 
@@ -61,7 +74,7 @@ public class JllmWebApplication {
         CompletableFuture<String> input = CompletableFuture.supplyAsync(() -> {
             try {
                 return new BufferedReader(new InputStreamReader(System.in)).readLine();
-            } catch (Exception e) {
+            } catch (IOException e) {
                 return null;
             }
         });
@@ -71,7 +84,8 @@ public class JllmWebApplication {
                 System.setProperty("jllm.api-key", typed.trim());
                 return;
             }
-        } catch (Exception ignored) {
+        } catch (InterruptedException | java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException e) {
+            if (e instanceof InterruptedException) Thread.currentThread().interrupt();
             // timeout or interrupted
         }
         System.out.println("No API key provided; starting without it.");

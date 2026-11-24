@@ -23,6 +23,13 @@ class DocxReaderTest {
             + " xmlns:v=\"urn:schemas-microsoft-com:vml\""
             + " xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"";
 
+    private static String extract(org.kendar.llm.harness.tools.DocumentReader reader, Path file) throws IOException {
+        try (java.io.InputStream in = Files.newInputStream(file)) {
+            return reader.extract(in, file.getFileName().toString());
+        }
+    }
+
+
     @TempDir
     Path dir;
 
@@ -52,7 +59,7 @@ class DocxReaderTest {
                 + "<w:tbl><w:tr><w:tc>" + p("a") + "</w:tc><w:tc>" + p("b") + "</w:tc></w:tr>"
                 + "<w:tr><w:tc>" + p("c") + "</w:tc><w:tc>" + p("d") + "</w:tc></w:tr></w:tbl>";
 
-        String text = new DocxReader().extract(docx(body));
+        String text = extract(new DocxReader(), docx(body));
 
         assertEquals("## Title\nPlain text\n- item\na | b\nc | d\n", text);
         assertFalse(text.contains("HEADER"));
@@ -63,7 +70,7 @@ class DocxReaderTest {
         String body = "<w:p><w:r><w:t>keep </w:t></w:r><w:ins><w:r><w:t>added</w:t></w:r></w:ins>"
                 + "<w:del><w:r><w:delText>removed</w:delText></w:r></w:del></w:p>";
 
-        assertEquals("keep added\n", new DocxReader().extract(docx(body)));
+        assertEquals("keep added\n", extract(new DocxReader(), docx(body)));
     }
 
     @Test
@@ -74,7 +81,7 @@ class DocxReaderTest {
                 + "<mc:Fallback><w:pict><v:shape><v:textbox>" + box + "</v:textbox></v:shape></w:pict></mc:Fallback>"
                 + "</mc:AlternateContent></w:r><w:r><w:t>after</w:t></w:r></w:p>";
 
-        assertEquals("in box\nbefore after\n", new DocxReader().extract(docx(body)));
+        assertEquals("in box\nbefore after\n", extract(new DocxReader(), docx(body)));
     }
 
     @Test
@@ -82,7 +89,7 @@ class DocxReaderTest {
         String body = "<w:p><w:pPr><w:tabs><w:tab w:val=\"left\" w:pos=\"720\"/></w:tabs></w:pPr>"
                 + "<w:r><w:t>a</w:t><w:tab/><w:t>b</w:t></w:r></w:p>";
 
-        assertEquals("a\tb\n", new DocxReader().extract(docx(body)));
+        assertEquals("a\tb\n", extract(new DocxReader(), docx(body)));
     }
 
     @Test
@@ -90,19 +97,19 @@ class DocxReaderTest {
         String body = "<w:p><w:r><w:t>text</w:t><w:drawing><a:graphic><a:p><a:r><a:t>chart label</a:t></a:r></a:p>"
                 + "</a:graphic></w:drawing></w:r></w:p>";
 
-        assertEquals("text\n", new DocxReader().extract(docx(body)));
+        assertEquals("text\n", extract(new DocxReader(), docx(body)));
     }
 
     @Test
     void legacyDocAndGarbageAreRefused() throws Exception {
         Path doc = dir.resolve("old.doc");
         Files.write(doc, new byte[]{1, 2, 3});
-        IOException e = assertThrows(IOException.class, () -> new DocxReader().extract(doc));
+        IOException e = assertThrows(IOException.class, () -> extract(new DocxReader(), doc));
         assertEquals("legacy .doc not supported, convert to docx", e.getMessage());
 
         Path bad = dir.resolve("bad.docx");
         Files.writeString(bad, "nope");
-        assertThrows(IOException.class, () -> new DocxReader().extract(bad));
+        assertThrows(IOException.class, () -> extract(new DocxReader(), bad));
     }
 
     @Test

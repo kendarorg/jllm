@@ -2,7 +2,7 @@ package org.kendar.llm.workflowweb;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.kendar.llm.harness.AgentHarness;
+import org.kendar.llm.harness.AgentHarnessBuilder;
 import org.kendar.llm.harness.HarnessConfig;
 import org.kendar.llm.harness.llm.ModelClient;
 import org.kendar.llm.harness.llm.ModelRequest;
@@ -11,10 +11,12 @@ import org.kendar.llm.harness.plugin.MemoryPluginStorage;
 import org.kendar.llm.harness.plugin.PluginStorages;
 import org.kendar.llm.harness.plugin.ServiceRegistry;
 import org.kendar.llm.harness.plugin.WebRequest;
-import org.kendar.llm.harness.sandbox.ChatDirSandboxExecutor;
+import org.kendar.llm.harness.sandbox.ChatDirLayout;
+import org.kendar.llm.harness.sandbox.LocalSandboxExecutor;
 import org.kendar.llm.harness.session.InMemoryChatSessionStore;
 import org.kendar.llm.harness.settings.HarnessSettings;
-import org.kendar.llm.web.commons.plugins.WebPluginHost;
+import org.kendar.llm.harness.settings.HarnessSettingsLoader;
+import org.kendar.llm.harness.plugin.WebPluginHost;
 import org.kendar.llm.harness.workflows.WorkflowApi;
 
 import java.nio.file.Files;
@@ -54,9 +56,9 @@ class SettingsFileStartupTest {
         MemoryPluginStorage mem = new MemoryPluginStorage();
         ServiceRegistry services = new ServiceRegistry();
         services.publish(PluginStorages.class, id -> mem);
-        HarnessSettings settings = HarnessSettings.load(file);
-        AgentHarness.builder().modelClient(NO_MODEL)
-                .sandbox(new ChatDirSandboxExecutor(HarnessConfig.defaults(), dir.resolve("work")))
+        HarnessSettings settings = HarnessSettingsLoader.load(file);
+        new AgentHarnessBuilder().modelClient(NO_MODEL)
+                .sandbox(new LocalSandboxExecutor(new ChatDirLayout(dir.resolve("work"))))
                 .sessionStore(new InMemoryChatSessionStore()).services(services).settings(settings)
                 .discoverPlugins().build();
         WebPluginHost web = new WebPluginHost(services, id -> mem, settings.plugins());

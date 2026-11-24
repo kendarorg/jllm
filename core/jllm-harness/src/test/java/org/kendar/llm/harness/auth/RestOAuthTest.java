@@ -181,7 +181,8 @@ class RestOAuthTest {
         OAuthCredentialResolver resolver = new OAuthCredentialResolver(store, List.of(src));
         Identity identity = new Identity(CredentialResolver.chain((u, s) -> Map.of("Authorization", "from-file"),
                 resolver), null, null, chat -> "anon".equals(chat) ? null : chat);
-        List<HarnessTool> tools = RestApiToolProvider.discover(api, http, MAPPER, identity, null);
+        List<HarnessTool> tools = RestApiToolProvider.discover(api, http, MAPPER, identity, null, Map.of(),
+                org.kendar.llm.harness.tools.TruncationMode.HEAD);
         return new Setup(api, resolver, identity, store, tools);
     }
 
@@ -318,7 +319,7 @@ class RestOAuthTest {
     void anApiWithNoEndpointAnywhereFailsAtStartup() {
         RestApiSettings none = new RestApiSettings("crm", base + "/api", null, tmp.resolve("missing.yaml").toString(),
                 Map.of(), null, null, null, null, oauth(null, null, null, null));
-        var settings = new org.kendar.llm.harness.settings.HarnessSettings(null, List.of(none), null, null, null, null);
+        var settings = org.kendar.llm.harness.settings.HarnessSettings.builder().restApis(List.of(none)).build();
         IllegalStateException e = assertThrows(IllegalStateException.class,
                 () -> OAuthSources.from(settings, store(), http, MAPPER, false));
         assertTrue(e.getMessage().contains("REST API 'crm'"), e.getMessage());

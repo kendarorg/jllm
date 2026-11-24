@@ -194,7 +194,7 @@ public final class ScopedInstructions {
                 String text = raw.strip();
                 if (text.isEmpty() || !loadedTexts.add(text)) continue;
                 out.add(new Block(e.getKey(), text, ContentScanner.scan(e.getKey(), raw)));
-            } catch (IOException | RuntimeException ex) {
+            } catch (IOException | RuntimeException ex) { // boundary: one unreadable instruction file must not stop the others
                 log.warn("Cannot read scoped instruction file {}: {}", e.getValue(), ex.getMessage());
             }
         }

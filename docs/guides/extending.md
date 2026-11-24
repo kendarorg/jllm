@@ -1,10 +1,10 @@
 # Extending the harness
 
-Every extension point is a plain Java interface passed to `AgentHarness.builder()`. No framework, no reflection.
+Every extension point is a plain Java interface passed to `new AgentHarnessBuilder()`. No framework, no reflection.
 
 ```mermaid
 flowchart LR
-    B["AgentHarness.Builder"]
+    B["AgentHarnessBuilder"]
     B --- T["tools(List&lt;HarnessTool&gt;)"]
     B --- H["hook(event, Hook) / before*/after*"]
     B --- P["plugin(HarnessPlugin)<br/>tools + hooks + /commands"]
@@ -37,7 +37,7 @@ External tools without code: [MCP and REST APIs](mcp.md). Instructions without c
 
 ## Jars to import
 
-All artifacts: group `org.kendar.llm`, version `1.2.0-jllm` (`mvn install` from the root puts them in the local
+All artifacts: group `org.kendar.llm`, version `1.3.0-jllm` (`mvn install` from the root puts them in the local
 repository; JDK 21).
 
 | Artifact | Contains | Import when |
@@ -47,8 +47,9 @@ repository; JDK 21).
 | `jllm-fs` | file tools (read, write, edit, grep, remote files) | only with the tools and no harness |
 | `jllm-webbrowse` | web search and fetch tools | only with the tools and no harness |
 | `jllm-apimcp` | REST API and MCP tool providers | only with the tools and no harness |
-| `jllm-test-support` | `HarnessTestSupport`: `ScriptedModel`, `Rig`, `Events` ([12](#12-testing)) | tests (scope `test`) |
-| `jllm-web-commons` | Spring Boot REST + SSE chat and file API, storage interfaces ([13](#13-web-storage)) | building a web front end with its own sign-in and storage |
+| `jllm-test-support` | `HarnessTestSupport`: `ScriptedModel`, `text`, `json`, `tool`, `config` ([12](#12-testing)) | tests (scope `test`) |
+| `jllm-web-commons` | the web API handlers (chat, files, sign-in, users) and the `Gate`, no Spring; its storage interfaces are in jllm-harness ([13](#13-web-storage)) | mounting the API on another web framework |
+| `jllm-web-spring-starter` | Spring Boot controllers, interceptors and auto-configuration over `jllm-web-commons` | building a web front end with its own sign-in and storage |
 | `jllm-web` | the reference web application (file stores, cookie sign-in, admin) | running it, or as an example |
 
 A plugin jar (loaded from the plugin directory by the CLI and the web app):
@@ -57,27 +58,30 @@ A plugin jar (loaded from the plugin directory by the CLI and the web app):
 <dependency>
     <groupId>org.kendar.llm</groupId>
     <artifactId>jllm-commons</artifactId>
-    <version>1.2.0-jllm</version>
+    <version>1.3.0-jllm</version>
     <scope>provided</scope>
 </dependency>
 <dependency>
     <groupId>org.kendar.llm</groupId>
     <artifactId>jllm-harness</artifactId>
-    <version>1.2.0-jllm</version>
+    <version>1.3.0-jllm</version>
     <scope>test</scope>
 </dependency>
 <dependency>
     <groupId>org.kendar.llm</groupId>
     <artifactId>jllm-test-support</artifactId>
-    <version>1.2.0-jllm</version>
+    <version>1.3.0-jllm</version>
     <scope>test</scope>
 </dependency>
 ```
 
 Package third-party libraries into the plugin (`jar-with-dependencies`, as `plugins/jllm-pdf` does); never the `jllm-*`
-jars. A library too large or too delicate to bundle can be left to the host instead, as `plugins/jllm-js` does with
-GraalJS: declare it `provided` and fail clearly at startup when it is missing. An application embedding the harness depends on `jllm-harness` (compile scope); a web
-application on `jllm-web-commons`.
+jars. A library too large, too delicate or under terms you do not want to redistribute can be left to the host instead, as
+`plugins/jllm-js` does with GraalJS: declare it `provided` (in the plugin and in every host that runs it: `jllm-cli`,
+`jllm-web`, `jllm-eval`), ship it outside the jars (the release puts GraalJS in `lib-ext/`, see the
+[js guide](js.md#enabling)), probe it at install time, log one WARN and register nothing when it is missing; the plugin
+class itself must not reference its types. An application embedding the harness depends on `jllm-harness` (compile scope); a web
+application on `jllm-web-spring-starter`.
 
 ## 1. Tools
 
@@ -104,7 +108,7 @@ HarnessTool sql = new SimpleTool("db_query",
         "Db", ToolKind.READ_ONLY,
         (ctx, in) -> reporting.query(in.path("sql").asText(), in.path("limit").asInt(100)));
 
-AgentHarness h = AgentHarness.builder().modelClient(client).tools(List.of(sql)).build();
+AgentHarness h = new AgentHarnessBuilder().modelClient(client).tools(List.of(sql)).build();
 ```
 
 Group several tools in a `HarnessToolSet` (`List<HarnessTool> tools()`), as the built-ins do.
@@ -189,7 +193,7 @@ appends "The stop check failed. Fix the problem and finish again. If it cannot b
 message twice in a row, the run ends `UNVERIFIED` (a sub-agent reports status `unverified`). Existing `STOP` hooks
 that assumed the main agent should check `ctx.agent()`. A test run needs no code: `hooks.stop` in the settings
 ([USAGE](../reference/usage.md#verify-on-stop)) registers a `CommandStopHook`. An LLM judge is a plugin `STOP` hook that asks the
-fast model and returns `continueWith` with its objection. `AgentLoop.changedInRun(chatId, agent)` tells a hook
+fast model and returns `continueWith` with its objection. `RunGuards.changedInRun(chatId, agent)` (via `loop.guards()`) tells a hook
 whether a tool that changes things ran in the run. A `PRE_TOOL` denial is reported to the model as `Denied by a hook: <reason>`, followed by an
 instruction not to work around it with another tool and to report it to the user instead.
 
@@ -211,6 +215,8 @@ dependency. An adapter is a plugin that registers hooks and keeps the spans itse
 
 ```java
 public final class OtelPlugin implements HarnessPlugin {
+    public String id() { return "otel"; }
+
     public void install(PluginRegistrar r) {
         Tracer tracer = GlobalOpenTelemetry.getTracer("jllm");
         r.hook(HookEvent.POST_LLM, c -> {
@@ -245,11 +251,14 @@ public final class DeployPlugin implements HarnessPlugin {
         r.tool(new SimpleTool("deploy_status", "Status of the last deployment", SimpleTool.schema(),
                         "Deploy", ToolKind.READ_ONLY, (ctx, in) -> deployer.status()))
          .hook(HookEvent.STOP, ctx -> { notifier.done(ctx.chatId()); return HookResult.allow(); })
-         .command("/deploy", "Deploy the current branch", (chatId, arg) -> deployer.deploy(arg));
+         .command("/deploy", "Deploy the current branch", (chatId, arg, history) -> deployer.deploy(arg));
     }
+
+    @Override
+    public String id() { return "deploy"; }
 }
 
-AgentHarness h = AgentHarness.builder().modelClient(client).plugin(new DeployPlugin()).build();
+AgentHarness h = new AgentHarnessBuilder().modelClient(client).plugin(new DeployPlugin()).build();
 ```
 
 A plugin can also register a `DocumentReader` for `read_file` (`r.documentReader(reader)`; see
@@ -267,7 +276,7 @@ and enabled:
 "plugins": {
   "pdf":  { "enabled": true },
   "docs": { "enabled": false },
-  "js":   { "enabled": true, "settings": { "storage": { "maxBytes": -1 } } }
+  "js":   { "enabled": true, "settings": { "maxInnerCalls": 100 } }
 }
 ```
 
@@ -362,6 +371,9 @@ built-ins.
 | `readOnly` | `false` | always PLAN mode with READ_ONLY tools |
 | `prompt` / `promptFile` | none | added to its system text |
 | `inheritContext` | `false` | start from a copy of the caller's conversation |
+| `provider` | none | name of a provider from the settings list; wins over `model` |
+| `temperature` | provider's | sampling temperature, 0 to 2 |
+| `thinking` | provider's | reasoning effort: minimal, low, medium, high |
 | `model` | main model | own `LlmSettings` |
 
 ```mermaid
@@ -406,7 +418,7 @@ public interface ContextStrategy {
 ```
 
 ```java
-builder.contextStrategy(deps -> new SlidingWindowStrategy(deps.config(), deps.mapper()));
+builder.contextStrategy(deps -> new MyStrategy(deps.config(), deps.mapper()));   // MyStrategy: your ContextStrategy
 ```
 
 `deps` gives `config`, `model`, `summaryModel` (fast or main), `approvals`, `mapper`, `metrics`, `subAgentRuns`.
@@ -437,7 +449,7 @@ Contract:
 public interface ChatSessionStore {
     ChatSessionData save(ChatSessionData session);     // insert or replace by chatId
     Optional<ChatSessionData> find(String chatId);
-    List<ChatSessionData> list();                      // most recently updated first
+    List<ChatSessionData> list(ChatVisibility visibility); // admitted chats, most recently updated first; filter in the store
     void delete(String chatId);
 }
 ```
@@ -450,7 +462,7 @@ cheap or write behind. The `FileHistory*` stores are decorators: they wrap anoth
 
 OAuth tokens (REST APIs, MCP servers, provider logins) go through `org.kendar.llm.harness.auth.TokenStore`. Shipped:
 `FileTokenStore` (one file per principal, optional `TokenCipher` encryption, cross-process file lock) and
-`NativeTokenStore` (macOS Keychain, Windows DPAPI, Linux Secret Service; single user). `AgentHarness.Builder.tokenStore(store)`
+`NativeTokenStore` (macOS Keychain, Windows DPAPI, Linux Secret Service; single user). `AgentHarnessBuilder.tokenStore(store)`
 takes any implementation and wins over the `tokenStore` settings ([MCP](mcp.md#6-token-storage)).
 
 ```java
@@ -523,35 +535,59 @@ Other choices:
 
 ## 9. Sandbox
 
+A sandbox is a `Layout` (where a chat works on the host) plus a runner (how commands run). `SandboxExecutor` is the
+runner seen by the harness; it extends four narrow interfaces:
+
 ```java
-public interface SandboxExecutor {
+public interface Layout {                     // host directories
+    Path location();
+    Path workDir(String chatId);              // root of the file tools' jail
+    Path scratchDir(String chatId, String agentId);
+    default boolean sharedWorkDir();
+    default Path chatStorage(String chatId);
+    void deleteWorkDir(String chatId);
+}
+public interface Exec {                       // commands
     ExecutionResult execute(String chatId, String command, Duration timeout);
     default ExecutionResult execute(String chatId, Path runDir, Path readOnlyDir, String command, Duration timeout);
-    Path workDir(String chatId);          // root of the file tools' jail
-    Path location();
-    default Path scratchDir(String chatId, String agentId);
-    default String shellDescription();    // appended to the bash tool description (shell syntax)
-    default void deleteWorkDir(String chatId);
-    default FileBackend files(String chatId, String agentId);  // null: the file tools use workDir on the host
-    default String displayPath(Path p);   // how the model and the user see a path
-    default String clean(String chatId);  // remove sandbox resources outside the work dir (container)
-    default void close();                 // release resources (web containers)
+    ExecutionResult execute(String chatId, Path scratchDir, boolean planMode, String command, Duration timeout);
+    default String shellDescription();        // appended to the bash tool description (shell syntax)
+    default String displayPath(Path p);       // how the model and the user see a path
+    // environmentWhitelist, outputLogLimit, shell
 }
+public interface SandboxFiles {
+    default FileBackend files(String chatId, String agentId);  // null: the file tools use workDir on the host
+}
+public interface Lifecycle {
+    // allowLocalFallback, localFallbackActive, backup, clean (resources outside the work dir), close
+}
+public interface SandboxExecutor extends Layout, Exec, SandboxFiles, Lifecycle { }
 ```
 
-| Implementation | Work dir | Isolation |
-|---|---|---|
-| `LocalDirSandboxExecutor` (default) | `<sandbox.baseDir>/<chatId>` | none (warning at startup) |
-| `CwdSandboxExecutor` (CLI) | the project directory for every chat | none |
-| `ChatDirSandboxExecutor` (web) | `<base>/<chatId>`, with its own `.jllm` | none |
-| `RemoteExecSandboxExecutor(config, runner, layoutExecutor, Kind, projectDir)` (settings `sandbox.backend: docker`, `sandbox.docker.mode: daemon`) | `/workspace` in a long-running container; bind mount (CLI) or volume (web) | as `Docker…`, plus a per-container token; default docker network |
-| `DockerSandboxExecutor(config, new ProcessDockerCommandRunner()[, layoutExecutor])` (settings `sandbox.backend: docker`) | that of the layout executor, mounted into the container | `--network none`, memory/cpu/pids limits, user `1000:1000`, work dir mounted read-only in plan mode |
+| Layout | Work dir |
+|---|---|
+| `DirLayout` (default) | `<sandbox.tempDir>/<chatId>` |
+| `CwdLayout` (CLI) | the project directory for every chat |
+| `ChatDirLayout` (web) | `<base>/<chatId>`, with its own `.jllm` |
 
-Docker settings come from `HarnessConfig.Docker` (`binary`, `image` default `python:3.12-slim`, `memory`, `cpus`,
-`pidsLimit`, `user`, `network`, `mode`), set in the settings file under `sandbox.docker`. The file tools run in the JVM
-against `workDir`, and only `bash` goes through the executor, unless `files(chatId, agentId)` returns a `FileBackend`
-(daemon mode): then all file tools go through it and no host paths are used. To plug in another remote sandbox,
-implement `FileBackend` (read, write, stat, glob, grep and the browse calls) and return it from `files`. Full description of each backend: [SANDBOX](sandbox.md).
+| Runner | Isolation |
+|---|---|
+| `LocalSandboxExecutor(layout)` (default: `LocalSandboxExecutor.of(config)`; settings `sandbox.backend: local`) | none: plain processes as the JVM user, for testing and trusted single-user use only; plan mode is advisory |
+| `RemoteExecSandboxExecutor` (settings `sandbox.backend: docker`) | a long-running container with an HTTP daemon, `standard` or `hardened` profile, `chat` or `user` scope, per-container token; the only isolated runner |
+
+Do not call the constructors for the container runner: `new SandboxFactory().runner(new ProcessDockerCommandRunner())
+.create(settings, config, layout, Kind.CLI | Kind.WEB)` is the single place that turns settings into a runner (CLI and web
+both use it). It also takes `userOf` (chat id to user id, `user` scope), `policy` (a `SandboxPolicy`: per user and per
+chat profile, limits and network), `backupRecords` (`BackupRecordStore`) and `onWarning`. The per-command docker runner
+and `docker.mode` are removed.
+
+Docker settings come from `HarnessConfig.Docker` (`binary`, `image` default `python:3.12-slim`, `profile`, `scope`,
+`memory`, `cpus`, `pidsLimit`, `user`, `network`, clean-up policy), set in the settings file under `sandbox.docker`. With
+the local runner the file tools run in the JVM against `workDir` and only `bash` goes through the executor; `files(chatId,
+agentId)` returns a `FileBackend` for the container runner: then all file tools go through it and no host paths are used.
+To plug in another remote sandbox, implement `FileBackend` (read, write, stat, glob, grep and the browse calls) and return
+it from `files`. `run_js` is not a runner: it is always present next to the runner and may use the container as its
+storage. Full description: [SANDBOX](sandbox.md).
 
 ## 10. Metrics and pricing
 
@@ -593,39 +629,34 @@ with the same path earlier on the class path.
 | Helper | Use |
 |---|---|
 | `ScriptedModel` | fake `ModelClient`: `enqueue(...)` responses, `simpleReplies` for `simpleComplete`, or a `handler`; records every request in `requests` |
-| `text`, `toolUse`, `resp`, `json` | build responses |
-| `Rig(Path baseDir)` | a wired `AgentLoop` (real gate, approvals, sessions, local sandbox, context strategy) over a `ScriptedModel`: `register(tools…)`, `newChat()`, `configure(cfg -> …)`, `loopWith(client)`, `requiresApproval.put(name, true)` |
-| `Events` | `EventSink` that records: `ofType("tool_result")`, `types()` |
-| `CountingMetrics` | token totals by type |
+| `text`, `json` | build a text response, parse JSON written with single quotes |
 | `tool(name, group, kind, body)`, `config(baseDir)` | quick tool and test config |
 
-`Rig` mocks the registry with Mockito, so the consumer needs `mockito-core` in test scope.
+`Rig` (a wired `AgentLoop` over a `ScriptedModel`), `Events`, `CountingMetrics`, `toolUse` and `resp` are not part of this
+module: they live in the harness's own test sources (`core/jllm-harness/src/test/.../HarnessTestSupport.java`).
 
 ```java
-Rig rig = new Rig(tempDir).register(myTool);
-rig.model.enqueue(toolUse("t1", "db_query", "{\"sql\":\"select 1\"}"), text("one row"));
-String chat = rig.newChat();
-Events events = new Events();
-rig.loop.run(chat, "How many rows?", events, () -> false);
-assertEquals("one row", events.ofType("text").getLast().path("text").asText());
+ScriptedModel model = new ScriptedModel().enqueue(text("one row"));
+// pass `model` to AgentHarnessBuilder.modelClient(...) and run a chat; model.requests records every request
 ```
 
 ## 13. Web storage
 
-A web application built on `jllm-web-commons` keeps its users, roles, skills, sign-in sessions, settings and tokens
-behind interfaces. `jllm-web` ships file and in-memory implementations, wired when `jllm.store=file` (the default,
-`WebAuthConfiguration`); another store (e.g. SQL) sets `jllm.store` to another value and supplies its own beans. The
+A web application built on `jllm-web-spring-starter` keeps its users, roles, skills, sign-in sessions, settings and tokens
+behind interfaces. `jllm-web` ships file and in-memory implementations (`FileStoresAutoConfiguration`, used when no other bean of the
+type exists); `jllm-sql-spring-starter` ships SQL ones ([README](../../web/jllm-sql-spring-starter/README.md): SQLite,
+MySQL, PostgreSQL by JDBC url, plain JDBC). `jllm.store` is `file` or `sql` (anything else stops the start). The
 controllers and the harness depend only on the interfaces.
 
 ```mermaid
 flowchart LR
-    subgraph WC["jllm-web-commons: org.kendar.llm.web.commons.users"]
-        UR["UserRepository / WebUser"]
+    subgraph WC["jllm-harness: org.kendar.llm.harness.identity"]
+        UR["UserRepository / User"]
         RR["RoleRepository / Role"]
         SR["SkillRepository"]
         LS["LoginSessionRepository"]
     end
-    subgraph HC["jllm-web-commons: HarnessConfiguration beans"]
+    subgraph HC["jllm-harness: optional beans read by the starter (HarnessFactory, jllm-web-commons)"]
         SS["SettingsSource"]
         PT["ProjectMcpTrust"]
         HI["HarnessIdentity.tokenStore()"]
@@ -644,28 +675,33 @@ flowchart LR
 
 | Interface | Module, package | Default (jllm-web) | Holds |
 |---|---|---|---|
-| `UserRepository` | jllm-web-commons, `...web.commons.users` | `FileUserRepository`: `webauth/users/<id>.json` | `WebUser`: id, name, role, password hash, per-source credential headers (`env:NAME` only), disabled tools and skills |
-| `RoleRepository` | jllm-web-commons, `...web.commons.users` | `FileRoleRepository`: `webauth/permissions/<role>.json` | `Role`: tool patterns, read-only, approval `ask`/`off`; the fixed `admin` role is never stored |
-| `SkillRepository` | jllm-web-commons, `...web.commons.users` | `FileSkillRepository`: `webauth/global-skills/`, `webauth/user-skills/<id>/` | global and per-user skills (name, description, content) |
-| `LoginSessionRepository` | jllm-web-commons, `...web.commons.users` | `InMemoryLoginSessionRepository` (a restart signs everybody out) | cookie token → user id, sliding `TTL` of 7 days |
+| `UserRepository` | jllm-harness, `...harness.identity` | `FileUserRepository`: `webauth/users/<id>.json` | `User`: id, name, role, email, external id, password hash, per-source credential headers (`env:NAME` only), disabled tools and skills |
+| `RoleRepository` | jllm-harness, `...harness.identity` | `FileRoleRepository`: `webauth/permissions/<role>.json` | `Role`: tool patterns, read-only, approval `ask`/`off`; the fixed `admin` role may be stored (SQL: seeded row) and is never deleted |
+| `SkillRepository` | jllm-harness, `...harness.identity` | `FileSkillRepository`: `webauth/global-skills/`, `webauth/user-skills/<id>/` | global and per-user skills (name, description, content) |
+| `LoginSessionRepository` | jllm-harness, `...harness.identity` | `InMemoryLoginSessionRepository` (a restart signs everybody out) | cookie token → user id, sliding `TTL` of 7 days |
 | `SettingsSource` | jllm-harness, `...harness.settings` | `FileSettingsSource`: `~/.jllm/settings.json`, `<project>/.jllm/settings.json`, `--settings`/`jllm.settings` | `SettingsLayer`s, `GLOBAL` → `PROJECT` → `EXPLICIT`, a later layer wins |
 | `ProjectMcpTrust` | jllm-harness, `...harness.settings` | `FileProjectMcpTrust.user()`: `~/.jllm/trusted-mcp.json` | trust answers for project MCP servers, tied to a SHA-256 of the definition |
-| `TokenStore` | jllm-harness, `...harness.auth` | `FileTokenStore` from the `tokenStore` settings | OAuth tokens per principal ([8](#token-stores)) |
+| `TokenStore` | jllm-commons, `...harness.auth` | `FileTokenStore` from the `tokenStore` settings | OAuth tokens per principal ([8](#token-stores)) |
 | `ChatSessionStore`, `SubAgentRunLog`, `StateStore` | jllm-commons, `...harness.session`, `...harness.state` | `FileChatSessionStore`, `FileHistorySubAgentRunLog`, `FileStateStore` under `<base>/<chatId>/.jllm/history` | chats, sub-agent runs, per-chat state ([8](#8-persistence)) |
 | `MnemonicStore` | jllm-harness, `...harness.context.mnemonic` | `FileMnemonicStore` under the same root | mnemonic decisions per chat and agent |
 
 ```java
 public interface UserRepository {
-    Optional<WebUser> find(String id);
-    List<WebUser> all();
+    Optional<User> find(String id);
+    List<User> all();
     boolean exists(String id);
-    WebUser create(String id, String name, String role, String passwordHash); // IllegalStateException if it exists
-    WebUser setName(String id, String name);                                   // setters: NoSuchElementException if unknown
-    WebUser setRole(String id, String role);
-    WebUser setPassword(String id, String passwordHash);                       // null = default password
-    WebUser setCredentials(String id, Map<String, Map<String, String>> credentials);
-    WebUser setDisabledTools(String id, List<String> patterns);
-    WebUser setDisabledSkills(String id, List<String> names);
+    User create(String id, String name, String role, String passwordHash, String email); // IllegalStateException if it exists
+    User createExternal(String id, String name, String role, String email, String externalId);
+    Optional<User> findByExternal(String issuer, String sub);
+    List<User> findByEmail(String email);
+    User setExternalId(String id, String externalId);
+    User setEmail(String id, String email);
+    User setName(String id, String name);                                   // setters: NoSuchElementException if unknown
+    User setRole(String id, String role);
+    User setPassword(String id, String passwordHash);                       // null = default password
+    User setCredentials(String id, Map<String, Map<String, String>> credentials);
+    User setDisabledTools(String id, List<String> patterns);
+    User setDisabledSkills(String id, List<String> names);
     boolean delete(String id);
 }
 
@@ -705,13 +741,14 @@ public interface SettingsSource {
 
 Wiring:
 - `UserRepository`, `RoleRepository`, `SkillRepository`, `LoginSessionRepository`: beans. The `jllm-web` ones are
-  `@ConditionalOnProperty(name = "jllm.store", havingValue = "file", matchIfMissing = true)`.
-- `SettingsSource`, `ProjectMcpTrust`: optional beans read by `HarnessConfiguration` (`ObjectProvider`); without
+  `@ConditionalOnMissingBean` in `FileStoresAutoConfiguration`, ordered after `JllmSqlAutoConfiguration`: supply your
+  own beans (or the SQL starter) and they win.
+- `SettingsSource`, `ProjectMcpTrust`: optional beans read by the starter's `JllmWebAutoConfiguration` (`ObjectProvider`); without
   them the files are used.
 - `TokenStore`: returned by your `HarnessIdentity.tokenStore()`; null = the store the `tokenStore` settings describe,
   under `HarnessIdentity.tokenDir()`.
 - `HarnessIdentity`, `WebAuthentication`, `ChatAccess` (sign-in, per-user policy, chat ownership) are beans too;
-  `JllmWebCommonsAutoConfiguration` falls back to "nobody signs in" without them.
+  `JllmWebAutoConfiguration` falls back to "nobody signs in" without them.
 
 Rules every store keeps (the helpers are static methods on the interfaces):
 - ids and names `[a-z0-9_-]{1,64}` (`UserRepository.validId`, `SkillRepository.validName`);
@@ -721,8 +758,10 @@ Rules every store keeps (the helpers are static methods on the interfaces):
 - a persistent login session store keeps a hash of the token, never the token.
 
 Chat history: `ChatSessionStore`, `SubAgentRunLog`, `MnemonicStore` and `StateStore` ([8](#8-persistence)) are
-optional beans read by `HarnessConfiguration`; without them it uses `FileChatSessionStore`,
+optional beans read by `JllmWebAutoConfiguration`; without them `HarnessFactory` uses `FileChatSessionStore`,
 `FileHistorySubAgentRunLog`, `FileMnemonicStore` and `FileStateStore` under each chat's history root
-(`<base>/<chatId>/.jllm/history`). Chat retention (`chatRetentionLimit`) picks the chats to delete from `ChatSessionStore.list()`.
+(`<base>/<chatId>/.jllm/history`). Chat retention (`chatRetentionLimit`) picks the chats to delete from `ChatSessionService.list()` (all chats).
+The web chat list asks the store only for what the user may see (`ChatAccess.visibility(user)` -> `ChatVisibility`: everything, owned, one owner, nothing); `canSee` stays the final check.
 
-A sketch of a MySQL store (tables, mapping of errors, token table) is in [jllm-web/README.md](../../jllm-web/README.md#a-possible-extension-a-mysql-store).
+The SQL implementation is a worked example: [jllm-sql-spring-starter](../../web/jllm-sql-spring-starter/README.md) (tables, error
+mapping, token table with optional encryption, per-dialect schema script).

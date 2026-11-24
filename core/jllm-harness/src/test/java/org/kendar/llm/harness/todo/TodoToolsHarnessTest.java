@@ -3,10 +3,12 @@ package org.kendar.llm.harness.todo;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.AgentHarness;
+import org.kendar.llm.harness.AgentHarnessBuilder;
 import org.kendar.llm.harness.context.ContextStrategyKind;
 import org.kendar.llm.harness.session.ChatSessionData;
 import org.kendar.llm.harness.session.InMemoryChatSessionStore;
 import org.kendar.llm.harness.settings.HarnessSettings;
+import org.kendar.llm.harness.settings.HarnessSettingsLoader;
 import org.kendar.llm.harness.state.FileStateStore;
 
 import java.nio.file.Files;
@@ -30,12 +32,12 @@ class TodoToolsHarnessTest {
         Path f = Files.createTempFile(base, "settings", ".json");
         Files.writeString(f, "{\"context\":{\"strategy\":\"" + strategy + "\""
                 + (todos == null ? "" : ",\"todos\":" + todos) + "}}");
-        return HarnessSettings.load(f, k -> null);
+        return HarnessSettingsLoader.load(f, k -> null);
     }
 
     private AgentHarness harness(ScriptedModel model, HarnessSettings settings, Path stateRoot,
                                  InMemoryChatSessionStore sessions) {
-        return AgentHarness.builder().modelClient(model).config(config(base)).withoutStandardTools()
+        return new AgentHarnessBuilder().modelClient(model).config(config(base)).withoutStandardTools()
                 .settings(settings).stateStore(new FileStateStore(stateRoot)).sessionStore(sessions).build();
     }
 

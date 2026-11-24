@@ -130,7 +130,7 @@ class FileToolsLenientTest {
                 return Set.of("fake");
             }
 
-            public String extract(Path file) {
+            public String extract(java.io.InputStream in, String fileName) {
                 return "alpha\nbeta\ngamma";
             }
         });

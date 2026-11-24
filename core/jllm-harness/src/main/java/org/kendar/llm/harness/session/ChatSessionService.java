@@ -1,5 +1,6 @@
 package org.kendar.llm.harness.session;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -67,13 +68,17 @@ public class ChatSessionService {
     }
 
     public List<ChatSessionData> list() {
-        return store.list();
+        return store.list(ChatVisibility.everything());
     }
 
-    /** The chats of {@code owner}; null = every chat (admin, CLI). */
+    /** The chats of {@code owner}; null = every chat (admin, CLI). The store filters. */
     public List<ChatSessionData> list(String owner) {
-        if (owner == null) return store.list();
-        return store.list().stream().filter(c -> owns(owner, c)).toList();
+        return store.list(owner == null ? ChatVisibility.everything() : ChatVisibility.ownedBy(owner));
+    }
+
+    /** The chats {@code visibility} admits; the store filters. */
+    public List<ChatSessionData> list(ChatVisibility visibility) {
+        return store.list(visibility);
     }
 
     /** True when {@code owner} may see the chat: a null owner sees everything, anyone else only their own chats. */
@@ -94,7 +99,7 @@ public class ChatSessionService {
         for (var l : deleteListeners) {
             try {
                 l.accept(chatId);
-            } catch (RuntimeException e) {
+            } catch (RuntimeException e) { // boundary: cleanup after a delete is best effort
                 org.slf4j.LoggerFactory.getLogger(ChatSessionService.class)
                         .warn("Cleanup of deleted chat {} failed: {}", chatId, e.toString());
             }
@@ -116,7 +121,7 @@ public class ChatSessionService {
                 if (!line.isBlank() && !ChatSessionData.isReference(line)) out.add(mapper.readTree(line));
             }
             return out;
-        } catch (Exception e) {
+        } catch (JsonProcessingException e) {
             throw new IllegalStateException("Corrupt message log for chat " + s.chatId(), e);
         }
     }
@@ -152,7 +157,7 @@ public class ChatSessionService {
                 }
             }
             store.save(current.withMessagesJson(sb.toString()));
-        } catch (Exception e) {
+        } catch (JsonProcessingException e) {
             throw new IllegalStateException("Cannot serialize messages", e);
         }
     }
@@ -170,7 +175,7 @@ public class ChatSessionService {
             for (String line : raw.split("\n")) {
                 if (!line.isBlank() && ChatSessionData.isReference(line)) out.add(mapper.readTree(line));
             }
-        } catch (Exception e) {
+        } catch (JsonProcessingException e) {
             throw new IllegalStateException("Corrupt message log for chat " + s.chatId(), e);
         }
         return out;
@@ -189,7 +194,7 @@ public class ChatSessionService {
                 sb.append(mapper.writeValueAsString(m));
             }
             return sb.toString();
-        } catch (Exception e) {
+        } catch (JsonProcessingException e) {
             throw new IllegalStateException("Cannot serialize messages", e);
         }
     }

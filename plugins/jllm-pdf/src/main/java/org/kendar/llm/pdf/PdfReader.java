@@ -4,14 +4,15 @@ import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.contentstream.operator.Operator;
 import org.apache.pdfbox.cos.COSBase;
 import org.apache.pdfbox.io.MemoryUsageSetting;
+import org.apache.pdfbox.io.RandomAccessReadBuffer;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.encryption.InvalidPasswordException;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.kendar.llm.harness.tools.DocumentReader;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InterruptedIOException;
-import java.nio.file.Path;
 import java.util.List;
 import java.util.Set;
 
@@ -48,11 +49,12 @@ public final class PdfReader implements DocumentReader {
     }
 
     @Override
-    public String extract(Path file) throws IOException {
+    public String extract(InputStream in, String fileName) throws IOException {
         checkInterrupted();
         // An owner password only restricts printing/copying: such a file opens with the empty user password.
         // A real user password makes the load fail with InvalidPasswordException.
-        try (PDDocument doc = Loader.loadPDF(file.toFile(),
+        // PDFBox needs random access: the stream (bounded by the document size cap of the caller) is buffered
+        try (PDDocument doc = Loader.loadPDF(new RandomAccessReadBuffer(in),
                 MemoryUsageSetting.setupMixed(MAX_MAIN_MEMORY_BYTES, MAX_STORAGE_BYTES).streamCache)) {
             if (doc.isEncrypted()) doc.setAllSecurityToBeRemoved(true);
             PDFTextStripper stripper = new InterruptibleTextStripper();

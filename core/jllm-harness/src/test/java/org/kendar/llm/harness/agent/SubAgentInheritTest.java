@@ -53,7 +53,7 @@ class SubAgentInheritTest {
         String before = rig.sessions.get(chat).messagesJson();
         rig.model.enqueue(text("found"));
 
-        String answer = rig.loop.runSubAgent(chat, "task1", "dig", new AgentDefinition("x", "d", List.of(), "", true, null));
+        String answer = rig.subAgent(chat, "task1", "dig", new AgentDefinition("x", "d", List.of(), "", true, null));
 
         assertEquals("found", answer);
         ArrayNode sent = rig.model.requests.get(0).messages();
@@ -72,7 +72,7 @@ class SubAgentInheritTest {
         ScriptedModel own = new ScriptedModel();
         own.enqueue(text("mine"));
 
-        String answer = rig.loop.runSubAgent(chat, "task1", "dig", new AgentDefinition("x", "d", List.of(), "", false, own));
+        String answer = rig.subAgent(chat, "task1", "dig", new AgentDefinition("x", "d", List.of(), "", false, own));
 
         assertEquals("mine", answer);
         assertEquals(1, own.requests.get(0).messages().size());

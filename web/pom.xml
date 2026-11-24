@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.kendar.llm</groupId>
+        <artifactId>jllm</artifactId>
+        <version>${revision}</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>jllm-web-group</artifactId>
+    <packaging>pom</packaging>
+    <name>jllm-web-group</name>
+    <description>Web API of jllm: framework-free handlers and the Spring Boot starter.</description>
+
+    <url>https://github.com/kendarorg/jllm</url>
+
+    <scm>
+        <connection>scm:git:git://github.com/kendarorg/jllm.git</connection>
+        <developerConnection>scm:git:git://github.com/kendarorg/jllm.git</developerConnection>
+        <url>https://www.github.com/kendarorg/jllm</url>
+        <tag>HEAD</tag>
+    </scm>
+
+    <modules>
+        <module>jllm-web-commons</module>
+        <module>jllm-web-spring-starter</module>
+        <module>jllm-sql</module>
+        <module>jllm-sql-spring-starter</module>
+    </modules>
+</project>

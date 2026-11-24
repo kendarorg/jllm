@@ -1,0 +1,7 @@
+# jllm MySQL JDBC driver, never bundled. version must equal mysql.version of the root pom (a test checks it).
+# Then "<sha256>  <path in Maven Central>".
+version=9.2.0
+license=GPL-2.0 with the Universal FOSS Exception
+accept=required
+terms=https://oss.oracle.com/licenses/universal-foss-exception/  https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
+7e9941bbdcca244d878ea95bfff788fd9ba6a65af757f24be6c632930d61c7ed  com/mysql/mysql-connector-j/9.2.0/mysql-connector-j-9.2.0.jar

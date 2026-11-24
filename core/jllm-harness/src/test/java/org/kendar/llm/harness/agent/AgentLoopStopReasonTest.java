@@ -31,7 +31,7 @@ class AgentLoopStopReasonTest {
 
     private Events run() {
         Events ev = new Events();
-        rig.loop.run(chatId, "hi", ev, () -> false);
+        rig.loop.run(chatId, "hi", ev, () -> false, null);
         return ev;
     }
 

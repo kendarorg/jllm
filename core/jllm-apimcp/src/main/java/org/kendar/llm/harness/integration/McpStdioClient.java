@@ -55,11 +55,6 @@ public final class McpStdioClient implements McpClient {
     /** Whether a start ever succeeded: only a server that worked is restarted. */
     private volatile boolean started;
 
-    public McpStdioClient(ObjectMapper mapper, String name, String executable, List<String> args,
-                          Map<String, String> env) {
-        this(mapper, name, executable, args, env, null);
-    }
-
     /**
      * @param inheritedEnv patterns of the variables of this process the server inherits ({@code null}: all); the
      *                     server's own {@code env} is added on top
@@ -126,7 +121,7 @@ public final class McpStdioClient implements McpClient {
             log.warn("MCP server '{}' is unavailable: {}", name, gaveUp);
             try {
                 onUnavailable.accept(gaveUp);
-            } catch (RuntimeException e) {
+            } catch (RuntimeException e) { // boundary: an embedder callback must not break the client
                 log.warn("MCP server '{}': unavailable callback failed: {}", name, e.toString());
             }
         }

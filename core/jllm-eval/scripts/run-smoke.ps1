@@ -22,6 +22,12 @@
 #   *_RPM        requests per minute; 0 = unpaced
 #   *_THINKING   minimal|low|medium|high; empty = the model's default (ollama defaults to minimal)
 # With both roles on anthropic, the judge shares the target's base, context, timeout and rpm (one eval.anthropic.* block).
+#
+# Run pinning and reliability:
+#   DIRTY_TREE   refuse | warn | allow (default warn): what to do when tracked files differ from HEAD (the eval results
+#                folder excluded). refuse stops before the warm-up call and lists the files. A baseline update
+#                (UPDATE_BASELINE=1) from a dirty tree is always refused.
+#   PASS_K       comma list of k for pass@k / pass^k; empty = 1 and MAX_TRIALS. A k above a case's trials is not measured.
 param([string]$Preset = '')
 
 $ErrorActionPreference = 'Stop'
@@ -141,6 +147,9 @@ $TEST_GROUPS = (Get-Setting 'TEST_GROUPS' 'all') -replace '\s', ''   # 'all' or 
 if (($TEST_GROUPS -split ',') -contains 'all') { $TEST_GROUPS = 'smoke,full,strategy,compaction,unit' }
 $TESTS = Get-Setting 'TESTS' ''                    # optional comma separated test classes
 $TRIALS = Get-Setting 'TRIALS' '1'
+$DIRTY_TREE = Get-Setting 'DIRTY_TREE' 'warn'
+if ($DIRTY_TREE -notin 'refuse', 'warn', 'allow') { Fail "DIRTY_TREE must be refuse, warn or allow (got '$DIRTY_TREE')" }
+$PASS_K = Get-Setting 'PASS_K' '' -AllowEmpty
 $MAX_TRIALS = Get-Setting 'MAX_TRIALS' '2'         # cap on trials of any case, including cases that set their own count
 $UPDATE_BASELINE = Get-Setting 'UPDATE_BASELINE' '0'   # 1: store this run as the model baseline
 $IGNORE_TEST_FAILURES = Get-Setting 'IGNORE_TEST_FAILURES' '1'   # 1: failed cases never fail the Maven build
@@ -236,6 +245,7 @@ Write-Host "Preset: $(if ($Preset -eq 'none') { 'none' } else { Split-Path $Pres
 Write-Host "JAVA_HOME: $JAVA_HOME"
 Write-Host "Target: $TARGET_PROVIDER $TARGET_MODEL$(if ($TARGET_MODEL_NAME) { " as $TARGET_MODEL_NAME" })  thinking: $(if ($TARGET_THINKING) { $TARGET_THINKING } else { 'default' })  ctx: $TARGET_CTX_TOKENS  rpm: $TARGET_RPM"
 Write-Host "Judge:  $JUDGE_PROVIDER $JUDGE_MODEL$(if ($JUDGE_MODEL_NAME) { " as $JUDGE_MODEL_NAME" })  thinking: $(if ($JUDGE_THINKING) { $JUDGE_THINKING } else { 'default' })  ctx: $JUDGE_CTX_TOKENS  rpm: $JUDGE_RPM  key: $judgeKeyLabel"
+Write-Host "Pinning: dirty tree: $DIRTY_TREE  pass@k: $(if ($PASS_K) { $PASS_K } else { 'default (1 and max trials)' })"
 Write-Host "Compaction ctx: $COMPACTION_CTX_TOKENS  groups: $TEST_GROUPS  tests: $testsShown  trials: $TRIALS  max trials: $MAX_TRIALS  timeout: ${TIMEOUT_SECONDS}s  case timeout cap: ${CASE_TIMEOUT_SECONDS}s  parallelism: $PARALLELISM"
 
 # ---- eval settings
@@ -295,6 +305,7 @@ if ($TARGET_MODEL_NAME) { $evalArgs += "-Deval.target.modelName=$TARGET_MODEL_NA
 if ($JUDGE_MODEL_NAME) { $evalArgs += "-Deval.judge.modelName=$JUDGE_MODEL_NAME" }
 if ($SYSTEM_PROMPT_EXTRA -ne 'none') { $secretEnv['EVAL_SYSTEMPROMPT_EXTRA'] = $SYSTEM_PROMPT_EXTRA }
 if ($TESTS) { $evalArgs += "-Dtest=$TESTS" }
+if ($PASS_K) { $evalArgs += "-Deval.passK=$PASS_K" }
 
 $ignoreFailures = if ($IGNORE_TEST_FAILURES -eq '1') { 'true' } else { 'false' }
 $mvnArgs = @(
@@ -310,6 +321,7 @@ $mvnArgs = @(
     "-Deval.trials=$TRIALS",
     "-Deval.maxTrials=$MAX_TRIALS",
     "-Deval.updateBaseline=$(if ($UPDATE_BASELINE -eq '1') { 'true' } else { 'false' })",
+    "-Deval.dirtyTree=$DIRTY_TREE",
     "-Deval.caseTimeoutSeconds=$CASE_TIMEOUT_SECONDS",
     "-Deval.compaction.contextTokens=$COMPACTION_CTX_TOKENS",
     "-Deval.timeout.warmup=$TIMEOUT_SECONDS"

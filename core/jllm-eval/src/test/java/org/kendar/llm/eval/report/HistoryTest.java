@@ -20,11 +20,12 @@ class HistoryTest {
         Path run = tmp.resolve("results").resolve(model).resolve(folder);
         Files.createDirectories(run);
         Files.writeString(run.resolve("summary.json"), "{\"run\":{\"model\":\"" + model + "\",\"judgeModel\":\"j\","
-                + "\"selfGraded\":false,\"startTime\":\"2026-11-17T14:30:00Z\",\"runFolder\":\"" + folder + "\"},\"overall\":{\"cases\":4,\"passRate\":"
-                + passRate + ",\"passKRate\":0.5,\"tokens\":{\"perTrial\":1234}},\"baseline\":{\"present\":false}}");
+                + "\"selfGraded\":false,\"reportK\":5,\"startTime\":\"2026-11-17T14:30:00Z\",\"runFolder\":\"" + folder + "\"},\"overall\":{\"cases\":4,\"passRate\":"
+                + passRate + ",\"passAtK\":{\"1\":" + passRate + ",\"5\":0.9},\"passPowK\":{\"1\":" + passRate
+                + ",\"5\":0.5},\"tokens\":{\"perTrial\":1234}},\"baseline\":{\"present\":false}}");
         Files.writeString(run.resolve("run.json"),
                 "{\"targetType\":\"remote\",\"targetName\":\"mac\",\"quantization\":\"q4\",\"contextTokens\":65536,"
-                        + "\"gitCommit\":\"abc\"}");
+                        + "\"build\":{\"commit\":\"0123456789abcdef\",\"dirty\":true}}");
         Files.writeString(run.resolve("report.md"), "# report " + model);
         return run;
     }
@@ -45,7 +46,10 @@ class HistoryTest {
         assertTrue(index.contains("| " + History.localTime("2026-11-17T14:30:00Z") + " | "), index);
         assertTrue(!index.contains("| - |"), index);
         String json = Files.readString(hist.resolve("20261117-143000_qwen3.6-27b.json"));
-        assertTrue(json.contains("\"commit\" : \"abc\"") && json.contains("\"contextTokens\" : 65536"));
+        assertTrue(json.contains("\"commit\" : \"0123456789abcdef\"") && json.contains("\"contextTokens\" : 65536"));
+        assertTrue(index.contains("| 01234567 (dirty) |"), index);
+        assertTrue(index.contains("| pass@k | pass^k |"), index);
+        assertTrue(index.contains("| 90.0% (k=5) | 50.0% (k=5) |"), index);
     }
 
     @Test

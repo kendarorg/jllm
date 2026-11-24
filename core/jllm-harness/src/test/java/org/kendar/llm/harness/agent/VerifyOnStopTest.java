@@ -66,7 +66,7 @@ class VerifyOnStopTest {
         rig.model.enqueue(text("a"), text("b"), text("c"));
         Events ev = new Events();
 
-        assertEquals(AgentLoop.Outcome.COMPLETED, rig.loop.run(chatId, "go", ev, () -> false));
+        assertEquals(AgentLoop.Outcome.COMPLETED, rig.loop.run(chatId, "go", ev, () -> false, null));
 
         assertEquals(List.of("fail 1", "fail 2"), verifyNotes(rig.sessions.messages(rig.sessions.get(chatId))));
         assertEquals(2, ev.ofType("verify_failed").size());
@@ -85,7 +85,7 @@ class VerifyOnStopTest {
         for (int i = 0; i < 10; i++) rig.model.enqueue(text("t" + i));
         Events ev = new Events();
 
-        assertEquals(AgentLoop.Outcome.UNVERIFIED, rig.loop.run(chatId, "go", ev, () -> false));
+        assertEquals(AgentLoop.Outcome.UNVERIFIED, rig.loop.run(chatId, "go", ev, () -> false, null));
         // default maxReentries 3: the first attempt and three re-entries
         assertEquals(4, rig.model.requests.size());
         assertEquals(3, ev.ofType("verify_failed").size());
@@ -99,7 +99,7 @@ class VerifyOnStopTest {
         for (int i = 0; i < 10; i++) rig.model.enqueue(text("t" + i));
         Events ev = new Events();
 
-        assertEquals(AgentLoop.Outcome.UNVERIFIED, rig.loop.run(chatId, "go", ev, () -> false));
+        assertEquals(AgentLoop.Outcome.UNVERIFIED, rig.loop.run(chatId, "go", ev, () -> false, null));
         assertEquals(2, rig.model.requests.size());
         assertEquals("verify_repeat", ev.ofType("stuck").get(0).path("pattern").asText());
     }
@@ -110,7 +110,7 @@ class VerifyOnStopTest {
         h.add(HookEvent.STOP, ctx -> ctx.attempt() == 1 ? HookResult.continueWith("x") : HookResult.allow());
         hooks(h);
         rig.model.enqueue(text("a"), text("b"));
-        rig.loop.run(chatId, "go", new Events(), () -> false);
+        rig.loop.run(chatId, "go", new Events(), () -> false, null);
 
         ArrayNode first = rig.model.requests.get(0).messages();
         ArrayNode second = rig.model.requests.get(1).messages();
@@ -128,7 +128,7 @@ class VerifyOnStopTest {
         seen.clear();
         rig.sessions.setMode(chatId, PermissionMode.PLAN);
         rig.model.enqueue(text("plan"));
-        assertEquals(AgentLoop.Outcome.COMPLETED, rig.loop.run(chatId, "go", new Events(), () -> false));
+        assertEquals(AgentLoop.Outcome.COMPLETED, rig.loop.run(chatId, "go", new Events(), () -> false, null));
         assertTrue(seen.isEmpty());
     }
 
@@ -139,8 +139,8 @@ class VerifyOnStopTest {
         hooks(h);
         for (int i = 0; i < 10; i++) rig.model.enqueue(text("answer " + i));
 
-        AgentLoop.SubAgentIncompleteException e = assertThrows(AgentLoop.SubAgentIncompleteException.class,
-                () -> rig.loop.runSubAgent(chatId, null, "fix it"));
+        SubAgentIncompleteException e = assertThrows(SubAgentIncompleteException.class,
+                () -> rig.subAgent(chatId, null, "fix it", null));
         assertEquals("unverified", e.status());
         assertEquals("answer 3", e.partial());
         assertTrue(seen.get(0).agent().matches(".+ #\\d+"), seen.get(0).agent());
@@ -158,19 +158,19 @@ class VerifyOnStopTest {
             return HookResult.allow();
         });
         ordered.add(HookEvent.STOP, ctx -> {
-            changed[seen.size() - 1] = rig.loop.changedInRun(ctx.chatId(), ctx.agent());
+            changed[seen.size() - 1] = rig.loop.guards().changedInRun(ctx.chatId(), ctx.agent());
             return HookResult.allow();
         });
         rig.hooks = ordered;
         rig.loop = rig.loopWith(rig.model);
         rig.model.enqueue(toolUse("1", "look", "{}"), text("only looked"), toolUse("2", "edit", "{}"), text("edited"));
 
-        rig.loop.run(chatId, "look", new Events(), () -> false);
-        rig.loop.run(chatId, "edit", new Events(), () -> false);
+        rig.loop.run(chatId, "look", new Events(), () -> false, null);
+        rig.loop.run(chatId, "edit", new Events(), () -> false, null);
 
         assertFalse(changed[0]);
         assertTrue(changed[1]);
-        assertFalse(rig.loop.changedInRun(chatId, HookContext.MAIN)); // cleared once the run ended
+        assertFalse(rig.loop.guards().changedInRun(chatId, HookContext.MAIN)); // cleared once the run ended
     }
 
     @Test

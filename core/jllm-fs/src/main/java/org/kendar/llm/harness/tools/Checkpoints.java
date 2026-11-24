@@ -3,16 +3,20 @@ package org.kendar.llm.harness.tools;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.kendar.llm.harness.sandbox.FileBackend;
 
+import org.kendar.llm.harness.tools.PathResolver.JailedPath;
+
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.io.UncheckedIOException;
+import java.nio.channels.Channels;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.stream.Stream;
 
 /**
  * File checkpoints: the first time a user turn touches a file with {@code write_file} or {@code edit_file}, the old
@@ -27,21 +31,22 @@ import java.util.stream.Stream;
  * there ({@link #isCheckpointPath}).
  */
 public final class Checkpoints {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(Checkpoints.class);
 
     private static final String DIR = ".jllm/checkpoints";
     /** Turn directory names: at most 18 digits, so they parse as a long and the next one does not overflow. */
+    /** The most a {@code created.txt} is read: a longer one is not ours. */
+    private static final long MAX_CREATED_BYTES = 16L * 1024 * 1024;
     private static final String TURN_NAME = "\\d{1,18}";
 
     private final Map<String, Long> current = new ConcurrentHashMap<>();
     private final Map<String, Set<String>> touched = new ConcurrentHashMap<>();
 
-    /** Whether a host path is inside the checkpoint data of {@code workDir} (directly or through a link). */
-    public static boolean isCheckpointPath(Path workDir, Path p) {
-        Path work = workDir.toAbsolutePath().normalize();
-        Path dir = work.resolve(DIR);
-        if (p.toAbsolutePath().normalize().startsWith(dir)) return true;
-        Path real = PathLocks.realKey(p);
-        return real.startsWith(PathLocks.realKey(dir));
+    /** Whether a jailed host path is inside the checkpoint data of {@code workDir} (directly or through a link). */
+    public static boolean isCheckpointPath(Path workDir, JailedPath p) {
+        Path dir = workDir.toAbsolutePath().normalize().resolve(DIR);
+        if (p.lexical().startsWith(dir)) return true;
+        return PathResolver.realPath(p).startsWith(PathResolver.realKey(dir));
     }
 
     /** Whether a container target is inside the checkpoint data of the work dir. */
@@ -58,10 +63,13 @@ public final class Checkpoints {
     /** Starts a new turn for the chat; edits recorded from now on belong to it. */
     public void beginTurn(String chatId, Path workDir) {
         long next = 1;
-        Path root = root(chatId, workDir);
-        if (Files.isDirectory(root)) {
-            try (Stream<Path> s = Files.list(root)) {
-                next = s.mapToLong(p -> turnNumber(p.getFileName().toString())).max().orElse(0) + 1;
+        if (Files.isDirectory(workDir)) {
+            try {
+                JailedPath root = PathResolver.resolve(workDir, DIR + "/" + chatId, ExternalLinks.NONE, false);
+                BasicFileAttributes a = PathJail.stat(root);
+                if (a != null && a.isDirectory()) {
+                    for (PathJail.Entry e : PathJail.list(root)) next = Math.max(next, turnNumber(e.name()) + 1);
+                }
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
             }
@@ -85,8 +93,9 @@ public final class Checkpoints {
                 long n = turnNumber(e.path("name").asText());
                 if (n >= 0) next = Math.max(next, n + 1);
             }
-        } catch (IOException | RuntimeException e) {
+        } catch (IOException | RuntimeException e) { // boundary: no checkpoints yet, or the container is not reachable
             // no checkpoints yet (or the container is not reachable: the first tool call will say so)
+            log.debug("No checkpoint state loaded: {}", e.toString());
         }
         current.put(chatId, next);
         touched.put(chatId, ConcurrentHashMap.newKeySet());
@@ -138,7 +147,7 @@ public final class Checkpoints {
                 try {
                     fb.write(new FileBackend.Target(FileBackend.Root.WORKSPACE, dir + "/files/" + rel),
                             fb.read(target, 0, -1), false);
-                } catch (IOException | RuntimeException e) {
+                } catch (IOException | RuntimeException e) { // boundary: roll back on any failure, rethrown unchanged
                     r.rollback();
                     throw e;
                 }
@@ -149,7 +158,7 @@ public final class Checkpoints {
         } catch (IOException e) {
             seen.remove(rel);
             throw new UncheckedIOException("Cannot checkpoint " + rel, e);
-        } catch (RuntimeException e) {
+        } catch (RuntimeException e) { // boundary: forget the path on any failure, rethrown unchanged
             seen.remove(rel);
             throw e;
         }
@@ -182,9 +191,9 @@ public final class Checkpoints {
                     if (n >= 0 && e.path("dir").asBoolean(false) && !e.path("link").asBoolean(false)) nums.add(n);
                 }
             } catch (java.nio.file.NoSuchFileException e) {
-                return new UndoResult(0, restored, deleted);
+                return new UndoResult(0, restored, deleted, List.of());
             }
-            if (nums.isEmpty()) return new UndoResult(0, restored, deleted);
+            if (nums.isEmpty()) return new UndoResult(0, restored, deleted, List.of());
             nums.sort(Comparator.reverseOrder());
             List<Long> picked = nums.subList(0, Math.clamp(turns, 1, nums.size()));
             Set<String> seen = new HashSet<>();
@@ -205,7 +214,7 @@ public final class Checkpoints {
             }
             touched.remove(chatId);
             current.remove(chatId);
-            return new UndoResult(picked.size(), restored, deleted);
+            return new UndoResult(picked.size(), restored, deleted, List.of());
         } catch (IOException e) {
             throw new UncheckedIOException("Cannot undo", e);
         }
@@ -234,21 +243,17 @@ public final class Checkpoints {
         }
     }
 
-    private static Path root(String chatId, Path workDir) {
-        return workDir.toAbsolutePath().normalize().resolve(DIR).resolve(chatId);
-    }
-
     /** Records the state of {@code file} before a write; no-op after the first touch in the turn. */
-    public void record(ToolContext ctx, Path file) {
+    public void record(ToolContext ctx, JailedPath file) {
         record(ctx, file, StorageQuota.UNLIMITED);
     }
 
-    /** As {@link #record(ToolContext, Path)}, counting the backup in {@code quota}. */
-    public void record(ToolContext ctx, Path file, StorageQuota quota) {
+    /** As {@link #record(ToolContext, JailedPath)}, counting the backup in {@code quota}. */
+    public void record(ToolContext ctx, JailedPath file, StorageQuota quota) {
         Long turn = current.get(ctx.chatId());
         if (turn == null) return;
         Path work = ctx.workDir().toAbsolutePath().normalize();
-        Path abs = file.toAbsolutePath().normalize();
+        Path abs = file.lexical();
         if (!abs.startsWith(work) || abs.startsWith(work.resolve(".jllm"))) return; // outside the project or our own data
         // the scratch dir of the agent: with the local layout it lies inside the work dir, and it is never undone
         Path scratch = ctx.scratchDir() == null ? null : ctx.scratchDir().toAbsolutePath().normalize();
@@ -256,48 +261,54 @@ public final class Checkpoints {
         String rel = work.relativize(abs).toString().replace('\\', '/');
         Set<String> seen = touched.computeIfAbsent(ctx.chatId(), k -> ConcurrentHashMap.newKeySet());
         if (!seen.add(rel)) return;
-        Path dir = root(ctx.chatId(), work).resolve(String.valueOf(turn));
+        String dir = DIR + "/" + ctx.chatId() + "/" + turn;
         try {
-            if (Files.exists(abs)) {
-                Path backup = dir.resolve("files").resolve(rel);
-                Files.createDirectories(backup.getParent());
-                // a link planted in the checkpoint dir must not send the copy elsewhere
-                if (!backup.getParent().toRealPath().startsWith(work.resolve(DIR).toRealPath())) {
-                    throw new IOException("Checkpoint directory leaves " + DIR);
-                }
-                StorageQuota.Reservation r = quota.reserve(ctx.chatId(), backup,
-                        Files.exists(backup, LinkOption.NOFOLLOW_LINKS) ? Files.size(backup) : 0, Files.size(abs));
+            BasicFileAttributes st = PathJail.stat(file);
+            if (st != null) {
+                JailedPath backup = PathResolver.resolve(work, dir + "/files/" + rel, ExternalLinks.NONE, true);
+                PathJail.createParentDirectories(backup);
+                BasicFileAttributes old = PathJail.statNoFollow(backup);
+                StorageQuota.Reservation r = quota.reserve(ctx.chatId(), backup.lexical(), old != null ? old.size() : 0,
+                        st.size());
                 try {
-                    Files.deleteIfExists(backup); // a link is removed, not followed
-                    Files.copy(abs, backup);
-                } catch (IOException | RuntimeException e) {
+                    PathJail.deleteIfExists(backup); // a link is removed, not followed
+                    try (InputStream in = PathJail.newInputStream(file);
+                         OutputStream out = Channels.newOutputStream(
+                                 PathJail.openWrite(backup, Set.of(StandardOpenOption.CREATE_NEW)))) {
+                        in.transferTo(out);
+                    }
+                } catch (IOException | RuntimeException e) { // boundary: roll back on any failure, rethrown unchanged
                     r.rollback();
                     throw e;
                 }
             } else {
-                Files.createDirectories(dir);
+                JailedPath created = PathResolver.resolve(work, dir + "/created.txt", ExternalLinks.NONE, true);
+                PathJail.createParentDirectories(created);
                 synchronized (this) {
-                    Files.writeString(dir.resolve("created.txt"), rel + "\n", StandardCharsets.UTF_8,
-                            java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND);
+                    try (OutputStream out = Channels.newOutputStream(PathJail.openWrite(created,
+                            Set.of(StandardOpenOption.CREATE, StandardOpenOption.APPEND)))) {
+                        out.write((rel + "\n").getBytes(StandardCharsets.UTF_8));
+                    }
                 }
             }
         } catch (IOException e) {
             seen.remove(rel);
             throw new UncheckedIOException("Cannot checkpoint " + rel, e);
-        } catch (RuntimeException e) {
+        } catch (RuntimeException e) { // boundary: forget the path on any failure, rethrown unchanged
             seen.remove(rel);
             throw e;
         }
     }
 
     /** Outcome of {@link #undo}. */
-    public record UndoResult(int turns, List<String> restored, List<String> deleted) {
+    public record UndoResult(int turns, List<String> restored, List<String> deleted, List<String> refused) {
         public String message() {
             if (turns == 0) return "Nothing to undo";
             StringBuilder sb = new StringBuilder("Undid " + turns + " turn(s): restored " + restored.size()
                     + " file(s), removed " + deleted.size() + " created file(s).");
             restored.forEach(f -> sb.append("\n  restored ").append(f));
             deleted.forEach(f -> sb.append("\n  deleted  ").append(f));
+            refused.forEach(f -> sb.append("\n  not restored ").append(f));
             sb.append("\nFiles changed by shell commands are not restored.");
             return sb.toString();
         }
@@ -305,102 +316,101 @@ public final class Checkpoints {
 
     /**
      * Where a relative path from checkpoint data goes in the work dir, or null when it must not be touched: absolute,
-     * with {@code ..}, inside {@code .jllm}, or leaving the work dir through a link.
+     * with {@code ..}, inside {@code .jllm}, or leaving the work dir through a link that {@code links} does not allow
+     * writing through (then {@code refused} gets a line naming the setting).
      */
-    private static Path safeTarget(Path work, Path realWork, String rel) {
+    private static JailedPath safeTarget(Path work, String rel, ExternalLinks links, List<String> refused) {
         String p = rel.strip().replace('\\', '/');
         if (p.isEmpty() || p.startsWith("/") || p.matches("^[A-Za-z]:.*")) return null;
         for (String seg : p.split("/")) {
             if (seg.equals("..")) return null;
         }
-        Path target;
+        JailedPath target;
         try {
-            target = work.resolve(p).normalize();
-        } catch (RuntimeException e) {
-            return null; // invalid path characters
+            target = PathResolver.resolve(work, p, links, true);
+        } catch (IllegalArgumentException e) {
+            if (String.valueOf(e.getMessage()).contains("is a link that leaves the work dir")) {
+                refused.add(p + " (a link that leaves the work dir; files.externalLinks is " + links.settingValue()
+                        + ", writing through it needs readwrite)");
+            }
+            return null; // invalid path characters, or a link leaving the work dir
         }
-        if (!target.startsWith(work) || target.equals(work) || target.startsWith(work.resolve(".jllm"))) return null;
-        Path real = PathLocks.realKey(target);
-        if (!real.startsWith(realWork) || real.equals(realWork) || real.startsWith(realWork.resolve(".jllm"))) {
-            return null;
-        }
+        if (target.components().isEmpty() || target.components().get(0).equals(".jllm")) return null;
+        List<String> real = PathResolver.realComponents(target);
+        if (real == null && links.followsOnWrite()) return target; // outside the work dir through a link: allowed
+        if (real == null || real.isEmpty() || real.get(0).equals(".jllm")) return null;
         return target;
     }
 
-    /** Deletes a directory tree without entering links or junctions (they are removed, not followed). */
-    private static void deleteTree(Path dir) throws IOException {
-        Path realDir = dir.toRealPath();
-        List<Path> all;
-        try (Stream<Path> s = Files.walk(dir)) {
-            all = s.sorted(Comparator.reverseOrder()).toList();
-        }
-        for (Path p : all) {
-            if (!p.equals(dir) && !PathLocks.realKey(p.getParent()).startsWith(realDir)) continue;
-            Files.deleteIfExists(p);
-        }
+    private static boolean isRealDirectory(JailedPath p) throws IOException {
+        BasicFileAttributes a = PathJail.statNoFollow(p);
+        return a != null && a.isDirectory() && !PathResolver.isLink(a);
     }
 
     /** Restores the files of the last {@code turns} turns that edited files, newest first. */
-    public UndoResult undo(String chatId, Path workDir, int turns) {
+    public UndoResult undo(String chatId, Path workDir, int turns, ExternalLinks links) {
         Path work = workDir.toAbsolutePath().normalize();
-        Path root = root(chatId, work);
         List<String> restored = new ArrayList<>();
         List<String> deleted = new ArrayList<>();
-        if (!Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS)) return new UndoResult(0, restored, deleted);
-        Path realWork;
+        List<String> refused = new ArrayList<>();
+        if (!Files.isDirectory(work)) return new UndoResult(0, restored, deleted, List.of());
+        JailedPath root = PathResolver.resolve(work, DIR + "/" + chatId, ExternalLinks.NONE, false);
+        List<PathJail.Entry> dirs;
         try {
-            realWork = work.toRealPath();
-            if (!root.toRealPath().startsWith(realWork.resolve(DIR))) {
-                throw new IOException("Checkpoint directory leaves the work dir");
-            }
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-        List<Path> dirs;
-        try (Stream<Path> s = Files.list(root)) {
-            dirs = s.filter(p -> turnNumber(p.getFileName().toString()) >= 0
-                            && Files.isDirectory(p, LinkOption.NOFOLLOW_LINKS))
-                    .sorted(Comparator.comparingLong((Path p) -> turnNumber(p.getFileName().toString())).reversed())
+            if (!isRealDirectory(root)) return new UndoResult(0, restored, deleted, List.of());
+            dirs = PathJail.list(root).stream()
+                    .filter(e -> turnNumber(e.name()) >= 0 && e.attributes().isDirectory() && !e.isLink())
+                    .sorted(Comparator.comparingLong((PathJail.Entry e) -> turnNumber(e.name())).reversed())
                     .limit(Math.max(1, turns)).toList();
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
         Set<String> seenRestored = new HashSet<>();
-        for (Path dir : dirs) {
+        for (PathJail.Entry entry : dirs) {
+            int refusedBefore = refused.size();
+            JailedPath dir = root.child(entry.name());
             try {
-                Path created = dir.resolve("created.txt");
-                if (Files.isRegularFile(created, LinkOption.NOFOLLOW_LINKS)) {
-                    for (String line : Files.readAllLines(created, StandardCharsets.UTF_8)) {
-                        Path target = safeTarget(work, realWork, line);
-                        if (target == null || Files.isDirectory(target, LinkOption.NOFOLLOW_LINKS)) continue;
-                        Files.deleteIfExists(target); // a link is removed, not followed
-                        deleted.add(work.relativize(target).toString().replace('\\', '/'));
+                JailedPath created = dir.child("created.txt");
+                BasicFileAttributes ca = PathJail.statNoFollow(created);
+                if (ca != null && ca.isRegularFile()) {
+                    String text = new String(PathJail.readAllBytes(created, MAX_CREATED_BYTES), StandardCharsets.UTF_8);
+                    for (String line : (Iterable<String>) text.lines()::iterator) {
+                        JailedPath target = safeTarget(work, line, links, refused);
+                        if (target == null || isRealDirectory(target)) continue;
+                        PathJail.deleteIfExists(target); // a link is removed, not followed
+                        deleted.add(String.join("/", target.components()));
                     }
                 }
-                Path files = dir.resolve("files");
-                if (Files.isDirectory(files, LinkOption.NOFOLLOW_LINKS)) {
-                    Path realFiles = files.toRealPath();
-                    try (Stream<Path> s = Files.walk(files)) { // does not follow links; junctions: real path check
-                        for (Path b : (Iterable<Path>) s.filter(f -> Files.isRegularFile(f, LinkOption.NOFOLLOW_LINKS)
-                                && PathLocks.realKey(f).startsWith(realFiles))::iterator) {
-                            String rel = files.relativize(b).toString().replace('\\', '/');
-                            Path target = safeTarget(work, realWork, rel);
-                            if (target == null) continue;
-                            Files.createDirectories(target.getParent());
-                            if (safeTarget(work, realWork, rel) == null) continue; // a link appeared on the way
-                            if (Files.isDirectory(target)) continue;
-                            AtomicFiles.copy(b, target); // through a link (checked to stay inside): its file was edited
-                            if (seenRestored.add(rel)) restored.add(rel);
+                JailedPath files = dir.child("files");
+                if (isRealDirectory(files)) {
+                    int skip = files.components().size();
+                    PathJail.walk(files, (b, a) -> {
+                        if (!a.isRegularFile() || b.components().size() <= skip) return PathJail.Action.CONTINUE;
+                        BasicFileAttributes own = PathJail.statNoFollow(b);
+                        if (own == null || !own.isRegularFile()) return PathJail.Action.CONTINUE; // a link: not trusted
+                        String rel = String.join("/", b.components().subList(skip, b.components().size()));
+                        JailedPath target = safeTarget(work, rel, links, refused);
+                        if (target == null) return PathJail.Action.CONTINUE;
+                        try {
+                            PathJail.createParentDirectories(target);
+                            if (PathJail.isDirectory(target)) return PathJail.Action.CONTINUE;
+                            try (InputStream in = PathJail.newInputStream(b)) {
+                                AtomicFiles.write(target, in); // through a link inside the jail: its file was edited
+                            }
+                        } catch (IllegalArgumentException e) {
+                            return PathJail.Action.CONTINUE; // a link leaving the work dir appeared on the way
                         }
-                    }
+                        if (seenRestored.add(rel)) restored.add(rel);
+                        return PathJail.Action.CONTINUE;
+                    });
                 }
-                deleteTree(dir);
+                if (refused.size() == refusedBefore) PathJail.deleteTree(dir); // kept when a restore was refused: retry with another policy
             } catch (IOException e) {
-                throw new UncheckedIOException("Cannot undo " + dir.getFileName(), e);
+                throw new UncheckedIOException("Cannot undo " + entry.name(), e);
             }
         }
         touched.remove(chatId);
         current.remove(chatId);
-        return new UndoResult(dirs.size(), restored, deleted);
+        return new UndoResult(dirs.size(), restored, deleted, refused);
     }
 }

@@ -66,6 +66,8 @@ class CaseApiTest {
         assertThrows(IllegalArgumentException.class, () -> EvalCase.named("x").trials(0));
     }
 
+    private static final List<Integer> KS = List.of(1, 2, 3, 5);
+
     private static TrialResult trial(int n, boolean ok) {
         return new TrialResult(n, null, List.of(ok ? CheckResult.pass("a", "") : CheckResult.fail("a", "bad")), ok,
                 Path.of("t" + n));
@@ -77,19 +79,28 @@ class CaseApiTest {
         EvalCase risk = EvalCase.named("r").user("a").risk().build();
         List<TrialResult> twoOfThree = List.of(trial(1, true), trial(2, false), trial(3, true));
 
-        CaseResult n = CaseResult.of(normal, "compaction", twoOfThree);
+        CaseResult n = CaseResult.of(normal, "compaction", twoOfThree, KS);
         assertEquals(2.0 / 3, n.passRate(), 1e-9);
-        assertFalse(n.passK());
+        assertEquals(2.0 / 3, n.passAtK().get(1), 1e-9);
+        assertEquals(2.0 / 3, n.passPowK().get(1), 1e-9);
+        assertEquals(1.0, n.passAtK().get(3), 1e-9);
+        assertEquals(0.0, n.passPowK().get(3), 1e-9);
+        assertFalse(n.passAtK().containsKey(5), "k above the trials is not measured");
+        assertFalse(n.passPowK().containsKey(5));
         assertTrue(n.passed());
 
-        CaseResult r = CaseResult.of(risk, "compaction", twoOfThree);
+        CaseResult r = CaseResult.of(risk, "compaction", twoOfThree, KS);
         assertFalse(r.passed(), "risk needs every trial");
         assertTrue(r.failureMessage().contains("trial 2") && r.failureMessage().contains("t2"));
 
-        assertTrue(CaseResult.of(risk, "compaction", List.of(trial(1, true), trial(2, true))).passK());
-        assertFalse(CaseResult.of(normal, "compaction", List.of(trial(1, false), trial(2, false), trial(3, true)))
+        CaseResult allPass = CaseResult.of(risk, "compaction", List.of(trial(1, true), trial(2, true)), KS);
+        assertEquals(1.0, allPass.passPowK().get(2), 1e-9);
+        assertFalse(allPass.passPowK().containsKey(3));
+        assertFalse(CaseResult.of(normal, "compaction", List.of(trial(1, false), trial(2, false), trial(3, true)), KS)
                 .passed());
-        assertFalse(CaseResult.of(normal, "compaction", List.of()).passed());
+        CaseResult none = CaseResult.of(normal, "compaction", List.of(), KS);
+        assertFalse(none.passed());
+        assertTrue(none.passAtK().isEmpty());
     }
 
     @Test
@@ -156,7 +167,7 @@ class CaseApiTest {
                     return CheckResult.pass("judge", "");
                 })).build();
 
-        CaseExecutor ex = new CaseExecutor(runner(model), out, 3, null);
+        CaseExecutor ex = new CaseExecutor(runner(model), out, 3, 10, KS, null);
         CaseResult res = ex.run(c, ContextStrategyKind.COMPACTION);
 
         assertFalse(res.passed());
@@ -166,19 +177,21 @@ class CaseApiTest {
     }
 
     @Test
-    void executorRunsConfiguredTrialsAndRiskStopsAtFirstFailure() {
+    void executorRunsConfiguredTrialsAndARiskCaseRunsAllOfThemEvenAfterAFailure() {
         ScriptedModel model = new ScriptedModel();
         for (int i = 0; i < 6; i++) model.enqueue(text("ok"));
         EvalCase normal = EvalCase.named("n").user("q").check(answerIs("ok")).build();
-        CaseExecutor ex = new CaseExecutor(runner(model), out, 3, null);
+        CaseExecutor ex = new CaseExecutor(runner(model), out, 3, 10, KS, null);
         assertEquals(3, ex.run(normal, ContextStrategyKind.COMPACTION).trials().size());
 
         ScriptedModel bad = new ScriptedModel();
         for (int i = 0; i < 3; i++) bad.enqueue(text("no"));
         EvalCase risk = EvalCase.named("r").user("q").risk().check(answerIs("ok")).build();
-        CaseResult r = new CaseExecutor(runner(bad), out, 3, null).run(risk, ContextStrategyKind.COMPACTION);
-        assertEquals(1, r.trials().size());
+        CaseResult r = new CaseExecutor(runner(bad), out, 3, 10, KS, null).run(risk, ContextStrategyKind.COMPACTION);
+        assertEquals(3, r.trials().size(), "no early stop: every trial runs");
         assertFalse(r.passed());
+        assertEquals(0.0, r.passAtK().get(3), 1e-9);
+        assertEquals(0.0, r.passPowK().get(1), 1e-9);
     }
 
     @Test

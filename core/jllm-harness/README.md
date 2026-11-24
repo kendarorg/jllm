@@ -1,7 +1,7 @@
 # jllm-harness
 
 Framework-free coding-agent harness for Java: a library to embed and a command-line agent. No Spring, JPA or
-Micrometer. Java 21, Jackson, JDK `HttpClient`, jsoup, swagger-parser, slf4j-api.
+Micrometer. Java 21, Jackson, the JDK `HttpClient`, jsoup, json-schema-validator, swagger-parser (with its transitive libraries) and `slf4j-api` (full list: `mvn dependency:tree -pl core/jllm-harness`).
 
 - **Models**: Anthropic (prompt caching, thinking, citations) and any OpenAI-compatible endpoint (OpenAI, Qwen,
   llama.cpp, vLLM, Ollama); an optional fast model for summaries, tool-group selection and the auto-mode classifier;
@@ -13,7 +13,7 @@ Micrometer. Java 21, Jackson, JDK `HttpClient`, jsoup, swagger-parser, slf4j-api
   prefix stays stable.
 - **Permissions**: `plan` / `edit` / `auto` modes, deny rules, approval policy, per-chat grants, fast-model
   classifier in `auto`.
-- **Sandbox**: current directory (CLI), per-chat directory or Docker; a writable scratch directory per chat and agent.
+- **Sandbox**: a layout (current directory for the CLI, per-chat directory for the web) plus a runner (local, no isolation, or a long-running Docker container with `standard`/`hardened` profile and `chat`/`user` scope); a writable scratch directory per chat and agent.
 - **Context**: three strategies. `compaction` (default) clears old tool results, then summarizes, then proposes a
   rewrite for approval. `mnemonic` never rewrites the log: it masks old content behind receipts, switches segments
   with handoff notes and offers `history_recall`. `scope` measures the whole request, offloads large tool results to
@@ -31,14 +31,14 @@ Front ends: [jllm-cli](../../jllm-cli/README.md) (terminal) and [jllm-web](../..
 ## Build
 
 ```sh
-mvn -pl jllm-harness -am package            # jar, sources jar, test-jar (HarnessTestSupport)
-mvn -pl jllm-harness -am package -Prelease  # also the javadoc jar
+mvn -pl core/jllm-harness -am package            # jar and sources jar
+mvn -pl core/jllm-harness -am package -Prelease  # also the javadoc jar
 ```
 
 ## Embedding
 
 ```java
-AgentHarness h = AgentHarness.builder()
+AgentHarness h = new AgentHarnessBuilder()
     .modelClient(ModelClients.anthropic(AnthropicSettings.defaults(System.getenv("ANTHROPIC_API_KEY")),
                                         new ObjectMapper()))
     .tools(List.of(myTool))                 // added to the standard Files, Shell and Web tools
@@ -79,7 +79,7 @@ ends the run. A cut `write_file` keeps the lines that arrived in the scratch dir
 ## Settings file, hooks and plugins
 
 ```java
-AgentHarness h = AgentHarness.builder()
+AgentHarness h = new AgentHarnessBuilder()
     .modelClient(client)
     .settings(Path.of("harness.json"))                       // MCP, REST, skills, instruction files, agent types
     .hook(HookEvent.PRE_TOOL, ctx -> HookResult.deny("no"))  // USER_PROMPT, PRE_TOOL, POST_TOOL, STOP, PRE_LLM, POST_LLM, PRE_AGENT, POST_AGENT
@@ -105,7 +105,7 @@ AgentHarness h = AgentHarness.builder()
   "permissions": {"deny": ["bash(rm -rf .*)"], "ask": ["bash(.*curl.*)"], "allow": ["bash(mvn .*)"]},
   "execution":  {"maxParallel": 1},
   "sandbox":    {"tempDir": "/var/tmp/harness", "timeoutSeconds": 120, "backend": "docker",
-                 "docker": {"image": "maven:3-eclipse-temurin-21", "network": "none"}},
+                 "docker": {"image": "maven:3-eclipse-temurin-21", "profile": "hardened", "scope": "chat"}},
   "context":    {"maxTokens": 100000, "auto": true, "keepTokens": 15000, "buffer": null, "keepRecentTurns": 6,
                  "strategy": "compaction", "scope": {"offloadChars": 20000, "safetyPercent": 2}},
   "output":     {"toolMaxChars": 30000, "eventMaxChars": 2000},
@@ -118,7 +118,7 @@ AgentHarness h = AgentHarness.builder()
   and [TOOLS](../../docs/guides/tools.md#document-readers). `builder.discoverPlugins()` loads the `HarnessPlugin`s found by
   `ServiceLoader` (classpath and `builder.pluginDir(...)`) that are listed and enabled under `plugins` in the settings
   (ids `pdf`, `docs`; see [EXTENDING](../../docs/guides/extending.md#3-plugins-and-slash-commands)); `builder.documentReader(...)` adds a reader directly.
-- `${ENV_VAR}` is expanded in every string; a missing variable fails the load. MCP servers support OAuth (`oauth: true`, see [MCP](../../docs/guides/mcp.md#oauth)); REST uses static headers only.
+- `${ENV_VAR}` is expanded in every string; a missing variable fails the load. MCP servers and REST APIs support OAuth (`oauth`, see [MCP](../../docs/guides/mcp.md#oauth)).
 - A REST operation becomes a tool only if it passes `allowedPaths` and `denyPaths` (`METHOD /path`, method optional, `*` wildcard).
   MCP tools follow `allowList` and `denyList` (tool names, `*` wildcard). Absent allow = all, `[]` = none, `["*"]` = all;
   deny hides matches. Hidden tools are never sent to the model.
@@ -145,7 +145,7 @@ AgentHarness h = AgentHarness.builder()
   ```json
   {"sandbox": {"shell": "/bin/zsh"}}
   ```
-  Windows (PowerShell 7), Linux/Unix (bash), macOS (zsh). A Docker backend always runs `sh -c` in the container.
+  Windows (PowerShell 7), Linux/Unix (bash), macOS (zsh). The container runner always runs `sh -c` in the container.
 - `execution.useContextStack` (default `true`): a sub-agent continues the parent's request prefix (same pinned text,
   system prompt and tool list; role text and task go in its first message) so the parent's KV cache is reused and still
   valid when the sub-agent returns. The agent type's tool restrictions are applied when a call is executed. `false`
@@ -174,10 +174,11 @@ AgentHarness h = AgentHarness.builder()
 - Tools are sorted by group, then name, once, in the registry. Injection order does not matter, which keeps
   the prompt-cache prefix stable. Duplicate tool names are rejected at `build()`.
 - The tool set of a chat is fixed on its first message and only grows through `request_tool_group`.
-- The default sandbox, `LocalDirSandboxExecutor`, has **no isolation** (a startup warning is logged).
-  Pass `DockerSandboxExecutor` or your own `SandboxExecutor` for untrusted input.
+- The default sandbox, `LocalSandboxExecutor`, has **no isolation** (a warning is logged at the first command); it is for
+  testing and trusted single-user use. Build a `RemoteExecSandboxExecutor` with `SandboxFactory` (or pass your own
+  `SandboxExecutor`) for untrusted input.
 - Ports to implement: `ChatSessionStore`, `SubAgentRunLog`, `ToolApprovalPolicy`, `HarnessMetrics`, `SandboxExecutor`.
-- `HarnessTestSupport` (scripted fake model, rig) ships in the `test-jar`.
+- `HarnessTestSupport` (scripted fake model, rig) is in the `core/jllm-test-support` module.
 - `mvn -Prelease package` additionally builds the javadoc jar; the sources jar is always built.
 
 ## Modes, working directory and scratch directory
@@ -197,8 +198,8 @@ AgentHarness h = AgentHarness.builder()
 - Scratch dir: `<sandbox.tempDir>/<chatId>/<agentId>` (default `${java.io.tmpdir}/agent-harness`); the main agent and
   each sub-agent get their own. Sub-agents inherit the caller's mode; types marked `readOnly` (explore, plan) stay read-only.
 - Front ends ([jllm-cli](../../jllm-cli/README.md), [jllm-web](../../jllm-web/README.md)): the working directory is the
-  project directory and the file tools are confined to it. There is no isolation: in plan mode shell commands run from scratch but cannot be stopped from
-  writing to the working directory. The Docker executor mounts the working directory read-only in plan mode.
+  project directory and the file tools are confined to it. With the local runner there is no isolation: plan mode is advisory, shell commands run from scratch but cannot be stopped from
+  writing to the working directory (the container runner does not enforce it either). See [SANDBOX](../../docs/guides/sandbox.md).
 
 ## Context window and compaction
 
@@ -225,7 +226,7 @@ Three strategies, in separate packages behind `context.ContextStrategy`:
 
 Select it with settings `"context": {"strategy": "mnemonic"}`, the CLI flag `--context-strategy mnemonic` (wins over
 the settings), `config.withContextStrategy(ContextStrategyKind.MNEMONIC)`, or a custom implementation with
-`AgentHarness.builder().contextStrategy(deps -> ...)` (wins over everything). `/status` shows the active one.
+`new AgentHarnessBuilder().contextStrategy(deps -> ...)` (wins over everything). `/status` shows the active one.
 
 The mnemonic strategy (after mnemonic-proxy) renders each request from the verbatim log and decisions stored per chat
 and agent (`mnemonicStore(...)`; the CLI keeps them in `.jllm/history/<chat>/<agent>/mnemonic.json`). The same log
@@ -278,7 +279,7 @@ The other strategies offer them too unless `context.todos: false` (saved the sam
 ## Fast model and the auto-mode classifier
 
 `"fastModel": {"name": "ollama", "baseUrl": "...", "apiKey": "", "model": "...", ...}` in the settings file (or
-`AgentHarness.builder().fastModelClient(..)`) adds a small model used for compaction summaries, tool-group selection and
+`new AgentHarnessBuilder().fastModelClient(..)`) adds a small model used for compaction summaries, tool-group selection and
 the classifier. In `auto` mode, with a fast model configured, each tool call that is not read-only is classified as
 safe or unsafe from the tool name, its input, the working directory and the user's request only (never tool output).
 Safe runs; unsafe, unsure, low confidence (under 0.8), timeout or error asks the user. Without a fast model `auto` asks

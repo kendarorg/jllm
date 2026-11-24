@@ -18,7 +18,7 @@ class FileSystemAgentToolsTest {
     void jailAllowsPathsInsideWorkDir() {
         ToolContext ctx = new ToolContext("c1", root);
 
-        Path p = FileSystemAgentTools.jail(ctx, "sub/a.txt");
+        Path p = FileSystemAgentTools.jail(ctx, "sub/a.txt").lexical();
 
         assertTrue(p.startsWith(root.toAbsolutePath().normalize()));
     }

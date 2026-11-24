@@ -1,4 +1,4 @@
-import {computed, ref} from 'vue';
+import {computed, ref} from '../vendor/vue.esm-browser.prod.js';
 
 /** Case-insensitive match where '*' stands for any run of characters (the server's Wildcard). */
 export function wildcard(pattern, text) {
@@ -128,7 +128,7 @@ export default {
         <label v-for="t in g.tools" :key="t.name" v-show="shown(t.name)" class="tp-check" :title="t.description">
           <input type="checkbox" :checked="checked(t.name)" :disabled="!!lockedBy(t.name)"
                  @change="setTool(t.name, $event.target.checked)" />
-          <code>{{ t.name }}</code> <small class="tp-kind">{{ t.kind }}</small>
+          <code>{{ t.name }}</code> <small class="tp-kind">{{ t.kind }}</small> <small v-if="t.status" class="tp-status">{{ t.status }}</small>
           <small v-if="lockedBy(t.name)" class="tp-note">via {{ lockedBy(t.name) }}</small>
           <small v-if="decisionOf(t.name)" class="tp-perm" :class="'tp-perm-' + decisionOf(t.name)">{{ decisionLabel[decisionOf(t.name)] }}</small>
         </label>
@@ -149,7 +149,7 @@ export default {
         <label v-for="t in s.tools" :key="t.name" v-show="shown(t.name)" class="tp-check tp-indent" :title="t.description">
           <input type="checkbox" :checked="checked(t.name)"
                  @change="setTool(t.name, $event.target.checked, s)" />
-          <code>{{ t.name }}</code> <small class="tp-kind">{{ t.kind }}</small>
+          <code>{{ t.name }}</code> <small class="tp-kind">{{ t.kind }}</small> <small v-if="t.status" class="tp-status">{{ t.status }}</small>
           <small v-if="decisionOf(t.name)" class="tp-perm" :class="'tp-perm-' + decisionOf(t.name)">{{ decisionLabel[decisionOf(t.name)] }}</small>
         </label>
         <p v-if="!s.tools.length" class="tp-indent empty">No tools known (source off or unreachable); the whole-source entry still applies.</p>

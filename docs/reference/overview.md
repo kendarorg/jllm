@@ -23,13 +23,15 @@ They're not separate products or mandatory dependencies. They're working example
 
 | Module | What | Doc |
 |---|---|---|
-| [jllm-harness](../../core/jllm-harness) | the library: framework-free (no Spring, JPA or Micrometer), Jackson, JDK `HttpClient`, jsoup | [README](../../core/jllm-harness/README.md) |
+| [jllm-harness](../../core/jllm-harness) | the library: framework-free (no Spring, JPA or Micrometer), Jackson, JDK `HttpClient`, jsoup, json-schema-validator, swagger-parser, `slf4j-api` (full list: `mvn dependency:tree -pl core/jllm-harness`) | [README](../../core/jllm-harness/README.md) |
 | [jllm-cli](../../jllm-cli) | terminal front end, one shaded runnable jar | [README](../../jllm-cli/README.md) |
-| [jllm-web-commons](../../jllm-web-commons) | REST + SSE chat and file API over the harness, independent of sign-in | [README](../../jllm-web-commons/README.md) |
+| [jllm-web-commons](../../web/jllm-web-commons) | framework-free handlers of the web API (chat, files, sign-in, users) and the `Gate` | [README](../../web/jllm-web-commons/README.md) |
+| [jllm-sql](../../web/jllm-sql), [jllm-sql-spring-starter](../../web/jllm-sql-spring-starter) | SQL stores (SQLite, MySQL, PostgreSQL by JDBC url; plain JDBC, no JPA) and the auto-configuration that selects them | [README](../../web/jllm-sql-spring-starter/README.md) |
+| [jllm-web-spring-starter](../../web/jllm-web-spring-starter) | Spring Boot controllers, interceptors and auto-configuration over them | [README](../../web/jllm-web-spring-starter/README.md) |
 | [jllm-web](../../jllm-web) | Spring Boot application: startup, sample sign-in and permissions, no-build Vue 3 chat UI, flow editor and runs screens | [README](../../jllm-web/README.md) |
 | [jllm-workflows](../../plugins/jllm-workflows) / [jllm-workflow-web](../../plugins/jllm-workflow-web) | optional plugins: the flow engine with chat commands and command line, and its web endpoints | [WORKFLOW](../guides/workflow.md) |
 
-Also: [HISTORY](history.md) (how the harness evolved) and [HARNESSES-COMPARE](../comparisons/harnesses-compare.md) (feature matrix against mini-swe-agent, Pi, OpenCode, Qwen Code, Hermes Agent).
+Also: [HISTORY](history.md) (how the harness evolved) and [HARNESSES-COMPARE](../comparisons/harnesses-compare.md) (feature matrix against mini-swe-agent, Pi, OpenCode, Qwen Code, Hermes Agent, Claude Code; [sources](../comparisons/harnesses-sources.md)).
 
 What is still missing (more in [FUTURE](../enterprise/roadmap-and-limits.md)):
 
@@ -46,7 +48,7 @@ harness runs the agent loop (model call, tool calls, results, repeat) inside you
 agent can touch and what needs a human's approval.
 
 ```java
-AgentHarness h = AgentHarness.builder()
+AgentHarness h = new AgentHarnessBuilder()
     .modelClient(ModelClients.anthropic(AnthropicSettings.defaults(System.getenv("ANTHROPIC_API_KEY")), mapper))
     .tools(List.of(myTool))                      // your Java code as tools
     .settings(Path.of("harness.json"))           // MCP servers and REST APIs
@@ -126,7 +128,7 @@ MCP servers and REST APIs need no code, only configuration:
 - **Ports** for your infrastructure: `ChatSessionStore`, `SubAgentRunLog`, `ToolApprovalPolicy`, `HarnessMetrics`,
   `SandboxExecutor`. The defaults are in memory.
 - **Isolation**: the default sandbox has none. For untrusted input set `sandbox.backend` to `docker` (CLI
-  `--sandbox docker`, optionally `--docker-mode daemon`) or use your own `SandboxExecutor`.
+  `--sandbox docker`: a long-running container, optionally `--sandbox-profile hardened` and `--sandbox-scope user`) or use your own `SandboxExecutor`.
 
 Details: [harness README](../../core/jllm-harness/README.md), [EXTENDING](../guides/extending.md) (custom tools, hooks, policies,
 providers, stores), [MCP and REST](../guides/mcp.md), [TOOLS](../guides/tools.md).
@@ -184,11 +186,11 @@ budget, large tool results offloaded to disk, pinned first message, a `todo_writ
 ```sh
 # terminal
 mvn -pl jllm-cli -am package
-java -jar jllm-cli/target/jllm-cli-1.0.0.jar --provider anthropic --mode edit
+java -jar jllm-cli/target/jllm-cli-1.3.0-jllm.jar --provider anthropic --mode edit
 
 # browser, http://localhost:8080
 mvn -pl jllm-web -am package
-java -jar jllm-web/target/jllm-web-1.0.0.jar --provider anthropic
+java -jar jllm-web/target/jllm-web-1.3.0-jllm.jar --provider anthropic
 ```
 
 Set `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`, `GROK_API_KEY`, `QWEN_API_KEY`) first. Embedding the library is shown above and in the

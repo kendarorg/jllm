@@ -69,18 +69,13 @@
             <version>${project.version}</version>
             <scope>test</scope>
         </dependency>
+        <!-- GraalJS for run_js: provided, never bundled; downloaded by scripts/setup into .downloaded-libs/graal/, the release ships it in lib-ext/ -->
         <dependency>
-            <groupId>org.graalvm.polyglot</groupId>
-            <artifactId>polyglot</artifactId>
-            <version>${graalvm.version}</version>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.graalvm.polyglot</groupId>
-            <artifactId>js</artifactId>
+            <groupId>org.kendar.llm.graal</groupId>
+            <artifactId>jllm-graal-set</artifactId>
             <version>${graalvm.version}</version>
             <type>pom</type>
-            <scope>test</scope>
+            <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>org.kendar.llm</groupId>
@@ -118,6 +113,10 @@
                     <threadCount>1</threadCount>
                     <trimStackTrace>true</trimStackTrace>
                     <failIfNoSpecifiedTests>false</failIfNoSpecifiedTests>
+                    <!-- the version of the project under test, pinned in every run's metadata; unknown from an IDE -->
+                    <systemPropertyVariables>
+                        <jllm.project.version>${project.version}</jllm.project.version>
+                    </systemPropertyVariables>
                     <properties>
                         <configurationParameters>
                             junit.jupiter.execution.parallel.enabled=${run.parallel.enabled}
@@ -132,4 +131,5 @@
             </plugin>
         </plugins>
     </build>
+
 </project>

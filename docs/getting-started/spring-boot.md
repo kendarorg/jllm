@@ -1,19 +1,20 @@
 # JLLM in a Spring Boot application
 
 The harness has no Spring dependency, so it runs in any Spring Boot application as plain beans. Everything on this
-page is a **recipe**: JLLM ships no Spring Boot starter. The one shipped Spring layer is `jllm-web-commons`
-(Path A), which is what `jllm-web` uses.
+page is a **recipe** for your own code. The shipped Spring layer is the starter `jllm-web-spring-starter`
+(Path A), over the framework-free handlers of `jllm-web-commons`; it is what `jllm-web` uses.
 
 | Path | You get | You write |
 |---|---|---|
-| **A. `jllm-web-commons`** | chat REST + SSE API, file API, OAuth callbacks, `jllm.*` properties, plugin host | three small interfaces (identity) |
+| **A. `jllm-web-spring-starter`** | chat REST + SSE API, file API, OAuth callbacks, `jllm.*` properties, plugin host | three small interfaces (identity) |
 | **B. Harness beans** | the agent inside your services, your own API or UI | the `AgentHarness` bean and your tools |
 
-Both can be combined: the web layer is itself a Spring bean configuration over the same harness.
+Both can be combined: the web layer is itself a Spring bean configuration over the same harness. The handlers of
+`jllm-web-commons` know no web framework, so another one can mount them with its own thin layer.
 
 ## Path A: the web API in your application
 
-Add the dependency (`org.kendar.llm:jllm-web-commons`). Its auto-configuration (`JllmWebCommonsAutoConfiguration`)
+Add the dependency (`org.kendar.llm:jllm-web-spring-starter`). Its auto-configuration (`JllmWebAutoConfiguration`)
 registers the harness, the chat controllers and the web plugin host. The properties use the prefix `jllm.`
 ([full table](../../jllm-web/README.md#configuration)):
 
@@ -21,8 +22,6 @@ registers the harness, the chat controllers and the web plugin host. The propert
 jllm.provider=anthropic
 jllm.model=claude-sonnet-4-5
 jllm.workdir=/var/lib/jllm
-jllm.sandbox=docker
-jllm.docker-mode=daemon
 jllm.web.public-url=https://agents.example.com
 spring.mvc.async.request-timeout=-1
 ```
@@ -34,14 +33,14 @@ Supply them as beans; they replace the defaults (`@ConditionalOnMissingBean`).
 @Bean
 WebAuthentication webAuthentication() {
     return new WebAuthentication() {
-        public Optional<WebPrincipal> current(HttpServletRequest req) {
+        public Optional<Principal> current(Cookies cookies) {   // the request's cookies; Spring Security needs none
             // bridge from Spring Security
             var auth = SecurityContextHolder.getContext().getAuthentication();
             if (auth == null || !auth.isAuthenticated() || auth instanceof AnonymousAuthenticationToken) {
                 return Optional.empty();
             }
             boolean admin = auth.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_ADMIN"));
-            return Optional.of(new WebPrincipal() {
+            return Optional.of(new Principal() {
                 public String id() { return auth.getName(); }
                 public boolean admin() { return admin; }
             });
@@ -64,6 +63,8 @@ HarnessIdentity harnessIdentity(MyToolPolicy policy) {
     };
 }
 ```
+
+Override `ChatAccess.visibility(user)` (a `ChatVisibility`) to let the store filter the chat list; the default loads every chat and `canSee` filters.
 
 `ChatSessionData.principal()` is the user id given when the chat was created. Because the API reads the
 principal from `WebAuthentication`, the existing Spring Security filter chain and session or JWT handling stay yours.
@@ -92,7 +93,7 @@ class AgentConfig {
     @Bean(destroyMethod = "close")
     AgentHarness agentHarness(ModelClient model, AgentProps p, ObjectProvider<HarnessTool> tools,
                               ObjectProvider<HarnessMetrics> metrics) {
-        return AgentHarness.builder()
+        return new AgentHarnessBuilder()
                 .modelClient(model)
                 .tools(tools.orderedStream().toList())     // every HarnessTool bean in the context
                 .settings(p.settings())                    // MCP servers, REST APIs, permissions
@@ -151,7 +152,7 @@ class SupportAgent {
 ```
 
 `start` does not block. Forward events to the client with `SseEmitter`, a WebSocket or a message queue, answer
-approvals with `resolveApproval(chatId, approvalId, approved, edited)`, and cancel with `cancel(chatId)`. The event
+approvals with `resolveApproval(chatId, approvalId, approved, edited, remember, rememberDir)`, and cancel with `cancel(chatId, kill)`. The event
 contract is in [USAGE](../reference/usage.md).
 
 ## Metrics and tracing

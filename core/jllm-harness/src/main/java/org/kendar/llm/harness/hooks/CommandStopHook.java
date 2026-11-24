@@ -4,6 +4,7 @@ import org.kendar.llm.harness.safety.ToolOutputSanitizer;
 import org.kendar.llm.harness.sandbox.ExecutionResult;
 import org.kendar.llm.harness.sandbox.SandboxExecutor;
 import org.kendar.llm.harness.settings.HarnessSettings;
+import org.kendar.llm.harness.settings.StopHook;
 
 import java.time.Duration;
 import java.util.function.BiPredicate;
@@ -16,7 +17,7 @@ import java.util.function.BiPredicate;
  */
 public final class CommandStopHook implements Hook {
 
-    private final HarnessSettings.StopHook spec;
+    private final StopHook spec;
     private final SandboxExecutor sandbox;
     private final BiPredicate<String, String> changedInRun;
     private final ToolOutputSanitizer sanitizer;
@@ -25,7 +26,7 @@ public final class CommandStopHook implements Hook {
      * @param changedInRun (chatId, agent) whether a tool that changes things ran in the current run of the agent
      * @param sanitizer    cleaning of the output, as for tool output
      */
-    public CommandStopHook(HarnessSettings.StopHook spec, SandboxExecutor sandbox,
+    public CommandStopHook(StopHook spec, SandboxExecutor sandbox,
                            BiPredicate<String, String> changedInRun, ToolOutputSanitizer sanitizer) {
         this.spec = spec;
         this.sandbox = sandbox;

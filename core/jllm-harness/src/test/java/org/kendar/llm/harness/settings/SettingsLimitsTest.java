@@ -7,6 +7,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** {@code files.maxReadBytes}, {@code web.fetchMaxBytes} and {@code sandbox.outputLogMaxBytes}. */
 class SettingsLimitsTest {
@@ -15,7 +17,7 @@ class SettingsLimitsTest {
     Path dir;
 
     private HarnessSettings load(String json) throws Exception {
-        return HarnessSettings.load(Files.writeString(dir.resolve("s.json"), json));
+        return HarnessSettingsLoader.load(Files.writeString(dir.resolve("s.json"), json));
     }
 
     @Test
@@ -50,11 +52,22 @@ class SettingsLimitsTest {
     void commandLineOverridesKeepTheLimits() throws Exception {
         HarnessSettings s = load("{\"files\":{\"maxReadBytes\":2000},\"web\":{\"fetchMaxBytes\":3000},"
                 + "\"sandbox\":{\"outputLogMaxBytes\":4000}}")
-                .withSandboxBackend("docker").withDockerImage("img").withDockerMode("daemon")
-                .withDockerRemote(true, "h").withMaxTokens(1000).withContextStrategy("compaction")
-                .withSmallModel(true).withChatRetentionLimit(3).withPlugin("x", true);
+                .toBuilder().sandboxBackend("docker").dockerImage("img").dockerScope("user")
+                .dockerRemote(true, "h").maxTokens(1000).contextStrategy("compaction")
+                .smallModel(true).chatRetentionLimit(3).build().withPlugin("x", true, null);
         assertEquals(2000, s.filesMaxReadBytes());
         assertEquals(3000, s.webFetchMaxBytes());
         assertEquals(4000, s.sandboxOutputLogMaxBytes());
+    }
+
+    @Test
+    void webAddressGuardIsRead() throws Exception {
+        HarnessSettings d = load("{}");
+        assertFalse(d.webBlockLocalHost());
+        assertEquals(java.util.List.of(), d.webBlockExtraAddresses());
+        HarnessSettings s = load("{\"web\":{\"blockLocalHost\":true,\"blockExtraAddresses\":[\"10.0.0.0/8\",\"*.corp\"]}}");
+        assertTrue(s.webBlockLocalHost());
+        assertEquals(java.util.List.of("10.0.0.0/8", "*.corp"), s.webBlockExtraAddresses());
+        assertFalse(load("{\"web\":{\"fetchMaxBytes\":5}}").webBlockLocalHost());
     }
 }

@@ -25,9 +25,9 @@ public record FileSettingsSource(Path explicit, Path projectDir) implements Sett
 
     @Override
     public List<SettingsLayer> layers() {
-        Path projectFile = projectDir == null ? null : HarnessSettings.projectFile(projectDir);
+        Path projectFile = projectDir == null ? null : HarnessSettingsLoader.projectFile(projectDir);
         List<SettingsLayer> out = new ArrayList<>();
-        add(out, SettingsLayer.Kind.GLOBAL, HarnessSettings.globalFile());
+        add(out, SettingsLayer.Kind.GLOBAL, HarnessSettingsLoader.globalFile());
         if (projectFile != null) {
             add(out, projectFile.equals(explicit) ? SettingsLayer.Kind.EXPLICIT : SettingsLayer.Kind.PROJECT,
                     projectFile);

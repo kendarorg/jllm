@@ -1,4 +1,11 @@
 {
-  "tools": ["run_js", "read_file", "ls", "glob", "grep", "grep_code"],
-  "toolPermissions": {"bash": "deny"}
+  "tools" : [ "run_js", "read_file", "ls", "glob", "grep", "grep_code" ],
+  "readOnly" : false,
+  "approval" : "ask",
+  "toolPermissions" : {
+    "bash" : "deny"
+  },
+  "sandbox" : {
+    "kind" : "docker-isolated"
+  }
 }

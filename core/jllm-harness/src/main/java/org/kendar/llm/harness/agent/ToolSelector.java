@@ -97,7 +97,7 @@ public class ToolSelector {
                 if (groups.contains(n.asText())) out.add(n.asText());
             }
             return out;
-        } catch (Exception ex) {
+        } catch (Exception ex) { // boundary: the selector model failing means all tools are offered
             log.warn("Tool group selection failed, using all tools: {}", ex.getMessage());
             return null;
         }

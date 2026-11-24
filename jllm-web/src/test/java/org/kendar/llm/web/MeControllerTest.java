@@ -7,7 +7,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.auth.UserPolicy;
 import org.kendar.llm.harness.auth.UserSkill;
 import org.kendar.llm.harness.tools.ToolKind;
-import org.kendar.llm.web.auth.PasswordHasher;
+import org.kendar.llm.web.commons.auth.PasswordHasher;
 
 import java.nio.file.Path;
 import java.util.ArrayList;

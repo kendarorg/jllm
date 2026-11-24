@@ -201,10 +201,10 @@ class NoiseCommandPrunerTest {
         String id = rig.newChat();
         NoiseCommandPruner p = new NoiseCommandPruner(rig.sessions, new NoiseQualifier(rig.model), MAPPER, 1);
         rig.model.enqueue(toolUse("t1", "bash", "{\"command\":\"mkdir out\"}"), text("done"), text("again"));
-        rig.loop.run(id, "make a dir", new Events(), () -> false);
+        rig.loop.run(id, "make a dir", new Events(), () -> false, null);
         assertEquals(1, p.afterTurn(id));
 
-        rig.loop.run(id, "next", new Events(), () -> false);
+        rig.loop.run(id, "next", new Events(), () -> false, null);
 
         var last = rig.model.requests.get(rig.model.requests.size() - 1);
         assertFalse(last.messages().toString().contains("\"ignore\""));

@@ -1,5 +1,6 @@
 package org.kendar.llm.harness.session;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -19,6 +20,7 @@ import java.util.TreeSet;
  * (names sanitized to {@code [a-zA-Z0-9_-]}): a switched-off server or API hides every tool with that prefix.
  */
 public final class ChatToolSet {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(ChatToolSet.class);
 
     public enum Kind { TOOL, MCP, API, SKILL }
 
@@ -56,8 +58,9 @@ public final class ChatToolSet {
                 n.path("base").path(key).forEach(v -> s.base.get(k).add(v.asText()));
                 n.path("off").path(key).forEach(v -> s.off.get(k).add(v.asText()));
             }
-        } catch (Exception e) {
+        } catch (JsonProcessingException e) {
             // fail closed: a corrupt set offers nothing until it is captured again
+            log.debug("Corrupt chat tool set, none offered: {}", e.toString());
         }
         return s;
     }

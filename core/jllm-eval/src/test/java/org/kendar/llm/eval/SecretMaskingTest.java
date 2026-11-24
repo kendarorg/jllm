@@ -36,7 +36,9 @@ class SecretMaskingTest {
         assertFalse(c.secrets().mask("Authorization: Bearer " + SECRET).contains(SECRET));
 
         // run metadata file
-        RunMetadata meta = RunMetadata.of(c, new ConnectionCheck.Result(Map.of()), Instant.now());
+        RunMetadata meta = RunMetadata.of(c, new ConnectionCheck.Result(Map.of()), Instant.now(),
+                org.kendar.llm.eval.pin.BuildInfo.unknown("test"), "settings-hash", "prompts-hash",
+                org.kendar.llm.eval.pin.JsInfo.NONE);
         String json = Files.readString(meta.write(dir, c.secrets()));
         assertFalse(json.contains(SECRET), json);
         assertFalse(new ObjectMapper().writeValueAsString(meta).contains(SECRET));

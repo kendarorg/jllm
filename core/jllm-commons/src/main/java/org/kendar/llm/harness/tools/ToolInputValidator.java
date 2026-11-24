@@ -6,7 +6,7 @@ import java.util.List;
 
 /**
  * Checks (and may repair) the arguments the model passed to a tool, before permissions, approval and execution.
- * Add one with {@code AgentHarness.Builder#addToolInputValidator}, or replace the default with
+ * Add one with {@code AgentHarnessBuilder#addToolInputValidator}, or replace the default with
  * {@code Builder#toolInputValidator}.
  */
 @FunctionalInterface

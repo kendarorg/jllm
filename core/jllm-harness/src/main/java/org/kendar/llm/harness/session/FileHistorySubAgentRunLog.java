@@ -62,7 +62,7 @@ public class FileHistorySubAgentRunLog implements SubAgentRunLog {
             n.put("cacheCreationTokens", run.cacheCreationTokens());
             n.put("createdAt", String.valueOf(run.createdAt()));
             mapper.writeValue(dir.resolve("run.json").toFile(), n);
-        } catch (IOException | RuntimeException e) {
+        } catch (IOException | RuntimeException e) { // boundary: history is best effort
             log.warn("Cannot write the history of sub-agent run {}: {}", run.id(), e.getMessage());
         }
     }
@@ -99,7 +99,7 @@ public class FileHistorySubAgentRunLog implements SubAgentRunLog {
                             n.path("answer").asText(), n.path("status").asText(), n.path("inputTokens").asLong(),
                             n.path("outputTokens").asLong(), n.path("cacheReadTokens").asLong(),
                             n.path("cacheCreationTokens").asLong(), java.time.Instant.parse(n.path("createdAt").asText())));
-                } catch (Exception e) {
+                } catch (Exception e) { // boundary: one corrupt run is skipped and logged
                     log.warn("Skipping sub-agent run in {}: {}", d, e.getMessage());
                 }
             }

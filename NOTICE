@@ -2,3 +2,13 @@ jllm
 Copyright 2025-2026 Kendar (https://github.com/kendarorg)
 
 This product includes software developed by Kendar (https://github.com/kendarorg/jllm).
+
+Third-party component shipped separately in lib-ext/ (not part of any jllm jar, replaceable):
+
+  GraalJS (JavaScript engine for the run_js tool): the Maven artifacts org.graalvm.polyglot:polyglot,
+  org.graalvm.polyglot:js (pom) with org.graalvm.js:js-language, org.graalvm.regex:regex, org.graalvm.truffle,
+  org.graalvm.sdk and the isolate add-ons org.graalvm.js:js-isolate-*, Copyright (c) Oracle and/or its affiliates.
+  Licence: as declared by the poms of the shipped version. At the shipped version (see lib-ext/graaljs-*.manifest for
+  the exact coordinates and SHA-256 of every jar) the community set declares the Universal Permissive License 1.0 and
+  the MIT License; the shaded ICU4J inside it is under the Unicode/ICU license. The non-community isolate add-ons
+  declare the GraalVM Free Terms and Conditions, which whoever installs them accepts.

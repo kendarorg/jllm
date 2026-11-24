@@ -1,7 +1,9 @@
 package org.kendar.llm.web.users;
 
-import org.kendar.llm.web.commons.users.WebUser;
-import org.kendar.llm.web.commons.users.UserRepository;
+import org.kendar.llm.harness.identity.RoleRepository;
+import org.kendar.llm.harness.identity.UnknownRoleException;
+import org.kendar.llm.harness.identity.User;
+import org.kendar.llm.harness.identity.UserRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -26,27 +28,37 @@ public final class FileUserRepository implements UserRepository {
 
     private final Path dir;
     private final ObjectMapper mapper;
+    private final RoleRepository roles;
 
-    public FileUserRepository(Path dir, ObjectMapper mapper) {
+    public FileUserRepository(Path dir, ObjectMapper mapper, RoleRepository roles) {
         this.dir = dir;
         this.mapper = mapper;
+        this.roles = roles;
+    }
+
+    /** The same rule the SQL foreign key enforces: the role exists ({@code admin} always does). */
+    private void requireRole(String role) {
+        if (role == null || !(User.ADMIN_ROLE.equals(role) || roles.find(role).isPresent())) {
+            throw new UnknownRoleException(role);
+        }
     }
 
     @Override
-    public Optional<WebUser> find(String id) {
+    public Optional<User> find(String id) {
         if (!UserRepository.validId(id)) return Optional.empty();
         Path file = dir.resolve(id + ".json");
         if (!Files.isRegularFile(file)) return Optional.empty();
         try {
             return Optional.of(parse(id, mapper.readTree(file.toFile())));
-        } catch (IOException | RuntimeException e) {
+        } catch (IOException | IllegalArgumentException e) {
+            log.debug("Stack of the skipped user file {}", file, e);
             log.warn("User file {} skipped: {}", file, e.toString());
             return Optional.empty();
         }
     }
 
     @Override
-    public List<WebUser> all() {
+    public List<User> all() {
         if (!Files.isDirectory(dir)) return List.of();
         try (Stream<Path> files = Files.list(dir)) {
             return files.map(p -> p.getFileName().toString())
@@ -68,18 +80,19 @@ public final class FileUserRepository implements UserRepository {
     }
 
     @Override
-    public WebUser create(String id, String name, String role, String passwordHash, String email) {
+    public User create(String id, String name, String role, String passwordHash, String email) {
         return write(id, name, role, passwordHash, email, null);
     }
 
     @Override
-    public WebUser createExternal(String id, String name, String role, String email, String externalId) {
+    public User createExternal(String id, String name, String role, String email, String externalId) {
         if (externalId == null || externalId.isBlank()) throw new IllegalArgumentException("externalId is required");
         return write(id, name, role, null, email, externalId);
     }
 
-    private WebUser write(String id, String name, String role, String passwordHash, String email, String externalId) {
+    private User write(String id, String name, String role, String passwordHash, String email, String externalId) {
         if (!UserRepository.validId(id)) throw new IllegalArgumentException("Invalid user id: " + id);
+        requireRole(role);
         synchronized (JsonFiles.LOCK) {
             if (exists(id)) throw new IllegalStateException("User " + id + " exists");
             JsonFiles.update(mapper, dir.resolve(id + ".json"), n -> {
@@ -95,21 +108,21 @@ public final class FileUserRepository implements UserRepository {
     }
 
     @Override
-    public Optional<WebUser> findByExternal(String issuer, String sub) {
+    public Optional<User> findByExternal(String issuer, String sub) {
         if (issuer == null || sub == null) return Optional.empty();
         String key = UserRepository.externalKey(issuer, sub);
         return all().stream().filter(u -> key.equals(u.externalId())).findFirst();
     }
 
     @Override
-    public List<WebUser> findByEmail(String email) {
+    public List<User> findByEmail(String email) {
         if (email == null || email.isBlank()) return List.of();
         String wanted = email.strip();
         return all().stream().filter(u -> u.email() != null && u.email().equalsIgnoreCase(wanted)).toList();
     }
 
     @Override
-    public WebUser setExternalId(String id, String externalId) {
+    public User setExternalId(String id, String externalId) {
         return update(id, n -> {
             if (externalId == null || externalId.isBlank()) n.remove("externalId");
             else n.put("externalId", externalId);
@@ -117,7 +130,7 @@ public final class FileUserRepository implements UserRepository {
     }
 
     @Override
-    public WebUser setEmail(String id, String email) {
+    public User setEmail(String id, String email) {
         return update(id, n -> {
             if (email == null || email.isBlank()) n.remove("email");
             else n.put("email", email.strip());
@@ -125,17 +138,30 @@ public final class FileUserRepository implements UserRepository {
     }
 
     @Override
-    public WebUser setName(String id, String name) {
+    public User setSettings(String id, String json) {
+        String checked = UserRepository.checkSettings(json);
+        return update(id, n -> {
+            try {
+                n.set("settings", mapper.readTree(checked));
+            } catch (java.io.IOException e) {
+                throw new IllegalArgumentException("Settings are not valid JSON");
+            }
+        });
+    }
+
+    @Override
+    public User setName(String id, String name) {
         return update(id, n -> n.put("name", name == null || name.isBlank() ? id : name.strip()));
     }
 
     @Override
-    public WebUser setRole(String id, String role) {
+    public User setRole(String id, String role) {
+        requireRole(role);
         return update(id, n -> n.put("role", role));
     }
 
     @Override
-    public WebUser setPassword(String id, String passwordHash) {
+    public User setPassword(String id, String passwordHash) {
         return update(id, n -> {
             if (passwordHash == null) n.remove("password");
             else n.put("password", passwordHash);
@@ -143,7 +169,7 @@ public final class FileUserRepository implements UserRepository {
     }
 
     @Override
-    public WebUser setCredentials(String id, Map<String, Map<String, String>> credentials) {
+    public User setCredentials(String id, Map<String, Map<String, String>> credentials) {
         UserRepository.checkCredentials(credentials);
         return update(id, n -> {
             ObjectNode c = n.putObject("credentials");
@@ -156,12 +182,12 @@ public final class FileUserRepository implements UserRepository {
     }
 
     @Override
-    public WebUser setDisabledTools(String id, List<String> patterns) {
+    public User setDisabledTools(String id, List<String> patterns) {
         return setList(id, "disabledTools", patterns);
     }
 
     @Override
-    public WebUser setDisabledSkills(String id, List<String> names) {
+    public User setDisabledSkills(String id, List<String> names) {
         return setList(id, "disabledSkills", names);
     }
 
@@ -170,7 +196,7 @@ public final class FileUserRepository implements UserRepository {
         return UserRepository.validId(id) && JsonFiles.delete(dir.resolve(id + ".json"));
     }
 
-    private WebUser setList(String id, String field, Collection<String> values) {
+    private User setList(String id, String field, Collection<String> values) {
         return update(id, n -> {
             ArrayNode a = n.putArray(field);
             if (values != null) values.forEach(a::add);
@@ -178,7 +204,7 @@ public final class FileUserRepository implements UserRepository {
     }
 
     /** Changes fields of an existing user file. @throws NoSuchElementException when the user does not exist */
-    private WebUser update(String id, Consumer<ObjectNode> change) {
+    private User update(String id, Consumer<ObjectNode> change) {
         synchronized (JsonFiles.LOCK) {
             if (!exists(id)) throw new NoSuchElementException("Unknown user " + id);
             JsonFiles.update(mapper, dir.resolve(id + ".json"), change);
@@ -192,7 +218,7 @@ public final class FileUserRepository implements UserRepository {
         return out;
     }
 
-    private static WebUser parse(String fileId, JsonNode n) {
+    private static User parse(String fileId, JsonNode n) {
         Map<String, Map<String, String>> creds = new LinkedHashMap<>();
         JsonNode c = n.path("credentials");
         c.fields().forEachRemaining(source -> {
@@ -201,9 +227,10 @@ public final class FileUserRepository implements UserRepository {
             creds.put(source.getKey(), headers);
         });
         String password = n.path("password").isTextual() ? n.path("password").asText() : null;
-        return new WebUser(fileId, n.path("name").asText(fileId), n.path("role").asText("none"), creds, password,
+        return new User(fileId, n.path("name").asText(fileId), n.path("role").asText("none"), creds, password,
                 strings(n.path("disabledTools")), strings(n.path("disabledSkills")),
                 n.path("externalId").isTextual() ? n.path("externalId").asText() : null,
-                n.path("email").isTextual() ? n.path("email").asText() : null);
+                n.path("email").isTextual() ? n.path("email").asText() : null,
+                n.path("settings").isObject() ? n.path("settings").toString() : null);
     }
 }

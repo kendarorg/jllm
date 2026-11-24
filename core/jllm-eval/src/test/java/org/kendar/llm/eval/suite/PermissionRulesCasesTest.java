@@ -13,7 +13,7 @@ import static org.kendar.llm.eval.suite.Suite.*;
 /** 1.11 Permission rules (settings permissions.deny / ask). */
 class PermissionRulesCasesTest extends SuiteBase {
 
-    private static Consumer<org.kendar.llm.harness.AgentHarness.Builder> rules(String kind, String... patterns) {
+    private static Consumer<org.kendar.llm.harness.AgentHarnessBuilder> rules(String kind, String... patterns) {
         return b -> b.settings(settings((ObjectNode root) -> {
             var arr = root.putObject("permissions").putArray(kind);
             for (String p : patterns) arr.add(p);

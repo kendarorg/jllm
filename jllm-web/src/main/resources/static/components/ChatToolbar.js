@@ -1,4 +1,4 @@
-import {computed, onUnmounted, ref} from 'vue';
+import {computed, onUnmounted, ref} from '../vendor/vue.esm-browser.prod.js';
 import {cancelRun, copyId, scriptRunning, setMode, store} from '../store.js';
 
 export default {

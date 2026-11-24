@@ -1,5 +1,6 @@
 package org.kendar.llm.harness.context.mnemonic;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -130,7 +131,7 @@ final class Messages {
     static String pretty(JsonNode n) {
         try {
             return MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(n);
-        } catch (Exception e) {
+        } catch (JsonProcessingException e) {
             return n.toString();
         }
     }

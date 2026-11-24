@@ -5,13 +5,13 @@ about sign-in; the web layer asks three small interfaces, so you can plug in you
 
 ## Three interfaces
 
-Defined in [jllm-web-commons](../../jllm-web-commons/README.md). Each has a deny-by-default fallback, so a missing
+Defined in [jllm-web-commons](../../web/jllm-web-commons/README.md), mounted by [jllm-web-spring-starter](../../web/jllm-web-spring-starter/README.md). Each has a deny-by-default fallback, so a missing
 implementation locks the application instead of opening it.
 
 | Interface | Question it answers | Fallback |
 |---|---|---|
-| `WebAuthentication` | who sent this request (`WebPrincipal`: `id()`, `admin()`) and which `/api` paths are open | nobody; 401 |
-| `ChatAccess` | may this user see this chat | none; 404 |
+| `WebAuthentication` | who sent this request (`Principal`: `id()`, `admin()`) and which `/api` paths are open | nobody; 401 |
+| `ChatAccess` | may this user see this chat (`canSee`), and which chats a listing may load (`visibility`, applied by the store; default: everything) | none; 404 |
 | `HarnessIdentity` | the user's credentials, tool policy and principal; where OAuth tokens are kept | no credentials, no tools |
 
 A chat a user may not see answers 404, as if it did not exist.
@@ -25,8 +25,8 @@ A chat a user may not see answers 404, as if it did not exist.
 - **OpenID Connect**: authorization code with PKCE against one provider (Entra, Keycloak, Okta, Google, ...). Optional
   `allowed-domains`, linking by verified email, optional auto-provisioning with a fixed default role. Modes
   `password`, `oidc` or `both`. Setup: [jllm-web](../../jllm-web/README.md#sign-in-with-openid-connect).
-- **Roles** are files listing tool patterns (`read_file`, `mcp__docs__*`, `billing__*`), an optional `readOnly` flag and
-  an `approval` setting. One role per user. `admin` is fixed and cannot be edited or removed.
+- **Roles** are files listing tool patterns (`read_file`, `mcp__docs__*`, `billing__*`), an optional `readOnly` flag,
+  an `approval` setting, optional per-tool `toolPermissions` (allow, ask, deny) and a `sandbox` (`none` by default, `local`, `docker-isolated`, `docker-open`: where the role's users get files and a shell, see [Sandboxes](../guides/sandbox.md#the-web-a-sandbox-per-role)). One role per user, which must exist (SQL: foreign key `users.role` -> `roles`; files: checked in code). A role held by users cannot be deleted (409 naming them). `admin` always has every tool: only its approval, tool permissions and sandbox can change, and it cannot be removed.
 - **Narrowing, never widening**: a user can switch off tools and skills their role allows, but cannot add any.
 - **Own skills** per user, bounded in size and count.
 
@@ -42,12 +42,14 @@ A chat a user may not see answers 404, as if it did not exist.
 
 - One OIDC provider, and no group or claim to role mapping: the provider never changes a role, so an administrator
   assigns roles ([limits](roadmap-and-limits.md)).
-- Model credentials are global today; per-user model keys and OAuth are [in development](roadmap-and-limits.md#in-development-per-user-model-credentials).
+- Model credentials are global today; per-user model keys and OAuth are [in development](roadmap-and-limits.md#planned-per-user-model-credentials).
 - No SAML or SCIM. Put an OIDC bridge (Keycloak, Entra, Okta) in front of a SAML provider.
-- Users, roles, skills and sessions are stored as files or in memory. The repository interfaces are in
-  `jllm-web-commons`, so a database implementation does not touch the controllers or the harness
-  ([checklist](../../jllm-web/README.md#a-possible-extension-a-mysql-store)).
+- Users, roles, skills and sessions are stored in SQL (`jllm-sql-spring-starter`: SQLite, MySQL, PostgreSQL), as files
+  (`jllm.store=file`) or in memory (sessions in file mode). The repository interfaces are in `jllm-harness`, so another
+  implementation does not touch the controllers or the harness ([SQL starter](../../web/jllm-sql-spring-starter/README.md)).
 
 If you embed the harness in an application with its own users, skip `jllm-web` and pass your own principal to
 `AgentHarness`; see [Embedding](../getting-started/embed-in-java.md) and
 [Spring Boot](../getting-started/spring-boot.md).
+
+Step-by-step hardening and enterprise setup: [Securing a jllm-web deployment](securing-and-enterprise-setup.md).

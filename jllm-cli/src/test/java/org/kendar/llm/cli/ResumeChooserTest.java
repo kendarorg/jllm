@@ -5,6 +5,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.AgentHarness;
+import org.kendar.llm.harness.AgentHarnessBuilder;
 import org.kendar.llm.harness.HarnessConfig;
 import org.kendar.llm.harness.llm.ModelClient;
 import org.kendar.llm.harness.llm.ModelRequest;
@@ -31,7 +32,7 @@ class ResumeChooserTest {
 
     @BeforeEach
     void start() {
-        harness = AgentHarness.builder().modelClient(new ModelClient() {
+        harness = new AgentHarnessBuilder().modelClient(new ModelClient() {
                     @Override
                     public ModelResponse complete(ModelRequest request) {
                         throw new IllegalStateException("no model in this test");

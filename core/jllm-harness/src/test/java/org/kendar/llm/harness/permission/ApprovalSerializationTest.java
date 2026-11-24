@@ -30,9 +30,9 @@ class ApprovalSerializationTest {
         assertEquals(List.of("A"), shown, "B waits behind the open dialog");
         assertEquals(1, svc.pending("c").size());
 
-        svc.resolve("c", svc.pending("c").get(0).id(), true, null);
+        svc.resolve("c", svc.pending("c").get(0).id(), true, null, false, false);
         waitFor(() -> shown.contains("B"));
-        svc.resolve("c", svc.pending("c").get(0).id(), false, null);
+        svc.resolve("c", svc.pending("c").get(0).id(), false, null, false, false);
         assertTrue(a.get().approved());
         assertFalse(b.get().approved());
     }

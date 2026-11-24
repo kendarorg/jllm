@@ -3,6 +3,7 @@ package org.kendar.llm.harness.tools;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.AgentHarness;
+import org.kendar.llm.harness.AgentHarnessBuilder;
 import org.kendar.llm.harness.agent.AgentEvent;
 import org.kendar.llm.harness.agent.AgentLoop;
 import org.kendar.llm.harness.hooks.HookEvent;
@@ -51,8 +52,8 @@ class ToolCatalogTest {
         };
     }
 
-    private AgentHarness.Builder builder(ScriptedModel model, List<String> listed) {
-        return AgentHarness.builder().modelClient(model).config(config(base)).plugin(caller(listed));
+    private AgentHarnessBuilder builder(ScriptedModel model, List<String> listed) {
+        return new AgentHarnessBuilder().modelClient(model).config(config(base)).plugin(caller(listed));
     }
 
     private List<AgentEvent> run(AgentHarness h, String text) throws Exception {
@@ -129,7 +130,7 @@ class ToolCatalogTest {
         h.subscribe(chat, 0, ev -> {
             events.add(ev);
             if (ev.type().equals("approval_request")) {
-                h.resolveApproval(chat, ev.data().path("id").asText(), false, null);
+                h.resolveApproval(chat, ev.data().path("id").asText(), false, null, false, false);
             }
             if (ev.type().equals("run_finished")) done.countDown();
         });
@@ -203,7 +204,7 @@ class ToolCatalogTest {
             }
         };
         ScriptedModel model = new ScriptedModel().enqueue(toolUse("t1", "run_js", "{\"input\":{}}"), text("ok"));
-        AgentHarness h = AgentHarness.builder().modelClient(model).config(config(base)).plugin(plugin)
+        AgentHarness h = new AgentHarnessBuilder().modelClient(model).config(config(base)).plugin(plugin)
                 .tools(List.of(tool("act", "Misc", ToolKind.READ_ONLY, (c, i) -> "done"))).build();
         ref.set(h);
 
@@ -237,7 +238,7 @@ class ToolCatalogTest {
         List<AgentEvent> events = Collections.synchronizedList(new ArrayList<>());
         h.subscribe(chat, 0, ev -> {
             events.add(ev);
-            if (ev.type().equals("approval_request")) h.resolveApproval(chat, ev.data().path("id").asText(), true, null);
+            if (ev.type().equals("approval_request")) h.resolveApproval(chat, ev.data().path("id").asText(), true, null, false, false);
             if (ev.type().equals("run_finished")) done.countDown();
         });
         h.start(chat, "go");

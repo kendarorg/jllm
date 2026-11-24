@@ -1,4 +1,4 @@
-import {computed} from 'vue';
+import {computed} from '../vendor/vue.esm-browser.prod.js';
 
 /** Picks a step id of `steps`; "new step…" asks the parent to create one (emits `create`). */
 export default {

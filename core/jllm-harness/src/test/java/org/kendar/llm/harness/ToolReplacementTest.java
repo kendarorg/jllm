@@ -18,8 +18,8 @@ class ToolReplacementTest {
     @TempDir
     Path base;
 
-    private AgentHarness.Builder builder() {
-        return AgentHarness.builder().modelClient(new ScriptedModel()).config(config(base));
+    private AgentHarnessBuilder builder() {
+        return new AgentHarnessBuilder().modelClient(new ScriptedModel()).config(config(base));
     }
 
     private static HarnessPlugin plugin(java.util.function.Consumer<PluginRegistrar> body) {
@@ -95,7 +95,7 @@ class ToolReplacementTest {
 
     @Test
     void failingNameCheckStopsTheBuild() {
-        AgentHarness.Builder b = builder().plugin(plugin(r -> r.toolNameCheck(n -> {
+        AgentHarnessBuilder b = builder().plugin(plugin(r -> r.toolNameCheck(n -> {
             throw new IllegalArgumentException("collision");
         })));
 

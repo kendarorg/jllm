@@ -3,11 +3,19 @@ package org.kendar.llm.js;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.kendar.llm.harness.plugin.HarnessPlugin;
 import org.kendar.llm.harness.plugin.PluginRegistrar;
+import org.slf4j.LoggerFactory;
 
 /**
  * Adds {@code run_js}, a JavaScript sandbox over the harness tools. {@code bash} is left alone: whether a user may run
  * the script tool, the shell or both is decided by their role. A user who has {@code bash} has a host shell, a second,
  * unrestricted way out, so give it only to roles that are trusted with the host.
+ *
+ * <p>GraalJS is not bundled: the host carries it. The plugin installs by probing first; when GraalJS (or its regex
+ * language) is absent, or the {@code engine} setting asks for an isolate the runtime lacks, it logs one warning and
+ * registers nothing, so the harness starts without {@code run_js}. This class names no GraalJS type, so it loads
+ * without them.
+ *
+ * <p>Settings are those of {@link JsSettings}; an invalid value fails the install with a message naming the key.
  */
 public final class JsPlugin implements HarnessPlugin {
 
@@ -18,19 +26,13 @@ public final class JsPlugin implements HarnessPlugin {
 
     @Override
     public void install(PluginRegistrar registrar, JsonNode settings) {
-        requireGraal();
         JsSettings s = JsSettings.from(settings);
-        registrar.toolNameCheck(ToolLibrary::checkNames);
-        registrar.tool(RunJsTool.create(new JsSandbox(s), registrar.catalog(), new ToolLibrary()));
-    }
-
-    /** The plugin does not bundle GraalJS: the host (jllm-cli, jllm-web, or your own app) must carry it. */
-    private static void requireGraal() {
-        try {
-            Class.forName("org.graalvm.polyglot.Context", false, JsPlugin.class.getClassLoader());
-        } catch (ClassNotFoundException e) {
-            throw new IllegalStateException("Plugin 'js' needs GraalVM on the host classpath: add "
-                    + "org.graalvm.polyglot:polyglot and org.graalvm.polyglot:js (type pom) to the application", e);
+        GraalProbe.Result caps = GraalProbe.probe();
+        if (!caps.usable()) {
+            LoggerFactory.getLogger(JsPlugin.class).warn("Plugin 'js' is disabled, run_js is not available: {}",
+                    caps.unusableReason());
+            return;
         }
+        JsInstaller.install(registrar, s, caps);
     }
 }

@@ -1,4 +1,4 @@
-import {computed} from 'vue';
+import {computed} from '../vendor/vue.esm-browser.prod.js';
 
 /**
  * Edits a map of text to text as rows. `valueOptions` (array of strings, or of {value,label}) turns the value column

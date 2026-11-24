@@ -11,8 +11,9 @@ final class CliArgs {
             + "[--system-prompt TEXT] [--max-turns N] [--context-tokens TOKENS] [--search-api-key BRAVE_KEY] "
             + "[--settings FILE] [--context-strategy compaction|mnemonic|scope] [--max-tokens TOKENS] [--small-model] "
             + "[--resume prompt|no|CHAT_ID] "
-            + "[--sandbox local|docker] [--docker-image IMAGE] [--docker-mode oneshot|daemon] "
+            + "[--sandbox local|docker] [--docker-image IMAGE] [--sandbox-scope chat|user] [--sandbox-profile standard|hardened] "
             + "[--docker-remote] [--docker-remote-host ADDRESS] [--sandbox-clean] [--sandbox-clean-all] "
+            + "[--external-links none|read|readwrite] "
             + "[--pricing.input-per-million=USD] [--pricing.output-per-million=USD] [--pricing.cache-read-per-million=USD] [--pricing.cache-write-per-million=USD] [--plugin-dir DIR] [--plugins.ID.enabled=true|false] [--plugins.ID.settings.KEY=VALUE]";
 
     private CliArgs() {

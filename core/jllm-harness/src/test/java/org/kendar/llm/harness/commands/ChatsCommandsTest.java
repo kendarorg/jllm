@@ -4,6 +4,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.AgentHarness;
+import org.kendar.llm.harness.AgentHarnessBuilder;
 import org.kendar.llm.harness.session.ChatSessionData;
 import org.kendar.llm.harness.session.FileChatSessionStore;
 
@@ -26,7 +27,7 @@ class ChatsCommandsTest {
     @BeforeEach
     void start() {
         store = new FileChatSessionStore(base.resolve("history"), MAPPER);
-        harness = AgentHarness.builder().modelClient(new ScriptedModel()).config(config(base)).withoutStandardTools()
+        harness = new AgentHarnessBuilder().modelClient(new ScriptedModel()).config(config(base)).withoutStandardTools()
                 .sessionStore(store).build();
     }
 
@@ -34,7 +35,7 @@ class ChatsCommandsTest {
     private String chatAged(String title, int daysAgo) {
         ChatSessionData c = harness.sessions().create(title);
         ChatSessionData aged = new ChatSessionData(c.chatId(), c.agentId(), title, c.mode(), "", null, 0, 0, 0, 0,
-                c.createdAt(), Instant.now().minus(daysAgo, ChronoUnit.DAYS), 0, 0, 0, c.principal());
+                c.createdAt(), Instant.now().minus(daysAgo, ChronoUnit.DAYS), 0, 0, 0, c.principal(), null, null);
         store.save(aged);
         return c.chatId();
     }

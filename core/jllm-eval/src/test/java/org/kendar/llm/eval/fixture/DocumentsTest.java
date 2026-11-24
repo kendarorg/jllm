@@ -20,7 +20,7 @@ class DocumentsTest {
     @Test
     void pdfFactsAreReadBackByThePluginReader() throws Exception {
         Documents.Doc doc = Documents.pdf(dir, "report.pdf");
-        String text = new PdfReader().extract(doc.file());
+        String text = extract(new PdfReader(), doc.file());
         assertEquals(3, doc.facts().size());
         for (Fact f : doc.facts()) {
             assertTrue(text.contains(f.answer()), "missing " + f.answer() + " in: " + text);
@@ -32,7 +32,7 @@ class DocumentsTest {
     @Test
     void docxFactsAreReadBackByThePluginReader() throws Exception {
         Documents.Doc doc = Documents.docx(dir, "handbook.docx");
-        String text = new DocxReader().extract(doc.file());
+        String text = extract(new DocxReader(), doc.file());
         for (Fact f : doc.facts()) {
             assertTrue(text.contains(f.answer()), "missing " + f.answer() + " in: " + text);
         }
@@ -42,8 +42,8 @@ class DocumentsTest {
 
     @Test
     void factAnswersAreNotInTheOtherDocument() throws Exception {
-        String pdf = new PdfReader().extract(Documents.pdf(dir, "a.pdf").file());
-        String docx = new DocxReader().extract(Documents.docx(dir, "b.docx").file());
+        String pdf = extract(new PdfReader(), Documents.pdf(dir, "a.pdf").file());
+        String docx = extract(new DocxReader(), Documents.docx(dir, "b.docx").file());
         for (Fact f : Documents.docxFacts()) assertFalse(pdf.contains(f.answer()), f.answer());
         for (Fact f : Documents.pdfFacts()) assertFalse(docx.contains(f.answer()), f.answer());
     }
@@ -52,8 +52,14 @@ class DocumentsTest {
     void corruptFilesFailInTheReaders() {
         Path pdf = Documents.corruptPdf(dir, "bad.pdf");
         Path docx = Documents.corruptDocx(dir, "bad.docx");
-        assertThrows(IOException.class, () -> new PdfReader().extract(pdf));
-        assertThrows(IOException.class, () -> new DocxReader().extract(docx));
+        assertThrows(IOException.class, () -> extract(new PdfReader(), pdf));
+        assertThrows(IOException.class, () -> extract(new DocxReader(), docx));
+    }
+
+    private static String extract(org.kendar.llm.harness.tools.DocumentReader reader, Path file) throws IOException {
+        try (java.io.InputStream in = java.nio.file.Files.newInputStream(file)) {
+            return reader.extract(in, file.getFileName().toString());
+        }
     }
 
     private static int count(String text, String part) {

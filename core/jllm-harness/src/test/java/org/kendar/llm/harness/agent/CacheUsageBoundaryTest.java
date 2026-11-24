@@ -93,9 +93,9 @@ class CacheUsageBoundaryTest {
         responses.add(reply("[{\"type\":\"text\",\"text\":\"a2\"}]", "end_turn", 30, 7, 430, 0));
 
         Events e1 = new Events();
-        rig.loop.run(chatId, "q1 " + "p".repeat(6000), e1, () -> false);
+        rig.loop.run(chatId, "q1 " + "p".repeat(6000), e1, () -> false, null);
         Events e2 = new Events();
-        rig.loop.run(chatId, "q2", e2, () -> false);
+        rig.loop.run(chatId, "q2", e2, () -> false, null);
 
         assertEquals(2, e2.ofType("compaction").get(0).get("tier").asInt());
         assertEquals(4, sent.size());

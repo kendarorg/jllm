@@ -10,7 +10,7 @@ decides what the agent may touch and what needs a human.
 > engines). JLLM talks to any OpenAI-compatible endpoint, so those can serve as its model backend.
 
 ```java
-AgentHarness h = AgentHarness.builder()
+AgentHarness h = new AgentHarnessBuilder()
     .modelClient(ModelClients.anthropic(AnthropicSettings.defaults(System.getenv("ANTHROPIC_API_KEY")), mapper))
     .tools(List.of(myTool))                      // your Java code as tools
     .settings(Path.of("harness.json"))           // MCP servers and REST APIs
@@ -63,7 +63,7 @@ Untrusted tool output tagged, approvals inline (<a href="jllm-cli/README.md">jll
 
 | | |
 |---|---|
-| **Framework-free core** | Jackson, the JDK `HttpClient`, jsoup, slf4j-api. No Spring, JPA or Micrometer in the library. Fits Spring Boot, Quarkus, Jakarta EE or plain Java ([Spring recipes](docs/getting-started/spring-boot.md)) |
+| **Framework-free core** | Jackson, the JDK `HttpClient`, jsoup, json-schema-validator, swagger-parser (with its transitive libraries) and `slf4j-api` (full list: `mvn dependency:tree -pl core/jllm-harness`). No Spring, JPA or Micrometer in the library. Fits Spring Boot, Quarkus, Jakarta EE or plain Java ([Spring recipes](docs/getting-started/spring-boot.md)) |
 | **Governed tool calls** | tool kinds, permission modes, regex deny rules, hidden tools, per-host network approval, hooks to deny, rewrite or audit ([security model](docs/enterprise/security-model.md)) |
 | **Isolation** | path jail for file tools, Docker sandbox per command or per chat (also remote), and a JavaScript sandbox with no host access ([JS](docs/guides/js.md)) |
 | **Deterministic flows** | business processes as JSON maps of steps: your engine decides the path, the model does bounded work inside a step ([flows](docs/guides/workflow.md)) |
@@ -88,7 +88,7 @@ See [MCP and REST](docs/guides/mcp.md) and [TOOLS](docs/guides/tools.md).
 
 JLLM is an agent runtime, not a RAG toolkit or a model SDK. Use it beside Spring AI or LangChain4j when the agent must
 act under approval and isolation. Comparison: [JVM landscape](docs/comparisons/jvm-landscape.md),
-[terminal agents](docs/comparisons/harnesses-compare.md), [Why JLLM](docs/why-jllm.md).
+[terminal agents](docs/comparisons/harnesses-compare.md) ([sources](docs/comparisons/harnesses-sources.md)), [Why JLLM](docs/why-jllm.md).
 
 ## Modules
 
@@ -96,7 +96,9 @@ act under approval and isolation. Comparison: [JVM landscape](docs/comparisons/j
 |---|---|---|
 | [jllm-harness](core/jllm-harness) | the library | [README](core/jllm-harness/README.md) |
 | [jllm-cli](jllm-cli) | terminal front end, one shaded jar | [README](jllm-cli/README.md) |
-| [jllm-web-commons](jllm-web-commons) | REST + SSE chat API as a Spring Boot auto-configuration | [README](jllm-web-commons/README.md) |
+| [jllm-web-commons](web/jllm-web-commons) | framework-free handlers of the web API (chat, files, sign-in, users) | [README](web/jllm-web-commons/README.md) |
+| [jllm-web-spring-starter](web/jllm-web-spring-starter) | REST + SSE web API as a Spring Boot starter | [README](web/jllm-web-spring-starter/README.md) |
+| [jllm-sql](web/jllm-sql), [jllm-sql-spring-starter](web/jllm-sql-spring-starter) | SQL stores (SQLite, MySQL, PostgreSQL; plain JDBC) and their auto-configuration | [README](web/jllm-sql-spring-starter/README.md) |
 | [jllm-web](jllm-web) | reference web app: OIDC and password sign-in, roles, Vue chat UI, flow editor | [README](jllm-web/README.md) |
 | [jllm-workflows](plugins/jllm-workflows), [jllm-workflow-web](plugins/jllm-workflow-web) | optional flow engine and its web endpoints | [WORKFLOW](docs/guides/workflow.md) |
 | jllm-js, jllm-pdf, jllm-docs | optional plugins: JavaScript sandbox, document readers | [JS](docs/guides/js.md), [TOOLS](docs/guides/tools.md#document-readers) |
@@ -105,13 +107,43 @@ act under approval and isolation. Comparison: [JVM landscape](docs/comparisons/j
 
 ```sh
 mvn -pl jllm-cli -am package
-java -jar jllm-cli/target/jllm-cli-1.0.0.jar --provider anthropic --mode edit      # terminal
+java -jar jllm-cli/target/jllm-cli-1.3.0-jllm.jar --provider anthropic --mode edit      # terminal
 
 mvn -pl jllm-web -am package
-java -jar jllm-web/target/jllm-web-1.0.0.jar --provider anthropic                 # http://localhost:8080
+java -jar jllm-web/target/jllm-web-1.3.0-jllm.jar --provider anthropic                 # http://localhost:8080
 ```
 
 Set `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`, `GROK_API_KEY`, `QWEN_API_KEY`) first.
+
+The jars do not contain GraalJS, so `run_js` is off in the commands above. For development, run once `scripts/setup`
+(`.sh`, `.ps1`, `.cmd`): it downloads the GraalJS set into the git-ignored `.downloaded-libs/graal/<graalvm.version>/` (commercial
+edition after you accept the Oracle GraalVM Free Terms and Conditions, or `--accept-license`; `--edition community`
+for the community one) and runs the first build (`--no-build` skips it). Every module then sees GraalJS as a `provided`
+dependency, with no profile and no flag. These run the built jars or the eval module on it (`.sh`, `.ps1` and `.cmd` of each):
+
+```sh
+scripts/run-cli.sh --provider anthropic --mode edit       # terminal, with run_js
+scripts/run-web.sh --jllm.provider=anthropic              # http://localhost:8080, with run_js
+scripts/run-eval.sh                                       # eval module (needs a model; you run it, not the build)
+mvn test                                                  # js plugin tests run on the same set
+```
+
+The release zip ships no GraalJS: `setup.sh` / `setup.ps1`, released next to it, unzip it and download the edition you choose into `lib-ext/`. Licensing and details: [JS guide](docs/guides/js.md#enabling).
+
+> The GraalJS libraries are not in this repository. If they are present in `.downloaded-libs/graal/`, you downloaded them with
+> `scripts/setup` and accepted the license terms of the chosen edition. After a `graalvm.version` change, run
+> `scripts/setup` again.
+
+
+## SQL store
+
+`jllm-web` keeps users, roles, chats, tokens and settings in SQL by default: SQLite in `<jllm.webauth-dir>/jllm.db`
+(bundled, nothing to install), or MySQL / PostgreSQL (both experimental) chosen by the JDBC url alone:
+`jllm.sql.url=jdbc:postgresql://host:5432/jllm`, `jllm.sql.user`, `jllm.sql.password=${JLLM_SQL_PASSWORD}`. `jllm.store=file`
+keeps the files under `webauth/` instead. The MySQL (GPL) and PostgreSQL drivers are never shipped: run
+`scripts/fetch-sql-driver.sh mysql|postgres` (`.ps1` / `.cmd` on Windows; in a release zip the script next to it) or
+`scripts/setup --sql`; the jar is SHA-256 checked. Stored OAuth tokens are encrypted when `JLLM_TOKEN_KEY` is set.
+Details: [jllm-sql-spring-starter](web/jllm-sql-spring-starter/README.md).
 
 ## Maven Central
 
@@ -132,7 +164,7 @@ judge. Every run is recorded in the [eval history](core/jllm-eval/eval-results/h
 
 | For | Start here |
 |---|---|
-| **Evaluating** | [Why JLLM](docs/why-jllm.md), [security model](docs/enterprise/security-model.md), [compliance](docs/enterprise/compliance-and-licensing.md), [limits](docs/enterprise/roadmap-and-limits.md) |
+| **Evaluating** | [Why JLLM](docs/why-jllm.md), [security model](docs/enterprise/security-model.md), [compliance](docs/enterprise/compliance-and-licensing.md), [limits](docs/enterprise/roadmap-and-limits.md), [securing a deployment](docs/enterprise/securing-and-enterprise-setup.md) |
 | **Integrating** | [Embed in Java](docs/getting-started/embed-in-java.md), [Spring Boot](docs/getting-started/spring-boot.md), [Extending](docs/guides/extending.md) |
 | **Operating** | [Deployment](docs/enterprise/deployment.md), [identity](docs/enterprise/identity-and-access.md), [observability](docs/enterprise/observability.md), [governance](docs/enterprise/governance-and-audit.md) |
 | **Everything** | [Docs index](docs/index.md), [long overview](docs/reference/overview.md) |
@@ -140,9 +172,9 @@ judge. Every run is recorded in the [eval history](core/jllm-eval/eval-results/h
 ## Known limits and what is next
 
 Today: single OIDC provider and no IdP role mapping; one global API key per model provider; the web app is a
-reference front end to run behind your proxy; no Spring Boot starter (recipes only); no external security audit.
+reference front end to run behind your proxy; no Spring Boot starter for the harness itself (only the web API starter `jllm-web-spring-starter`; harness beans are recipes); no external security audit.
 
-Stores (chat history, users, roles, tokens) are files by default. To use your own storage, implement the store
+Stores (chat history, users, roles, tokens): memory or files in the library and the CLI; `jllm-web` uses SQL when `jllm-sql-spring-starter` is present, else files. To use your own storage, implement the store
 interfaces and register them as beans or on the builder ([ports](docs/enterprise/governance-and-audit.md#ports-for-your-stores)).
 
 Next: IdP role mapping (token claims to roles) and per-user model credentials (own API key or OAuth login per

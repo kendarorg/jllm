@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.AgentHarness;
+import org.kendar.llm.harness.AgentHarnessBuilder;
 import org.kendar.llm.harness.testsupport.HarnessTestSupport;
 import org.kendar.llm.harness.tools.ToolContext;
 import org.kendar.llm.harness.workflows.WorkflowApi;
@@ -33,7 +34,7 @@ class FixturesTest {
     }
 
     private AgentHarness build(Fixtures fx) {
-        AgentHarness.Builder b = AgentHarness.builder().modelClient(new HarnessTestSupport.ScriptedModel())
+        AgentHarnessBuilder b = new AgentHarnessBuilder().modelClient(new HarnessTestSupport.ScriptedModel())
                 .config(HarnessTestSupport.config(dir));
         fx.harness().accept(b);
         return b.build();

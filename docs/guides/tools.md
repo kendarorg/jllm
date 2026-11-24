@@ -13,6 +13,7 @@ What the model can call, how tools are grouped, selected per chat and gated. To 
 | `glob` | Files | READ_ONLY | `pattern` | at most 200 paths, sorted; `**/x` also matches top-level files |
 | `ls` | Files | READ_ONLY | `path?` | one directory, not recursive: directories first (`d name/`), then files (`f name size`); at most 200 entries; not available on a remote (docker daemon) work dir |
 | `grep` | Files | READ_ONLY | `pattern` (Java regex), `path?`, `glob?` | `path:line:text`, at most 200 hits, files over 1 MB skipped |
+| `grep_code` | Files | READ_ONLY | `path?`, `glob?`, `pattern?` | definition lines (block openers, or `pattern`, a Java regex) per file |
 | `bash` | Shell | OTHER | `command`, `timeout_seconds?` | runs through the `SandboxExecutor`; timeout capped at 600 s; stderr is merged into stdout; only the last 50 KB are kept and the result says `[output truncated: N lines omitted; log: <scratch>/bash-N.log]` (read the log with `read_file` or `grep`); the log itself is capped at `sandbox.outputLogMaxBytes` (default 50 KB, 0 = unlimited) and the result then says `log (itself truncated):` |
 | `web_search` | Web | READ_ONLY | `query`, `count?` (≤ 20) | Brave with a key, DuckDuckGo HTML otherwise |
 | `wikipedia_search` | Web | READ_ONLY | `query`, `lang?`, `count?` | titles, URLs, snippets |
@@ -44,6 +45,41 @@ todo tools are not in the registry: the loop adds them to the tool list of each 
 All file tools resolve paths against the chat's working directory and reject anything that escapes it, including
 through symlinks (the deepest existing ancestor is resolved with `toRealPath`).
 
+The check is not the only protection: `PathJail` (in `jllm-fs`) does every read, write, directory creation, listing and
+delete itself, walking the path again from the real root, one component at a time, without following links. A link
+whose target is inside the working directory is always followed (at most 40 hops); a dangling one is refused; one that
+leaves it follows `files.externalLinks` (below). An atomic write puts its temporary file next to the target through the jail too, so a directory swapped for a
+link between the check and the open cannot redirect the write. On Linux and macOS the walk uses `openat` with
+`O_NOFOLLOW` on directory handles and is race-free. On Windows (and any file system without secure directory streams)
+the final component is opened without following links and without sharing delete, and the real path is checked again
+after the open; **a process on the host that swaps a directory for a junction and back inside that window can still win
+the race** (accepted: creating a junction needs a host shell, which has no jail anyway). A hard link in the work dir to
+a file of another user is not rewritten in place (Linux, macOS; Windows does not expose the link count). `ls` lists
+links as links; `glob`, `grep` and `grep_code` visit a link to a file inside and never enter a link to a directory
+inside (its files are listed where they lie).
+
+### Links that leave the work dir (`files.externalLinks`)
+
+A symlink or junction inside the work dir whose target is **outside** it is decided by the setting `files.externalLinks`
+(CLI flag `--external-links`):
+
+| Value | Reads (`read_file`, `ls`, `glob`, `grep`, `grep_code`, document readers) | Writes (`write_file`, `edit_file`, atomic writer, `web_download` target, checkpoint undo) |
+|---|---|---|
+| `none` | refused: `<path> is a link that leaves the work dir` | refused, same message |
+| `read` (default) | followed; `glob`, `grep` and `grep_code` enter a linked directory (once, never a link to an ancestor of the work dir) | refused; the message names `files.externalLinks`; undo reports the file as `not restored` and keeps its checkpoint |
+| `readwrite` | followed | followed; the approval prompt of `write_file` and `edit_file` shows `link -> resolved target`, not only the link path |
+
+Chains work as one: every hop is judged by where it lands, so a link inside that points to another link that leaves the
+dir follows the mode of the last hop. A recursive delete (checkpoint cleanup, the daemon's `DELETE /file`) removes a
+link and never enters it. A path that leaves the work dir without any link (`..`, an absolute path) is refused in every
+mode. A script run by `run_js` in a shared work dir is confined to its scratch dir and always uses `none`.
+
+**The web app never follows an outside link**, reads or writes: it forces `none` when it builds the harness and
+ignores the key; when the settings carry it with another value, one `WARN` is logged at startup. There is no per-user
+or UI setting. In docker daemon mode the container daemon receives the mode (`JLLM_EXTERNAL_LINKS`) when the container
+is created ([SANDBOX](sandbox.md)). The shell is not covered by any of this: `bash` runs as the host user and follows
+every link.
+
 ```mermaid
 flowchart TD
     P["path from the model"] --> A{"absolute and under<br/>the scratch dir?"}
@@ -60,7 +96,7 @@ flowchart TD
 ```
 
 `glob` and `grep` walk the working directory. In plan mode `bash` runs with the scratch directory as its current
-directory; only `DockerSandboxExecutor` mounts the working directory read-only.
+directory; the local runner cannot enforce it (plan mode is advisory for `bash` there), and the container runner's `bash` is a convention too; the file tools refuse writes outside the scratch directory in both.
 
 ## 3. Registry and ordering
 
@@ -147,7 +183,7 @@ model corrects it on its next turn. Modes (`output.validation` in the settings, 
 | `strict` | the input must match the schema exactly |
 
 The default check is JSON Schema (draft 7) on `inputSchema()`; a schema the library cannot compile is skipped with a
-warning. Replace it with `AgentHarness.builder().toolInputValidator(v)`, or add a further check after it with
+warning. Replace it with `new AgentHarnessBuilder().toolInputValidator(v)`, or add a further check after it with
 `addToolInputValidator(v)`. A `ToolInputValidator` returns the input to use and the list of problems; chained
 validators see the input as repaired by the previous one.
 
@@ -155,6 +191,12 @@ An exception from `execute` becomes an error result (`Error: …`); the loop goe
 requests go to the user through the parent's event sink, titled `[<type> #n] <tool>`; dialogs of one chat are shown
 one at a time. `PermissionGate` returns only `ALLOW` or `ASK`; `DENY` is what an `ASK` becomes in a loop run
 with `interactive=false` (the built-in main and sub-agent loops are both interactive).
+
+The permission step of the flowchart is one pure function, `ToolExecutor.decide(AuthorizeInput)` returning an
+`AuthorizeOutcome` (decision, taint warning, approval unavailable): free tool, read-only, admin rule, mode, gate answer,
+grants, taint and classifier verdict in; no side effects. `ToolExecutorAuthorizeTest` checks it against a copy of the
+previous logic over the whole input space. Taint (untrusted output in the chat) survives compaction: when a tool
+result is cleared (`ClearedResult.TEXT`), `TaintTracker.prune` keeps its taint until the next user message.
 
 ## 6. Output limits
 
@@ -165,6 +207,8 @@ with `interactive=false` (the built-in main and sub-agent loops are both interac
 | `web.fetchMaxChars` | 40000 | `web_fetch` body before the context limit |
 | `web.downloadMaxBytes` | 100000000 | largest file `web_download` accepts |
 | `web.fetchMaxBytes` (settings) | 5242880 (5 MB) | largest response body `web_fetch` reads; `<= 0` = default |
+| `web.blockLocalHost` (settings) | `false` | `true`: `web_fetch` and `web_download` refuse loopback, link-local (169.254.169.254), site-local, any-local and IPv6 `fc00::/7` addresses, on the first URL and on every redirect, before the host-approval question. The shipped web release sets it `true` |
+| `web.blockExtraAddresses` (settings) | `[]` | more entries to refuse: IP, CIDR (`10.0.0.0/8`), host name or `*.suffix`; works without `blockLocalHost`. Known gap: the name is resolved by the guard and again by the HTTP client, so a DNS answer that changes in between (rebinding) is not caught; connecting to the checked address is not implemented |
 | `files.maxReadBytes` (settings) | 1000000 | the most text one `read_file` returns and the largest file `edit_file` changes (`grep` skips larger files); `<= 0` = default |
 | `sandbox.outputLogMaxBytes` (settings) | 51200 | cap of the spill log of a long `bash` output; `0` = unlimited |
 | `storage.maxBytes` | -1 (no limit) | total size of a chat storage (web: the work dir of the chat; CLI: `<project>/.jllm/scratchpad/<chatId>/`). A write by `write_file`, `edit_file` or `web_download` that would exceed it fails and creates no file. Project files edited by the model in the CLI are outside the chat storage and are not counted; writes made by a shell command are not counted until the next start |
@@ -174,9 +218,9 @@ with `interactive=false` (the built-in main and sub-agent loops are both interac
 
 ## Document readers
 
-`read_file` looks up the file extension in the registered `DocumentReader`s (`extensions()`, `extract(Path)`), extracts
+`read_file` looks up the file extension in the registered `DocumentReader`s (`extensions()`, `extract(InputStream, String fileName)`; the stream is opened through the path jail), extracts
 the text and then applies `offset`, `limit` and the line cap to it. The path jail runs before the reader. A binary
-extension with no reader answers `No reader for .pdf; put the pdf plugin jar in the plugin directory and enable it under plugins`. Extraction has a 30 s timeout and a
+extension with no reader answers `No reader for .pdf; add the jllm-pdf module` (`jllm-docs` for docx). Extraction has a 30 s timeout and a
 5 MB text cap; the binary file may be up to 50 MB.
 
 | Module | Extensions | Notes |
@@ -184,7 +228,7 @@ extension with no reader answers `No reader for .pdf; put the pdf plugin jar in 
 | `jllm-pdf` | `pdf` | Apache PDFBox 3; text only, `--- page N ---` markers; scanned PDFs answer "no extractable text (scanned?)"; password-protected files fail with a clear error |
 | `jllm-docs` | `docx` (and `doc`) | JDK ZIP + StAX, no dependency; headings as `#`, list items as `-`, table rows as `a \| b`; headers, footers and comments skipped; tracked insertions kept, deletions dropped; legacy `.doc` answers "legacy .doc not supported, convert to docx" |
 
-The front ends carry neither: `./mvnw install` copies each plugin jar to `target/plugins/`; pass that directory with
+The front ends carry neither: `mvn install` copies each plugin jar to `target/plugins/`; pass that directory with
 `--plugin-dir` (CLI) or `jllm.plugin-dir` (web), default `./plugins`, and enable the plugin: `"plugins": {"pdf":
 {"enabled": true}}` in the settings file, `--plugins.pdf.enabled=true` for one CLI run, or
 `--jllm.plugins.pdf.enabled=true` in the web application. An embedder can add the module as a dependency and call

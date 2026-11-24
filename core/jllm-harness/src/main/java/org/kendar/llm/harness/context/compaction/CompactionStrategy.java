@@ -41,7 +41,7 @@ public class CompactionStrategy implements ContextStrategy {
                 true, t.prefix(), ratio)
                 : manager.compactInherited(t.chatId(), t.log(), t.inherited(), t.lastUsage(), t.sink(), t.usageSink(),
                 t.prefix(), false, ceiling(), ratio, null);
-        tokens.sent(t.chatId(), t.agentKey(), t.log().toString().length() + ContextManager.fixedChars(t.prefix()));
+        tokens.sent(t.chatId(), t.agentKey(), t.log().toString().length() + TokenEstimator.fixedChars(t.prefix()));
         return new ContextView(t.log(), changed, changed);
     }
 
@@ -56,14 +56,14 @@ public class CompactionStrategy implements ContextStrategy {
             if (inheritsCopy(t)) {
                 r = compactInherited(t, ratio);
             } else {
-                long room = (long) (ceiling() / ratio) - ContextManager.fixedTokens(t.prefix());
+                long room = (long) (ceiling() / ratio) - TokenEstimator.fixedTokens(t.prefix());
                 r = manager.compactOverflow(t.log(), room, t.usageSink());
             }
             if (!r.changed()) return null;
             t.sink().emit("compaction", mapper.createObjectNode().put("tier", 2)
                     .put("estimatedTokens", r.tokensAfter()).put("reason", "overflow"));
             return new ContextView(t.log(), true, true);
-        } catch (RuntimeException e) {
+        } catch (RuntimeException e) { // boundary: a failing summary call degrades compaction, the run goes on
             log.warn("Overflow compaction failed: {}", e.getMessage());
             return null;
         }
@@ -82,10 +82,10 @@ public class CompactionStrategy implements ContextStrategy {
 
     /** Forced compaction of a sub-agent with an inherited copy; updates {@code t.inherited()[0]}. */
     private CompactResult compactInherited(ContextTurn t, double ratio) {
-        long before = manager.estimateTokens(t.log(), null);
+        long before = TokenEstimator.estimateTokens(t.log(), null);
         boolean changed = manager.compactInherited(t.chatId(), t.log(), t.inherited(), null, t.sink(), t.usageSink(),
                 t.prefix(), true, ceiling(), ratio, null);
-        return new CompactResult(changed, before, manager.estimateTokens(t.log(), null), 0);
+        return new CompactResult(changed, before, TokenEstimator.estimateTokens(t.log(), null), 0);
     }
 
     private long ceiling() {
@@ -94,7 +94,7 @@ public class CompactionStrategy implements ContextStrategy {
 
     @Override
     public long contextTokens(String chatId, String agentKey, ArrayNode log) {
-        return Math.round(manager.estimateTokens(log, null) * tokens.ratio(chatId, agentKey));
+        return Math.round(TokenEstimator.estimateTokens(log, null) * tokens.ratio(chatId, agentKey));
     }
 
     @Override

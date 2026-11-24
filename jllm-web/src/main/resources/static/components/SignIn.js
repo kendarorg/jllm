@@ -1,4 +1,4 @@
-import {ref, onMounted} from 'vue';
+import {ref, onMounted} from '../vendor/vue.esm-browser.prod.js';
 import {api, post} from '../api.js';
 
 const AUTH_ERRORS = {

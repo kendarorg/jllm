@@ -44,7 +44,7 @@ class OAuthSettingsTest {
     }
 
     private HarnessSettings load(ProjectMcpTrust.Prompt prompt) {
-        return HarnessSettings.loadLayered(new FileSettingsSource(null, project), project, Map.of("CRM_SECRET", "s3")::get, prompt, trust,
+        return HarnessSettingsLoader.loadLayered(new FileSettingsSource(null, project), project, Map.of("CRM_SECRET", "s3")::get, prompt, trust,
                 warnings::add,
                 new org.kendar.llm.harness.safety.ContentWarnings());
     }

@@ -95,7 +95,7 @@ class ContextManagerTurnTest {
         assertTrue(changed);
         assertEquals(1, model.simpleUserPrompts.size());
         assertEquals("the request", m.get(0).get("content").get(0).get("text").asText());
-        assertEquals(ContextManager.TURN_SUMMARY_PREFIX + "TURN-SUMMARY",
+        assertEquals(SummaryBuilder.TURN_SUMMARY_PREFIX + "TURN-SUMMARY",
                 m.get(1).get("content").get(0).get("text").asText());
         assertEquals(last, m.get(m.size() - 1).toString(), "the newest round stays intact");
         assertEquals(3, m.size());
@@ -110,7 +110,7 @@ class ContextManagerTurnTest {
         user(m, "the request");
         rounds(m, 30, 2000); // ~19k tokens by the estimate
         ContextManager cm = manager(cfg);
-        assertTrue(cm.estimateTokens(m, null) < 24_000);
+        assertTrue(TokenEstimator.estimateTokens(m, null) < 24_000);
         int before = m.size();
         model.simpleReplies.add("TURN");
 

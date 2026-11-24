@@ -125,9 +125,9 @@ public final class WorkflowWebPlugin implements WebPlugin {
         RUNNER.execute(() -> {
             try {
                 changed(api, events, user, rl, api.proceed(user, rl, runId));
-            } catch (RuntimeException e) {
+            } catch (RuntimeException e) { // boundary: flow thread top level: the run is marked failed
                 System.getLogger(ID).log(System.Logger.Level.ERROR, "flow run " + runId + " failed: " + e, e);
-                try { changed(api, events, user, rl, api.run(user, rl, runId)); } catch (RuntimeException ignored) { /* gone */ }
+                try { changed(api, events, user, rl, api.run(user, rl, runId)); } catch (RuntimeException ignored) { /* boundary: the run is gone */ }
             }
         });
     }
@@ -157,7 +157,7 @@ public final class WorkflowWebPlugin implements WebPlugin {
                 return h.handle(r);
             } catch (IllegalArgumentException | IllegalStateException e) {
                 return WebResponse.error(400, e.getMessage());
-            } catch (RuntimeException e) {
+            } catch (RuntimeException e) { // boundary: plugin boundary: mapped to an HTTP status
                 String m = String.valueOf(e.getMessage());
                 return WebResponse.error(m.startsWith("Unknown run") ? 404 : m.contains("not allowed")
                         || m.contains("Only administrators") ? 403 : 400, m);

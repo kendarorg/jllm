@@ -3,13 +3,13 @@
 How the harness is put together and how a turn runs. Context management (compaction, mnemonic, prompt-cache layout)
 is not covered here: see [CACHES](caches.md). Step-by-step diagrams of every pipeline are in [FLOW](flow.md).
 
-Source root: `src/main/java/org/kendar/llm/harness`.
+Source root: `src/main/java/org/kendar/llm/harness` in `core/jllm-harness` and `core/jllm-commons` (shared types such as `HarnessConfig`, `HarnessTool`, `SimpleTool`, `HookEvent`, `TokenStore`).
 
 ## 1. Packages
 
 | Package | Contents |
 |---|---|
-| (root) | `AgentHarness` (facade + builder), `HarnessConfig`, `Prompts`, `HarnessMetrics`, `HarnessPricing` |
+| (root) | `AgentHarness` (facade), `AgentHarnessBuilder`, `HarnessConfig`, `Prompts`, `HarnessMetrics`, `HarnessPricing` |
 | `agent` | `AgentService` (runs, events, cancel), `AgentLoop` (ReAct loop), `ToolSelector`, `SubAgentTool`, `RequestToolGroupTool`, `AgentCatalog` |
 | `llm` | `ModelClient`, `AnthropicModelClient`, `OpenAiCompatModelClient`, `LimitedModelClient`, `CancelToken`, request/response records |
 | `tools` | `HarnessTool`, `SimpleTool`, `HarnessToolRegistry`, Files/Shell/Web tools, `ToolContext` |
@@ -59,7 +59,7 @@ disabled by `/tools`, are never seen by sub-agents, and never clash with registr
 flowchart TD
     A["settings.applyTo(config)"] --> B{"maxParallel (default 1)"}
     B -->|yes| B1["main client = LimitedModelClient(client, 1)"]
-    B --> C["sandbox = given or LocalDirSandboxExecutor"]
+    B --> C["sandbox = given or LocalSandboxExecutor.of(config)"]
     B1 --> C
     C --> D["tools = Files + Shell + Web (unless withoutStandardTools)<br/>+ builder/plugin tools + skill (if any skill)"]
     D --> E["HarnessToolRegistry: reject duplicates, sort, policy.registered(each)"]
@@ -97,8 +97,12 @@ stateDiagram-v2
 
 - `serializeRuns` (config, default `true`): a fair semaphore with one permit across all chats.
 - The first message of a chat titled `New chat` sets the title (first 60 chars).
-- Events go to an in-memory buffer (max 2000 per chat, cleared at each `start`) and to listeners. A listener that
-  throws is removed. `subscribe(afterSeq)` replays the buffer then streams live events, deduplicated by `seq`.
+- Events go to an in-memory buffer (max 2000 per chat, an `ArrayDeque`, cleared at each `start`) and to listeners. Each
+  subscriber has its own bounded queue (4,048 events) drained by its own virtual thread, so a slow client (a stalled
+  SSE write) delays neither the run nor other subscribers. A queue that overflows detaches that subscriber with a final
+  `subscriber_dropped` event (`ChatApi.events` then closes the stream); it reconnects and replays from its last `seq`.
+  A listener that throws is removed. `subscribe(afterSeq)` replays the buffer then streams live events, deduplicated by
+  `seq`. The run state uses a `ReentrantLock` and `Condition`, no sleep polling.
 - `compact()` takes the same per-chat busy flag, so `/compact` is refused during a run.
 
 ## 5. The ReAct loop (`AgentLoop`)
@@ -277,7 +281,7 @@ strategy reports `logChanged`. The CLI and web use `FileChatSessionStore` (chats
 <root>/<chatId>/subagent-<runId>/         messages.jsonl, result.txt, run.json
 ```
 
-`find` reads the log lazily; `list()` scans the chat directories for `session.json` (no index file) and caches the rows.
+`find` reads the log lazily; `list(ChatVisibility)` scans the chat directories for `session.json` (no index file) and caches the rows.
 The log is written before the row, so a crash leaves a row at most one turn behind. A corrupt row is skipped with a
 warning. `InterruptedTurnRepair` completes an unanswered `tool_use` at the end of a loaded log. Restoring needs no
 extra step: the mnemonic, state and tool-group data are keyed by chat and agent id, which the row keeps, so the next
@@ -323,7 +327,7 @@ is gone (compaction, `/clear`). The model cannot recall them (`history_recall` d
 |---|---|
 | approval grants | `ApprovalService`, saved in the `StateStore` (`grants`), survive a restart |
 | declined tier-3 sizes | `ContextManager`, memory only |
-| todo list (`scope` strategy, or `context.todos`) | `StateStore` (`todos-<agent>`); `scope` adds it to each request on a copy, not to the log |
+| todo list (`scope` strategy, or `context.todos`) | `StateStore` (`todos-<agent>`); `scope` also writes a snapshot into the latest user message of the log |
 | chat title, mode name changes | session row (the mode sentence is in the per-turn note, not the pinned block) |
 | sub-agent transcripts | `SubAgentRunLog` (the parent gets only the answer; mnemonic `history_recall` can read them) |
 | tool output beyond `toolMaxChars` | dropped (`[truncated N chars]`) |
@@ -336,10 +340,10 @@ is gone (compaction, `/clear`). The model cannot recall them (`history_recall` d
 
 | | `AnthropicModelClient` | `OpenAiCompatModelClient` |
 |---|---|---|
-| Endpoint | `POST {baseUrl}/v1/messages`, non-streaming | `POST {baseUrl}/chat/completions` |
+| Endpoint | `POST {baseUrl}/v1/messages`, SSE for agent-loop calls (`stream`, default on), plain call for helper calls | `POST {baseUrl}/chat/completions` |
 | System | two blocks, `cache_control` on the second | one `system` message |
 | Tools | `cache_control` on the last; `tool_choice` only when needed | translated to functions |
-| Retries | 429, 529, 5xx and I/O errors; `retry-after` or exponential backoff (max 30 s); each wait is reported as a `retry` event (`CancelToken.onRetry`) | 429, 5xx and I/O errors; same backoff and event |
+| Retries | 429, 529, 5xx and I/O errors; `retry-after` or exponential backoff, at most 10 s of waiting in total per call (`RetryBudget`); each wait is reported as a `retry` event (`CancelToken.onRetry`) | 429, 5xx and I/O errors; same backoff and event |
 | Auth | `x-api-key`, or an `AuthProvider`; one retry after a 401 | `Authorization: Bearer`, or an `AuthProvider`; one retry after a 401 |
 | Extras | extended thinking (`thinkingBudget`), citations: `search_local_knowledge` results become `search_result` blocks | `max_completion_tokens` for OpenAI proper |
 

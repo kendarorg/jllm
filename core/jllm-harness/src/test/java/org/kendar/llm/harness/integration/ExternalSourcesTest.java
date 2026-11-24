@@ -71,7 +71,7 @@ class ExternalSourcesTest {
     }
 
     private static HarnessSettings settings(McpServerSettings... servers) {
-        return new HarnessSettings(List.of(servers), List.of(), null, null, null);
+        return HarnessSettings.builder().mcpServers(List.of(servers)).restApis(List.of()).build();
     }
 
     private static HarnessToolRegistry registry(String... coreTools) {

@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.Cookie;
 import org.kendar.llm.harness.AgentHarness;
+import org.kendar.llm.harness.AgentHarnessBuilder;
 import org.kendar.llm.harness.HarnessPricing;
 import org.kendar.llm.harness.llm.ModelClient;
 import org.kendar.llm.harness.llm.ModelRequest;
@@ -18,20 +19,26 @@ import org.kendar.llm.harness.settings.SkillSettings;
 import org.kendar.llm.harness.tools.HarnessTool;
 import org.kendar.llm.harness.tools.SimpleTool;
 import org.kendar.llm.harness.tools.ToolKind;
-import org.kendar.llm.web.admin.AdminController;
-import org.kendar.llm.web.admin.AdminInterceptor;
-import org.kendar.llm.web.admin.ToolCatalogView;
-import org.kendar.llm.web.auth.AuthController;
-import org.kendar.llm.web.auth.CookieAuthentication;
-import org.kendar.llm.web.auth.LoginThrottle;
+import org.kendar.llm.web.commons.admin.AdminApi;
+import org.kendar.llm.web.commons.admin.ToolCatalogView;
+import org.kendar.llm.web.commons.auth.AuthApi;
+import org.kendar.llm.web.commons.auth.CookieAuthentication;
+import org.kendar.llm.web.commons.auth.LoginThrottle;
 import org.kendar.llm.web.auth.InMemoryLoginSessionRepository;
-import org.kendar.llm.web.commons.users.LoginSessionRepository;
-import org.kendar.llm.web.commons.ApiInterceptor;
-import org.kendar.llm.web.commons.ChatController;
-import org.kendar.llm.web.me.MeController;
-import org.kendar.llm.web.users.Permissions;
-import org.kendar.llm.web.commons.users.SkillRepository;
-import org.kendar.llm.web.commons.users.UserRepository;
+import org.kendar.llm.harness.identity.LoginSessionRepository;
+import org.kendar.llm.web.commons.me.MeApi;
+import org.kendar.llm.web.commons.users.Permissions;
+import org.kendar.llm.harness.identity.SkillRepository;
+import org.kendar.llm.harness.identity.UserRepository;
+import org.kendar.llm.web.commons.ChatApi;
+import org.kendar.llm.web.commons.Gate;
+import org.kendar.llm.web.spring.AdminController;
+import org.kendar.llm.web.spring.AdminInterceptor;
+import org.kendar.llm.web.spring.ApiExceptionAdvice;
+import org.kendar.llm.web.spring.ApiInterceptor;
+import org.kendar.llm.web.spring.AuthController;
+import org.kendar.llm.web.spring.ChatController;
+import org.kendar.llm.web.spring.MeController;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
@@ -60,6 +67,26 @@ final class WebauthFixture {
     final LoginThrottle throttle = new LoginThrottle();
     final AgentHarness harness;
     final MockMvc mvc;
+    private final CookieAuthentication auth;
+    private final ToolCatalogView catalog;
+    private final Gate gate;
+
+    /** A tool that reports what it runs on, the way run_js reports its engine. */
+    static HarnessTool toolWithStatus(String name, String status) {
+        SimpleTool t = tool(name, ToolKind.OTHER);
+        return new HarnessTool() {
+            @Override public String name() { return t.name(); }
+            @Override public String description() { return t.description(); }
+            @Override public com.fasterxml.jackson.databind.JsonNode inputSchema() { return t.inputSchema(); }
+            @Override public String group() { return t.group(); }
+            @Override public ToolKind kind() { return t.kind(); }
+            @Override public String status() { return status; }
+            @Override public String execute(org.kendar.llm.harness.tools.ToolContext ctx,
+                                            com.fasterxml.jackson.databind.JsonNode input) throws Exception {
+                return t.execute(ctx, input);
+            }
+        };
+    }
 
     static SimpleTool tool(String name, ToolKind kind) {
         return new SimpleTool(name, name + " tool", MAPPER.createObjectNode(), "g", kind, (c, i) -> "");
@@ -76,8 +103,9 @@ final class WebauthFixture {
         user("rita", "reader");
         user("gus", "guest");
         Path pdf = Files.writeString(root.resolve("pdf.md"), "---\ndescription: PDFs\n---\nUse pdftotext.");
-        users = new FileUserRepository(root.resolve("users"), MAPPER);
-        permissions = new Permissions(new FileRoleRepository(root.resolve("permissions"), MAPPER));
+        FileRoleRepository roleRepo = new FileRoleRepository(root.resolve("permissions"), MAPPER);
+        users = new FileUserRepository(root.resolve("users"), MAPPER, roleRepo);
+        permissions = new Permissions(roleRepo);
         skills = new FileSkillRepository(root);
         ModelClient unused = new ModelClient() {
             @Override
@@ -90,25 +118,34 @@ final class WebauthFixture {
                 return "";
             }
         };
-        HarnessSettings settings = new HarnessSettings(
-                List.of(new McpServerSettings("docs", "http://127.0.0.1:9/mcp", null, null, false, null, null, null, null, null, null, null, null)),
-                null, List.of(new SkillSettings("pdf", null, pdf.toString())), null, null);
+        HarnessSettings settings = HarnessSettings.builder()
+                .mcpServers(List.of(new McpServerSettings("docs", "http://127.0.0.1:9/mcp", null, null, false, null, null, null, null, null, null, null, null)))
+                .skills(List.of(new SkillSettings("pdf", null, pdf.toString()))).build();
         List<HarnessTool> tools = List.of(tool("read_file", ToolKind.READ_ONLY), tool("grep", ToolKind.READ_ONLY),
-                tool("write_file", ToolKind.FILE_EDIT), tool("web_fetch", ToolKind.READ_ONLY));
-        harness = AgentHarness.builder().modelClient(unused).sessionStore(new InMemoryChatSessionStore())
+                tool("write_file", ToolKind.FILE_EDIT), tool("web_fetch", ToolKind.READ_ONLY),
+                toolWithStatus("run_js", "edition community, profile isolated, isolate available"));
+        harness = new AgentHarnessBuilder().modelClient(unused).sessionStore(new InMemoryChatSessionStore())
                 .objectMapper(MAPPER).withoutStandardTools().tools(tools).settings(settings)
                 .userPolicyResolver(permissions.resolver(users, skills))
                 .principalDirectory(id -> users.find(id).map(u -> u.principal()).orElse(null))
                 .build();
-        CookieAuthentication auth = new CookieAuthentication(users, sessions);
-        ToolCatalogView catalog = new ToolCatalogView(harness);
-        mvc = MockMvcBuilders.standaloneSetup(
-                        new AuthController(users, auth, sessions, throttle, new org.kendar.llm.web.auth.OidcProperties(null, null)),
-                        new MeController(users, permissions, skills, sessions, throttle, harness, catalog),
-                        new AdminController(users, permissions, skills, sessions, harness, catalog),
-                        new ChatController(harness, MAPPER, new HarnessPricing(0, 0, 0, 0), auth, auth))
-                .addInterceptors(new ApiInterceptor(auth, auth, harness.sessions(), MAPPER),
-                        new MappedInterceptor(new String[]{"/api/admin/**"}, new AdminInterceptor(auth, MAPPER)))
+        auth = new CookieAuthentication(users, sessions);
+        catalog = new ToolCatalogView(harness);
+        gate = new Gate(auth, auth, harness.sessions());
+        mvc = mvc(false, true);
+    }
+
+    /** The API with the default-password enforcement; {@code onLoopback}: also for loopback callers; {@code boundToLoopback}: the server listens on loopback only. */
+    MockMvc mvc(boolean onLoopback, boolean boundToLoopback) {
+        return MockMvcBuilders.standaloneSetup(
+                        new AuthController(new AuthApi(users, auth, sessions, throttle,
+                                new org.kendar.llm.web.commons.auth.OidcProperties(null, null))),
+                        new MeController(new MeApi(users, permissions, skills, sessions, throttle, harness, catalog)),
+                        new AdminController(new AdminApi(users, permissions, skills, sessions, harness, catalog)),
+                        new ChatController(new ChatApi(harness, MAPPER, new HarnessPricing(0, 0, 0, 0), auth), auth))
+                .setControllerAdvice(new ApiExceptionAdvice())
+                .addInterceptors(new ApiInterceptor(gate, auth, MAPPER, onLoopback, boundToLoopback),
+                        new MappedInterceptor(new String[]{"/api/admin/**"}, new AdminInterceptor(gate, auth, MAPPER)))
                 .build();
     }
 
@@ -124,7 +161,7 @@ final class WebauthFixture {
 
     /** Signs in with the default password; the session cookie. */
     Cookie signIn(String id) throws Exception {
-        return signIn(id, org.kendar.llm.web.auth.PasswordHasher.defaultPassword(id));
+        return signIn(id, org.kendar.llm.web.commons.auth.PasswordHasher.defaultPassword(id));
     }
 
     Cookie signIn(String id, String password) throws Exception {

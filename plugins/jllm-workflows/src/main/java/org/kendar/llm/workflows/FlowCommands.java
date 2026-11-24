@@ -82,7 +82,7 @@ final class FlowCommands {
     private static JsonNode tryJson(String s) {
         try {
             return Json.parse(s);
-        } catch (RuntimeException e) {
+        } catch (FlowException e) {
             return Json.M.getNodeFactory().textNode(s);
         }
     }

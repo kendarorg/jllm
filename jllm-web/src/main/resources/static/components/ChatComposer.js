@@ -1,4 +1,4 @@
-import {computed, nextTick, onMounted, ref, watch} from 'vue';
+import {computed, nextTick, onMounted, ref, watch} from '../vendor/vue.esm-browser.prod.js';
 import {searchFiles, send, store} from '../store.js';
 
 export default {

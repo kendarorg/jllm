@@ -1,5 +1,6 @@
 {
-  "name": "Admin",
-  "role": "admin",
-  "credentials": {}
+  "name" : "Admin",
+  "role" : "admin",
+  "credentials" : { },
+  "password" : "pbkdf2$210000$kwt0XCEhfiX2LmnH6ord2w==$4cDmQ007IEBHy5HeY0ZeX6UeA5/STEIfh/PmJ7BWooE="
 }

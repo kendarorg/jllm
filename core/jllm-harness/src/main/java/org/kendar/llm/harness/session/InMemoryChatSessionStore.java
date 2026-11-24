@@ -19,8 +19,8 @@ public class InMemoryChatSessionStore implements ChatSessionStore {
     }
 
     @Override
-    public List<ChatSessionData> list() {
-        List<ChatSessionData> out = new ArrayList<>(store.values());
+    public List<ChatSessionData> list(ChatVisibility visibility) {
+        List<ChatSessionData> out = new ArrayList<>(store.values().stream().filter(visibility::matches).toList());
         out.sort(Comparator.comparing(ChatSessionData::updatedAt).reversed());
         return out;
     }

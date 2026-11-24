@@ -1,8 +1,9 @@
 package org.kendar.llm.web.users;
 
-import org.kendar.llm.web.commons.users.WebUser;
-import org.kendar.llm.web.commons.users.Role;
-import org.kendar.llm.web.commons.users.RoleRepository;
+import org.kendar.llm.web.commons.users.Permissions;
+import org.kendar.llm.harness.identity.User;
+import org.kendar.llm.harness.identity.Role;
+import org.kendar.llm.harness.identity.RoleRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -25,7 +26,11 @@ import java.util.stream.Stream;
  *   "readOnly": true,                          only READ_ONLY tools (optional, default false)
  *   "approval": "off",                         no approval prompts (optional; default "ask" = the harness policy)
  *   "toolPermissions": {"send_mail": "allow",  per tool pattern: allow = runs unattended, never asked;
- *                       "bash": "deny"}        ask = always asked; deny = never runs (deny, ask, allow order)
+ *                       "bash": "deny"},       ask = always asked; deny = never runs (deny, ask, allow order)
+ *   "sandbox": {"kind": "docker-isolated",     none (default: no files, no shell), local, docker-isolated
+ *                                              (hardened container) or docker-open (standard container)
+ *               "scope": "user",               docker: chat or user (optional)
+ *               "network": "none"}             docker-isolated: none or default (optional)
  * }
  * </pre>
  * A file for {@code admin} is ignored: that role is fixed ({@link Permissions}).
@@ -49,7 +54,8 @@ public final class FileRoleRepository implements RoleRepository {
         if (!Files.isRegularFile(file)) return Optional.empty();
         try {
             return Optional.of(parse(name, mapper.readTree(file.toFile())));
-        } catch (IOException | RuntimeException e) {
+        } catch (IOException | IllegalArgumentException e) {
+            log.debug("Stack of the skipped permission file {}", file, e);
             log.warn("Permission file {} skipped: {}", file, e.toString());
             return Optional.empty();
         }
@@ -83,6 +89,12 @@ public final class FileRoleRepository implements RoleRepository {
                 var perms = n.putObject("toolPermissions");
                 role.toolPermissions().forEach((pattern, p) -> perms.put(pattern, p.name().toLowerCase()));
             }
+            var sb = role.sandbox();
+            n.remove("sandbox");
+            var sn = n.putObject("sandbox");
+            sn.put("kind", sb.kind().wire());
+            if (sb.scope() != null) sn.put("scope", sb.scope());
+            if (sb.network() != null) sn.put("network", sb.network());
         });
     }
 
@@ -109,7 +121,16 @@ public final class FileRoleRepository implements RoleRepository {
         }
         p.fields().forEachRemaining(e -> perms.put(e.getKey(),
                 org.kendar.llm.harness.permission.ToolPermission.parse(e.getValue().asText())));
+        JsonNode sb = n.path("sandbox");
+        org.kendar.llm.harness.identity.RoleSandbox sandbox;
+        try {
+            sandbox = org.kendar.llm.harness.identity.RoleSandbox.of(sb.path("kind").asText(null),
+                    sb.path("scope").asText(null), sb.path("network").asText(null));
+        } catch (IllegalArgumentException e) { // a bad value is no sandbox: the file must not stop the server
+            log.warn("Sandbox of role {} ignored: {}", role, e.getMessage());
+            sandbox = org.kendar.llm.harness.identity.RoleSandbox.NONE;
+        }
         return new Role(role, names(tools), n.path("readOnly").asBoolean(false), n.path("approval").asText("ask"),
-                perms);
+                perms, sandbox);
     }
 }

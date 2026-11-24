@@ -47,8 +47,8 @@ final class SimpleCompletion {
                                       Double temperature, Consumer<Usage> usageSink) {
         ArrayNode messages = MAPPER.createArrayNode();
         messages.addObject().put("role", "user").put("content", user);
-        ModelRequest request = new ModelRequest(system, "", messages, List.of(), maxTokens)
-                .withThinkingLevel(ThinkingLevel.MINIMAL);
+        ModelRequest request = new ModelRequest(system, "", messages, List.of(), maxTokens,
+                null, false, null, ThinkingLevel.MINIMAL);
         if (temperature != null) request = request.withTemperature(temperature);
         ModelResponse r = client.complete(request);
         if (usageSink != null && r.usage() != null) usageSink.accept(r.usage());

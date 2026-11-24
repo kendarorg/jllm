@@ -22,22 +22,6 @@ public record AgentSettings(String name, String description, List<String> tools,
                             Boolean inheritContext, LlmSettings model, Boolean readOnly, String provider,
                             Double temperature, ThinkingLevel thinking) {
 
-    public AgentSettings(String name, String description, List<String> tools, String prompt, String promptFile,
-                         Boolean inheritContext, LlmSettings model, Boolean readOnly, String provider,
-                         Double temperature) {
-        this(name, description, tools, prompt, promptFile, inheritContext, model, readOnly, provider, temperature,
-                null);
-    }
-
-    public AgentSettings(String name, String description, List<String> tools, String prompt, String promptFile,
-                         Boolean inheritContext, LlmSettings model, Boolean readOnly) {
-        this(name, description, tools, prompt, promptFile, inheritContext, model, readOnly, null, null, null);
-    }
-
-    public AgentSettings(String name, String description, List<String> tools, String prompt, String promptFile) {
-        this(name, description, tools, prompt, promptFile, null, null, null, null, null, null);
-    }
-
     public AgentSettings {
         tools = tools == null ? List.of() : List.copyOf(tools);
         if (temperature != null && (temperature < 0 || temperature > 2)) {

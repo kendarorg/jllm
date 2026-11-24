@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.AgentHarness;
+import org.kendar.llm.harness.AgentHarnessBuilder;
 import org.kendar.llm.harness.HarnessTestSupport.*;
 import org.kendar.llm.harness.settings.HarnessSettings;
 
@@ -24,9 +25,8 @@ class ProvidersTemperatureTest {
     }
 
     private AgentHarness harness(List<ProviderSettings> providers) {
-        HarnessSettings settings = new HarnessSettings(null, null, null, null, null, null, null, null, null, null,
-                null, null, providers, null);
-        return AgentHarness.builder().modelClient(new ScriptedModel()).config(config(base)).settings(settings).build();
+        HarnessSettings settings = HarnessSettings.builder().providers(providers).build();
+        return new AgentHarnessBuilder().modelClient(new ScriptedModel()).config(config(base)).settings(settings).build();
     }
 
     @Test

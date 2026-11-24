@@ -37,7 +37,9 @@ class SuiteStructureTest {
                 new SkillsCasesTest(), new OutputLimitsCasesTest(), new SessionsCasesTest(),
                 new CommandsCasesTest(), new PromptCacheCasesTest(), new PdfCasesTest(), new DocsCasesTest(),
                 new JsCasesTest(), new WorkflowsCasesTest(), new StrategyRefactoringSessionTest(), new StrategyResearchLargeOutputsSessionTest(),
-                new StrategyModeSwitchesSessionTest(), new StrategyToolTogglesSessionTest());
+                new StrategyModeSwitchesSessionTest(), new StrategyToolTogglesSessionTest(),
+                new SsrfCasesTest(), new TaintCompactionCasesTest(), new SymlinkCasesTest(),
+                new AdminApprovalCasesTest(), new WebInjectionCasesTest());
     }
 
     private static List<EvalCase> all() {

@@ -1,26 +1,39 @@
 package org.kendar.llm.eval.cases;
 
+import org.kendar.llm.eval.report.PassAtK;
 import org.kendar.llm.eval.run.TrialResult;
 
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 
 /**
  * Aggregate of the trials of one case under one strategy.
  *
- * @param passRate fraction of passed trials
- * @param passK    true when all k trials passed (pass^k)
- * @param passed   verdict after the thresholds: all trials for risk cases, else passRate at least the case minimum
+ * @param passRate  fraction of passed trials (equals pass@1 and pass^1)
+ * @param passAtK   pass@k by k, only for the configured k that do not exceed the trials run
+ * @param passPowK  pass^k by k, same keys as {@code passAtK}
+ * @param passed    verdict after the thresholds: all trials for risk cases, else passRate at least the case minimum
  */
 public record CaseResult(String caseName, String feature, String strategy, boolean risk, List<TrialResult> trials,
-                         double passRate, boolean passK, boolean passed, double minPassRate) {
+                         double passRate, Map<Integer, Double> passAtK, Map<Integer, Double> passPowK, boolean passed,
+                         double minPassRate) {
 
-    public static CaseResult of(EvalCase c, String strategy, List<TrialResult> trials) {
-        long ok = trials.stream().filter(TrialResult::passed).count();
-        double rate = trials.isEmpty() ? 0 : (double) ok / trials.size();
-        boolean all = !trials.isEmpty() && ok == trials.size();
-        boolean passed = c.risk() ? all : !trials.isEmpty() && rate + 1e-9 >= c.minPassRate();
-        return new CaseResult(c.name(), c.feature(), strategy, c.risk(), List.copyOf(trials), rate, all, passed,
-                c.minPassRate());
+    /** @param ks the configured k values ({@code eval.passK}) */
+    public static CaseResult of(EvalCase c, String strategy, List<TrialResult> trials, List<Integer> ks) {
+        int n = trials.size();
+        int ok = (int) trials.stream().filter(TrialResult::passed).count();
+        double rate = n == 0 ? 0 : (double) ok / n;
+        boolean all = n > 0 && ok == n;
+        boolean passed = c.risk() ? all : n > 0 && rate + 1e-9 >= c.minPassRate();
+        Map<Integer, Double> at = new TreeMap<>();
+        Map<Integer, Double> pow = new TreeMap<>();
+        for (int k : ks) {
+            PassAtK.passAt(n, ok, k).ifPresent(v -> at.put(k, v));
+            PassAtK.passPow(n, ok, k).ifPresent(v -> pow.put(k, v));
+        }
+        return new CaseResult(c.name(), c.feature(), strategy, c.risk(), List.copyOf(trials), rate,
+                java.util.Collections.unmodifiableMap(at), java.util.Collections.unmodifiableMap(pow), passed, c.minPassRate());
     }
 
     /** Failure text: the failed checks of each failed trial and where its trace is saved. */

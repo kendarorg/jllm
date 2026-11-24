@@ -16,7 +16,10 @@ public interface ToolCatalog {
     /** The path as the model's own file tools accept it. */
     String display(ToolContext ctx, java.nio.file.Path path);
 
-    /** Whether {@code name} is a built-in file tool, which a script calls without a prompt. */
+    /**
+     * Whether {@code name} is a built-in file tool, which a script calls in its jailed context and, if read-only or
+     * while the chat is not tainted, without a prompt.
+     */
     boolean free(ToolContext ctx, String name);
 
     /**

@@ -1,7 +1,7 @@
 package org.kendar.llm.web.users;
 
-import org.kendar.llm.web.commons.users.UserRepository;
-import org.kendar.llm.web.commons.users.SkillRepository;
+import org.kendar.llm.harness.identity.UserRepository;
+import org.kendar.llm.harness.identity.SkillRepository;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;

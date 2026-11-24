@@ -39,7 +39,7 @@ public final class HistoryRootLock implements AutoCloseable {
         } catch (IOException e) {
             closeQuietly(ch);
             throw new UncheckedIOException("Cannot lock " + file, e);
-        } catch (RuntimeException e) {
+        } catch (RuntimeException e) { // boundary: release the channel, rethrown unchanged
             closeQuietly(ch);
             throw e;
         }

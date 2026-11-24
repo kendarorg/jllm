@@ -129,7 +129,7 @@ class SteeringTest {
         assertTrue(inTool.await(5, TimeUnit.SECONDS));
         service.steer(chat, "change course");
         service.followUp(chat, "and later");
-        service.cancel(chat);
+        service.cancel(chat, false);
         release.countDown();
 
         assertTrue(finished.await(5, TimeUnit.SECONDS));

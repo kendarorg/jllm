@@ -55,11 +55,11 @@ class CacheBoundaryTest {
         // the tier-2 summary is a request of its own: same prefix, plus the summary instruction
         rig.model.enqueue(toolUse("t1", "echo", "{}"), text("a1"), text("SUMMARY"), text("a2"));
         Events e1 = new Events();
-        rig.loop.run(chatId, "q1 " + "p".repeat(6000), e1, () -> false);
+        rig.loop.run(chatId, "q1 " + "p".repeat(6000), e1, () -> false, null);
         rig.sessions.setTitle(chatId, "renamed mid-conversation"); // title/mode changes must not leak into the prefix
         Events e2 = new Events();
 
-        rig.loop.run(chatId, "q2", e2, () -> false);
+        rig.loop.run(chatId, "q2", e2, () -> false, null);
 
         assertTrue(e1.ofType("compaction").isEmpty(), "single turn: nothing to cut yet");
         assertEquals(2, e2.ofType("compaction").get(0).get("tier").asInt());
@@ -77,15 +77,15 @@ class CacheBoundaryTest {
         // request 2 is the tier-2 summary request; it stays over budget -> tier 3 (plain text request)
         rig.model.enqueue(toolUse("t1", "echo", "{}"), text("a1"), text("x".repeat(5000)), text("a2"));
         rig.model.simpleReplies.add("REWRITE");
-        rig.loop.run(chatId, "q1 " + "p".repeat(6000), new Events(), () -> false);
+        rig.loop.run(chatId, "q1 " + "p".repeat(6000), new Events(), () -> false, null);
         Events e2 = new Events();
         e2.also = (type, data) -> {
             if ("approval_request".equals(type)) {
-                rig.approvals.resolve(chatId, data.get("id").asText(), true, null);
+                rig.approvals.resolve(chatId, data.get("id").asText(), true, null, false, false);
             }
         };
 
-        rig.loop.run(chatId, "q2", e2, () -> false);
+        rig.loop.run(chatId, "q2", e2, () -> false, null);
 
         assertEquals(3, e2.ofType("compaction").get(e2.ofType("compaction").size() - 1).get("tier").asInt());
         assertTrue(rig.model.requests.get(3).messages().get(0).toString().contains("REWRITE"));
@@ -96,15 +96,15 @@ class CacheBoundaryTest {
     void pinnedPrefixIsIdenticalWhenTier3IsDeclined() {
         rig.model.enqueue(toolUse("t1", "echo", "{}"), text("a1"), text("x".repeat(5000)), text("a2"));
         rig.model.simpleReplies.add("REWRITE");
-        rig.loop.run(chatId, "q1 " + "p".repeat(6000), new Events(), () -> false);
+        rig.loop.run(chatId, "q1 " + "p".repeat(6000), new Events(), () -> false, null);
         Events e2 = new Events();
         e2.also = (type, data) -> {
             if ("approval_request".equals(type)) {
-                rig.approvals.resolve(chatId, data.get("id").asText(), false, null);
+                rig.approvals.resolve(chatId, data.get("id").asText(), false, null, false, false);
             }
         };
 
-        rig.loop.run(chatId, "q2", e2, () -> false);
+        rig.loop.run(chatId, "q2", e2, () -> false, null);
 
         assertTrue(e2.ofType("compaction").stream().noneMatch(n -> n.get("tier").asInt() == 3));
         assertFalse(rig.model.requests.get(3).messages().toString().contains("REWRITE"));

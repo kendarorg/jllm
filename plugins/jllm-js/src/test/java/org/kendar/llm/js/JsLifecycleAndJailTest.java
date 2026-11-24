@@ -3,10 +3,12 @@ package org.kendar.llm.js;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.AgentHarness;
+import org.kendar.llm.harness.AgentHarnessBuilder;
 import org.kendar.llm.harness.agent.AgentEvent;
 import org.kendar.llm.harness.llm.ModelResponse;
 import org.kendar.llm.harness.llm.Usage;
-import org.kendar.llm.harness.sandbox.CwdSandboxExecutor;
+import org.kendar.llm.harness.sandbox.LocalSandboxExecutor;
+import org.kendar.llm.harness.sandbox.CwdLayout;
 import org.kendar.llm.harness.tools.ToolKind;
 
 import java.nio.file.Files;
@@ -40,7 +42,7 @@ class JsLifecycleAndJailTest {
         h.subscribe(chat, 0, ev -> {
             events.add(ev);
             if (ev.type().equals("approval_request")) {
-                h.resolveApproval(chat, ev.data().path("id").asText(), true, null, false);
+                h.resolveApproval(chat, ev.data().path("id").asText(), true, null, false, false);
             }
             if (ev.type().equals("run_finished")) done.countDown();
         });
@@ -59,8 +61,8 @@ class JsLifecycleAndJailTest {
         var cfg = config(base);
         Path settings = base.resolve("settings.json");
         Files.writeString(settings, settingsJson);
-        return AgentHarness.builder().modelClient(model).config(cfg)
-                .sandbox(new CwdSandboxExecutor(cfg, project))
+        return new AgentHarnessBuilder().modelClient(model).config(cfg)
+                .sandbox(new LocalSandboxExecutor(new CwdLayout(cfg, project)))
                 .settings(settings)
                 .plugin(new JsPlugin()).build();
     }
@@ -110,7 +112,7 @@ class JsLifecycleAndJailTest {
 
     @Test
     void theClockStandsStillWhileAToolCallIsRunning() {
-        try (JsSandbox box = new JsSandbox(JsSettings.defaults())) {
+        try (JsSandbox box = JsTest.box("auto")) {
             var lib = new ToolLibrary().source(List.of(tool("slow", "G", ToolKind.READ_ONLY, (c, i) -> "")));
 
             JsResult r = box.run("tools.slow({}); return 'done';", 1, lib, (n, a) -> {
@@ -129,7 +131,7 @@ class JsLifecycleAndJailTest {
 
     @Test
     void aCancelledScriptThatKeepsRunningIsKilledAfterTheGracePeriod() {
-        try (JsSandbox box = new JsSandbox(new JsSettings(Long.MAX_VALUE, 120, 1, true))) {
+        try (JsSandbox box = JsTest.box("auto", "statementLimit", "9000000000000000", "gracefulSeconds", "1")) {
             AtomicBoolean cancelled = new AtomicBoolean();
             new Thread(() -> {
                 try {
@@ -152,7 +154,7 @@ class JsLifecycleAndJailTest {
 
     @Test
     void aKillRequestStopsTheScriptAtOnceWithoutTheGracePeriod() {
-        try (JsSandbox box = new JsSandbox(new JsSettings(Long.MAX_VALUE, 120, 60, true))) {
+        try (JsSandbox box = JsTest.box("auto", "statementLimit", "9000000000000000", "gracefulSeconds", "60")) {
             AtomicBoolean cancelled = new AtomicBoolean();
             AtomicBoolean kill = new AtomicBoolean();
             new Thread(() -> {
@@ -178,7 +180,7 @@ class JsLifecycleAndJailTest {
     void aGlobalSetInOneCallIsNotVisibleInTheNextCallOfTheSameChat() throws Exception {
         ScriptedModel model = new ScriptedModel().enqueue(jsUse("t1", "globalThis.keep = 7; return 1;"),
                 jsUse("t2", "return typeof globalThis.keep;"), text("ok"));
-        AgentHarness h = AgentHarness.builder().modelClient(model).config(config(base)).plugin(new JsPlugin()).build();
+        AgentHarness h = new AgentHarnessBuilder().modelClient(model).config(config(base)).plugin(new JsPlugin()).build();
 
         List<AgentEvent> events = run(h);
 
@@ -205,7 +207,7 @@ class JsLifecycleAndJailTest {
                 + "return {rows: rows.length, total: rows.reduce((s, r) => s + Number(r.split(',')[2]), 0),"
                 + "        lines: back.split('\\n').length};";
         ScriptedModel model = new ScriptedModel().enqueue(jsUse("t1", js), text("ok"));
-        AgentHarness h = AgentHarness.builder().modelClient(model).config(config(base)).tools(List.of(pages))
+        AgentHarness h = new AgentHarnessBuilder().modelClient(model).config(config(base)).tools(List.of(pages))
                 .plugin(new JsPlugin()).build();
 
         long t = System.nanoTime();

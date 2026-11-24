@@ -3,6 +3,7 @@ package org.kendar.llm.eval.cases;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.kendar.llm.eval.grade.Check;
 import org.kendar.llm.harness.AgentHarness;
+import org.kendar.llm.harness.AgentHarnessBuilder;
 import org.kendar.llm.harness.HarnessConfig;
 import org.kendar.llm.harness.context.ContextStrategyKind;
 import org.kendar.llm.harness.llm.ModelClient;
@@ -65,7 +66,7 @@ public final class EvalCase {
     private final List<Check> checks;
     private final List<ContextStrategyKind> strategies;
     private final BiConsumer<Path, Map<String, Object>> setup;
-    private final Consumer<AgentHarness.Builder> harness;
+    private final Consumer<AgentHarnessBuilder> harness;
     private final Supplier<ModelClient> model;
     private final UnaryOperator<HarnessConfig> config;
     private final java.util.function.Function<JsonNode, Boolean> approvals;
@@ -114,7 +115,7 @@ public final class EvalCase {
     /** Strategies the case expands into; one run (compaction) when not set. */
     public List<ContextStrategyKind> strategies() { return strategies; }
     public BiConsumer<Path, Map<String, Object>> setup() { return setup; }
-    public Consumer<AgentHarness.Builder> harness() { return harness; }
+    public Consumer<AgentHarnessBuilder> harness() { return harness; }
     /** A scripted model used instead of the model under test, or null. Its requests are still recorded. */
     public Supplier<ModelClient> model() { return model; }
     public UnaryOperator<HarnessConfig> config() { return config; }
@@ -155,7 +156,7 @@ public final class EvalCase {
         private final List<ContextStrategyKind> strategies = new ArrayList<>();
         private BiConsumer<Path, Map<String, Object>> setup = (w, e) -> {
         };
-        private Consumer<AgentHarness.Builder> harness = b -> {
+        private Consumer<AgentHarnessBuilder> harness = b -> {
         };
         private Supplier<ModelClient> model;
         private UnaryOperator<HarnessConfig> config = c -> c;
@@ -182,7 +183,7 @@ public final class EvalCase {
         public Builder setup(BiConsumer<Path, Map<String, Object>> s) { this.setup = s; return this; }
 
         /** Customizes the harness builder; applied last, after the eval's own defaults. */
-        public Builder harness(Consumer<AgentHarness.Builder> h) { this.harness = h; return this; }
+        public Builder harness(Consumer<AgentHarnessBuilder> h) { this.harness = h; return this; }
         /** Runs the case against this model instead of the model under test (scripted servers); evaluated per trial. */
         public Builder model(Supplier<ModelClient> m) { this.model = m; return this; }
 

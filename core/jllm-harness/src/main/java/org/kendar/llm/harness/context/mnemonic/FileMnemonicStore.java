@@ -44,7 +44,7 @@ public class FileMnemonicStore implements MnemonicStore {
         if (!Files.isRegularFile(f)) return new MnemonicState();
         try {
             return mapper.readValue(f.toFile(), MnemonicState.class);
-        } catch (IOException | RuntimeException e) {
+        } catch (IOException | RuntimeException e) { // boundary: an unreadable state file is quarantined
             return quarantine(f, e);
         }
     }
@@ -56,7 +56,7 @@ public class FileMnemonicStore implements MnemonicStore {
         try {
             Files.move(f, moved, StandardCopyOption.REPLACE_EXISTING);
             where = "moved to " + moved.getFileName();
-        } catch (IOException | RuntimeException e) {
+        } catch (IOException | RuntimeException e) { // boundary: quarantine is best effort
             log.warn("Cannot quarantine {}: {}", f, e.getMessage());
             where = "left in place";
         }

@@ -4,12 +4,15 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.context.compaction.ContextManager;
+import org.kendar.llm.harness.context.compaction.CutPlanner;
 import org.kendar.llm.harness.llm.ModelException;
 import org.kendar.llm.harness.permission.ApprovalService;
 import org.kendar.llm.harness.permission.PermissionMode;
-import org.kendar.llm.harness.sandbox.CwdSandboxExecutor;
-import org.kendar.llm.harness.sandbox.LocalDirSandboxExecutor;
+import org.kendar.llm.harness.sandbox.LocalSandboxExecutor;
+import org.kendar.llm.harness.sandbox.CwdLayout;
+import org.kendar.llm.harness.settings.HarnessConfigMapper;
 import org.kendar.llm.harness.settings.HarnessSettings;
+import org.kendar.llm.harness.settings.HarnessSettingsLoader;
 import org.kendar.llm.harness.tools.FileSystemAgentTools;
 import org.kendar.llm.harness.tools.ToolContext;
 
@@ -31,12 +34,12 @@ class ModesScratchContextTest {
     void settingsSectionsAreOptionalAndApplyToConfig() throws Exception {
         Path none = Files.writeString(base.resolve("a.json"), "{}");
         HarnessConfig defaults = HarnessConfig.defaults();
-        assertEquals(defaults, HarnessSettings.load(none, k -> null).applyTo(defaults));
+        assertEquals(defaults, HarnessConfigMapper.apply(HarnessSettingsLoader.load(none, k -> null), defaults));
 
         Path f = Files.writeString(base.resolve("b.json"), """
                 {"sandbox":{"tempDir":"${T}","timeoutSeconds":7},
                  "context":{"maxTokens":50000,"keepRecentTurns":3,"auto":false,"keepTokens":900,"buffer":2000}}""");
-        HarnessConfig c = HarnessSettings.load(f, Map.of("T", "/x/tmp")::get).applyTo(defaults);
+        HarnessConfig c = HarnessConfigMapper.apply(HarnessSettingsLoader.load(f, Map.of("T", "/x/tmp")::get), defaults);
         assertEquals("/x/tmp", c.sandbox().baseDir());
         assertEquals(7, c.sandbox().timeoutSeconds());
         assertEquals(50_000, c.contextBudgetTokens());
@@ -49,32 +52,32 @@ class ModesScratchContextTest {
         Path f = Files.writeString(base.resolve("d.json"), """
                 {"sandbox":{"backend":"docker","localFallback":false,
                             "docker":{"image":"maven:3-eclipse-temurin-21","memory":"2g","network":"bridge"}}}""");
-        HarnessSettings s = HarnessSettings.load(f, k -> null);
+        HarnessSettings s = HarnessSettingsLoader.load(f, k -> null);
         assertTrue(s.dockerSandbox());
-        HarnessConfig c = s.applyTo(HarnessConfig.defaults());
+        HarnessConfig c = HarnessConfigMapper.apply(s, HarnessConfig.defaults());
         assertEquals("maven:3-eclipse-temurin-21", c.sandbox().docker().image());
         assertEquals("2g", c.sandbox().docker().memory());
         assertEquals("bridge", c.sandbox().docker().network());
         assertEquals("1.0", c.sandbox().docker().cpus());
         assertFalse(c.sandbox().localDirSandboxAllowed());
 
-        HarnessSettings flag = HarnessSettings.empty().withSandboxBackend("docker").withDockerImage("alpine:3");
+        HarnessSettings flag = HarnessSettings.builder().sandboxBackend("docker").dockerImage("alpine:3").build();
         assertTrue(flag.dockerSandbox());
-        assertEquals("alpine:3", flag.applyTo(HarnessConfig.defaults()).sandbox().docker().image());
-        assertThrows(IllegalArgumentException.class, () -> HarnessSettings.empty().withSandboxBackend("vm"));
+        assertEquals("alpine:3", HarnessConfigMapper.apply(flag, HarnessConfig.defaults()).sandbox().docker().image());
+        assertThrows(IllegalArgumentException.class, () -> HarnessSettings.builder().sandboxBackend("vm"));
     }
 
     @Test
     void commandLineMaxTokensWinsOverSettings() {
-        HarnessSettings s = HarnessSettings.empty().withMaxTokens(1234);
-        assertEquals(1234, s.applyTo(HarnessConfig.defaults()).contextBudgetTokens());
+        HarnessSettings s = HarnessSettings.builder().maxTokens(1234).build();
+        assertEquals(1234, HarnessConfigMapper.apply(s, HarnessConfig.defaults()).contextBudgetTokens());
     }
 
     // ---- scratch
 
     @Test
     void scratchIsPerChatAndAgentAndJailed() {
-        LocalDirSandboxExecutor box = new LocalDirSandboxExecutor(config(base));
+        LocalSandboxExecutor box = LocalSandboxExecutor.of(config(base));
         Path a = box.scratchDir("chat1", "main");
         Path b = box.scratchDir("chat1", "sub-1");
         assertEquals(box.location().resolve("chat1").resolve("main"), a);
@@ -87,29 +90,29 @@ class ModesScratchContextTest {
     @Test
     void planModeWritesOnlyToScratch() throws Exception {
         Path cwd = Files.createDirectories(base.resolve("project"));
-        CwdSandboxExecutor box = new CwdSandboxExecutor(config(base.resolve("tmp")), cwd);
+        LocalSandboxExecutor box = new LocalSandboxExecutor(new CwdLayout(config(base.resolve("tmp")), cwd));
         Path scratch = box.scratchDir("c1", "main");
         ToolContext plan = new ToolContext("c1", box.workDir("c1"), scratch, true, null);
 
         assertEquals(cwd.toAbsolutePath().normalize(), box.workDir("c1"));
-        assertEquals(scratch.resolve("n.txt"), FileSystemAgentTools.jailWrite(plan, "n.txt"));
-        assertEquals(scratch.resolve("n.txt"), FileSystemAgentTools.jailWrite(plan, scratch.resolve("n.txt").toString()));
+        assertEquals(scratch.resolve("n.txt"), FileSystemAgentTools.jailWrite(plan, "n.txt").lexical());
+        assertEquals(scratch.resolve("n.txt"), FileSystemAgentTools.jailWrite(plan, scratch.resolve("n.txt").toString()).lexical());
         assertThrows(IllegalArgumentException.class,
                 () -> FileSystemAgentTools.jailWrite(plan, cwd.resolve("n.txt").toString()));
         assertThrows(IllegalArgumentException.class, () -> FileSystemAgentTools.jailWrite(plan, "../p.txt"));
         // reading cwd and scratch is allowed
-        assertEquals(cwd.resolve("r.txt").toAbsolutePath().normalize(), FileSystemAgentTools.jail(plan, "r.txt"));
-        assertEquals(scratch.resolve("n.txt"), FileSystemAgentTools.jail(plan, scratch.resolve("n.txt").toString()));
+        assertEquals(cwd.resolve("r.txt").toAbsolutePath().normalize(), FileSystemAgentTools.jail(plan, "r.txt").lexical());
+        assertEquals(scratch.resolve("n.txt"), FileSystemAgentTools.jail(plan, scratch.resolve("n.txt").toString()).lexical());
 
         ToolContext edit = new ToolContext("c1", box.workDir("c1"), scratch, false, null);
-        assertEquals(cwd.resolve("n.txt").toAbsolutePath().normalize(), FileSystemAgentTools.jailWrite(edit, "n.txt"));
+        assertEquals(cwd.resolve("n.txt").toAbsolutePath().normalize(), FileSystemAgentTools.jailWrite(edit, "n.txt").lexical());
     }
 
     @Test
     void deletingAChatNeverTouchesTheProjectDirectory() throws Exception {
         Path cwd = Files.createDirectories(base.resolve("project"));
         Files.writeString(cwd.resolve("keep.txt"), "x");
-        CwdSandboxExecutor box = new CwdSandboxExecutor(config(base.resolve("tmp")), cwd);
+        LocalSandboxExecutor box = new LocalSandboxExecutor(new CwdLayout(config(base.resolve("tmp")), cwd));
         Path scratch = box.scratchDir("c1", "main");
         box.deleteWorkDir("c1");
         assertFalse(Files.exists(scratch));
@@ -127,7 +130,7 @@ class ModesScratchContextTest {
 
     @Test
     void modeMenuListsPlanEditAutoAndSelectsByNumber() {
-        AgentHarness h = AgentHarness.builder().modelClient(new ScriptedModel()).config(config(base))
+        AgentHarness h = new AgentHarnessBuilder().modelClient(new ScriptedModel()).config(config(base))
                 .withoutStandardTools().build();
         String chat = h.sessions().create(null).chatId();
         var c = h.commands();
@@ -237,8 +240,8 @@ class ModesScratchContextTest {
         HarnessConfig c = config(base).withKeepRecentTurns(1);
         ContextManager cm = new ContextManager(c, new ScriptedModel(), new ApprovalService(5), MAPPER);
         ArrayNode m = conversation(4, 400); // ~110 tokens per turn
-        assertEquals(6, cm.tokenCutIndex(m, 250), "the last two turns fit");
-        assertEquals(0, cm.tokenCutIndex(m, 100_000), "everything fits");
+        assertEquals(6, CutPlanner.tokenCutIndex(m, 250), "the last two turns fit");
+        assertEquals(0, CutPlanner.tokenCutIndex(m, 100_000), "everything fits");
     }
 
     @Test

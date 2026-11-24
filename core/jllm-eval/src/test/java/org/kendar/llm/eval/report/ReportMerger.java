@@ -54,7 +54,14 @@ public final class ReportMerger {
         rows.add(row("judge", sums, s -> ReportBuilder.judge(s.path("run"))));
         rows.add(row("self-graded", sums, s -> s.path("run").path("selfGraded").asBoolean() ? "yes" : "no"));
         rows.add(row("pass rate", sums, s -> ReportBuilder.pct(s.path("overall").path("passRate"))));
-        rows.add(row("pass^k", sums, s -> ReportBuilder.pct(s.path("overall").path("passKRate"))));
+        // each run is shown at its own largest k; the k is printed per cell when the runs differ
+        Set<Integer> reportKs = new TreeSet<>();
+        for (JsonNode s : sums) reportKs.add(s.path("run").path("reportK").asInt(1));
+        boolean sameK = reportKs.size() == 1;
+        String kName = sameK ? String.valueOf(reportKs.iterator().next()) : "k";
+        rows.add(row("commit", sums, s -> ReportBuilder.commitLabel(s.path("run"))));
+        rows.add(row("pass@" + kName, sums, s -> kCell(s, "passAtK", sameK)));
+        rows.add(row("pass^" + kName, sums, s -> kCell(s, "passPowK", sameK)));
         rows.add(row("tokens/trial", sums, s -> ReportBuilder.num(s.path("overall").path("tokens").path("perTrial"))));
         rows.add(row("cache ratio", sums, s -> ReportBuilder.pct(s.path("overall").path("cacheRatio"))));
         rows.add(row("latency mean/p50/p95 ms", sums, s -> ReportBuilder.lat(s.path("overall").path("latency"))));
@@ -83,6 +90,12 @@ public final class ReportMerger {
         ReportBuilder.writeText(out.resolve("merged.md"), d.markdown());
         ReportBuilder.writeText(out.resolve("merged.html"), d.html());
         return root;
+    }
+
+    private static String kCell(JsonNode summary, String metric, boolean sameK) {
+        int k = summary.path("run").path("reportK").asInt(1);
+        String cell = ReportBuilder.kCell(summary.path("overall"), metric, k);
+        return sameK || cell.startsWith("k greater") ? cell : cell + " (k=" + k + ")";
     }
 
     private static List<String> row(String name, List<JsonNode> sums, java.util.function.Function<JsonNode, String> f) {

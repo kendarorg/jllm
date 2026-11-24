@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.llm.ProviderCatalog;
 import org.kendar.llm.harness.settings.HarnessSettings;
+import org.kendar.llm.harness.settings.HarnessSettingsLoader;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -28,7 +29,7 @@ class ProviderChooserTest {
     }
 
     private HarnessSettings settings(String json) throws Exception {
-        return HarnessSettings.load(Files.writeString(tmp.resolve("settings.json"), json));
+        return HarnessSettingsLoader.load(Files.writeString(tmp.resolve("settings.json"), json));
     }
 
     private static final String LOCAL = """

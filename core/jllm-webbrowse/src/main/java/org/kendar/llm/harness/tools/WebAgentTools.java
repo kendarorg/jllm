@@ -41,26 +41,34 @@ public class WebAgentTools implements HarnessToolSet {
     private final String duckDuckGoUrl;
     private final StorageQuota quota;
     private final long fetchMaxBytes;
+    private final AddressPolicy addresses;
 
     public WebAgentTools(HarnessConfig config, ObjectMapper mapper) {
-        this(config, mapper, "https://html.duckduckgo.com/html/", StorageQuota.UNLIMITED, DEFAULT_FETCH_MAX_BYTES);
+        this(config, mapper, "https://html.duckduckgo.com/html/", StorageQuota.UNLIMITED, DEFAULT_FETCH_MAX_BYTES,
+                AddressPolicy.OPEN);
     }
 
     public WebAgentTools(HarnessConfig config, ObjectMapper mapper, StorageQuota quota) {
-        this(config, mapper, "https://html.duckduckgo.com/html/", quota, DEFAULT_FETCH_MAX_BYTES);
+        this(config, mapper, "https://html.duckduckgo.com/html/", quota, DEFAULT_FETCH_MAX_BYTES, AddressPolicy.OPEN);
     }
 
-    /** @param fetchMaxBytes {@code web.fetchMaxBytes}: the most bytes of a body web_fetch reads; 0 or less: default */
-    public WebAgentTools(HarnessConfig config, ObjectMapper mapper, StorageQuota quota, long fetchMaxBytes) {
-        this(config, mapper, "https://html.duckduckgo.com/html/", quota, fetchMaxBytes);
+    /**
+     * @param fetchMaxBytes {@code web.fetchMaxBytes}: the most bytes of a body web_fetch reads; 0 or less: default
+     * @param addresses     the addresses web_fetch and web_download refuse ({@code web.blockLocalHost},
+     *                      {@code web.blockExtraAddresses})
+     */
+    public WebAgentTools(HarnessConfig config, ObjectMapper mapper, StorageQuota quota, long fetchMaxBytes,
+                         AddressPolicy addresses) {
+        this(config, mapper, "https://html.duckduckgo.com/html/", quota, fetchMaxBytes, addresses);
     }
 
     WebAgentTools(HarnessConfig config, ObjectMapper mapper, String duckDuckGoUrl) {
-        this(config, mapper, duckDuckGoUrl, StorageQuota.UNLIMITED, DEFAULT_FETCH_MAX_BYTES);
+        this(config, mapper, duckDuckGoUrl, StorageQuota.UNLIMITED, DEFAULT_FETCH_MAX_BYTES, AddressPolicy.OPEN);
     }
 
     private WebAgentTools(HarnessConfig config, ObjectMapper mapper, String duckDuckGoUrl, StorageQuota quota,
-                          long fetchMaxBytes) {
+                          long fetchMaxBytes, AddressPolicy addresses) {
+        this.addresses = addresses == null ? AddressPolicy.OPEN : addresses;
         this.duckDuckGoUrl = duckDuckGoUrl;
         this.config = config;
         this.mapper = mapper;
@@ -81,6 +89,7 @@ public class WebAgentTools implements HarnessToolSet {
         URI current = uri;
         java.util.Set<String> insecure = new java.util.HashSet<>(); // hosts the user let through, for this call only
         for (int hop = 0; ; hop++) {
+            addresses.check(current); // before the approval question: a blocked address is never offered
             checkHost(ctx, current, hop == 0 ? null : uri);
             HttpRequest req = HttpRequest.newBuilder(current)
                     .timeout(Duration.ofSeconds(30))
@@ -401,7 +410,7 @@ public class WebAgentTools implements HarnessToolSet {
             }
             String shown = in.path("path").asText();
             long max = config.web().downloadMaxBytes();
-            Path target = ctx.files() != null ? null : FileSystemAgentTools.jailWrite(ctx, shown);
+            PathResolver.JailedPath target = ctx.files() != null ? null : FileSystemAgentTools.jailWrite(ctx, shown);
             HttpResponse<java.io.InputStream> resp = get(ctx, uri, HttpResponse.BodyHandlers.ofInputStream());
             try (java.io.InputStream body = resp.body()) {
                 if (resp.statusCode() / 100 != 2) throw new IllegalStateException("download failed: HTTP " + resp.statusCode());
@@ -421,27 +430,35 @@ public class WebAgentTools implements HarnessToolSet {
                     fb.write(t, bytes, false);
                     size = bytes.length;
                 } else {
-                    Path dir = target.getParent();
-                    java.nio.file.Files.createDirectories(dir);
-                    Path tmp = java.nio.file.Files.createTempFile(dir, ".download-", ".tmp");
-                    try {
-                        long n = 0;
-                        try (var out = java.nio.file.Files.newOutputStream(tmp)) {
-                            byte[] buf = new byte[65536];
-                            for (int r; (r = body.read(buf)) >= 0; ) {
-                                n += r;
-                                if (n > max) throw new IllegalStateException("File too large: more than " + max
+                    PathJail.createParentDirectories(target);
+                    java.nio.file.attribute.BasicFileAttributes old = PathJail.stat(target);
+                    if (old != null && old.isDirectory()) throw new IllegalArgumentException("Is a directory: " + shown);
+                    long oldSize = old != null ? old.size() : 0;
+                    long[] n = {0};
+                    java.io.InputStream limited = new java.io.FilterInputStream(body) {
+                        private void count(long r) {
+                            if (r > 0 && (n[0] += r) > max) {
+                                throw new IllegalStateException("File too large: more than " + max
                                         + " bytes (web.downloadMaxBytes)");
-                                out.write(buf, 0, r);
                             }
                         }
-                        quota.reserve(ctx.chatId(), target,
-                                java.nio.file.Files.exists(target) ? java.nio.file.Files.size(target) : 0, n);
-                        java.nio.file.Files.move(tmp, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-                        size = n;
-                    } finally {
-                        java.nio.file.Files.deleteIfExists(tmp);
-                    }
+
+                        @Override
+                        public int read() throws java.io.IOException {
+                            int b = super.read();
+                            if (b >= 0) count(1);
+                            return b;
+                        }
+
+                        @Override
+                        public int read(byte[] buf, int off, int len) throws java.io.IOException {
+                            int r = super.read(buf, off, len);
+                            count(r);
+                            return r;
+                        }
+                    };
+                    AtomicFiles.write(target, limited, written -> quota.reserve(ctx.chatId(), target.lexical(), oldSize, written));
+                    size = n[0];
                 }
                 return FileSystemAgentTools.written(ctx, "Saved " + size + " bytes (" + type + ") to", shown);
             }

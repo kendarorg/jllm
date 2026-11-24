@@ -1,4 +1,4 @@
-import {computed, nextTick, onMounted, onUnmounted, ref, watch} from 'vue';
+import {computed, nextTick, onMounted, onUnmounted, ref, watch} from '../vendor/vue.esm-browser.prod.js';
 import {resolveApproval, store, toast} from '../store.js';
 
 export default {

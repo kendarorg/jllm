@@ -3,12 +3,14 @@ package org.kendar.llm.harness.skills;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.AgentHarness;
+import org.kendar.llm.harness.AgentHarnessBuilder;
 import org.kendar.llm.harness.agent.AgentCatalog;
 import org.kendar.llm.harness.agent.AgentDefinition;
-import org.kendar.llm.harness.agent.AgentLoop;
+import org.kendar.llm.harness.agent.SubAgentRunner;
 import org.kendar.llm.harness.agent.SubAgentTool;
 import org.kendar.llm.harness.instructions.InstructionLoader;
 import org.kendar.llm.harness.settings.HarnessSettings;
+import org.kendar.llm.harness.settings.HarnessSettingsLoader;
 import org.kendar.llm.harness.settings.SkillSettings;
 import org.kendar.llm.harness.tools.HarnessTool;
 import org.kendar.llm.harness.tools.ToolContext;
@@ -21,6 +23,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.kendar.llm.harness.HarnessTestSupport.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
@@ -54,9 +57,9 @@ class SkillsAgentsInstructionsTest {
     @Test
     void harnessRegistersSkillToolOnlyWithSkillsAndSkillsMenuToggles() throws Exception {
         Path pdf = write("pdf.md", "body");
-        HarnessSettings settings = new HarnessSettings(null, null,
-                List.of(new SkillSettings("pdf", "PDFs", pdf.toString())), null, null);
-        AgentHarness h = AgentHarness.builder().modelClient(new ScriptedModel()).config(config(base))
+        HarnessSettings settings = HarnessSettings.builder()
+                .skills(List.of(new SkillSettings("pdf", "PDFs", pdf.toString()))).build();
+        AgentHarness h = new AgentHarnessBuilder().modelClient(new ScriptedModel()).config(config(base))
                 .withoutStandardTools().settings(settings).build();
         String chat = h.sessions().create(null).chatId();
 
@@ -67,7 +70,7 @@ class SkillsAgentsInstructionsTest {
         h.commands().menuInput(chat, "1");
         assertFalse(h.skills().isEnabled("pdf"));
 
-        AgentHarness none = AgentHarness.builder().modelClient(new ScriptedModel()).config(config(base))
+        AgentHarness none = new AgentHarnessBuilder().modelClient(new ScriptedModel()).config(config(base))
                 .withoutStandardTools().build();
         assertTrue(none.tools().all().isEmpty());
     }
@@ -87,7 +90,7 @@ class SkillsAgentsInstructionsTest {
     void defaultInstructionFilesAreKendarAgentsClaudeInThatOrder() throws Exception {
         assertEquals(List.of("KENDAR.md", "AGENTS.md", "CLAUDE.md"), HarnessSettings.empty().instructionFiles());
         Path file = Files.writeString(base.resolve("settings.json"), "{}");
-        assertEquals(HarnessSettings.DEFAULT_INSTRUCTION_FILES, HarnessSettings.load(file).instructionFiles());
+        assertEquals(HarnessSettings.DEFAULT_INSTRUCTION_FILES, HarnessSettingsLoader.load(file).instructionFiles());
 
         write("CLAUDE.md", "Claude rules.");
         write("AGENTS.md", "Agents rules.");
@@ -113,9 +116,9 @@ class SkillsAgentsInstructionsTest {
     @Test
     void anExplicitListReplacesTheDefault() throws Exception {
         Path file = Files.writeString(base.resolve("settings.json"), "{\"instructionFiles\":[\"RULES.md\"]}");
-        assertEquals(List.of("RULES.md"), HarnessSettings.load(file).instructionFiles());
+        assertEquals(List.of("RULES.md"), HarnessSettingsLoader.load(file).instructionFiles());
         Files.writeString(file, "{\"instructionFiles\":[]}");
-        assertEquals(List.of(), HarnessSettings.load(file).instructionFiles());
+        assertEquals(List.of(), HarnessSettingsLoader.load(file).instructionFiles());
     }
 
     @Test
@@ -150,8 +153,8 @@ class SkillsAgentsInstructionsTest {
     void instructionsReachTheSystemPrompt() throws Exception {
         Path a = write("KENDAR.md", "Always say moo.");
         ScriptedModel model = new ScriptedModel().enqueue(text("ok"));
-        AgentHarness h = AgentHarness.builder().modelClient(model).config(config(base)).withoutStandardTools()
-                .settings(new HarnessSettings(null, null, null, List.of(a.toString()), null)).build();
+        AgentHarness h = new AgentHarnessBuilder().modelClient(model).config(config(base)).withoutStandardTools()
+                .settings(HarnessSettings.builder().instructionFiles(List.of(a.toString())).build()).build();
         String chat = h.sessions().create(null).chatId();
 
         h.start(chat, "hi");
@@ -173,15 +176,15 @@ class SkillsAgentsInstructionsTest {
 
     @Test
     void taskToolRunsTypedAgentsAndRejectsUnknownTypes() throws Exception {
-        AgentLoop loop = mock(AgentLoop.class);
+        SubAgentRunner loop = mock(SubAgentRunner.class);
         AgentCatalog catalog = new AgentCatalog(List.of());
-        when(loop.runSubAgent(any(), any(), eq("q"), eq(catalog.get("explore")), any(), any(), any())).thenReturn("typed");
-        when(loop.runSubAgent(any(), any(), eq("q"), eq(catalog.get("general")), any(), any(), any())).thenReturn("plain");
+        when(loop.run(argThat(r -> r != null && "q".equals(r.prompt()) && catalog.get("explore").equals(r.agentType())))).thenReturn("typed");
+        when(loop.run(argThat(r -> r != null && "q".equals(r.prompt()) && catalog.get("general").equals(r.agentType())))).thenReturn("plain");
         SubAgentTool tool = new SubAgentTool(() -> loop, MAPPER, catalog);
         ToolContext ctx = new ToolContext("c1", base);
 
         assertTrue(tool.execute(ctx, json("{'prompts':['q'],'subagent_type':'explore'}")).contains("typed"));
-        verify(loop).runSubAgent(eq("c1"), any(), eq("q"), eq(catalog.get("explore")), any(), any(), any());
+        verify(loop).run(argThat(r -> r != null && "c1".equals(r.chatId()) && "q".equals(r.prompt()) && catalog.get("explore").equals(r.agentType())));
         assertTrue(tool.execute(ctx, json("{'prompts':['q']}")).contains("plain"));
         assertThrows(IllegalArgumentException.class, () -> tool.execute(ctx, json("{'prompts':['q'],'subagent_type':'x'}")));
         assertTrue(tool.description().contains("explore"));
@@ -197,7 +200,7 @@ class SkillsAgentsInstructionsTest {
         rig.model.enqueue(text("found"));
         AgentDefinition scout = new AgentDefinition("scout", "Looks around", List.of("read_file"), "SCOUT RULES");
 
-        String out = rig.loop.runSubAgent(rig.newChat(), "t1", "look", scout);
+        String out = rig.subAgent(rig.newChat(), "t1", "look", scout);
 
         assertEquals("found", out);
         var req = rig.model.requests.get(0);

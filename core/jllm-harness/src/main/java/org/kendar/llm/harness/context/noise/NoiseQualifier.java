@@ -92,7 +92,7 @@ public final class NoiseQualifier {
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 return Decision.KEEP;
-            } catch (Exception e) {
+            } catch (Exception e) { // boundary: a failing qualifier call is retried, then skipped
                 log.warn("Noise qualifier failed (attempt {}): {}", attempt + 1, e.getMessage());
             }
         }

@@ -131,7 +131,13 @@ class AdminControllerTest {
         assertFalse(f.permissions.role("docs").orElseThrow().allows(tool("mcp__docs__search", ToolKind.OTHER)));
 
         f.user("dora", "docs");
-        f.send(admin, "DELETE", "/api/admin/roles/docs", null).andExpect(status().isConflict());
+        String refusal = f.send(admin, "DELETE", "/api/admin/roles/docs", null).andExpect(status().isConflict())
+                .andReturn().getResponse().getContentAsString();
+        assertTrue(refusal.contains("dora"), "the message names the users: " + refusal);
+        f.send(admin, "POST", "/api/admin/users", Map.of("id", "ghosty", "role", "nosuchrole")).andExpect(status().isBadRequest());
+        f.send(admin, "PUT", "/api/admin/users/dora", Map.of("role", "nosuchrole")).andExpect(status().isBadRequest());
+        assertThrows(org.kendar.llm.harness.identity.UnknownRoleException.class,
+                () -> f.users.create("ghosty", "G", "nosuchrole", null, null));
         f.users.delete("dora");
         f.send(admin, "DELETE", "/api/admin/roles/docs", null).andExpect(status().isNoContent());
         assertTrue(f.permissions.role("docs").isEmpty());
@@ -160,6 +166,23 @@ class AdminControllerTest {
         assertEquals("docs", docs.path("name").asText());
         assertFalse(docs.path("enabled").asBoolean());
         assertEquals("mcp__docs__*", docs.path("pattern").asText());
+    }
+
+    @Test
+    void theCatalogEntryOfRunJsCarriesTheEngineStatusAndOthersHaveNone() throws Exception {
+        WebauthFixture f = new WebauthFixture(dir);
+        JsonNode cat = json(f.get(f.signIn("admin"), "/api/admin/catalog"));
+        JsonNode runJs = null;
+        JsonNode readFile = null;
+        for (JsonNode t : cat.path("tools")) {
+            if (t.path("name").asText().equals("run_js")) runJs = t;
+            if (t.path("name").asText().equals("read_file")) readFile = t;
+        }
+
+        assertNotNull(runJs);
+        assertEquals("edition community, profile isolated, isolate available", runJs.path("status").asText());
+        assertNotNull(readFile);
+        assertTrue(readFile.path("status").isNull(), "a tool with nothing to report has no status");
     }
 
     @Test

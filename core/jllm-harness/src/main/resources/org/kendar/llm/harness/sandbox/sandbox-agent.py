@@ -8,10 +8,14 @@ Standard library only. Configuration (environment):
   JLLM_WORKSPACE  work root (default /workspace)
   JLLM_SCRATCH    scratch root (default <workspace>/.jllm/scratchpad)
   JLLM_LOG_MAX_BYTES  cap of a command's spill log when the request gives none (default 51200; 0: unlimited)
+  JLLM_EXTERNAL_LINKS  none (default), read or readwrite: what a link that leaves the root does (files.externalLinks)
+  X-Jllm-Chat     optional request header: a chat id. The file roots of that request are /workspace/<chat> and its
+                  .jllm/scratchpad (user-scope containers keep one directory per chat in one workspace volume)
   JLLM_ALIAS      tests only: absolute paths under this prefix (e.g. /workspace) are mapped onto the workspace
 
 Endpoints: see docs/guides/sandbox.md. A request with a missing or wrong token gets an empty 401 and nothing is executed.
 """
+import errno
 import hmac
 import json
 import os
@@ -33,6 +37,10 @@ TOKEN = os.environ.get("JLLM_TOKEN", "")
 WORKSPACE = os.environ.get("JLLM_WORKSPACE", "/workspace")
 SCRATCH = os.environ.get("JLLM_SCRATCH", os.path.join(WORKSPACE, ".jllm", "scratchpad"))
 ALIAS = os.environ.get("JLLM_ALIAS", "")
+# What the file tools do with a link that leaves the root: none (default), read or readwrite
+EXTERNAL_LINKS = (os.environ.get("JLLM_EXTERNAL_LINKS") or "none").strip().lower()
+if EXTERNAL_LINKS not in ("none", "read", "readwrite"):
+    EXTERNAL_LINKS = "none"
 
 CAPTURE_LIMIT = 50 * 1024      # bytes of command output kept in memory
 LOG_MAX_BYTES = int(os.environ.get("JLLM_LOG_MAX_BYTES") or 50 * 1024)  # spill log cap (0: unlimited)
@@ -60,17 +68,39 @@ def unalias(p):
     return p
 
 
+CTX = threading.local()   # per request: the chat whose directory the file roots are (user-scope containers)
+CHAT_ID = re.compile(r"[A-Za-z0-9._-]{1,64}")
+
+
 def root_of(name):
+    chat = getattr(CTX, "chat", None)
+    work = os.path.join(WORKSPACE, chat) if chat else WORKSPACE
+    scratch = os.path.join(work, ".jllm", "scratchpad") if chat else SCRATCH
     if name in (None, "", "workspace"):
-        return WORKSPACE
+        os.makedirs(work, exist_ok=True)
+        return work
     if name == "scratch":
-        os.makedirs(SCRATCH, exist_ok=True)
-        return SCRATCH
+        os.makedirs(scratch, exist_ok=True)
+        return scratch
     raise HttpError(400, "unknown root")
 
 
-def resolve(root, path, must_exist=False):
-    """Resolves path (relative to root, or absolute) and refuses anything that ends outside root, symlinks included."""
+def check_external(shown, write):
+    """A link leaves the root: refused unless JLLM_EXTERNAL_LINKS allows this access (read: reads only)."""
+    if EXTERNAL_LINKS == "none":
+        raise HttpError(400, "%s is a link that leaves the work dir. Files outside the work dir are off-limits for "
+                             "every tool, the shell included: tell the user you cannot access it, do not try another "
+                             "way." % shown)
+    if write and EXTERNAL_LINKS != "readwrite":
+        raise HttpError(400, "%s is a link that leaves the work dir: it can be read but not written, because the "
+                             "setting files.externalLinks is read (readwrite allows writes through such links). Tell "
+                             "the user; do not try another way to change it." % shown)
+
+
+def resolve(root, path, must_exist=False, write=False):
+    """Resolves path (relative to root, or absolute) and refuses anything that ends outside root, symlinks included.
+
+    A link leaving the root is followed only as JLLM_EXTERNAL_LINKS allows (write: the access changes something)."""
     real_root = os.path.realpath(root)
     p = unalias(path or ".")
     candidate = p if os.path.isabs(p) else os.path.join(real_root, p)
@@ -83,10 +113,10 @@ def resolve(root, path, must_exist=False):
             break
         existing = parent
     real_existing = os.path.realpath(existing)
-    if real_existing != real_root and not real_existing.startswith(real_root + os.sep):
-        raise HttpError(400, "path escapes the root: " + p)
     if candidate != real_root and not candidate.startswith(real_root + os.sep):
         raise HttpError(400, "path escapes the root: " + p)
+    if real_existing != real_root and not real_existing.startswith(real_root + os.sep):
+        check_external(p, write)
     if must_exist and not os.path.lexists(candidate):
         raise HttpError(404, "not found: " + p)
     return candidate
@@ -163,15 +193,42 @@ def glob_class(body):
     return "[" + ("^/" if neg else "") + "".join(parts) + "]"
 
 
-def walk_files(start, root):
-    """Regular files under start, as paths relative to root; symlinks are not followed."""
+def _inside(real_root, real):
+    return real == real_root or real.startswith(real_root + os.sep)
+
+
+def walk_files(start, root, entered=None):
+    """Regular files under start, as paths relative to root.
+
+    A link to a file is a file when its target is inside the root, or JLLM_EXTERNAL_LINKS allows reading outside. A
+    link to a directory is not entered when its target is inside the root (it is walked where it lies); one leaving the
+    root is entered once, when reads outside are allowed, unless it is an ancestor of the root."""
     real_root = os.path.realpath(root)
+    follow = EXTERNAL_LINKS != "none"
+    if entered is None:
+        entered = set()
+        real_start = os.path.realpath(start)
+        if not _inside(real_root, real_start):
+            entered.add(real_start)
     for dirpath, dirnames, filenames in os.walk(start, followlinks=False):
         dirnames.sort()
+        if follow:
+            for d in list(dirnames):
+                full = os.path.join(dirpath, d)
+                if not os.path.islink(full):
+                    continue
+                real = os.path.realpath(full)
+                if (os.path.isdir(real) and not _inside(real_root, real) and not _inside(real, real_root)
+                        and real not in entered):
+                    entered.add(real)
+                    yield from walk_files(full, root, entered)
         for f in sorted(filenames):
             full = os.path.join(dirpath, f)
-            if os.path.isfile(full) and not os.path.islink(full):
-                yield full, os.path.relpath(full, real_root).replace(os.sep, "/")
+            if not os.path.isfile(full):
+                continue
+            if os.path.islink(full) and not (follow or _inside(real_root, os.path.realpath(full))):
+                continue
+            yield full, os.path.relpath(full, real_root).replace(os.sep, "/")
 
 
 # ── commands ──────────────────────────────────────────────────────────────────
@@ -307,6 +364,8 @@ def start_exec(body):
     if not isinstance(command, str) or not command:
         raise HttpError(400, "command is required")
     cwd = resolve(WORKSPACE, body.get("cwd") or WORKSPACE)
+    if not os.path.exists(cwd):
+        os.makedirs(cwd, exist_ok=True)  # a chat's directory in a user-scope workspace, or a scratch dir not used yet
     if not os.path.isdir(cwd):
         raise HttpError(400, "cwd is not a directory")
     timeout = max(1, min(int(body.get("timeoutSeconds") or 120), 3600))
@@ -365,54 +424,263 @@ def stat_info(root, path):
             "mode": statmod.filemode(mode)}
 
 
+# open-in-root: no model-supplied path is opened by name. Every component is opened relative to the descriptor of its
+# parent with O_NOFOLLOW, so a component swapped for a link after the check cannot lead outside the root. A link whose
+# target stays inside the root is followed by restarting the walk on the target's components (at most 40 hops).
+
+MAX_LINK_HOPS = 40
+O_DIRECTORY = getattr(os, "O_DIRECTORY", 0)
+O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+# Linux, macOS: openat and friends. Windows (the daemon runs there for development only): no directory descriptors,
+# the path is checked by resolve() and opened by name.
+HAS_DIRFD = bool(O_NOFOLLOW and O_DIRECTORY and os.open in os.supports_dir_fd and os.stat in os.supports_dir_fd
+                 and os.rename in os.supports_dir_fd and os.mkdir in os.supports_dir_fd
+                 and os.unlink in os.supports_dir_fd and os.rmdir in os.supports_dir_fd)
+
+
+def _components(real_root, candidate):
+    r = os.path.relpath(candidate, real_root)
+    return [] if r == "." else r.split(os.sep)
+
+
+def walk_parent(real_root, comps, create=False, follow_final=True, write=False):
+    """Opens the directory holding the last of comps (names below real_root) without following links.
+
+    Returns (dir_fd, name); the caller closes dir_fd. A link to somewhere inside the root is followed (follow_final:
+    also at the last component). A link leaving the root is followed only as JLLM_EXTERNAL_LINKS allows (write: the
+    access changes something); the walk then restarts from "/" and is no longer confined. A link swapped in on the way
+    is refused with 400."""
+    if not comps:
+        raise HttpError(400, "path is the root")
+    shown = "/".join(comps)
+    hops = 0
+    base = real_root
+    while True:
+        fd = os.open(base, os.O_RDONLY | O_DIRECTORY)
+        restart_base = base
+        restart = None
+        try:
+            for i, name in enumerate(comps):
+                last = i == len(comps) - 1
+                try:
+                    st = os.stat(name, dir_fd=fd, follow_symlinks=False)
+                except FileNotFoundError:
+                    st = None
+                if st is not None and statmod.S_ISLNK(st.st_mode) and (not last or follow_final):
+                    hops += 1
+                    if hops > MAX_LINK_HOPS:
+                        raise HttpError(400, "too many levels of links: " + shown)
+                    at = os.path.join(base, *comps[:i])
+                    target = os.path.normpath(os.path.join(at, os.readlink(name, dir_fd=fd)))
+                    if target == real_root or target.startswith(real_root + os.sep):
+                        restart_base = real_root
+                        restart = _components(real_root, target) + comps[i + 1:]
+                    else:
+                        check_external(shown, write)
+                        restart_base = os.sep
+                        restart = _components(os.sep, target) + comps[i + 1:]
+                    if not restart:
+                        raise HttpError(400, "path is the root")
+                    break
+                if last:
+                    result = (fd, name)
+                    fd = None  # owned by the caller
+                    return result
+                if st is None:
+                    if not create:
+                        raise HttpError(404, "not found: " + shown)
+                    try:
+                        os.mkdir(name, dir_fd=fd)
+                    except FileExistsError:
+                        pass
+                try:
+                    nxt = os.open(name, os.O_RDONLY | O_DIRECTORY | O_NOFOLLOW, dir_fd=fd)
+                except OSError:
+                    raise HttpError(400, "path escapes the root, or is not a directory: " + shown)
+                os.close(fd)
+                fd = nxt
+        finally:
+            if fd is not None:
+                os.close(fd)
+        comps = restart
+        base = restart_base
+
+
+def open_in_root(root, path, flags, mode=0o666, create_dirs=False):
+    """Opens a file under root without following a link that leaves it (unless JLLM_EXTERNAL_LINKS allows it for this
+    access); returns the file descriptor."""
+    write = bool(flags & (os.O_WRONLY | os.O_RDWR | os.O_CREAT)) or create_dirs
+    if not HAS_DIRFD:
+        p = resolve(root, path, write=write)
+        if create_dirs:
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+        try:
+            return os.open(p, flags | getattr(os, "O_BINARY", 0), mode)
+        except FileNotFoundError:
+            raise HttpError(404, "not found: " + path)
+    real_root = os.path.realpath(root)
+    fd, name = walk_parent(real_root, _components(real_root, resolve(root, path, write=write)), create_dirs,
+                           write=write)
+    try:
+        return os.open(name, flags | O_NOFOLLOW, mode, dir_fd=fd)
+    except FileNotFoundError:
+        raise HttpError(404, "not found: " + path)
+    except OSError as e:
+        if e.errno == errno.ELOOP:
+            raise HttpError(400, "path escapes the root: " + path)
+        raise
+    finally:
+        os.close(fd)
+
+
 def read_file(root, path, offset, limit):
     p = resolve(root, path, must_exist=True)
-    if not os.path.isfile(p):
+    if not HAS_DIRFD and not os.path.isfile(p):
         raise HttpError(404, "not a file: " + path)
-    with open(p, "rb") as f:
+    fd = open_in_root(root, path, os.O_RDONLY)
+    with os.fdopen(fd, "rb") as f:
+        if not statmod.S_ISREG(os.fstat(f.fileno()).st_mode):
+            raise HttpError(404, "not a file: " + path)
         f.seek(max(0, offset))
         return f.read(limit if limit >= 0 else -1)
 
 
 def write_file(root, path, data, append):
-    p = resolve(root, path)
-    if os.path.isdir(p):
-        raise HttpError(400, "is a directory: " + path)
-    os.makedirs(os.path.dirname(p), exist_ok=True)
-    with open(p, "ab" if append else "wb") as f:
-        f.write(data)
-    return {"path": rel(root, p), "size": os.path.getsize(p)}
+    p = resolve(root, path, write=True)
+    if not HAS_DIRFD:
+        if os.path.isdir(p):
+            raise HttpError(400, "is a directory: " + path)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "ab" if append else "wb") as f:
+            f.write(data)
+        return {"path": rel(root, p), "size": os.path.getsize(p)}
+    real_root = os.path.realpath(root)
+    fd, name = walk_parent(real_root, _components(real_root, p), create=True, write=True)
+    try:
+        try:
+            old = os.stat(name, dir_fd=fd, follow_symlinks=False)
+        except FileNotFoundError:
+            old = None
+        if old is not None and statmod.S_ISDIR(old.st_mode):
+            raise HttpError(400, "is a directory: " + path)
+        if append or (old is not None and old.st_nlink > 1):
+            # appended, or shared through hard links: written in place, so every link keeps seeing the content
+            flags = os.O_WRONLY | os.O_CREAT | O_NOFOLLOW | (os.O_APPEND if append else os.O_TRUNC)
+            with os.fdopen(os.open(name, flags, 0o666, dir_fd=fd), "ab" if append else "wb") as f:
+                f.write(data)
+        else:
+            # a temporary file next to it, moved over it relative to the directory descriptor: never half written
+            tmp = ".%s.%s.tmp" % (name, uuid.uuid4().hex)
+            tfd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | O_NOFOLLOW, 0o666, dir_fd=fd)
+            try:
+                with os.fdopen(tfd, "wb") as f:
+                    f.write(data)
+                    f.flush()
+                    os.fsync(f.fileno())
+                if old is not None and statmod.S_ISREG(old.st_mode):
+                    os.chmod(tmp, statmod.S_IMODE(old.st_mode), dir_fd=fd, follow_symlinks=False)
+                os.rename(tmp, name, src_dir_fd=fd, dst_dir_fd=fd)
+            except BaseException:
+                try:
+                    os.unlink(tmp, dir_fd=fd)
+                except OSError:
+                    pass
+                raise
+        size = os.stat(name, dir_fd=fd, follow_symlinks=False).st_size
+    finally:
+        os.close(fd)
+    return {"path": rel(root, p), "size": size}
+
+
+def _remove_tree(parent_fd, name):
+    """Deletes name (relative to parent_fd): a link is removed, never entered; directories are walked by descriptor."""
+    st = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+    if not statmod.S_ISDIR(st.st_mode):
+        os.unlink(name, dir_fd=parent_fd)
+        return
+    dfd = os.open(name, os.O_RDONLY | O_DIRECTORY | O_NOFOLLOW, dir_fd=parent_fd)
+    try:
+        with os.scandir(dfd) as it:
+            children = [e.name for e in it]
+        for child in children:
+            _remove_tree(dfd, child)
+    finally:
+        os.close(dfd)
+    os.rmdir(name, dir_fd=parent_fd)
 
 
 def delete_path(root, path):
-    p = resolve(root, path, must_exist=True)
-    if p == os.path.realpath(root):
+    p = resolve(root, path, must_exist=True, write=True)
+    real_root = os.path.realpath(root)
+    if p == real_root:
         raise HttpError(400, "cannot delete the root")
-    if os.path.isdir(p) and not os.path.islink(p):
-        shutil.rmtree(p)
-    else:
-        os.remove(p)
+    if not HAS_DIRFD:
+        if os.path.isdir(p) and not os.path.islink(p):
+            shutil.rmtree(p)
+        else:
+            os.remove(p)
+        return {"deleted": rel(root, p)}
+    fd, name = walk_parent(real_root, _components(real_root, p), follow_final=False, write=True)
+    try:
+        _remove_tree(fd, name)
+    except FileNotFoundError:
+        raise HttpError(404, "not found: " + path)
+    finally:
+        os.close(fd)
     return {"deleted": rel(root, p)}
 
 
 def make_dir(root, path):
-    p = resolve(root, path)
-    if os.path.lexists(p):
-        raise HttpError(409, "already exists: " + path)
-    os.makedirs(p)
+    p = resolve(root, path, write=True)
+    if not HAS_DIRFD:
+        if os.path.lexists(p):
+            raise HttpError(409, "already exists: " + path)
+        os.makedirs(p)
+        return {"path": rel(root, p)}
+    real_root = os.path.realpath(root)
+    fd, name = walk_parent(real_root, _components(real_root, p), create=True, follow_final=False, write=True)
+    try:
+        try:
+            os.mkdir(name, dir_fd=fd)
+        except FileExistsError:
+            raise HttpError(409, "already exists: " + path)
+    finally:
+        os.close(fd)
     return {"path": rel(root, p)}
 
 
 def move_path(root, src, dst):
-    d = resolve(root, dst)
-    s = resolve(root, src, must_exist=True)
+    d = resolve(root, dst, write=True)
+    s = resolve(root, src, must_exist=True, write=True)
     if s == os.path.realpath(root):
         raise HttpError(400, "cannot move the root")
-    if os.path.lexists(d):
-        raise HttpError(409, "already exists: " + dst)
-    os.makedirs(os.path.dirname(d), exist_ok=True)
-    os.rename(s, d)
+    if not HAS_DIRFD:
+        if os.path.lexists(d):
+            raise HttpError(409, "already exists: " + dst)
+        os.makedirs(os.path.dirname(d), exist_ok=True)
+        os.rename(s, d)
+        return {"path": rel(root, d)}
+    real_root = os.path.realpath(root)
+    sfd, sname = walk_parent(real_root, _components(real_root, s), follow_final=False, write=True)
+    try:
+        dfd, dname = walk_parent(real_root, _components(real_root, d), create=True, follow_final=False, write=True)
+        try:
+            if _exists_at(dfd, dname):
+                raise HttpError(409, "already exists: " + dst)
+            os.rename(sname, dname, src_dir_fd=sfd, dst_dir_fd=dfd)
+        finally:
+            os.close(dfd)
+    finally:
+        os.close(sfd)
     return {"path": rel(root, d)}
+
+
+def _exists_at(dir_fd, name):
+    try:
+        os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+        return True
+    except FileNotFoundError:
+        return False
 
 
 # ── workspace backup / setup (remote docker: the host cannot mount the project) ─
@@ -523,7 +791,7 @@ def do_grep(body):
         try:
             if os.path.getsize(full) > MAX_FILE_BYTES:
                 continue
-            with open(full, "r", encoding="utf-8") as f:
+            with os.fdopen(open_in_root(root, full, os.O_RDONLY), "r", encoding="utf-8") as f:
                 for i, line in enumerate(f, 1):
                     line = line.rstrip("\r\n")
                     if rx.search(line):
@@ -666,6 +934,10 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         try:
+            chat = self.headers.get("X-Jllm-Chat")
+            if chat is not None and (not CHAT_ID.fullmatch(chat) or ".." in chat):
+                raise HttpError(400, "bad chat id")
+            CTX.chat = chat
             u = urlparse(self.path)
             q = {k: v[0] for k, v in parse_qs(u.query, keep_blank_values=True).items()}
             self._route(self.command, u.path, q)
@@ -729,6 +1001,28 @@ def main():
     os.makedirs(WORKSPACE, exist_ok=True)
     port = int(os.environ.get("JLLM_PORT", "8080"))
     bind = os.environ.get("JLLM_BIND", "0.0.0.0")
+    # ======================================================================================
+    # TODO TODO TODO  --  THIS DAEMON SPEAKS PLAIN HTTP ONLY. NO TLS.  --  TODO TODO TODO
+    #
+    # The bearer token (JLLM_TOKEN) and EVERY command, file and output exchanged with the
+    # Java side (DaemonClient) travel in CLEARTEXT. Anyone on the network path can read the
+    # token, replay it, and execute arbitrary commands inside the sandbox.
+    #
+    # Safe only when:
+    #   - the daemon is reached over loopback / a local Docker network on the same host, or
+    #   - the traffic goes through an SSH tunnel, or
+    #   - the network between client and daemon is fully trusted.
+    #
+    # For any other remote use, put a TLS-terminating reverse proxy (nginx, caddy, traefik,
+    # stunnel) in front of the published port and point the client at https://host. The Java
+    # client already supports https (HarnessConfig.Docker: allowInsecure, trustStore,
+    # trustStorePassword); see docs/guides/sandbox.md. allowInsecure currently defaults to
+    # true, so http is accepted silently apart from one WARN per host.
+    #
+    # PROPER FIX (not done): wrap srv.socket with ssl.SSLContext.wrap_socket(), loading a
+    # certificate and key from JLLM_TLS_CERT / JLLM_TLS_KEY, optionally require a client
+    # certificate (mTLS), then flip the allowInsecure default to false.
+    # ======================================================================================
     srv = ThreadingHTTPServer((bind, port), Handler)
     srv.daemon_threads = True
     signal.signal(signal.SIGTERM, lambda *_: threading.Thread(target=srv.shutdown, daemon=True).start())

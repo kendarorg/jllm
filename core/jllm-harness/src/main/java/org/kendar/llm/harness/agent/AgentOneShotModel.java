@@ -22,12 +22,12 @@ public final class AgentOneShotModel implements OneShotModel {
     private final AgentCatalog agents;
     private final ModelClient model;
     private final ModelClient fast;
-    private final Supplier<AgentLoop> loop;
+    private final Supplier<SubAgentRunner> loop;
     private final ChatSessionService sessions;
     private final Map<String, String> chats = new ConcurrentHashMap<>();
 
     /** @param loop the agent loop; null or returning null runs every agent as a plain completion */
-    public AgentOneShotModel(AgentCatalog agents, ModelClient model, ModelClient fast, Supplier<AgentLoop> loop,
+    public AgentOneShotModel(AgentCatalog agents, ModelClient model, ModelClient fast, Supplier<SubAgentRunner> loop,
                              ChatSessionService sessions) {
         this.agents = agents;
         this.model = model;
@@ -48,7 +48,7 @@ public final class AgentOneShotModel implements OneShotModel {
         String system = call.system();
         String user = call.user();
         AgentDefinition def = agent == null || agent.isBlank() ? null : agents.get(agent);
-        AgentLoop l = loop == null ? null : loop.get();
+        SubAgentRunner l = loop == null ? null : loop.get();
         java.util.List<String> tools = call.tools();
         boolean agentic = tools != null ? !tools.isEmpty() : def != null && !def.tools().isEmpty();
         if (agentic && l != null && sessions != null) {

@@ -2,7 +2,7 @@ package org.kendar.llm.eval.suite;
 
 import org.kendar.llm.eval.cases.EvalCase;
 import org.kendar.llm.eval.grade.judge.Rubrics;
-import org.kendar.llm.harness.AgentHarness;
+import org.kendar.llm.harness.AgentHarnessBuilder;
 import org.kendar.llm.js.JsPlugin;
 
 import java.util.List;
@@ -14,7 +14,7 @@ import static org.kendar.llm.eval.suite.Suite.*;
 /** 2.3 js plugin (run_js). */
 class JsCasesTest extends SuiteBase {
 
-    private static Consumer<AgentHarness.Builder> js(int statementLimit) {
+    private static Consumer<AgentHarnessBuilder> js(int statementLimit) {
         return b -> {
             b.settings(settings(root -> root.putObject("plugins").putObject("js").put("enabled", true)
                     .putObject("settings").put("statementLimit", statementLimit)));

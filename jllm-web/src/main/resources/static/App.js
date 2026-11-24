@@ -1,4 +1,4 @@
-import {onMounted, ref} from 'vue';
+import {onMounted, ref} from './vendor/vue.esm-browser.prod.js';
 import {api, post} from './api.js';
 import {contentWarningText, continueOffer, dismissContentWarnings, dismissOffer, dismissToast, init, newChat, shortId,
   store, toast} from './store.js';
@@ -31,14 +31,19 @@ export default {
     onMounted(async () => {
       try {
         me.value = await api('/api/me');
-        await init();
-        initWorkflows();
+        await start();
       } catch (e) {
         me.value = null;
       }
     });
     async function onSignedIn(user) {
       me.value = user;
+      await start();
+    }
+    // A user on the default password is refused everything but the password change: send them there, load the
+    // chats only once the password is changed.
+    async function start() {
+      if (me.value && me.value.defaultPassword) { view.value = 'settings'; return; }
       await init();
       initWorkflows();
     }
@@ -47,7 +52,12 @@ export default {
       focusRun.value = run.runId; view.value = 'runs';
       toast('Started ' + run.flow + ' (' + String(run.runId).slice(0, 8) + '): ' + run.status, 'success');
     }
-    function onPasswordChanged() { if (me.value) me.value = { ...me.value, defaultPassword: false }; }
+    async function onPasswordChanged() {
+      if (!me.value) return;
+      me.value = { ...me.value, defaultPassword: false };
+      view.value = 'chat';
+      await start();
+    }
     async function signOut() {
       await post('/api/logout', {});
       location.reload();

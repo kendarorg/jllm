@@ -43,7 +43,7 @@ class SubAgentContextStackTest {
         String chatId = rig.newChat();
         rig.sessions.setMode(chatId, PermissionMode.EDIT);
 
-        rig.loop.run(chatId, "go", new Events(), () -> false);
+        rig.loop.run(chatId, "go", new Events(), () -> false, null);
 
         Recorded main = rig.model.requests.stream().filter(r -> !isSub(r)).findFirst().orElseThrow();
         Recorded sub = rig.model.requests.stream().filter(SubAgentContextStackTest::isSub).findFirst().orElseThrow();
@@ -58,7 +58,7 @@ class SubAgentContextStackTest {
         Rig rig = rig("general");
         String chatId = rig.newChat();
 
-        rig.loop.run(chatId, "go", new Events(), () -> false);
+        rig.loop.run(chatId, "go", new Events(), () -> false, null);
 
         var mains = rig.model.requests.stream().filter(r -> !isSub(r)).toList();
         assertEquals(2, mains.size());
@@ -77,7 +77,7 @@ class SubAgentContextStackTest {
         String chatId = rig.newChat();
         rig.sessions.setMode(chatId, PermissionMode.EDIT);
 
-        rig.loop.run(chatId, "go", new Events(), () -> false);
+        rig.loop.run(chatId, "go", new Events(), () -> false, null);
 
         var subs = rig.model.requests.stream().filter(SubAgentContextStackTest::isSub).toList();
         assertEquals(2, subs.size());

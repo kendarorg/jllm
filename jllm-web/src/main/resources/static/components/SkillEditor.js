@@ -1,4 +1,4 @@
-import {reactive, watch} from 'vue';
+import {reactive, watch} from '../vendor/vue.esm-browser.prod.js';
 
 /**
  * Edits (or shows) one skill: name (new skills only), description, markdown body.

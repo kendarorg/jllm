@@ -20,7 +20,10 @@ public interface RunScope {
     /** The path as the model's own file tools accept it. */
     String display(java.nio.file.Path path);
 
-    /** Whether {@code name} is a built-in file tool: free from a script (no prompt). */
+    /**
+     * Whether {@code name} is a built-in file tool, which a script calls in its jailed context. It also skips the
+     * permission gate: always when read-only, and for the others only while the chat holds no untrusted output.
+     */
     boolean free(String name);
 
     /** @see ToolCatalog#invoke */

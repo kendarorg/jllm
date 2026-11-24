@@ -6,8 +6,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.AgentHarness;
+import org.kendar.llm.harness.AgentHarnessBuilder;
 import org.kendar.llm.harness.session.FileChatSessionStore;
 import org.kendar.llm.harness.settings.HarnessSettings;
+import org.kendar.llm.harness.settings.HarnessSettingsLoader;
 import org.kendar.llm.harness.tools.ToolKind;
 
 import java.nio.file.Files;
@@ -57,7 +59,7 @@ class SlashCommandsTest {
     }
 
     private AgentHarness build(HarnessSettings settings) {
-        return AgentHarness.builder().modelClient(model).config(config(base)).withoutStandardTools()
+        return new AgentHarnessBuilder().modelClient(model).config(config(base)).withoutStandardTools()
                 .tools(List.of(tool("alpha", "Misc", ToolKind.READ_ONLY, (c, i) -> ""),
                         tool("beta", "Other", ToolKind.OTHER, (c, i) -> "")))
                 .sessionStore(new FileChatSessionStore(base.resolve("history"), MAPPER))
@@ -65,7 +67,7 @@ class SlashCommandsTest {
     }
 
     private HarnessSettings settings(String json) throws Exception {
-        return HarnessSettings.load(Files.writeString(base.resolve("settings.json"), json));
+        return HarnessSettingsLoader.load(Files.writeString(base.resolve("settings.json"), json));
     }
 
     private String run(String line) {
@@ -308,13 +310,14 @@ class SlashCommandsTest {
         assertTrue(status.contains("running agents: none"), status);
         assertTrue(status.contains("context strategy: "), status);
         assertTrue(status.contains("chats: 1"), status);
+        assertTrue(status.contains("sandbox: "), status);
     }
 
     @Test
     void sandboxSubcommandsOnALocalSandbox() {
         assertEquals("usage: /sandbox clean | /sandbox backup", run("/sandbox"));
         assertEquals("usage: /sandbox clean | /sandbox backup", run("/sandbox wipe"));
-        assertEquals("This sandbox needs no backup (only remote docker does)", run("/sandbox backup"));
+        assertEquals("This sandbox needs no backup (only a container workspace does)", run("/sandbox backup"));
         assertEquals("This sandbox has no container to clean", run("/sandbox clean"));
     }
 

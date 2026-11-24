@@ -11,7 +11,7 @@ Java 21, Maven coordinates `org.kendar.llm:jllm-harness`. Build from source with
 ## 2. Build a harness
 
 ```java
-AgentHarness h = AgentHarness.builder()
+AgentHarness h = new AgentHarnessBuilder()
     .modelClient(ModelClients.anthropic(AnthropicSettings.defaults(System.getenv("ANTHROPIC_API_KEY")), mapper))
     .tools(List.of(myTool))                      // your Java code as tools
     .settings(Path.of("harness.json"))           // MCP servers and REST APIs
@@ -61,7 +61,7 @@ settings for what must never run.
 ## 6. Production ports
 
 Defaults are in memory. Replace what you need: `ChatSessionStore`, `SubAgentRunLog`, `StateStore`, `TokenStore`,
-`HarnessMetrics`, `SandboxExecutor`. See [EXTENDING](../guides/extending.md) and the
+`HarnessMetrics`, `SandboxExecutor` (build it with `SandboxFactory`: a `Layout` plus the local or the container runner). See [EXTENDING](../guides/extending.md) and the
 [harness README](../../core/jllm-harness/README.md#embedding).
 
 ## Next

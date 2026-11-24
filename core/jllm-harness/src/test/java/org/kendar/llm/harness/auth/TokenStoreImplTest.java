@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.settings.HarnessSettings;
+import org.kendar.llm.harness.settings.TokenStoreSettings;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -200,18 +201,18 @@ class TokenStoreImplTest {
     void storeSettingsAreValidated() {
         Map<String, String> noKey = Map.of();
         assertTrue(assertThrows(IllegalArgumentException.class, () -> TokenStores.create(
-                new HarnessSettings.TokenStoreSettings("native", null, null), true, tmp, noKey::get))
+                new TokenStoreSettings("native", null, null), true, tmp, noKey::get))
                 .getMessage().contains("single user"));
         assertTrue(assertThrows(IllegalArgumentException.class, () -> TokenStores.create(
-                new HarnessSettings.TokenStoreSettings("file", null, true), false, tmp, noKey::get))
+                new TokenStoreSettings("file", null, true), false, tmp, noKey::get))
                 .getMessage().contains("JLLM_TOKEN_KEY"));
         assertThrows(IllegalArgumentException.class, () -> TokenStores.create(
-                new HarnessSettings.TokenStoreSettings("vault", null, null), false, tmp, noKey::get));
+                new TokenStoreSettings("vault", null, null), false, tmp, noKey::get));
         // with users: encrypted when the key is there, plain without (an embedder decides whether that is enough)
         Map<String, String> key = Map.of(TokenCipher.KEY_ENV, TokenCipher.newKey());
         assertTrue(((FileTokenStore) TokenStores.create(null, true, tmp, key::get)).encrypted());
         assertFalse(((FileTokenStore) TokenStores.create(null, true, tmp, noKey::get)).encrypted());
-        assertTrue(TokenStores.create(new HarnessSettings.TokenStoreSettings("file", null, null), false, tmp,
+        assertTrue(TokenStores.create(new TokenStoreSettings("file", null, null), false, tmp,
                 noKey::get) instanceof FileTokenStore);
         // auto for a single user: chosen on first use only
         assertTrue(TokenStores.create(null, false, tmp, noKey::get) instanceof TokenStores.Lazy);

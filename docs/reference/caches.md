@@ -22,7 +22,7 @@ flowchart TB
         T["tools[]<br/>sorted by (group, name)<br/>cache_control on the last tool"]
         S0["system[0] pinned:<br/>'chatId=…; agentId=…'"]
         S1["system[1] extra:<br/>system-prompt.md + addendum + instruction files<br/>(+ mnemonic-suffix.md)<br/>+ per-turn note: date, OS/shell, dirs, mode<br/>cache_control (ttl 1h)"]
-        M["messages[]<br/>no cache_control"]
+        M["messages[]<br/>cache_control on the last block of the last message"]
         T --> S0 --> S1 --> M
     end
 ```
@@ -41,9 +41,9 @@ turn that touched their directory, so they extend the messages like any tool out
 
 What this means per provider:
 
-- **Anthropic**: two breakpoints. The tool block is cached on its own; tools + system are cached as a whole. Messages
-  carry no `cache_control`, so the history is sent as normal input on each request. A mode switch or a new date
-  invalidates the system entry, the tool entry still hits. `AnthropicSettings.cacheTtl = "1h"` (default) uses the
+- **Anthropic**: three breakpoints. The tool block is cached on its own; tools + system are cached as a whole; a third
+  `cache_control` sits on the last cacheable block of the last message, so each request writes the prefix the next one
+  reads. A mode switch or a new date invalidates the system entry, the tool entry still hits. `AnthropicSettings.cacheTtl = "1h"` (default) uses the
   extended TTL.
 - **OpenAI-compatible** (`OpenAiCompatModelClient`): one `system` message = pinned + `\n\n` + extra, then the
   history. Prefix caching reuses everything up to the first changed byte, history included, so a mode switch or a new
@@ -154,7 +154,7 @@ The span is replaced by one user message `[Summary of the earlier conversation]\
 summary merged with newer history). The summary follows `compaction-template.md`:
 
 ```text
-## Objective  ## Requirements  ## Decisions  ## Work State (Completed / Active / Blocked)
+## Objective  ## User-Stated Facts  ## Requirements  ## Decisions  ## Work State (Completed / Active / Blocked)
 ## Next Move  ## Relevant Files  ## Important Context
 ```
 
@@ -183,7 +183,7 @@ Shortened bodies keep the newest part and start with `[earlier history omitted]`
 - Under `## User-Stated Facts`, each bullet of the old section that the update does not repeat is appended to the
   section. Bullets are compared normalised (no list marker, `**`/backticks, case, extra spaces, trailing `.;,`). A bullet
   is not restored when the update replaced it: a new bullet with the same *label*, the words before the first `: `,
-  `=` or ` is `/` are `/` was ` (leading "the" ignored, at most 8 words): `Reviewer is Sam Lee` replaces
+  `=` or ` is `/` are `/` was `/` were ` (leading "the" ignored, at most 8 words): `Reviewer is Sam Lee` replaces
   `Reviewer is Priya Raman`; `Deadline: Friday` replaces `Deadline: Thursday`.
 - Restoring never blocks a compaction. The summary may take the 3000 tokens reserved for it (10500 chars); old facts are
   added oldest first (their order in the old summary) while they fit, the rest are dropped with a `WARN` log naming them.
@@ -196,6 +196,7 @@ Shortened bodies keep the newest part and start with `[earlier history omitted]`
 | provider rejects a request as too long (`onOverflow`) | `compactNow` without prefix, then retry the same turn once; a second rejection is an `error` event. With `context.auto: false` nothing happens |
 | sub-agent with `inheritContext` (`compactInherited`) | the agent's own messages are compacted first into what is left of the ceiling after the parent copy; if still over, the copy is summarized into a user/assistant pair. The parent's log is never touched |
 | sub-agent without inherited context | tiers 1–2 only |
+| a turn still over budget after tier 2 (also on overflow) | `cutInsideTurn`: the older tool rounds of the current turn become one `[Summary of the earlier steps of this request]` block |
 
 ## 4. Mnemonic strategy
 
@@ -333,7 +334,7 @@ new head is stable until the next switch.
 | Event | Behavior |
 |---|---|
 | provider rejects as too long | `ratio ×= 1.3` (max 2), then a batch down to 60% of the estimate with no minimum; else a segment switch; else emergency masks; else give up (error) |
-| `/compact` | does nothing (`Not used with the mnemonic context strategy`) |
+| `/compact` | manual mask batch: every maskable block before the latest user turn is masked, protections ignored; `Nothing to mask before the latest request` when there is none |
 | sub-agent with `inheritContext` | copies the parent's **rendered** view; its own masks never go before the copy |
 
 ### `history_recall`
@@ -409,7 +410,7 @@ and adds a whole-request budget, offloading, a pinned first message and a task l
 | `safety` | `safetyPercent` of the window (2) |
 | `fixed` | pinned system block, per-turn note and tool schemas of the request |
 
-Nothing happens while the messages fit (and with `compaction.auto` off, nothing happens at all).
+Nothing happens while the messages fit (and with `context.auto` off, nothing happens at all).
 
 **Trim order**, each step only while the request is still over budget:
 
@@ -435,9 +436,9 @@ that came from `compaction`) has no pin.
 **Todos.** `todo_write` replaces the whole list (`id`, `content`, `status` of `pending`, `in_progress`, `completed`; at
 most one `in_progress`; a rejected write keeps the old list); `todo_read` returns it. Both are `READ_ONLY`, so they need
 no approval and work in plan mode. The list lives in the `StateStore` under `todos-<agent>`, per chat and agent. Each
-request gets it appended as a `<todo_list>` block to the last user message, on a copy: the stored log never contains
-it, so no compaction can lose or duplicate it, and the cached prefix does not change. A `todos` event is emitted on every
-write.
+turn and whenever the list changes, a `<todo_list>` block is appended to the latest user message of the log, unless that
+turn already holds an identical one. Earlier messages are never touched again, so the cached prefix does not change and no
+compaction can lose the list. A `todos` event is emitted on every write.
 
 **Overflow.** `onOverflow` runs one forced pass: offload at `overflowOffloadChars` (2000), clear all but the latest turn,
 summarize. `/compact` clears and summarizes with an optional focus.
@@ -463,7 +464,7 @@ Unset values keep these defaults. Code: `builder.scopeOptions(new ScopeStrategy.
 | Cache behavior | each compaction rewrites the prefix of the history | breaks only at the first newly masked message; rare, batched | like compaction; the todo block is at the end |
 | Pinned | none | first user message per segment | first user message, todo list |
 | Best for | short chats, hosted models | long agentic sessions, local servers with prefix KV cache | long task-driven sessions with large tool outputs |
-| `/compact` | yes | no-op | yes |
+| `/compact` | yes | masks everything maskable before the latest turn | yes |
 
 Select with `context.strategy`, `--context-strategy`, `HarnessConfig.withContextStrategy(...)`, or a custom
 implementation through `builder.contextStrategy(factory)` ([EXTENDING §7](../guides/extending.md#7-context-strategy)).

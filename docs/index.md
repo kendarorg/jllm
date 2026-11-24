@@ -8,7 +8,7 @@ Pick the path that matches your role.
 |---|---|
 | [Why JLLM](why-jllm.md) | what it is for, and when not to choose it |
 | [JVM landscape](comparisons/jvm-landscape.md) | how it relates to Spring AI, LangChain4j, ADK, Koog, local engines |
-| [Harness comparison](comparisons/harnesses-compare.md) | feature matrix against terminal agents |
+| [Harness comparison](comparisons/harnesses-compare.md), [sources](comparisons/harnesses-sources.md) | feature matrix against terminal agents, with the source of each cell |
 | [Security model](enterprise/security-model.md) | threats, controls, what is not covered |
 | [Compliance and licensing](enterprise/compliance-and-licensing.md) | Apache-2.0, dependencies, data handling |
 | [Roadmap and limits](enterprise/roadmap-and-limits.md) | known gaps and future work |
@@ -30,6 +30,7 @@ Pick the path that matches your role.
 | Page | Answers |
 |---|---|
 | [Deployment](enterprise/deployment.md) | shapes, hardening checklist, state and scaling |
+| [Securing a deployment](enterprise/securing-and-enterprise-setup.md) | hardening and enterprise setup, with a final checklist |
 | [Identity and access](enterprise/identity-and-access.md) | sign-in, roles, whose credentials a call uses |
 | [Governance and audit](enterprise/governance-and-audit.md) | approvals, hooks, events, ports |
 | [Observability](enterprise/observability.md) | metrics, tracing, cost (Micrometer and OTel recipes) |
@@ -41,4 +42,4 @@ Pick the path that matches your role.
 [FLOW](reference/flow.md) · [HISTORY](reference/history.md) · [PUBLISHING](reference/publishing.md)
 
 Module READMEs: [jllm-harness](../core/jllm-harness/README.md) · [jllm-cli](../jllm-cli/README.md) ·
-[jllm-web-commons](../jllm-web-commons/README.md) · [jllm-web](../jllm-web/README.md)
+[jllm-web-commons](../web/jllm-web-commons/README.md) · [jllm-web-spring-starter](../web/jllm-web-spring-starter/README.md) · [jllm-sql-spring-starter](../web/jllm-sql-spring-starter/README.md) · [jllm-web](../jllm-web/README.md)

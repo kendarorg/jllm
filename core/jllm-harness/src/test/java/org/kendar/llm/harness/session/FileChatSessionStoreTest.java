@@ -46,13 +46,29 @@ class FileChatSessionStoreTest {
     }
 
     @Test
+    void listFiltersByVisibilityAcrossANewStore() {
+        FileChatSessionStore s1 = store();
+        s1.save(ChatSessionData.create("a1", "ag-a1", "A1", "alice"));
+        s1.save(ChatSessionData.create("b1", "ag-b1", "B1", "bob"));
+        s1.save(chat("n1", "ownerless"));
+        for (FileChatSessionStore s : List.of(s1, store())) {
+            assertEquals(List.of("a1"), s.list(ChatVisibility.ownedBy("alice")).stream().map(ChatSessionData::chatId).toList());
+            assertEquals(List.of("b1"), s.list(ChatVisibility.ownedBy("bob")).stream().map(ChatSessionData::chatId).toList());
+            assertTrue(s.list(ChatVisibility.ownedBy("carol")).isEmpty());
+            assertTrue(s.list(ChatVisibility.nothing()).isEmpty());
+            assertEquals(2, s.list(ChatVisibility.owned()).size());
+            assertEquals(3, s.list(ChatVisibility.everything()).size());
+        }
+    }
+
+    @Test
     void listReadsRowsOnlyNewestFirst() throws Exception {
         FileChatSessionStore s1 = store();
         s1.save(chat("old", "old").withMessagesJson(msg("user", "a")));
         Thread.sleep(5);
         s1.save(chat("new", "new").withMessagesJson(msg("user", "b")));
 
-        List<ChatSessionData> list = store().list();
+        List<ChatSessionData> list = store().list(ChatVisibility.everything());
         assertEquals(List.of("new", "old"), list.stream().map(ChatSessionData::chatId).toList());
         assertEquals("", list.get(0).messagesJson());
         assertEquals(1, list.get(0).messageCount());
@@ -85,7 +101,7 @@ class FileChatSessionStoreTest {
         Files.writeString(bad.resolve("session.json"), "{ not json");
 
         FileChatSessionStore s = store();
-        assertEquals(List.of("good"), s.list().stream().map(ChatSessionData::chatId).toList());
+        assertEquals(List.of("good"), s.list(ChatVisibility.everything()).stream().map(ChatSessionData::chatId).toList());
         assertTrue(s.find("bad").isEmpty());
     }
 
@@ -96,7 +112,7 @@ class FileChatSessionStoreTest {
         s.delete("c1");
         assertFalse(Files.exists(root.resolve("c1")));
         assertTrue(store().find("c1").isEmpty());
-        assertTrue(store().list().isEmpty());
+        assertTrue(store().list(ChatVisibility.everything()).isEmpty());
     }
 
     @Test
@@ -140,7 +156,7 @@ class FileChatSessionStoreTest {
         };
         new FileChatSessionStore(chatRoot, dirs, MAPPER).save(chat("c1", "one"));
         assertEquals(List.of("c1"),
-                new FileChatSessionStore(chatRoot, dirs, MAPPER).list().stream().map(ChatSessionData::chatId).toList());
+                new FileChatSessionStore(chatRoot, dirs, MAPPER).list(ChatVisibility.everything()).stream().map(ChatSessionData::chatId).toList());
     }
 
     @Test

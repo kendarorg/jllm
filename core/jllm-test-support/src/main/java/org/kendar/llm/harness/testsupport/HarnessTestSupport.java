@@ -1,5 +1,6 @@
 package org.kendar.llm.harness.testsupport;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -33,7 +34,7 @@ public final class HarnessTestSupport {
     public static JsonNode json(String s) {
         try {
             return MAPPER.readTree(s.replace('\'', '"'));
-        } catch (Exception e) {
+        } catch (JsonProcessingException e) {
             throw new IllegalArgumentException(e);
         }
     }

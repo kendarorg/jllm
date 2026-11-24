@@ -25,6 +25,11 @@
         <tag>HEAD</tag>
     </scm>
 
+    <properties>
+        <!-- tests tagged "slow" (stress tests) are skipped; run them with: mvn test -DexcludedGroups=none -Dgroups=slow -->
+        <excludedGroups>slow</excludedGroups>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>org.kendar.llm</groupId>

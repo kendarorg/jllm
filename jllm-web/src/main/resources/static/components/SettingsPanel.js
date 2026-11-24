@@ -1,4 +1,4 @@
-import {onMounted, reactive, ref} from 'vue';
+import {onMounted, reactive, ref} from '../vendor/vue.esm-browser.prod.js';
 import {api, del, post, put} from '../api.js';
 import {connectSource, toast} from '../store.js';
 import ToolPicker from './ToolPicker.js';

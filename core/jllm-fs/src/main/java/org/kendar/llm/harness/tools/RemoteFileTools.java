@@ -6,9 +6,7 @@ import org.kendar.llm.harness.sandbox.FileBackend;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -20,8 +18,8 @@ import java.util.stream.Collectors;
  * and edit logic stay here. Checkpoints are kept inside the container, through the same backend.
  */
 final class RemoteFileTools {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(RemoteFileTools.class);
 
-    private static final long MAX_DOCUMENT_BYTES = 50_000_000;
     private static final int MAX_RESULTS = 200;
     /** Bytes fetched per call when streaming a file for {@code read_file}. */
     private static final int READ_CHUNK = 256 * 1024;
@@ -38,16 +36,13 @@ final class RemoteFileTools {
         String ext = extension(in.path("path").asText());
         DocumentReader reader = readers == null ? null : readers.get(ext);
         if (reader != null) {
-            if (st.size() > MAX_DOCUMENT_BYTES) {
+            if (st.size() > DocumentReaders.MAX_DOCUMENT_BYTES) {
                 throw new IllegalArgumentException("File too large (" + st.size() + " bytes)");
             }
-            Path tmp = Files.createTempFile("jllm-doc-", "." + ext);
-            try {
-                Files.write(tmp, fb.read(t, 0, -1));
-                return FileSystemAgentTools.formatRead(DocumentReaders.extractLines(reader, tmp), in, maxReadBytes);
-            } finally {
-                Files.deleteIfExists(tmp);
-            }
+            String name = in.path("path").asText();
+            name = name.substring(name.replace('\\', '/').lastIndexOf('/') + 1);
+            return FileSystemAgentTools.formatRead(DocumentReaders.extractLines(reader,
+                    new java.io.ByteArrayInputStream(fb.read(t, 0, -1)), name), in, maxReadBytes);
         }
         FileSystemAgentTools.checkNotBinary(ext);
         return FileSystemAgentTools.readText(() -> chunked(fb, t), in, maxReadBytes);
@@ -88,23 +83,6 @@ final class RemoteFileTools {
         };
     }
 
-    /** Like {@link Files#readAllLines}: a trailing line end does not add an empty line. */
-    static List<String> splitLines(String text) {
-        List<String> out = new ArrayList<>();
-        int start = 0;
-        int n = text.length();
-        for (int i = 0; i < n; i++) {
-            char c = text.charAt(i);
-            if (c == '\n' || c == '\r') {
-                out.add(text.substring(start, i));
-                if (c == '\r' && i + 1 < n && text.charAt(i + 1) == '\n') i++;
-                start = i + 1;
-            }
-        }
-        if (start < n) out.add(text.substring(start));
-        return out;
-    }
-
     /** Where a tool write goes; checkpoint data is refused. */
     private static FileBackend.Target writeTarget(ToolContext ctx, String shown) {
         FileBackend fb = ctx.files();
@@ -140,7 +118,7 @@ final class RemoteFileTools {
                 try {
                     checkpoint(ctx, t, checkpoints, quota);
                     fb.write(t, part, true);
-                } catch (IOException | RuntimeException e) {
+                } catch (IOException | RuntimeException e) { // boundary: roll back on any failure, rethrown unchanged
                     r.rollback();
                     throw e;
                 }
@@ -151,7 +129,7 @@ final class RemoteFileTools {
             try {
                 checkpoint(ctx, t, checkpoints, quota);
                 fb.write(t, bytes, false);
-            } catch (IOException | RuntimeException e) {
+            } catch (IOException | RuntimeException e) { // boundary: roll back on any failure, rethrown unchanged
                 r.rollback();
                 throw e;
             }
@@ -167,8 +145,9 @@ final class RemoteFileTools {
             if (!in.path("append").asBoolean(false) && fb.stat(t).isFile()) {
                 old = TextEdits.TextFile.probe(fb.read(t, 0, FileSystemAgentTools.DEFAULT_MAX_READ_BYTES)).text();
             }
-        } catch (IOException | RuntimeException ignored) {
+        } catch (IOException | RuntimeException ignored) { // boundary: the preview is optional
             // preview only
+            log.debug("No preview of the change: {}", ignored.toString());
         }
         return "--- " + in.path("path").asText() + "\n" + FileSystemAgentTools.diff(old, in.path("content").asText());
     }
@@ -191,7 +170,7 @@ final class RemoteFileTools {
             try {
                 checkpoint(ctx, t, checkpoints, quota);
                 fb.write(t, out, false);
-            } catch (IOException | RuntimeException e) {
+            } catch (IOException | RuntimeException e) { // boundary: roll back on any failure, rethrown unchanged
                 r.rollback();
                 throw e;
             }

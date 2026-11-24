@@ -157,4 +157,23 @@ class FakeServersTest {
             assertTrue(server.calls().stream().allMatch(ServerCall::down));
         }
     }
+
+    @Test
+    void webServerServesPagesRedirectsAndLogsEveryPath() throws Exception {
+        try (FakeWebServer other = new FakeWebServer("other").catchAll("collected");
+             FakeWebServer site = new FakeWebServer("site").page("/a", "<p>hello</p>")
+                     .redirect("/go", other.url() + "/landing")) {
+            HttpResponse<String> a = send("GET", site.url() + "/a", null);
+            assertEquals(200, a.statusCode());
+            assertTrue(a.body().contains("hello"));
+            HttpResponse<String> go = send("GET", site.url() + "/go", null);
+            assertEquals(302, go.statusCode());
+            assertEquals(other.url() + "/landing", go.headers().firstValue("Location").orElse(""));
+            assertEquals(404, send("GET", site.url() + "/missing", null).statusCode());
+            assertEquals("collected", send("GET", other.url() + "/x?d=1", null).body());
+
+            assertEquals(List.of("/a", "/go", "/missing"), site.operationCalls().stream().map(ServerCall::name).toList());
+            assertEquals(1, other.operationCalls("/x").size());
+        }
+    }
 }

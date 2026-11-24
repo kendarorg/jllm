@@ -4,6 +4,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.AgentHarness;
+import org.kendar.llm.harness.AgentHarnessBuilder;
 import org.kendar.llm.harness.session.ChatSessionData;
 import org.kendar.llm.harness.session.FileChatSessionStore;
 import org.kendar.llm.harness.tools.ToolKind;
@@ -28,7 +29,7 @@ class WebSlashCommandsTest {
 
     @BeforeEach
     void start() {
-        harness = AgentHarness.builder().modelClient(new ScriptedModel()).config(config(base)).withoutStandardTools()
+        harness = new AgentHarnessBuilder().modelClient(new ScriptedModel()).config(config(base)).withoutStandardTools()
                 .tools(List.of(tool("alpha", "Misc", ToolKind.READ_ONLY, (c, i) -> ""),
                         tool("beta", "Misc", ToolKind.OTHER, (c, i) -> "")))
                 .sessionStore(new FileChatSessionStore(base.resolve("history"), MAPPER)).build();

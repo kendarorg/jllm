@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Gate artifact of the GraalJS set that scripts/setup downloads into .downloaded-libs/graal/<version>/repo.
+  Template: resolve.sh / resolve.ps1 replace @VERSION@ (root pom graalvm.version) and @ISOLATE@ (js-isolate for the
+  commercial edition, js-isolate-community for the community one). Written last: its presence means the set is complete.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>org.kendar.llm.graal</groupId>
+    <artifactId>jllm-graal-set</artifactId>
+    <version>@VERSION@</version>
+    <packaging>pom</packaging>
+    <name>jllm GraalJS set</name>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.graalvm.polyglot</groupId>
+            <artifactId>polyglot</artifactId>
+            <version>@VERSION@</version>
+        </dependency>
+        <dependency>
+            <groupId>org.graalvm.polyglot</groupId>
+            <artifactId>js</artifactId>
+            <version>@VERSION@</version>
+            <type>pom</type>
+        </dependency>
+        <dependency>
+            <groupId>org.graalvm.regex</groupId>
+            <artifactId>regex</artifactId>
+            <version>@VERSION@</version>
+        </dependency>
+        <dependency>
+            <groupId>org.graalvm.polyglot</groupId>
+            <artifactId>@ISOLATE@</artifactId>
+            <version>@VERSION@</version>
+            <type>pom</type>
+        </dependency>
+    </dependencies>
+</project>

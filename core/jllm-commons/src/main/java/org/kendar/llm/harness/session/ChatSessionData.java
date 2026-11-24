@@ -22,26 +22,6 @@ public record ChatSessionData(String chatId, String agentId, String title, Strin
                               long qualifierInputTokens, long qualifierOutputTokens, String principal,
                               String chatTools, String taintedToolUses) {
 
-    /** The 17 components before {@code taintedToolUses}: no tainted calls. */
-    public ChatSessionData(String chatId, String agentId, String title, String mode, String messagesJson,
-                           String toolGroups, long inputTokens, long outputTokens, long cacheReadTokens,
-                           long cacheCreationTokens, Instant createdAt, Instant updatedAt, int messageCount,
-                           long qualifierInputTokens, long qualifierOutputTokens, String principal, String chatTools) {
-        this(chatId, agentId, title, mode, messagesJson, toolGroups, inputTokens, outputTokens, cacheReadTokens,
-                cacheCreationTokens, createdAt, updatedAt, messageCount, qualifierInputTokens, qualifierOutputTokens,
-                principal, chatTools, null);
-    }
-
-    /** The 16 components before {@code chatTools}: no per-chat tool set. */
-    public ChatSessionData(String chatId, String agentId, String title, String mode, String messagesJson,
-                           String toolGroups, long inputTokens, long outputTokens, long cacheReadTokens,
-                           long cacheCreationTokens, Instant createdAt, Instant updatedAt, int messageCount,
-                           long qualifierInputTokens, long qualifierOutputTokens, String principal) {
-        this(chatId, agentId, title, mode, messagesJson, toolGroups, inputTokens, outputTokens, cacheReadTokens,
-                cacheCreationTokens, createdAt, updatedAt, messageCount, qualifierInputTokens, qualifierOutputTokens,
-                principal, null);
-    }
-
     public static ChatSessionData create(String chatId, String agentId, String title) {
         return create(chatId, agentId, title, null);
     }

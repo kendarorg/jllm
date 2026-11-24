@@ -1,5 +1,6 @@
 package org.kendar.llm.harness.session;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -14,6 +15,7 @@ import java.util.List;
  * synthetic {@code tool_result} per unanswered call. A log ending with a user message is left as is.
  */
 public final class InterruptedTurnRepair {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(InterruptedTurnRepair.class);
 
     public static final String MARKER = "interrupted: process stopped";
 
@@ -34,8 +36,9 @@ public final class InterruptedTurnRepair {
         try {
             JsonNode n = mapper.readTree(last);
             if (n != null && n.isObject()) return null;
-        } catch (Exception e) {
+        } catch (JsonProcessingException e) {
             // partial line
+            log.debug("Last log line is partial: {}", e.toString());
         }
         return nl < 0 ? "" : text.substring(0, nl).stripTrailing();
     }
@@ -72,7 +75,7 @@ public final class InterruptedTurnRepair {
             msg.put("role", "user");
             msg.set("content", results);
             return String.join("\n", lines) + "\n" + mapper.writeValueAsString(msg);
-        } catch (Exception e) {
+        } catch (JsonProcessingException e) {
             return null; // a corrupt log is reported by the caller when it is parsed
         }
     }

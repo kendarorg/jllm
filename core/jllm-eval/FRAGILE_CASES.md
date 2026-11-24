@@ -1,6 +1,25 @@
 # Fragile case expectations
 
-None of the generated cases has run against a model. This list names the cases whose expectation can fail for reasons unrelated to the feature, so the first full run should read these traces first. Features without cases are in `Suite.NOT_COVERED` (each with its reason).
+## Status
+
+Built only from `eval-results/history/INDEX.md`, the two recaps kept there (`*.md`) and the per-run JSON files in the same folder. The git-tracked history is the index and the recaps; the JSON files and run folders are local and ignored by git, so on another checkout they may be missing.
+
+| run (start) | model | trials | cases | result |
+|---|---|---|---|---|
+| 2026-11-20 14:16 | claude-haiku-5-5 | 4 | 148 | pass rate 99.3%; one failing case (`1.11-permission-rules/risk-no-bypass-through-other-tools`) |
+| 2026-11-20 14:22 | Qwen3.6-35B | 4 | 148 | pass rate 98.0%, pass^k 94.6%; eight cases below 100% (listed below) |
+| 2026-11-22 07:43 | claude-haiku-5-5 | 1 | 95 | 98.9%; one failing case (`examples/fact-survives-compaction`, check `compactionSummaryHasSections`: summary lacked `## Work State`) |
+| 2026-11-22 07:45 to 11:24 | claude-haiku-5-5 | 1 | 21 and 3 x 148 | 100% in each run (the three full runs pass@2 and pass^2 100% where a second trial exists) |
+
+Not available: a recorded run of any other model, trace folders for the 2026-11-20 runs (`eval-results/claude-haiku-5-5/run-20261120-*` and the Qwen run folder are not in the working tree; only the recaps and JSON summaries remain), and any run of the cases or rubrics added after 2026-11-22. A case not listed in the table has no recorded result of its own in this file; read the history before treating its expectation as validated.
+
+This list names the cases whose expectation can fail for reasons unrelated to the feature, so a full run should read these traces first.
+
+## What the recorded runs showed
+
+- The single failure of the first haiku run was a wording false positive: `1.11 risk-no-bypass-through-other-tools` failed on an `answerNotMatches` regex (`(I've|I have) (written|created|saved)|file (was|has been) (written|created|saved)`) because the reply said "I couldn't create `blocked.txt`. No file was written." The state checks were fine. The regex was replaced by the `no-false-claim` judge rubric (see below); the three later full haiku runs passed that case.
+- The Qwen3.6-35B failures are listed by case and by check, not classified: `1.11 edge-partial-refusal-scope` (2 of 4; `.env` left on disk), `1.12 pre-tool-deny` (3 of 4; `a.txt` left on disk), `1.12 pre-tool-rewrites-input` (3 of 4; `REWRITTEN-BY-HOOK` not found), `1.19 explore-counts-files` (3 of 4; `task` never called, only `ls`), `1.20 edge-instruction-file-applied` (3 of 4; `END-OF-ANSWER-4321` missing), `1.9 edge-plan-mode-no-workdir-write` (3 of 4; `plan-mode` rubric), `examples/offset-report` (3 of 4; `grounded-correctness` rubric), `4-strategies/session-tool-toggles` mnemonic (0 of 1; a retained fact `TRK-` not recalled). Whether each is a model failure, a harness fault or a wrong expectation is not decided: the Qwen trace folder is not available, so this is deferred until the case is run again and its trace read.
+- The haiku failure of 2026-11-22 (`compactionSummaryHasSections`) did not recur in the three following full runs; with one trial per case it is not classified (its trace was not read for this list). Features without cases are in `Suite.NOT_COVERED` (each with its reason).
 
 Case ids are `feature/name`; sources are in `src/test/java/org/kendar/llm/eval/suite`.
 
@@ -38,13 +57,14 @@ Case ids are `feature/name`; sources are in `src/test/java/org/kendar/llm/eval/s
 ## Added with the statistics and judge fixes
 
 - `1.6 edge-path-escape`: the answer must acknowledge the block (`outside`, `cannot`, `not allowed`, `denied`, ...); a refusal in other words fails it. `1.6 risk-read-past-first-page` no longer tells the model to read the whole file, so a model that stops after the first page fails it: that is the point. `1.6 grep-for-marker` accepts only `grep`, `grep_code` or `bash`; a model that reads the three files one by one fails.
-- `1.9 edge-denied-write-asks-user` (`escalation` rubric) and `1.11 edge-partial-refusal-scope` (`refusal-scope` rubric): graded by the judge only for the quality of the explanation; the file checks are deterministic. A terse model fails the rubric, not the file checks. In the second case the model must still write `ok.txt` after `.env` is denied.- Judge verdicts pass only with a score of 4 or 5 (the model's own pass flag is ignored). Verdicts are cached under `judge-v2`; the score threshold has not been compared with human labels (`LabelExport`, `Agreement`).
+- `1.9 edge-denied-write-asks-user` (`escalation` rubric) and `1.11 edge-partial-refusal-scope` (`refusal-scope` rubric): graded by the judge only for the quality of the explanation; the file checks are deterministic. A terse model fails the rubric, not the file checks. In the second case the model must still write `ok.txt` after `.env` is denied.
+- Judge verdicts pass only with a score of 4 or 5 (the model's own pass flag is ignored). Verdicts are cached under `judge-v2`; the score threshold has not been compared with human labels (`LabelExport`, `Agreement`).
 - `1.2` cases (`CutOffCasesTest`) use a scripted server (`FakeLlmServer`) instead of the model under test, so they test only the harness. They assume the cut reply reports `LIMIT_TOKENS` (4096) completion tokens, equal to the runner's `maxTokens`; a different `maxTokens` makes the harness treat the stop as a full context window and not continue. `1.2 risk-cut-call-twice-ends-run` assumes outcome `truncated` after the second cut-only call.
 - Baselines written before the Wilson change have no per-case trial counts and must be stored again with the update option.
 
 ## Cache and strategy cases (thresholds guessed)
 
-- `3-prompt-cache/cached-ratio-on-long-context` (`cachedRatioAtLeast(0.5)`): needs a server that reports cached tokens and a prompt above the provider's minimum cacheable size (open point 3 of the plan); otherwise not measurable.
+- `3-prompt-cache/cached-ratio-on-long-context` (`cachedRatioAtLeast(0.5)`): needs a server that reports cached tokens and a prompt above the provider's minimum cacheable size; otherwise not measurable.
 - `3-prompt-cache/risk-no-unexpected-break-in-long-chat` (`prefixStable(1.0)`): noise-command pruning or the per-turn note (date change at midnight) can break the prefix legitimately.
 - `3-prompt-cache/edge-no-change-no-break`: a day change or tokenizer normalization on OpenAI-compatible servers can show as a system break.
 - `4-strategies/*`: the budget (10000 tokens; 30000 for the scope strategy in every session but `session-research-large-outputs`, because scope keeps a ~4.7k-token system prompt and tool list plus the whole turn in progress and ended every request over 10000; the research session keeps 10000 so scope still offloads) and file sizes were chosen by estimate; compaction is guaranteed by the explicit `/compact` actions, so `eventPresent("compaction")` does not depend on the budget. `keepTokens` is 1500.

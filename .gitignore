@@ -52,3 +52,11 @@ node_modules/
 !/CHANGELOG.md
 !/CONTRIBUTING.md
 .flattened-pom.xml
+
+### Python ###
+__pycache__/
+*.pyc
+
+
+# SQL drivers fetched by scripts/fetch-sql-driver
+.downloaded-libs/

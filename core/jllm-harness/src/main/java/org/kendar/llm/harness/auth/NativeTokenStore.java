@@ -106,7 +106,7 @@ public final class NativeTokenStore implements TokenStore {
                 return null;
             }
             return new NativeTokenStore(b);
-        } catch (IOException | RuntimeException e) {
+        } catch (IOException | RuntimeException e) { // boundary: a backend that cannot be used is reported and skipped
             why.accept(b.describe() + " is not usable: " + e.getMessage());
             return null;
         }

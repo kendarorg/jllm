@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Single source of the GraalJS jar set that jllm ships in lib-ext/ (release) and fetches into .downloaded-libs/graal/<version>/ (developers).
+  NOT part of the reactor build. The scripts pass the version from the root pom:
+    mvn -f release/graaljs/pom.xml -P<edition> -Dgraalvm.version=<root graalvm.version> -Dgraal.out=<dir> dependency:copy-dependencies
+  Profiles: community (UPL/MIT isolate) and oracle (the non-community isolate; its pom may declare Oracle terms).
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>org.kendar.llm</groupId>
+    <artifactId>jllm-graaljs-release</artifactId>
+    <version>0</version>
+    <packaging>pom</packaging>
+    <name>jllm GraalJS jar set</name>
+
+    <properties>
+        <!-- no default on purpose: the version lives in the root pom only; the scripts pass -Dgraalvm.version -->
+        <graal.out>${project.build.directory}/jars</graal.out>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.graalvm.polyglot</groupId>
+            <artifactId>polyglot</artifactId>
+            <version>${graalvm.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.graalvm.polyglot</groupId>
+            <artifactId>js</artifactId>
+            <version>${graalvm.version}</version>
+            <type>pom</type>
+        </dependency>
+        <!-- the regex language (TRegex) is mandatory for run_js; declared even though js pulls it in -->
+        <dependency>
+            <groupId>org.graalvm.regex</groupId>
+            <artifactId>regex</artifactId>
+            <version>${graalvm.version}</version>
+        </dependency>
+    </dependencies>
+
+    <profiles>
+        <profile>
+            <id>community</id>
+            <dependencies>
+                <dependency>
+                    <groupId>org.graalvm.polyglot</groupId>
+                    <artifactId>js-isolate-community</artifactId>
+                    <version>${graalvm.version}</version>
+                    <type>pom</type>
+                </dependency>
+            </dependencies>
+        </profile>
+        <profile>
+            <id>oracle</id>
+            <dependencies>
+                <dependency>
+                    <groupId>org.graalvm.polyglot</groupId>
+                    <artifactId>js-isolate</artifactId>
+                    <version>${graalvm.version}</version>
+                    <type>pom</type>
+                </dependency>
+            </dependencies>
+        </profile>
+    </profiles>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <version>3.6.0</version>
+                <configuration>
+                    <outputDirectory>${graal.out}</outputDirectory>
+                    <!-- the poms travel with the jars so the scripts can re-check every declared licence -->
+                    <copyPom>true</copyPom>
+                    <includeScope>runtime</includeScope>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

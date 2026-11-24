@@ -84,7 +84,7 @@ class McpStdioClientTest {
 
     @Test
     void crashedServerIsRestartedOnTheNextCall() throws Exception {
-        try (McpStdioClient client = new McpStdioClient(MAPPER, "crash", JAVA, loop("crash"), Map.of())) {
+        try (McpStdioClient client = new McpStdioClient(MAPPER, "crash", JAVA, loop("crash"), Map.of(), null)) {
             assertEquals(1, client.listTools().size());
             IOException crash = assertThrows(IOException.class, () -> client.callTool("echo", null));
             assertFalse(crash instanceof McpUnavailableException);
@@ -97,7 +97,7 @@ class McpStdioClientTest {
     void serverThatCannotBeRestartedBecomesUnavailable(@org.junit.jupiter.api.io.TempDir Path tmp) throws Exception {
         List<String> reasons = new java.util.concurrent.CopyOnWriteArrayList<>();
         String marker = tmp.resolve("started").toString();
-        try (McpStdioClient client = new McpStdioClient(MAPPER, "once", JAVA, loop("once", marker), Map.of())
+        try (McpStdioClient client = new McpStdioClient(MAPPER, "once", JAVA, loop("once", marker), Map.of(), null)
                 .onUnavailable(reasons::add)) {
             assertEquals(1, client.listTools().size());
             assertThrows(IOException.class, () -> client.callTool("echo", null));
@@ -111,7 +111,7 @@ class McpStdioClientTest {
 
     @Test
     void closeDoesNotWaitForAPendingInitialize() throws Exception {
-        McpStdioClient client = new McpStdioClient(MAPPER, "hang", JAVA, loop("hang"), Map.of());
+        McpStdioClient client = new McpStdioClient(MAPPER, "hang", JAVA, loop("hang"), Map.of(), null);
         java.util.concurrent.CompletableFuture<Throwable> init = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
             try {
                 client.initialize();
@@ -130,7 +130,7 @@ class McpStdioClientTest {
 
     @Test
     void listsToolsAndCallsThemOverStdin() throws Exception {
-        try (McpStdioClient client = new McpStdioClient(MAPPER, "fake", JAVA, FAKE_ARGS, Map.of())) {
+        try (McpStdioClient client = new McpStdioClient(MAPPER, "fake", JAVA, FAKE_ARGS, Map.of(), null)) {
             List<JsonNode> tools = client.listTools();
             assertEquals(1, tools.size());
             assertEquals("echo", tools.get(0).path("name").asText());
@@ -142,7 +142,7 @@ class McpStdioClientTest {
 
     @Test
     void failsWhenTheServerExitsBeforeAnswering() {
-        try (McpStdioClient client = new McpStdioClient(MAPPER, "gone", JAVA, EXIT_ARGS, Map.of())) {
+        try (McpStdioClient client = new McpStdioClient(MAPPER, "gone", JAVA, EXIT_ARGS, Map.of(), null)) {
             assertThrows(IOException.class, client::listTools);
         }
     }

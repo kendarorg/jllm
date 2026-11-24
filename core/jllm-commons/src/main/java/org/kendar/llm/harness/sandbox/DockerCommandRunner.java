@@ -36,4 +36,14 @@ public interface DockerCommandRunner {
             throws IOException, InterruptedException {
         return run(argv, timeout);
     }
+
+    /**
+     * Starts argv and returns the running process with its streams open (the caller pumps them and destroys it): used
+     * for {@code docker exec -i}, the tunnel to a container without network.
+     *
+     * @throws UnsupportedOperationException when the runner cannot start long-running processes
+     */
+    default Process start(List<String> argv) throws IOException {
+        throw new UnsupportedOperationException("This runner cannot start a process");
+    }
 }

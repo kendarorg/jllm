@@ -12,6 +12,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.AgentHarness;
+import org.kendar.llm.harness.AgentHarnessBuilder;
 import org.kendar.llm.harness.HarnessPricing;
 import org.kendar.llm.harness.auth.FileTokenStore;
 import org.kendar.llm.harness.auth.OAuthToken;
@@ -23,22 +24,29 @@ import org.kendar.llm.harness.llm.ModelResponse;
 import org.kendar.llm.harness.session.InMemoryChatSessionStore;
 import org.kendar.llm.harness.settings.HarnessSettings;
 import org.kendar.llm.harness.settings.RestApiSettings;
-import org.kendar.llm.web.admin.AdminController;
-import org.kendar.llm.web.admin.AdminInterceptor;
-import org.kendar.llm.web.admin.ToolCatalogView;
-import org.kendar.llm.web.auth.AuthController;
-import org.kendar.llm.web.auth.CookieAuthentication;
-import org.kendar.llm.web.auth.LoginThrottle;
-import org.kendar.llm.web.auth.PasswordHasher;
+import org.kendar.llm.web.commons.admin.AdminApi;
+import org.kendar.llm.web.commons.admin.ToolCatalogView;
+import org.kendar.llm.web.commons.auth.AuthApi;
+import org.kendar.llm.web.commons.auth.CookieAuthentication;
+import org.kendar.llm.web.commons.auth.LoginThrottle;
+import org.kendar.llm.web.commons.auth.PasswordHasher;
 import org.kendar.llm.web.auth.InMemoryLoginSessionRepository;
-import org.kendar.llm.web.commons.users.LoginSessionRepository;
-import org.kendar.llm.web.commons.ApiInterceptor;
-import org.kendar.llm.web.commons.ChatController;
+import org.kendar.llm.harness.identity.LoginSessionRepository;
 import org.kendar.llm.web.commons.JllmProperties;
-import org.kendar.llm.web.commons.OAuthController;
-import org.kendar.llm.web.users.Permissions;
-import org.kendar.llm.web.commons.users.SkillRepository;
-import org.kendar.llm.web.commons.users.UserRepository;
+import org.kendar.llm.web.commons.OAuthApi;
+import org.kendar.llm.web.spring.OAuthController;
+import org.kendar.llm.web.commons.users.Permissions;
+import org.kendar.llm.harness.identity.SkillRepository;
+import org.kendar.llm.harness.identity.UserRepository;
+import org.kendar.llm.web.commons.ChatApi;
+import org.kendar.llm.web.commons.Gate;
+import org.kendar.llm.web.spring.AdminController;
+import org.kendar.llm.web.spring.AdminInterceptor;
+import org.kendar.llm.web.spring.ApiExceptionAdvice;
+import org.kendar.llm.web.spring.ApiInterceptor;
+import org.kendar.llm.web.spring.AuthController;
+import org.kendar.llm.web.spring.ChatController;
+import org.kendar.llm.web.spring.MeController;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
@@ -105,23 +113,30 @@ class OAuthWebTest {
                 """);
         RestApiSettings crm = api("crm", spec, true);
         RestApiSettings shared = api("shared", spec, false);
-        users = new FileUserRepository(root.resolve("users"), MAPPER);
-        Permissions permissions = new Permissions(new FileRoleRepository(root.resolve("permissions"), MAPPER));
+        FileRoleRepository roleRepo = new FileRoleRepository(root.resolve("permissions"), MAPPER);
+        users = new FileUserRepository(root.resolve("users"), MAPPER, roleRepo);
+        Permissions permissions = new Permissions(roleRepo);
         SkillRepository skills = new FileSkillRepository(root);
         store = new FileTokenStore(root.resolve("tokens"),
                 new TokenCipher(Base64.getDecoder().decode(TokenCipher.newKey()), null));
-        harness = build(new HarnessSettings(null, List.of(crm, shared), null, null, null, null), store, permissions,
+        harness = build(HarnessSettings.builder().restApis(List.of(crm, shared)).build(), store, permissions,
                 skills);
         LoginSessionRepository sessions = new InMemoryLoginSessionRepository();
         CookieAuthentication auth = new CookieAuthentication(users, sessions);
-        OAuthController oauth = new OAuthController(harness, auth, props(PUBLIC));
-        oauth.check();
+        OAuthApi oauthApi = new OAuthApi(harness, props(PUBLIC));
+        oauthApi.check();
+        OAuthController oauth = new OAuthController(oauthApi, auth);
         ToolCatalogView catalog = new ToolCatalogView(harness);
-        mvc = MockMvcBuilders.standaloneSetup(new AuthController(users, auth, sessions, new LoginThrottle(), new org.kendar.llm.web.auth.OidcProperties(null, null)),
-                        new AdminController(users, permissions, skills, sessions, harness, catalog),
-                        new ChatController(harness, MAPPER, new HarnessPricing(0, 0, 0, 0), auth, auth), oauth)
-                .addInterceptors(new ApiInterceptor(auth, auth, harness.sessions(), MAPPER),
-                        new MappedInterceptor(new String[]{"/api/admin/**"}, new AdminInterceptor(auth, MAPPER)))
+        Gate gate = new Gate(auth, auth, harness.sessions());
+        mvc = MockMvcBuilders.standaloneSetup(
+                        new AuthController(new AuthApi(users, auth, sessions, new LoginThrottle(),
+                                new org.kendar.llm.web.commons.auth.OidcProperties(null, null))),
+                        new AdminController(new AdminApi(users, permissions, skills, sessions, harness, catalog)),
+                        new ChatController(new ChatApi(harness, MAPPER, new HarnessPricing(0, 0, 0, 0), auth), auth),
+                        oauth)
+                .setControllerAdvice(new ApiExceptionAdvice())
+                .addInterceptors(new ApiInterceptor(gate, auth, MAPPER, false, true),
+                        new MappedInterceptor(new String[]{"/api/admin/**"}, new AdminInterceptor(gate, auth, MAPPER)))
                 .build();
     }
 
@@ -138,7 +153,7 @@ class OAuthWebTest {
 
     private AgentHarness build(HarnessSettings settings, TokenStore store, Permissions permissions,
                                SkillRepository skills) {
-        return AgentHarness.builder().modelClient(new ModelClient() {
+        return new AgentHarnessBuilder().modelClient(new ModelClient() {
                     @Override
                     public ModelResponse complete(ModelRequest request) {
                         throw new UnsupportedOperationException();
@@ -157,7 +172,7 @@ class OAuthWebTest {
 
     private static JllmProperties props(String publicUrl) {
         return new JllmProperties(null, null, null, null, null, null, null, null, null, null, null, null, null, null,
-                null, null, null, null, null, null, null, null, null, new JllmProperties.Web(publicUrl));
+                null, null, null, null, null, null, null, null, null, null, new JllmProperties.Web(publicUrl, null, null, null));
     }
 
     private Cookie signIn(String id) throws Exception {
@@ -190,6 +205,16 @@ class OAuthWebTest {
     void startNeedsASignedInUser() throws Exception {
         mvc.perform(post("/api/oauth/api:crm/start")).andExpect(status().isUnauthorized());
         mvc.perform(get("/api/oauth")).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void startWithAChatIdNeedsThatChatToBeTheCallers() throws Exception {
+        String ritaChat = harness.sessions().create("t", "rita").chatId();
+        Cookie rita = signIn("rita");
+        Cookie gus = signIn("gus");
+        mvc.perform(post("/api/oauth/api:crm/start").param("chatId", ritaChat).cookie(rita)).andExpect(status().isOk());
+        mvc.perform(post("/api/oauth/api:crm/start").param("chatId", ritaChat).cookie(gus)).andExpect(status().isNotFound());
+        mvc.perform(post("/api/oauth/api:crm/start").param("chatId", "nope").cookie(gus)).andExpect(status().isNotFound());
     }
 
     @Test
@@ -267,15 +292,15 @@ class OAuthWebTest {
     @Test
     void startupIsRefusedWithoutEncryptionOrPublicUrl() throws Exception {
         Path spec = root.resolve("crm.yaml");
-        HarnessSettings settings = new HarnessSettings(null, List.of(api("crm", spec, true)), null, null, null, null);
+        HarnessSettings settings = HarnessSettings.builder().restApis(List.of(api("crm", spec, true))).build();
         Permissions permissions = new Permissions(new FileRoleRepository(root.resolve("permissions"), MAPPER));
         SkillRepository skills = new FileSkillRepository(root);
         AgentHarness plain = build(settings, new FileTokenStore(root.resolve("plain")), permissions, skills);
         CookieAuthentication auth = new CookieAuthentication(users, new InMemoryLoginSessionRepository());
         IllegalStateException e = assertThrows(IllegalStateException.class,
-                () -> new OAuthController(plain, auth, props(PUBLIC)).check());
+                () -> new OAuthApi(plain, props(PUBLIC)).check());
         assertTrue(e.getMessage().contains("JLLM_TOKEN_KEY"), e.getMessage());
-        e = assertThrows(IllegalStateException.class, () -> new OAuthController(harness, auth, props(null)).check());
+        e = assertThrows(IllegalStateException.class, () -> new OAuthApi(harness, props(null)).check());
         assertTrue(e.getMessage().contains("public-url"), e.getMessage());
     }
 }

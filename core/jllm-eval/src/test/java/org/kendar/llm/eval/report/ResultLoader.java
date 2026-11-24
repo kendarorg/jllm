@@ -8,6 +8,7 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Stream;
@@ -39,8 +40,14 @@ public final class ResultLoader {
     }
 
     public record CaseRun(String feature, String name, String strategy, String tag, String rubric, boolean risk,
-                          double passRate, boolean passK, boolean passed, List<Trial> trials, Path dir) {
+                          double passRate, boolean passed, List<Trial> trials, Path dir) {
         public String key() { return feature + "/" + name + "/" + strategy; }
+
+        /** Number of trials run. */
+        public int n() { return trials.size(); }
+
+        /** Number of trials that passed. */
+        public int c() { return (int) trials.stream().filter(Trial::passed).count(); }
     }
 
     public record Run(Path dir, JsonNode meta, List<CaseRun> cases) {
@@ -55,6 +62,25 @@ public final class ResultLoader {
         public String judgeType() { return text(meta, "judgeType"); }
 
         public boolean selfGraded() { return meta.path("selfGraded").asBoolean(false); }
+
+        /** The configured k values of pass@k and pass^k, ascending. */
+        public List<Integer> passK() {
+            JsonNode ks = meta.path("passK");
+            if (!ks.isArray() || ks.isEmpty()) {
+                throw new IllegalStateException("run.json in " + dir + " has no passK list: it is in the old result "
+                        + "format. Old results are not converted: delete this run folder.");
+            }
+            List<Integer> out = new ArrayList<>();
+            ks.forEach(k -> out.add(k.asInt()));
+            Collections.sort(out);
+            return out;
+        }
+
+        /** True when the working tree had tracked changes during the run. */
+        public boolean dirty() { return meta.path("build").path("dirty").asBoolean(false); }
+
+        /** The dirty-tree policy the run applied: refuse, warn or allow. */
+        public String dirtyTreePolicy() { return text(meta, "dirtyTree"); }
     }
 
     static String text(JsonNode n, String f) {
@@ -83,6 +109,10 @@ public final class ResultLoader {
     private static CaseRun loadCase(Path file) throws IOException {
         JsonNode j = MAPPER.readTree(file.toFile());
         Path dir = file.getParent();
+        if (j.has("passK") || !j.path("passAtK").isObject() || !j.path("passPowK").isObject()) {
+            throw new IllegalStateException(file + " is in the old result format (no passAtK and passPowK maps). "
+                    + "Old results are not converted: delete the run folder that holds it, or re-run the evaluation.");
+        }
         List<Trial> trials = new ArrayList<>();
         for (JsonNode t : j.path("trials")) {
             int n = t.path("trial").asInt();
@@ -113,7 +143,7 @@ public final class ResultLoader {
         String rubric = j.hasNonNull("rubric") && !j.path("rubric").asText().isEmpty()
                 ? j.path("rubric").asText() : null;
         return new CaseRun(text(j, "feature"), text(j, "case"), text(j, "strategy"), text(j, "tag"), rubric,
-                j.path("risk").asBoolean(), j.path("passRate").asDouble(), j.path("passK").asBoolean(),
+                j.path("risk").asBoolean(), j.path("passRate").asDouble(),
                 j.path("passed").asBoolean(), trials, dir);
     }
 }

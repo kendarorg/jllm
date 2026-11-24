@@ -121,4 +121,49 @@ class EvalConfigTest {
         assertTrue(sep.fastSeparate());
         assertEquals("claude-haiku-5-5", sep.fast().model());
     }
+
+    @Test
+    void passKDefaultsToOneAndTheMaximumTrials() {
+        assertEquals(java.util.List.of(1, 10), load(map(), map("ANTHROPIC_API_KEY", "k-1234")).passK());
+        assertEquals(java.util.List.of(1, 3),
+                load(map("eval.maxTrials", "3"), map("ANTHROPIC_API_KEY", "k-1234")).passK());
+        assertEquals(java.util.List.of(1), load(map("eval.maxTrials", "1"), map("ANTHROPIC_API_KEY", "k-1234")).passK());
+    }
+
+    @Test
+    void passKIsDeduplicatedSortedAndClippedToTheMaximumTrials() {
+        EvalConfig c = load(map("eval.passK", "5, 2,2, 20,1", "eval.maxTrials", "8"), map("ANTHROPIC_API_KEY", "k-1234"));
+        assertEquals(java.util.List.of(1, 2, 5, 8), c.passK());
+        assertEquals(java.util.List.of(2), load(map("eval.passK", "2"), map("ANTHROPIC_API_KEY", "k-1234")).passK());
+    }
+
+    @Test
+    void invalidPassKAndDirtyTreeAreReported() {
+        EvalConfigException e = assertThrows(EvalConfigException.class, () -> load(
+                map("eval.passK", "1,x", "eval.dirtyTree", "maybe"), map("ANTHROPIC_API_KEY", "k-1234")));
+        assertTrue(e.getMessage().contains("eval.passK"), e.getMessage());
+        assertTrue(e.getMessage().contains("eval.dirtyTree"), e.getMessage());
+        assertThrows(EvalConfigException.class,
+                () -> load(map("eval.passK", "0"), map("ANTHROPIC_API_KEY", "k-1234")));
+    }
+
+    @Test
+    void dirtyTreeDefaultsToWarn() {
+        assertEquals(org.kendar.llm.eval.pin.DirtyTreePolicy.WARN, load(map(), map("ANTHROPIC_API_KEY", "k-1234")).dirtyTree());
+        assertEquals(org.kendar.llm.eval.pin.DirtyTreePolicy.REFUSE,
+                load(map("eval.dirtyTree", "Refuse"), map("ANTHROPIC_API_KEY", "k-1234")).dirtyTree());
+        assertEquals(org.kendar.llm.eval.pin.DirtyTreePolicy.ALLOW,
+                load(map(), map("ANTHROPIC_API_KEY", "k-1234", "EVAL_DIRTYTREE", "allow")).dirtyTree());
+    }
+
+    @Test
+    void resolvedKeysNeverHoldASecretOrAResultIrrelevantKey() {
+        EvalConfig c = load(map("eval.anthropic.apiKey", "sk-secret-123456", "eval.dirtyTree", "refuse"),
+                map("ANTHROPIC_API_KEY", "k-1234"));
+        assertTrue(c.resolvedKeys().containsKey("eval.trials"));
+        assertTrue(c.resolvedKeys().containsKey("eval.passK"));
+        assertFalse(c.resolvedKeys().containsKey("eval.dirtyTree"));
+        assertFalse(c.resolvedKeys().keySet().stream().anyMatch(k -> k.endsWith(".apiKey")));
+        assertFalse(c.resolvedKeys().values().stream().anyMatch(v -> v.contains("sk-secret-123456")));
+    }
 }

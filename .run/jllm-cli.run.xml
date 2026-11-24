@@ -1,0 +1,13 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="jllm-cli" type="Application" factoryName="Application">
+    <!-- provided scope ticked: GraalJS (run_js) is a provided dependency and is not in the jars -->
+    <option name="INCLUDE_PROVIDED_SCOPE" value="true" />
+    <option name="MAIN_CLASS_NAME" value="org.kendar.llm.cli.Main" />
+    <module name="jllm-cli" />
+    <option name="PROGRAM_PARAMETERS" value="--plugin-dir $PROJECT_DIR$/target/plugins" />
+    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/runConfig/tmp" />
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>

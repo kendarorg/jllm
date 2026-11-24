@@ -8,6 +8,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.AgentHarness;
+import org.kendar.llm.harness.AgentHarnessBuilder;
 import org.kendar.llm.harness.settings.HarnessSettings;
 import org.kendar.llm.harness.settings.McpServerSettings;
 import org.kendar.llm.harness.settings.RestApiSettings;
@@ -59,11 +60,11 @@ class MenuCommandsTest {
         server.start();
         url = "http://127.0.0.1:" + server.getAddress().getPort();
 
-        HarnessSettings settings = new HarnessSettings(
-                List.of(new McpServerSettings("srv", url + "/mcp", null, null, null, null, null, null, null, null, null, null, null)),
-                List.of(new RestApiSettings("pets", url + "/api", url + "/spec.yaml", null, null, null,
-                        List.of("/ping"), false, null, null)), null, null, null);
-        harness = AgentHarness.builder().modelClient(new ScriptedModel()).config(config(base))
+        HarnessSettings settings = HarnessSettings.builder()
+                .mcpServers(List.of(new McpServerSettings("srv", url + "/mcp", null, null, null, null, null, null, null, null, null, null, null)))
+                .restApis(List.of(new RestApiSettings("pets", url + "/api", url + "/spec.yaml", null, null, null,
+                        List.of("/ping"), false, null, null))).build();
+        harness = new AgentHarnessBuilder().modelClient(new ScriptedModel()).config(config(base))
                 .withoutStandardTools()
                 .tools(List.of(tool("alpha", "Misc", ToolKind.READ_ONLY, (c, i) -> ""),
                         tool("beta", "Misc", ToolKind.OTHER, (c, i) -> "")))

@@ -133,11 +133,11 @@ public class OpenAiCompatModelClient implements ModelClient {
             try {
                 chunk = mapper.readTree(data);
             } catch (IOException e) {
-                throw new ModelException(cfg.name() + " returned a malformed stream chunk: " + truncate(data));
+                throw new ModelException(cfg.name() + " returned a malformed stream chunk: " + StreamingCall.truncate(data));
             }
             JsonNode error = chunk.path("error");
             if (!error.isMissingNode() && !error.isNull()) {
-                throw new StreamingCall.StreamError(cfg.name() + " returned an error: " + truncate(errorText(error)),
+                throw new StreamingCall.StreamError(cfg.name() + " returned an error: " + StreamingCall.truncate(errorText(error)),
                         false);
             }
             any = true;
@@ -388,11 +388,11 @@ public class OpenAiCompatModelClient implements ModelClient {
         // gateways (OpenRouter, LiteLLM...) report some failures as 200 with an error object or no choices
         JsonNode error = json.path("error");
         if (!error.isMissingNode() && !error.isNull()) {
-            throw new ModelException(cfg.name() + " returned an error: " + truncate(errorText(error)));
+            throw new ModelException(cfg.name() + " returned an error: " + StreamingCall.truncate(errorText(error)));
         }
         JsonNode choices = json.path("choices");
         if (!choices.isArray() || choices.isEmpty()) {
-            throw new ModelException(cfg.name() + " returned no choices: " + truncate(json.toString()));
+            throw new ModelException(cfg.name() + " returned no choices: " + StreamingCall.truncate(json.toString()));
         }
         ArrayNode content = mapper.createArrayNode();
         JsonNode choice = choices.path(0);
@@ -452,7 +452,7 @@ public class OpenAiCompatModelClient implements ModelClient {
         } catch (IOException e) {
             // not JSON: reported below
         }
-        throw new ModelException(cfg.name() + " returned a non-JSON response (check baseUrl): " + truncate(body));
+        throw new ModelException(cfg.name() + " returned a non-JSON response (check baseUrl): " + StreamingCall.truncate(body));
     }
 
     /**
@@ -517,7 +517,7 @@ public class OpenAiCompatModelClient implements ModelClient {
         if (auth != null) {
             try {
                 auth.headers().forEach(rb::header);
-            } catch (RuntimeException e) {
+            } catch (RuntimeException e) { // boundary: any auth provider failure becomes a ModelException
                 throw new ModelException("Authentication failed: " + e.getMessage(), e);
             }
         } else if (cfg.apiKey() != null && !cfg.apiKey().isBlank()) {
@@ -533,70 +533,9 @@ public class OpenAiCompatModelClient implements ModelClient {
         } catch (IOException e) {
             throw new ModelException("Cannot serialize request", e);
         }
-        java.util.function.Supplier<HttpRequest> build = () -> request(payload);
-        HttpRequest request = build.get();
-        boolean authRetried = false;
-
-        int attempt = 0;
-        RetryBudget budget = new RetryBudget();
-        while (true) {
-            try {
-                HttpResponse<String> resp = cancel.send(http, request);
-                int status = resp.statusCode();
-                if (status == 200) {
-                    return readJson(resp.body());
-                }
-                if (status == 401 && auth != null && !authRetried) {
-                    authRetried = true;
-                    auth.onUnauthorized();
-                    request = build.get();
-                    continue;
-                }
-                boolean retryable = status == 429 || status >= 500;
-                if (!retryable || attempt >= cfg.maxRetries()) {
-                    throw new ModelException(cfg.name() + " API error " + status + ": " + truncate(resp.body())
-                            + StreamingCall.rateLimitHint(resp));
-                }
-                attempt++;
-                long delayMs = budget.reserve(attempt, backoffBaseMs,
-                                resp.headers().firstValue("retry-after").map(OpenAiCompatModelClient::parseSeconds))
-                        .orElseThrow(() -> new ModelException(cfg.name() + " API error " + status + ": "
-                                + truncate(resp.body()) + StreamingCall.rateLimitHint(resp) + " (retry wait budget of " + RetryBudget.MAX_WAIT_MS
-                                + " ms exhausted)"));
-                log.warn("{} API {} - retry {} in {} ms{}", cfg.name(), status, attempt, delayMs, StreamingCall.rateLimitHint(resp));
-                cancel.retrying(status, attempt, cfg.maxRetries(), delayMs);
-                cancel.sleep(delayMs);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new ModelException("Interrupted while calling the model", e);
-            } catch (IOException e) {
-                if (attempt >= cfg.maxRetries()) {
-                    throw new ModelException(cfg.name() + " API call failed: " + e.getMessage(), e);
-                }
-                attempt++;
-                long netDelay = budget.reserve(attempt, backoffBaseMs, Optional.empty())
-                        .orElseThrow(() -> new ModelException(cfg.name() + " API call failed: " + e.getMessage()
-                                + " (retry wait budget of " + RetryBudget.MAX_WAIT_MS + " ms exhausted)", e));
-                cancel.retrying(0, attempt, cfg.maxRetries(), netDelay);
-                try {
-                    cancel.sleep(netDelay);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    throw new ModelException("Interrupted while calling the model", ie);
-                }
-            }
-        }
+        return readJson(StreamingCall.send(http, () -> request(payload), auth, cancel, cfg.maxRetries(), backoffBaseMs,
+                st -> st == 429 || st >= 500, st -> cfg.name() + " API error " + st, cfg.name() + " API call failed: "));
     }
 
-    private static long parseSeconds(String v) {
-        try {
-            return Math.min(120_000L, (long) (Double.parseDouble(v.trim()) * 1000));
-        } catch (NumberFormatException e) {
-            return 2000L;
-        }
-    }
 
-    private static String truncate(String s) {
-        return s != null && s.length() > 1000 ? s.substring(0, 1000) + "..." : s;
-    }
 }

@@ -22,6 +22,13 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class PdfReaderTest {
 
+    private static String extract(org.kendar.llm.harness.tools.DocumentReader reader, Path file) throws IOException {
+        try (java.io.InputStream in = Files.newInputStream(file)) {
+            return reader.extract(in, file.getFileName().toString());
+        }
+    }
+
+
     @TempDir
     Path dir;
 
@@ -47,7 +54,7 @@ class PdfReaderTest {
 
     @Test
     void extractsTextWithPageMarkers() throws Exception {
-        String text = new PdfReader().extract(pdf("Hello first", "Second page"));
+        String text = extract(new PdfReader(), pdf("Hello first", "Second page"));
 
         assertTrue(text.contains("--- page 1 ---\nHello first"), text);
         assertTrue(text.contains("--- page 2 ---\nSecond page"), text);
@@ -55,14 +62,14 @@ class PdfReaderTest {
 
     @Test
     void textlessPdfIsReportedAsScanned() throws Exception {
-        assertEquals("no extractable text (scanned?)", new PdfReader().extract(pdf("", "")));
+        assertEquals("no extractable text (scanned?)", extract(new PdfReader(), pdf("", "")));
     }
 
     @Test
     void corruptFileFails() throws Exception {
         Path f = dir.resolve("bad.pdf");
         Files.writeString(f, "not a pdf");
-        assertThrows(IOException.class, () -> new PdfReader().extract(f));
+        assertThrows(IOException.class, () -> extract(new PdfReader(), f));
     }
 
     private Path encrypted(String ownerPassword, String userPassword) throws IOException {
@@ -81,7 +88,7 @@ class PdfReaderTest {
 
     @Test
     void ownerPasswordOnlyPdfIsRead() throws Exception {
-        String text = new PdfReader().extract(encrypted("owner", ""));
+        String text = extract(new PdfReader(), encrypted("owner", ""));
 
         assertTrue(text.contains("--- page 1 ---\nSecret text"), text);
     }
@@ -89,13 +96,13 @@ class PdfReaderTest {
     @Test
     void userPasswordPdfIsRefused() throws Exception {
         Path f = encrypted("owner", "user");
-        IOException e = assertThrows(IOException.class, () -> new PdfReader().extract(f));
+        IOException e = assertThrows(IOException.class, () -> extract(new PdfReader(), f));
         assertEquals("The PDF is password-protected", e.getMessage());
     }
 
     @Test
     void stopsAfterThePageLimit() throws Exception {
-        String text = new PdfReader(2).extract(pdf("one", "two", "three"));
+        String text = extract(new PdfReader(2), pdf("one", "two", "three"));
 
         assertTrue(text.contains("--- page 2 ---\ntwo"), text);
         assertFalse(text.contains("three"), text);
@@ -107,7 +114,7 @@ class PdfReaderTest {
         Path f = pdf("Hello");
         Thread.currentThread().interrupt();
         try {
-            assertThrows(InterruptedIOException.class, () -> new PdfReader().extract(f));
+            assertThrows(InterruptedIOException.class, () -> extract(new PdfReader(), f));
         } finally {
             Thread.interrupted();
         }

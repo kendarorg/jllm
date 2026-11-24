@@ -4,17 +4,21 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.checkerframework.checker.nullness.qual.NonNull;
 import org.kendar.llm.harness.AgentHarness;
+import org.kendar.llm.harness.AgentHarnessBuilder;
 import org.kendar.llm.harness.HarnessConfig;
 import org.kendar.llm.harness.agent.AgentEvent;
 import org.kendar.llm.harness.commands.SlashCommands;
 import org.kendar.llm.harness.context.mnemonic.FileMnemonicStore;
 import org.kendar.llm.harness.permission.PermissionMode;
-import org.kendar.llm.harness.sandbox.CwdSandboxExecutor;
+import org.kendar.llm.harness.sandbox.CwdLayout;
 import org.kendar.llm.harness.session.FileChatSessionStore;
 import org.kendar.llm.harness.session.FileHistorySubAgentRunLog;
 import org.kendar.llm.harness.session.HistoryRootLock;
 import org.kendar.llm.harness.session.InMemorySubAgentRunLog;
+import org.kendar.llm.harness.settings.HarnessConfigMapper;
 import org.kendar.llm.harness.settings.HarnessSettings;
+import org.kendar.llm.harness.settings.HarnessSettingsLoader;
+import org.kendar.llm.harness.settings.ProjectTrustFilter;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -109,12 +113,12 @@ public final class Main {
         boolean canAsk = !a.containsKey("prompt") && System.in.available() == 0;
         // suspicious content in the loaded files: logged, and printed once the terminal is open
         var contentWarnings = new org.kendar.llm.harness.safety.ContentWarnings();
-        HarnessSettings settings = HarnessSettings.loadLayered(
+        HarnessSettings settings = HarnessSettingsLoader.loadLayered(
                 new org.kendar.llm.harness.settings.FileSettingsSource(
                         a.containsKey("settings") ? Path.of(a.get("settings")) : null, projectDir),
                 projectDir, System::getenv,
                 (dir, server, cmd) -> canAsk ? askYesNo("The project settings of " + dir + " define "
-                        + (server.startsWith(HarnessSettings.STOP_HOOK_TRUST_PREFIX) ? "a stop hook"
+                        + (server.startsWith(ProjectTrustFilter.STOP_HOOK_TRUST_PREFIX) ? "a stop hook"
                         : "the MCP server '" + server + "'") + ", which runs the local command:\n  " + cmd
                         + "\nRun it?") : null,
                 org.kendar.llm.harness.settings.FileProjectMcpTrust.user(),
@@ -132,24 +136,21 @@ public final class Main {
         // the flag wins over the settings file
         settings = SettingsOverrides.applyToSettings(a, settings);
         // the agent works in the project directory; scratch directories go under the settings' sandbox.tempDir
-        HarnessConfig config = SettingsOverrides.applyToConfig(a, settings.applyTo(HarnessConfig.defaults()),
+        HarnessConfig config = SettingsOverrides.applyToConfig(a, HarnessConfigMapper.apply(settings, HarnessConfig.defaults()),
                 System.getenv("BRAVE_API_KEY"));
 
         if (a.containsKey("sandbox-clean") || a.containsKey("sandbox-clean-all")) {
             cleanSandbox(config, projectDir, a.containsKey("sandbox-clean-all"));
             return;
         }
-        CwdSandboxExecutor cwdSandbox = new CwdSandboxExecutor(config, projectDir);
+        CwdLayout cwdSandbox = new CwdLayout(config, projectDir);
         HistoryRootLock historyLock = HistoryRootLock.acquire(cwdSandbox.historyRoot()); // held until the process ends
-        var dockerRunner = new org.kendar.llm.harness.sandbox.ProcessDockerCommandRunner();
-        org.kendar.llm.harness.sandbox.SandboxExecutor sandbox = !settings.dockerSandbox() ? cwdSandbox
-                : settings.dockerDaemon()
-                ? new org.kendar.llm.harness.sandbox.RemoteExecSandboxExecutor(config, dockerRunner, cwdSandbox,
-                org.kendar.llm.harness.sandbox.RemoteExecSandboxExecutor.Kind.CLI, projectDir)
+        org.kendar.llm.harness.sandbox.SandboxExecutor sandbox = new org.kendar.llm.harness.sandbox.SandboxFactory()
+                .runner(new org.kendar.llm.harness.sandbox.ProcessDockerCommandRunner())
                 .onWarning(w -> System.err.println("warning: " + w))
-                : new org.kendar.llm.harness.sandbox.DockerSandboxExecutor(config, dockerRunner, cwdSandbox);
+                .create(settings, config, cwdSandbox, org.kendar.llm.harness.sandbox.RemoteExecSandboxExecutor.Kind.CLI);
         ProviderChooser.ProviderChoice choice = ProviderChooser.choose(a, settings, mapper, config.maxTokens());
-        AgentHarness.Builder builder = AgentHarness.builder();
+        AgentHarnessBuilder builder = new AgentHarnessBuilder();
         if (a.containsKey("plugin-dir")) builder.pluginDir(Path.of(a.get("plugin-dir")));
         else if (java.nio.file.Files.isDirectory(Path.of("plugins"))) builder.pluginDir(Path.of("plugins"));
         AgentHarness harness = builder
@@ -177,9 +178,9 @@ public final class Main {
         term = a.containsKey("prompt") ? null : terminal.apply(names, cwdSandbox.historyRoot().resolve("cli-history"));
         renderer = new Renderer(Main::say, Main::sayErr, term != null);
         say("project dir: " + harness.sandbox().location() + (settings.dockerSandbox()
-                ? " (shell commands run in docker image " + config.sandbox().docker().image()
-                + (settings.dockerDaemon() ? ", long-running container, project mounted at /workspace)" : ")")
-                : " (no isolation: shell commands run as you, plan mode cannot stop them writing here)"));
+                ? " (shell commands run in a container from docker image " + config.sandbox().docker().image()
+                + ", project mounted at /workspace; /status shows the sandbox)"
+                : " (local runner, for testing only: no isolation, shell commands run as you, plan mode cannot stop them writing here)"));
         say("scratch dir: " + cwdSandbox.scratchRoot());
         say("history dir: " + cwdSandbox.historyRoot());
         // shown, never stored: not part of any chat
@@ -213,7 +214,7 @@ public final class Main {
             ResumeChooser.replay(harness, openId, term == null ? System.out : new Term.Tail(term));
         }
         atExit.accept(() -> {
-            harness.cancel(chat.id);
+            harness.cancel(chat.id, false);
             harness.close();
             historyLock.close();
         });
@@ -357,7 +358,7 @@ public final class Main {
             java.io.Console console = System.console();
             if (console != null) return LineCommands.parseYesNo(console.readLine("%s [y/N] ", question));
             return LineCommands.askYesNo(question, System.out, System.in);
-        } catch (RuntimeException e) {
+        } catch (RuntimeException e) { // boundary: a terminal that cannot ask means no answer
             return null;
         }
     }
@@ -439,7 +440,7 @@ public final class Main {
                 if (exitPending) {
                     exitPending = false;
                     if (typed.strip().toLowerCase().startsWith("y")) {
-                        harness.cancel(chatId);
+                        harness.cancel(chatId, false);
                         System.exit(0);
                     }
                     say("Continuing.");
@@ -485,7 +486,7 @@ public final class Main {
      */
     private static void requestStop(AgentHarness harness, String chatId) {
         if (!scriptRunning) {
-            harness.cancel(chatId);
+            harness.cancel(chatId, false);
             return;
         }
         if (stopPending) return;
@@ -532,7 +533,7 @@ public final class Main {
         }
     }
 
-    /** {@code --sandbox-clean[-all]}: removes the docker daemon-mode container(s), prints what went, and exits. */
+    /** {@code --sandbox-clean[-all]}: removes the sandbox container(s) of the project (or all), prints what went, and exits. */
     private static void cleanSandbox(HarnessConfig config, Path projectDir, boolean all) throws IOException {
         var runner = new org.kendar.llm.harness.sandbox.ProcessDockerCommandRunner();
         List<String> removed = all

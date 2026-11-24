@@ -1,5 +1,10 @@
-# Builds target\release\jllm-<version>.zip: cli + web + plugins + settings + users + runners.
+# Builds target\release\jllm-<version>.zip: cli + web + plugins + settings + users + runners + an empty lib-ext, and
+# copies setup.sh / setup.ps1 (release\setup) next to the zip as separate release files.
 # Usage: release\release.ps1 [-Build] [-Out DIR]
+# No GraalJS jar is shipped: lib-ext\manifests\ holds the manifests of both editions (resolved with release\graaljs) and
+# the user runs setup.sh / setup.ps1, which unzips the distribution, asks the edition and fetches it with fetch-graaljs.
+# The build fails if a front-end jar contains GraalJS or if a resolved pom declares a licence other than UPL, MIT,
+# Apache, BSD, Unicode/ICU (the Oracle terms are only recorded in the manifest, never accepted here).
 # Without -Build it asks whether to build (mvn clean install, with tests); the default is no: package the existing jars.
 param([switch]$Build, [string]$Out)
 $ErrorActionPreference = 'Stop'
@@ -49,9 +54,35 @@ $plugins = @(Get-ChildItem target\plugins\*.jar)
 if ($plugins.Count -lt 5) { throw "expected 5 plugin jars in target\plugins, found $($plugins.Count)" }
 Copy-Item $plugins.FullName (Join-Path $stage 'plugins')
 Copy-Item release\template\* $stage -Recurse -Force
+# SQL store: the starter and its jars go to lib-ext\sql (fetch-graaljs empties lib-ext\*.jar, not lib-ext\sql); the JDBC
+# drivers (MySQL GPL, PostgreSQL BSD) are never shipped: fetch-sql-driver downloads them into lib-ext and checks the manifests
+New-Item -ItemType Directory -Force (Join-Path $stage 'lib-ext\sql') | Out-Null
+Copy-Item "web\jllm-sql-spring-starter\target\jllm-sql-spring-starter-$version.jar" (Join-Path $stage 'lib-ext\sql')
+Copy-Item web\jllm-sql-spring-starter\target\lib-sql\*.jar (Join-Path $stage 'lib-ext\sql')
+Copy-Item scripts\fetch-sql-driver.sh, scripts\fetch-sql-driver.ps1, scripts\fetch-sql-driver.cmd $stage
 Copy-Item LICENSE, NOTICE $stage
+# neither front end may carry GraalJS (it is provided through lib-ext)
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+foreach ($j in 'jllm-cli.jar', 'jllm-web.jar') {
+  $zf = [IO.Compression.ZipFile]::OpenRead((Join-Path $stage $j))
+  try { $bad = @($zf.Entries | Where-Object { $_.FullName -match '^org/graalvm/|^com/oracle/truffle/|(^|/)(polyglot|truffle-[a-z]+|js-language|js-isolate[a-z0-9-]*|regex|graaljs)-[0-9][^/]*\.jar$' }) } finally { $zf.Dispose() }
+  if ($bad.Count -gt 0) { throw "$j contains GraalJS classes or jars: it must be provided through lib-ext, not bundled" }
+}
+$libExt = Join-Path $stage 'lib-ext'
+New-Item -ItemType Directory -Force (Join-Path $libExt 'manifests') | Out-Null
+Copy-Item web\jllm-sql\src\main\resources\db\drivers\*.manifest (Join-Path $libExt 'manifests')
+$resolve = Join-Path $root 'release\graaljs\resolve.ps1'
+# manifests only, nothing is shipped: the operator accepts the terms of the oracle edition in setup / fetch-graaljs
+foreach ($ed in 'community', 'oracle') {
+  $tmpEd = Join-Path ([IO.Path]::GetTempPath()) ("jllm-graal-mf-" + [guid]::NewGuid().ToString('N'))
+  try {
+    & $resolve -Edition $ed -Out $tmpEd -AcceptTerms
+    Copy-Item (Join-Path $tmpEd "graaljs-$ed.manifest") (Join-Path $libExt 'manifests')
+  } finally { Remove-Item -Recurse -Force $tmpEd -ErrorAction SilentlyContinue }
+}
+Copy-Item (Join-Path $root 'release\setup\setup.sh'), (Join-Path $root 'release\setup\setup.ps1') $Out
 Compress-Archive -Path $stage -DestinationPath $zip
 $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
 "$hash  $name.zip" | Set-Content (Join-Path $Out 'SHA256SUMS') -Encoding ascii
 Write-Host "built $zip"
-Write-Host "publish: gh release create v$version `"$zip`" `"$(Join-Path $Out 'SHA256SUMS')`" --title `"jllm $version`" --notes-file release\template\README.md"
+Write-Host "publish: gh release create v$version `"$zip`" `"$(Join-Path $Out 'SHA256SUMS')`" `"$(Join-Path $Out 'setup.sh')`" `"$(Join-Path $Out 'setup.ps1')`" --title `"jllm $version`" --notes-file release\template\README.md"

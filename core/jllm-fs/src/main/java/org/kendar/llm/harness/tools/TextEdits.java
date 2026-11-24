@@ -12,8 +12,6 @@ import java.nio.charset.Charset;
 import java.nio.charset.CharsetDecoder;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -43,7 +41,7 @@ public final class TextEdits {
     private static Charset windows1252() {
         try {
             return Charset.forName("windows-1252");
-        } catch (RuntimeException e) {
+        } catch (IllegalArgumentException e) {
             return StandardCharsets.ISO_8859_1;
         }
     }
@@ -57,10 +55,6 @@ public final class TextEdits {
      * @param eol     the dominant line ending, used for new lines that have no surrounding line
      */
     public record TextFile(String raw, Charset charset, boolean bom, String eol) {
-
-        public static TextFile read(Path p) throws IOException {
-            return decode(Files.readAllBytes(p));
-        }
 
         /** Decodes a whole file. */
         public static TextFile decode(byte[] bytes) {

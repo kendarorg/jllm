@@ -23,6 +23,12 @@
 #   *_RPM        requests per minute; 0 = unpaced
 #   *_THINKING   minimal|low|medium|high; empty = the model's default (ollama defaults to minimal)
 # With both roles on anthropic, the judge shares the target's base, context, timeout and rpm (one eval.anthropic.* block).
+#
+# Run pinning and reliability:
+#   DIRTY_TREE   refuse | warn | allow (default warn): what to do when tracked files differ from HEAD (the eval results
+#                folder excluded). refuse stops before the warm-up call and lists the files. A baseline update
+#                (UPDATE_BASELINE=1) from a dirty tree is always refused.
+#   PASS_K       comma list of k for pass@k / pass^k; empty = 1 and MAX_TRIALS. A k above a case's trials is not measured.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -101,6 +107,9 @@ TEST_GROUPS="${TEST_GROUPS// /}"
 if [[ ",$TEST_GROUPS," == *,all,* ]]; then TEST_GROUPS="smoke,full,strategy,compaction,unit"; fi
 TESTS="${TESTS:-}"                  # optional comma separated test classes
 TRIALS="${TRIALS:-1}"
+DIRTY_TREE="${DIRTY_TREE:-warn}"
+case "$DIRTY_TREE" in refuse|warn|allow) ;; *) echo "DIRTY_TREE must be refuse, warn or allow (got '$DIRTY_TREE')" >&2; exit 1;; esac
+PASS_K="${PASS_K:-}"
 MAX_TRIALS="${MAX_TRIALS:-2}"       # cap on trials of any case, including cases that set their own count
 UPDATE_BASELINE="${UPDATE_BASELINE:-0}"   # 1: store this run as the model baseline
 IGNORE_TEST_FAILURES="${IGNORE_TEST_FAILURES:-1}"   # 1: failed cases never fail the Maven build
@@ -199,6 +208,7 @@ echo "Log: $LOG_FILE"
 echo "Preset: $([[ "$PRESET" == none ]] && echo none || basename "$PRESET")"
 echo "Target: $TARGET_PROVIDER $TARGET_MODEL${TARGET_MODEL_NAME:+ as $TARGET_MODEL_NAME}  thinking: ${TARGET_THINKING:-default}  ctx: $TARGET_CTX_TOKENS  rpm: $TARGET_RPM"
 echo "Judge:  $JUDGE_PROVIDER $JUDGE_MODEL${JUDGE_MODEL_NAME:+ as $JUDGE_MODEL_NAME}  thinking: ${JUDGE_THINKING:-default}  ctx: $JUDGE_CTX_TOKENS  rpm: $JUDGE_RPM  key: $JUDGE_KEY_LABEL"
+echo "Pinning: dirty tree: $DIRTY_TREE  pass@k: ${PASS_K:-default (1 and max trials)}"
 echo "Compaction ctx: $COMPACTION_CTX_TOKENS  groups: $TEST_GROUPS  tests: ${TESTS:-all}  trials: $TRIALS  max trials: $MAX_TRIALS  timeout: ${TIMEOUT_SECONDS}s  case timeout cap: ${CASE_TIMEOUT_SECONDS}s  parallelism: $PARALLELISM"
 
 # ---- eval settings
@@ -259,6 +269,7 @@ fi
 [[ -z "$JUDGE_MODEL_NAME" ]] || EVAL_ARGS+=(-Deval.judge.modelName="$JUDGE_MODEL_NAME")
 [[ "$SYSTEM_PROMPT_EXTRA" == none ]] || export_secret EVAL_SYSTEMPROMPT_EXTRA "$SYSTEM_PROMPT_EXTRA"
 [[ -z "$TESTS" ]] || EVAL_ARGS+=(-Dtest="$TESTS")
+[[ -z "$PASS_K" ]] || EVAL_ARGS+=(-Deval.passK="$PASS_K")
 
 # ---- run
 set +e
@@ -273,7 +284,7 @@ mvn -B -ntp -f "$REPO_ROOT/pom.xml" -Peval -pl core/jllm-eval -am test \
   -Deval.fast=target \
   -Deval.trials="$TRIALS" \
   -Deval.maxTrials="$MAX_TRIALS" \
-  -Deval.updateBaseline="$([[ "$UPDATE_BASELINE" == 1 ]] && echo true || echo false)" \
+  -Deval.updateBaseline="$([[ "$UPDATE_BASELINE" == 1 ]] && echo true || echo false)"   -Deval.dirtyTree="$DIRTY_TREE" \
   -Deval.caseTimeoutSeconds="$CASE_TIMEOUT_SECONDS" \
   -Deval.compaction.contextTokens="$COMPACTION_CTX_TOKENS" \
   -Deval.timeout.warmup="$TIMEOUT_SECONDS" \

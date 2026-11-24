@@ -29,15 +29,17 @@ searching, use the group id.
 
 - **RAG, embeddings and vector stores**: JLLM has none. Use LangChain4j or Spring AI for retrieval and expose it to the
   agent as a tool or an MCP server.
-- **Provider breadth and framework integration**: JLLM supports Anthropic and any OpenAI-compatible endpoint. It does
-  not have native clients for every provider and no Quarkus or Spring starter.
+- **Provider breadth and framework integration**: JLLM has built-in entries for Anthropic, OpenAI, Gemini, Grok, Qwen, llama.cpp and Ollama, and any OpenAI-compatible endpoint. It does
+  not have native clients for every provider and no Quarkus starter; the Spring starter (`jllm-web-spring-starter`) covers only the web API.
 - **Gemini-first or Google-managed agents**: use Google ADK.
 - **Ready-made planners and multi-agent topologies**: JLLM has sub-agents and flows, not a goal planner.
 
 ### Where it is a different choice
 
 JLLM's emphasis is control: tool kinds and approvals, deny rules, a path jail, Docker sandboxes, sandboxed JavaScript,
-per-user credentials and deterministic flows ([why JLLM](../why-jllm.md)), with a core that has no Spring, JPA or
+per-user OAuth tokens and per-user env headers for REST/OpenAPI and HTTP MCP tools (the model-provider key is one
+per deployment, stdio MCP servers are shared, and provider logins are not shipped; see
+[identity and access](../enterprise/identity-and-access.md)) and deterministic flows ([why JLLM](../why-jllm.md)), with a core that has no Spring, JPA or
 Micrometer dependency.
 
 ## 2. Terminal coding-agent front ends

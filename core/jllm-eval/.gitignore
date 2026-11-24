@@ -1,5 +1,6 @@
 eval-models/
-# eval results: ignored, except the history and each model's baselines
+# eval results: ignored, except the history and each model's baselines. A run folder (run.json, settings.json,
+# result files, traces, report) is never committed; a dirty tree does not count the results folder as changed.
 eval-results/*
 !eval-results/*/
 eval-results/*/*
