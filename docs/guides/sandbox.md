@@ -27,6 +27,38 @@ next to whichever runner is chosen.
 `${java.io.tmpdir}/agent-harness`. There is no per-command docker runner any more: `sandbox.backend: docker` always means
 the daemon runner, and the old `sandbox.docker.mode` key and `--docker-mode` flag are gone.
 
+## The web: a sandbox per role
+
+In the CLI the runner is one choice for the whole process (`sandbox.backend`). In the web application it is chosen
+**per role** by an administrator, and the default is **none**: a role without a sandbox gets no file tools and no
+`bash`. `RoutedSandboxExecutor` holds one runner per kind and picks the runner of each call from the chat's user and
+their role. `jllm.sandbox` is ignored on the web (one warning is logged); `jllm.docker-*` and `sandbox.docker.*` stay
+the defaults of the containers.
+
+| Kind | Runner | What the role's users get |
+|---|---|---|
+| `none` (default) | `DisabledSandboxExecutor` | nothing: every file tool and `bash` fails with an error that the model sees |
+| `local` | `LocalSandboxExecutor` | files in the chat directory and `bash` on the server as the server user; **no isolation**, trusted users only |
+| `docker-isolated` | `RemoteExecSandboxExecutor`, `hardened` profile | a container with no network unless the role grants it, and resource limits; files and `bash` inside it |
+| `docker-open` | `RemoteExecSandboxExecutor`, `standard` profile | a container with docker's default network; files and `bash` inside it |
+
+Docker kinds also take the container scope (`chat` or `user`) and, for `docker-isolated`, the network (`none` or
+`default`). Everything else (image, limits, remote host, clean-up) comes from the settings.
+
+- **A refusal is a tool error, not a failure.** `SandboxDisabledException` reaches the model as the result of that call;
+  it never offers to run locally (unlike docker being unavailable, see [Docker missing](#docker-missing)). The chat, its
+  history and its directories keep working.
+- **Safe defaults.** A chat without a user, a user or role that cannot be read, a stored value that does not parse, a
+  failing lookup and a kind without a runner all resolve to `none`. The answer is cached for two seconds.
+- **docker needs docker only when used.** Building the container runner does not touch docker, and the orphan sweep at
+  start skips a missing docker. A role set to docker on a host without it affects only its own chats.
+- **Where it is stored.** `roles.settings` (free-text JSON, SQL) or the `sandbox` object of the role file:
+  `{"sandbox": {"kind": "docker-isolated", "scope": "user", "network": "none"}}`. An admin changes it in
+  Administration, Roles, Sandbox, or with `PUT /api/admin/roles/{name}`.
+- **`run_js`** does not depend on the kind: it runs in the server's engine. Only the file calls a script makes follow the
+  sandbox: refused for `none`, the chat directory for `local`, the container for the docker kinds.
+- **Files tab.** For a role without a sandbox the file explorer answers 403.
+
 ## The interface
 
 `SandboxExecutor` is four narrow parts: `Layout` (`location`, `workDir`, `scratchDir`, `chatStorage`, `sharedWorkDir`,
@@ -112,8 +144,11 @@ starts (`cmd &`) are killed when it ends (see [Lifecycle](#lifecycle)).
 
 ```sh
 java -jar jllm-cli.jar --sandbox docker --docker-image maven:3-eclipse-temurin-21
-java -jar jllm-web.jar --sandbox docker
 ```
+
+The web does not take `--sandbox`: an administrator gives each role `docker-isolated` or `docker-open` (see
+[The web: a sandbox per role](#the-web-a-sandbox-per-role)); `--docker-image` and the other `--docker-*` flags set the
+container defaults.
 
 The image must provide `python` (version 3) and `sh`; the default `python:3.12-slim` has both. For another image
 without Python, install it or build an image on top. The repository builds no image; Docker pulls the configured one the
@@ -137,7 +172,7 @@ Settings file (unset keys keep the defaults):
 
 | Key | Default | Effect |
 |---|---|---|
-| `sandbox.backend` | `local` | `local` (no isolation) or `docker` (the container runner) |
+| `sandbox.backend` | `local` | CLI and library: `local` (no isolation) or `docker` (the container runner). The web ignores it: the kind is per role |
 | `sandbox.localFallback` | `true` | allow running locally, without isolation, when docker is unavailable (asked per chat, see [Docker missing](#docker-missing)); `false` returns an error |
 | `sandbox.docker.binary` | `docker` | CLI to call |
 | `sandbox.docker.image` | `python:3.12-slim` | image of the container |
@@ -194,8 +229,8 @@ network beyond loopback. `network: default` gives a hardened container docker's 
 instead; that is a looser setting.
 
 Every setting of a container (profile, memory, cpus, pids, network) can differ per user and per chat. The embedder
-supplies a `SandboxPolicy` (chat id to settings); the admin sets the defaults and the allowed overrides, and a looser
-setting such as network on is an explicit admin grant. A reused container whose `jllm.config` label no longer matches is
+supplies a `SandboxPolicy` (chat id to settings); the web builds it from the role's sandbox (kind gives the profile,
+plus scope and network), and a looser setting such as network on is an explicit admin grant. A reused container whose `jllm.config` label no longer matches is
 recreated.
 
 ### Scope: one container per chat or per user
@@ -397,8 +432,9 @@ resolves the host per user, then the container key.
 | Part | State |
 |---|---|
 | Layout/runner split, `SandboxFactory`, profiles, scope, `ContainerRegistry`, backups with `docker commit`, `BackupRecordStore`, clean-up sweep, `SandboxPolicy`, CLI flags and `/status` | implemented (core, CLI) |
-| Web wiring: factory call, `userOf`, `SandboxPolicy` seam, orphan sweep | implemented |
-| Per-user allowed storages, per-user docker host and per-role clean-up policy stored in the SQL store; admin UI (including the local-runner warning and the scope-change warning); tarball download endpoint and permission; scope-change migration | not yet: the policy comes from settings and the embedder |
+| Web wiring: `userOf`, `SandboxPolicy` seam, orphan sweep | implemented |
+| Sandbox per role (`none`, `local`, `docker-isolated`, `docker-open`, scope, network), stored in `roles.settings`; role editor with the local-runner warning | implemented |
+| A list of allowed container images per role with their mode (isolated or exposed); per-user allowed storages, per-user docker host and per-role clean-up policy stored in the SQL store; clean-up and scope-change warning in the admin UI; tarball download endpoint and permission; scope-change migration | not yet: those come from settings and the embedder |
 
 ### Cleaning
 
@@ -502,8 +538,9 @@ the model only needs to scrape or transform data. The host shell is a way out of
 
 - Your own project, trusted model and input: `CwdLayout` with the local runner (CLI default).
 - Many chats that should not mix files: `ChatDirLayout` (web default).
-- Untrusted input, shared hosts or unattended `auto` mode: the container runner (`sandbox.backend: docker`), `hardened`
-  profile for temporary users.
+- Untrusted input, shared hosts or unattended `auto` mode: the container runner (`sandbox.backend: docker` in the CLI; on
+  the web `docker-isolated` for the role), `hardened` profile for temporary users.
+- A web role that should only chat, search and run `run_js`: leave its sandbox at `none`.
 - Installed tools that must persist across a user's chats: `user` scope (trusted chats only); otherwise `chat` scope.
 - Untrusted input where the model only needs to scrape or transform data: `run_js` without `bash` (no host access at
   all, no container needed).

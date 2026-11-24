@@ -388,6 +388,36 @@ signatures changed and callers were fixed.
 - **Left as `TODO` comments:** constant-time default-password check and the PBKDF2 iteration cap (`PasswordHasher`),
   TLS in the sandbox daemon. Not started: rate limits and spend caps, audit log, health and metrics, backups.
 
+## 23. Sandbox per role
+Until now the web had one sandbox for everybody, chosen at start with `jllm.sandbox`, and the default `local` ran `bash`
+on the server. An administrator now chooses it per role. No backward compatibility was kept: `Role` and
+`Role.admin` got a parameter, and the callers were fixed.
+- **Kinds:** `none` (the default), `local`, `docker-isolated` (hardened profile, network only when granted) and
+  `docker-open` (standard profile). Docker roles also pick the container scope (`chat` or `user`). `RoleSandbox` holds
+  the choice; `SandboxKind` parses it, and the old plain value `docker` is rejected.
+- **Router:** `RoutedSandboxExecutor` picks the runner of each call from the chat's user, then their role, with a cache
+  of two seconds. `DisabledSandboxExecutor` serves `none`: the chat directories exist, but every file tool and `bash`
+  throws `SandboxDisabledException`, which the model sees as the error of that call and which never offers to run
+  locally. A chat without a user, an unknown role or a failing lookup resolves to `none`. Building the container runner
+  does not touch docker, and the orphan sweep at start ignores a missing docker, so a role set to docker on a host
+  without it affects only its own chats.
+- **Web:** `jllm.sandbox` is ignored (a warning is logged); `jllm.docker-*` remain the defaults of the containers.
+  `HarnessIdentity.sandboxes()` gives the sandbox of a user id. The Files tab answers 403 for a role without a sandbox.
+  `run_js` does not depend on the kind: it runs in the server's engine, and only the file calls of its scripts follow
+  the sandbox.
+- **Storage:** `roles.settings` and `users.settings` are free-text JSON columns. The role's sandbox lives in
+  `roles.settings` (`{"sandbox": {kind, scope, network}}`) or in the `sandbox` object of the role file. `users.settings`
+  is a validated JSON object (`UserRepository.setSettings`), not read by anything yet. A database created before them
+  gets the columns by `ALTER TABLE` at start, the one change of the schema with an upgrade path, since a missing
+  column must not stop the server. A value that does not parse reads as no sandbox.
+- **Admin UI:** the role editor has a Sandbox section (kind, scope, network, a plain warning for `local`). The admin
+  role can be set too.
+- **Web fixes found on the way:** the inline import map was blocked by the Content-Security-Policy, so the page
+  failed to start; the components now import Vue by relative path. A user on the default password is now sent to
+  Settings after sign-in, and the chats load only after the password change instead of failing with 403.
+- **Not done:** a list of allowed container images per role with their mode (isolated or exposed); a persisted
+  per-user docker host and per-role clean-up policy; tarball download; migration of workspaces on a scope change.
+
 ## Overall direction
 - **Where it lives:** an embedded component, then a standalone library with a CLI, then a web front end, then a
   plugin host with workflows and pluggable storage.
@@ -395,7 +425,7 @@ signatures changed and callers were fixed.
 - **Context management:** three-tier compaction, then opencode-style compaction, then a second strategy that never
   rewrites the log, then a budgeted one with offloading and a task list.
 - **Permissions:** one approval flag, then a mode-by-tool-kind matrix, then sub-agents inheriting the parent's
-  permissions, then per-user roles narrowed by each user's own settings.
+  permissions, then per-user roles narrowed by each user's own settings, then a sandbox kind per role.
 - **Hardening:** a full review pass closing jail escapes, races and unbounded reads before adding features, then a
   second one for shared deployments (address guard, fail-closed gate, token key, SQL storage).
 - **Verification:** scripted fake models, then a live eval suite against real models with a recorded history and

@@ -37,7 +37,7 @@ Any other scheme is rejected at startup. Properties: `jllm.sql.url`, `jllm.sql.u
 `${ENV}`), `jllm.sql.pool` (SQLite 1, others 10), `jllm.sql.seed` (default true), `jllm.sql.driver-dir`.
 
 Schema: `db/<dialect>/schema.sql`, applied at startup when the `users` table is missing (MySQL `GET_LOCK` and
-PostgreSQL advisory lock around the creation; the SQLite script is idempotent). `schema_version` records the schema version; there is no migration runner, changing the schema means deleting the database. All three dialects have the same tables
+PostgreSQL advisory lock around the creation; the SQLite script is idempotent). `schema_version` records the schema version; there is no migration runner, changing the schema means deleting the database; the one exception is `roles.settings` and `users.settings` (free-text JSON, nullable, holding the role's sandbox and later settings), added by `ALTER TABLE` at startup to a database created before them. All three dialects have the same tables
 (`DialectTest`). `users.role` is a NOT NULL foreign key to `roles(name)` (`ON DELETE RESTRICT`): the `admin` role has a
 seeded row, a user needs an existing role, and deleting a role in use throws `RoleInUseException` (the admin API answers
 409 naming the users, with the files store too). Not done: per-message chat rows (`messages` is one text per chat; `SqlStoresTest.largeChatSaveTiming` logs the cost of

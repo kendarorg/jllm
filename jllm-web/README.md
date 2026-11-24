@@ -19,7 +19,7 @@ reload the page (with the server running from `target/classes`, or restart it).
 ## Configuration
 
 Standard Spring Boot properties, prefix `jllm.` (`application.properties`, environment). On the command line use the same
-flags as the CLI, without the prefix: `--provider openai`, `--sandbox docker`, `--docker-scope user`, `--small-model`
+flags as the CLI, without the prefix: `--provider openai`, `--docker-image IMAGE`, `--docker-scope user`, `--small-model`
 (`--flag value` or `--flag=value`). Spring's own flags (`--server.port=9000`) are unchanged.
 
 The file tools never follow a symlink or junction that leaves a chat's work dir: the web application forces `files.externalLinks` to `none` and logs one WARN at startup when the settings ask for another value ([tools guide](../docs/guides/tools.md#links-that-leave-the-work-dir-filesexternallinks)).
@@ -40,7 +40,7 @@ The file tools never follow a symlink or junction that leaves a chat's work dir:
 | `jllm.sandbox` | | ignored on the web: the sandbox kind is per role (see below). Still read by the CLI |
 | `jllm.docker-image` | `python:3.12-slim` | image of the docker sandbox; wins over the settings file |
 | `jllm.docker-scope` | `chat` | `chat` (one container per chat, removed with the chat) or `user` (one container per user, shared by the user's chats; the admin decides, see [SANDBOX](../docs/guides/sandbox.md)); wins over the settings file |
-| `jllm.docker-profile` | `standard` | `standard` or `hardened` (no network by default, resource limits; for temporary users); wins over the settings file |
+| `jllm.docker-profile` | `standard` | not used for web roles: the role's kind decides (`docker-isolated` is `hardened`, `docker-open` is `standard`) |
 | `jllm.docker-remote` | `false` | flag `--docker-remote`: docker on another machine; each chat's workspace is uploaded to its container and backed up under `<X>/<chatId>/.jllm/` ([SANDBOX](../docs/guides/sandbox.md#remote-docker)) |
 | `jllm.docker-remote-host` | from `DOCKER_HOST` | address where the remote host's published ports are reached |
 | `jllm.system-prompt-file` (flag `--system-prompt-file`) | none | file appended to the system prompt |

@@ -152,7 +152,9 @@ Scripts run on a platform thread of their own, because an isolate does not work 
 harness permissions: a role may have either or both. A host shell is a second, unrestricted way out (a helper script
 written with `write_file` and run with `bash python3 x.py` has the whole network and filesystem), so only a role that
 lists `bash` (for example `poweru`, or `admin`) has it. Scripts never see `bash` either way. A `deny` rule on `bash` is
-not a substitute for leaving it out of the role: `python -c` and quoting bypass a regex.
+not a substitute for leaving it out of the role: `python -c` and quoting bypass a regex. On the web a role also needs a
+sandbox for `bash`: with the default `none` it has neither files nor a shell, while `run_js` still runs (it does not use
+the sandbox), and the file calls of its scripts fail as the file tools do.
 
 The guarantee "no host access except tools" holds only for a user whose role gives no tool with host access. Outside the
 sandbox and out of its reach:

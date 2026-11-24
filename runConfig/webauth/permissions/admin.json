@@ -1,6 +1,6 @@
 {
   "tools" : [ "*" ],
-  "approval" : "ask",
+  "approval" : "off",
   "readOnly" : false,
   "sandbox" : {
     "kind" : "docker-open"

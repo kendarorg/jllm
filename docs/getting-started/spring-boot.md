@@ -22,7 +22,6 @@ registers the harness, the chat controllers and the web plugin host. The propert
 jllm.provider=anthropic
 jllm.model=claude-sonnet-4-5
 jllm.workdir=/var/lib/jllm
-jllm.sandbox=docker
 jllm.web.public-url=https://agents.example.com
 spring.mvc.async.request-timeout=-1
 ```

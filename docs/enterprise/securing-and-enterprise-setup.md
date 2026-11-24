@@ -90,8 +90,9 @@ With `auto-provision` use a least-privilege `default-role`. Mode `oidc` disables
 
 ### Roles and permissions
 
-Roles are `permissions/<role>.json` (files) or rows (SQL): `{tools, readOnly?, approval?, toolPermissions?}`. One role
-per user; `admin` always has every tool and cannot be deleted.
+Roles are `permissions/<role>.json` (files) or rows (SQL): `{tools, readOnly?, approval?, toolPermissions?, sandbox?}`.
+One role per user; `admin` always has every tool and cannot be deleted. `sandbox` is `none` unless an administrator sets
+it (see [Sandbox](#sandbox)), and without a sandbox a role has no file tools and no `bash`, whatever its `tools` say.
 
 | Role (shipped) | Tools |
 |---|---|
@@ -169,17 +170,17 @@ ask separately. To remove web access, add `deny` rules or leave the tools out of
 
 ### Sandbox
 
-`bash` in the default `local` sandbox runs as the JVM user with no limits. For shared use:
-
-```properties
-jllm.sandbox=docker
-```
+The sandbox is set **per role**, in Administration, Roles, Sandbox. The default is `none`: no file tools and no `bash`,
+and every attempt fails with an error the model sees. `local` runs `bash` on the server as the JVM user with no limits:
+for trusted users only. For shared use give roles `docker-isolated` (hardened container) or `docker-open` (standard
+container). `jllm.sandbox` is ignored on the web.
 
 | Setting | Note |
 |---|---|
-| `sandbox.docker.profile` | `standard` (docker's default network) or `hardened` (no network, limits per user and chat; for temporary users) |
-| `sandbox.docker.network` | `hardened` only: `none` (default) or `default`; `standard` ignores it |
-| `sandbox.docker.scope` | `chat` (default) or `user`; `user` shares one container across a user's chats, so untrusted chats use `chat` |
+| role kind | `none` (default), `local`, `docker-isolated` (hardened profile: no network, limits; for temporary or untrusted users) or `docker-open` (standard profile: docker's default network) |
+| role network | `docker-isolated` only: `none` (default) or `default`; `docker-open` ignores it |
+| role scope | `chat` (default) or `user`; `user` shares one container across a user's chats, so untrusted chats use `chat` |
+| `jllm.docker-image`, `sandbox.docker.*` | defaults of the containers: image, memory, cpus, clean-up |
 | remote daemon | `jllm.docker-remote=true`, `jllm.docker-remote-host`. The daemon protocol is plain HTTP by default |
 | `sandbox.docker.allowInsecure=false` | refuses plain http to a non-loopback remote host (default `true`: WARN only). Set it on shared setups |
 | `remoteHost: "https://..."` | TLS to a TLS-terminating proxy in front of the daemon; `sandbox.docker.trustStore` / `trustStorePassword` for a private CA |
@@ -255,7 +256,6 @@ jllm.web.public-url=https://jllm.example.com
 jllm.web.use-real-password=true
 jllm.web.enforce-password-change-on-loopback=true
 jllm.auth.mode=oidc                       # plus jllm.auth.oidc.* with an env: secret
-jllm.sandbox=docker
 jllm.store=sql
 jllm.sql.url=jdbc:sqlite:/var/lib/jllm/jllm.db
 jllm.max-turns=40
@@ -265,9 +265,9 @@ jllm.max-turns=40
 - [ ] `JLLM_TOKEN_KEY` set (same on all instances) and stored apart from backups; `allow-unencrypted-tokens` not set.
 - [ ] No default passwords: `use-real-password=true` or OIDC only; admin password taken from the log and the log protected.
 - [ ] `enforce-password-change-on-loopback=true` when anything forwards traffic without a forwarding header.
-- [ ] No role has `approval: "off"`; `bash` only for `poweru`-type roles; `auto-provision` default role is least privilege.
+- [ ] No role has `approval: "off"`; roles that need files or `bash` have a docker sandbox, no role is `local` on a shared host, the rest stay `none`; `auto-provision` default role is least privilege.
 - [ ] `web.blockLocalHost=true` and `blockExtraAddresses` for internal hosts.
-- [ ] Docker sandbox (daemon); remote daemon over https or SSH tunnel with `allowInsecure=false`; JVM runs unprivileged.
+- [ ] Docker sandboxes (daemon) for the roles that need them; remote daemon over https or SSH tunnel with `allowInsecure=false`; JVM runs unprivileged.
 - [ ] `permissions.deny` rules; visibility lists on every MCP/REST source.
 - [ ] SQL store with driver fetched and verified; database credentials from `${ENV}`; sticky routing if several instances.
 - [ ] Hook for audit events; backup and restore of database, workspaces and key tested.

@@ -24,7 +24,7 @@ only for the Docker sandbox.
 - [ ] The web app sends a `Content-Security-Policy` (same-origin only, no framing), `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`. Tighten or replace the policy with `jllm.web.content-security-policy`; `off` removes the CSP header (do not do this when exposed). A reverse proxy must not strip these headers.
 - [ ] Set `jllm.web.enforce-password-change-on-loopback=true` when anything on the host forwards remote traffic (reverse proxy, SSH or cloud tunnel, sidecar, port forward). The loopback exemption of the default-password enforcement is off when a forwarding header is present or `server.address` is unset, `0.0.0.0` or `::`; a proxy, tunnel or sidecar that adds no forwarding header makes remote requests look local, so the exemption must not be relied on there.
 - [ ] Set `web.blockLocalHost=true` (settings file) so `web_fetch` and `web_download` cannot reach loopback, link-local or private addresses; add `web.blockExtraAddresses` for internal hosts. DNS rebinding is not covered.
-- [ ] Use the `docker` sandbox in daemon mode and give `bash` only to roles that need it. Run the JVM as an
+- [ ] Give the roles that need files or `bash` a `docker-isolated` or `docker-open` sandbox (daemon mode); the default is `none`, and `local` has no isolation. Run the JVM as an
       unprivileged user: MCP stdio servers inherit it.
 - [ ] Set `JLLM_TOKEN_KEY` (`openssl rand -base64 32`) so OAuth tokens are encrypted at rest. Without it the server
       refuses to start when `jllm.web.use-real-password=true` or `server.address` is not loopback (unset, `0.0.0.0`
@@ -57,7 +57,7 @@ files and sessions in memory, so a restart signs everyone out). That fits one in
 
 ## Docker sandbox
 
-`sandbox.backend: docker` keeps one long-running container per chat (`chat` scope) or per user (`user` scope, admin
+A role with a docker sandbox keeps one long-running container per chat (`chat` scope) or per user (`user` scope, admin
 only) with an exec daemon inside; `hardened` profile for temporary users (no network, limits). `remote` runs the
 containers on another host and uploads each workspace. Idle containers are stopped, backed up and removed by the role's
 clean-up policy. Settings, the daemon's security and what is not yet in the admin UI are in

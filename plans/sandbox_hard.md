@@ -205,13 +205,23 @@ Implemented (core, CLI, web wiring), see `docs/guides/sandbox.md`:
 - `/status` shows the sandbox; local runner documented as testing-only with advisory plan mode; `run_js` described as
   always present beside the runner.
 - Web wiring: factory call, `userOf`, `SandboxPolicy` seam, orphan sweep.
+- Web, sandbox per role (`RoutedSandboxExecutor`): each role has a sandbox kind, `none` (default: no file tools and no
+  `bash`, every attempt is a tool error and the server keeps running; `DisabledSandboxExecutor`), `local`,
+  `docker-isolated` (hardened profile, network optional) or `docker-open` (standard profile), plus the container scope
+  (`chat` | `user`). Stored in `roles.settings` (free-text JSON, SQL) or the role file; `users.settings` exists for
+  later per-user settings. A chat without a user, an unreadable role or a failing lookup resolves to `none`. On the web
+  `jllm.sandbox` is ignored (a warning is logged); `jllm.docker-*` give the defaults of the containers.
+- Admin UI: Roles, Sandbox section (kind, scope, network, plain warning for `local`).
 
 Deviation: the scope key is `sandbox.docker.scope`, not `sandbox.remote.scope` (`sandbox.docker.remote` already means a
 docker daemon on another machine).
 
 Not yet:
 
-- Per-user allowed storages, per-user docker host override and per-role clean-up policy persisted in the SQL store.
-- Admin UI (local-runner warning, scope and policy editing, scope-change warning), role selection combo box.
+- Per-user allowed storages, per-user docker host override and per-role clean-up policy persisted in the SQL store
+  (a role stores only kind, scope and network today).
+- Admin UI: clean-up policy editing and the scope-change warning (kind, scope, network and the local-runner warning are
+  done).
+- A list of allowed container images per role, each with its mode (isolated or exposed): see TODO section 1.
 - Tarball download endpoint and its role permission.
 - Scope-change migration of existing workspaces.

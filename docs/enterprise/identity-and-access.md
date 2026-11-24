@@ -26,7 +26,7 @@ A chat a user may not see answers 404, as if it did not exist.
   `allowed-domains`, linking by verified email, optional auto-provisioning with a fixed default role. Modes
   `password`, `oidc` or `both`. Setup: [jllm-web](../../jllm-web/README.md#sign-in-with-openid-connect).
 - **Roles** are files listing tool patterns (`read_file`, `mcp__docs__*`, `billing__*`), an optional `readOnly` flag,
-  an `approval` setting and optional per-tool `toolPermissions` (allow, ask, deny). One role per user, which must exist (SQL: foreign key `users.role` -> `roles`; files: checked in code). A role held by users cannot be deleted (409 naming them). `admin` always has every tool: only its approval and tool permissions can change, and it cannot be removed.
+  an `approval` setting, optional per-tool `toolPermissions` (allow, ask, deny) and a `sandbox` (`none` by default, `local`, `docker-isolated`, `docker-open`: where the role's users get files and a shell, see [Sandboxes](../guides/sandbox.md#the-web-a-sandbox-per-role)). One role per user, which must exist (SQL: foreign key `users.role` -> `roles`; files: checked in code). A role held by users cannot be deleted (409 naming them). `admin` always has every tool: only its approval, tool permissions and sandbox can change, and it cannot be removed.
 - **Narrowing, never widening**: a user can switch off tools and skills their role allows, but cannot add any.
 - **Own skills** per user, bounded in size and count.
 
