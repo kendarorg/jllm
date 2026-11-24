@@ -5,6 +5,10 @@ A `SandboxExecutor` decides three things: where a chat works (the work directory
 `RemoteExecSandboxExecutor`, the daemon-mode docker executor ([Daemon mode](#daemon-mode-a-long-running-container)). Only
 the docker ones isolate anything.
 
+Commands are not the only thing a harness can run. The optional `jllm-js` plugin runs model-written JavaScript in a
+second, independent sandbox ([The JavaScript sandbox](#the-javascript-sandbox-run_js)). It is a plugin, not a
+`SandboxExecutor`, but it is part of the isolation picture and is described here for that reason.
+
 | Executor | Used by | Work dir | Scratch dir | Isolation |
 |---|---|---|---|---|
 | `CwdSandboxExecutor` | CLI | the project directory, for every chat | `<cwd>/.jllm/scratchpad/<chatId>/<agentId>` | none |
@@ -358,12 +362,39 @@ files are not on the host.
 
 `.jllm` stays hidden in the workspace root.
 
+## The JavaScript sandbox: `run_js`
+
+Provided by the optional `jllm-js` plugin ([JS guide](js.md)), not by a `SandboxExecutor`. It is not an alternative way
+to run `bash`: the script is not a process and has no shell, file system or network of its own. It runs in an embedded
+GraalJS engine and its only view of the world is the harness tools, exposed as `tools.<name>({...})` and gated exactly
+like a call from the model.
+
+| Profile | Isolation | Limits enforced by |
+|---|---|---|
+| `constrained` | GraalJS in the JVM, constrained sandbox policy, heap shared with the host | engine limits where the runtime has them, else a statement limit and a memory watchdog |
+| `isolated` / `untrusted` | GraalJS in a native isolate with its own heap (Linux amd64/aarch64, macOS aarch64, Windows amd64) | the engine: isolate memory, heap, CPU time, stack frames, AST depth |
+
+- `engine: auto` picks the isolate when the runtime has one, else `constrained`. `isolated` never downgrades silently:
+  without an isolate the tool is disabled with a reason. The web application defaults to the `untrusted` policy.
+- No `require`, `fetch`, `Java`, processes, threads or environment. A fresh context per run; nothing survives it.
+- File tools called from a script use a jail of their own: the chat work dir (web), or the agent's scratchpad (CLI, also
+  with the docker daemon through `ScratchJailBackend`). `fileJail: false` gives scripts the model's own root.
+- Limits: per-call and total wall time, tool calls per script, concurrent runs, heap, isolate memory, allocation budget.
+- GraalJS is not shipped in the jars; it is fetched by `scripts/setup` / `fetch-graaljs` into `lib-ext/`. Without it the
+  plugin registers nothing and `run_js` is absent.
+
+It does not replace the executors above and does not remove `bash`: a role that has `bash` still has the host (or the
+container). For untrusted input give the role `run_js` and no `bash`; the host shell is a way out of the JS sandbox's
+guarantees. The docker shell backend is not part of this profile.
+
 ## Which one to use
 
 - Your own project, trusted model and input: `CwdSandboxExecutor` (CLI default).
 - Many chats that should not mix files: `ChatDirSandboxExecutor` (web default).
 - Untrusted input, shared hosts or unattended `auto` mode: the docker backend, or your own `SandboxExecutor`.
 - Many commands, installed tools that must persist, builds: docker in `daemon` mode.
+- Untrusted input where the model only needs to scrape or transform data: `run_js` without `bash` (no host access at
+  all, no container needed).
 
 Permission rules (`deny`, `ask`, `allow` on `bash(...)`) are a guard rail, not a boundary: quoting, variables or
 `python -c` bypass a regex. Only a container limits what a command can do.

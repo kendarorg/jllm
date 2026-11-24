@@ -22,6 +22,7 @@ eval/
 ```
 - Only `jllm-eval` is a Maven module; runners drive the shaded `jllm-cli` jar (`JLLM_CLI_JAR`, else `jllm-cli/target/jllm-cli-*-jllm.jar`). `jllm-cli` stays at repo root.
 - No `eval/pom.xml` aggregator unless a second Maven module appears.
+- Python tooling: `uv` (venv, deps, lockfile, running); no venv+pip path.
 - Scripts in bash and PowerShell; Python 3.10+; presets never hold keys; Python tests need no network, Docker or LLM.
 
 ## Remaining tasks
@@ -30,10 +31,5 @@ eval/
 3. Update references: `CONTRIBUTING.md:37`, `docs/guides/extending.md:81`, `docs/reference/history.md`, `docs/comparisons/harnesses-*.md` (leave eval-results reports as history).
 4. `.gitignore`: add `eval/results/`, `eval/**/.venv/`, `eval/**/*.egg-info/`.
 5. Validate: `mvn -Peval -pl eval/jllm-eval validate` and unit-only run (`TEST_GROUPS=unit`); not during a model eval.
-6. After CLI contract (`plans/harborswe.md` task 1-2): create `eval/common`, then `eval/jllm-harbor` (smoke first), then `eval/jllm-swe`.
+6. After CLI contract (`plans/harborswe.md` task 1-2): create `eval/common`, then `eval/jllm-swe` (first benchmark), then `eval/jllm-harbor` (smoke first).
 7. Write `eval/README.md`.
-
-## Open questions
-- Tooling: `uv` (recommended) vs venv+pip.
-- Shared `common` (recommended) vs duplicated helpers.
-- Track Markdown summaries only under `eval/results/` (recommended).

@@ -19,6 +19,7 @@ Nothing implemented (checked against code). Verified current state:
 Benchmark starts a container, installs and runs the agent with a task prompt (no human, no approvals), checks end state (agent text ignored).
 Entry point: `jllm-cli --prompt` in `--mode auto`; the container is the sandbox. Never `--sandbox docker` inside it.
 Fixed per run and recorded (not tuned per task): model, `--system-prompt*`, `--small-model`, max turns, timeout, jllm commit.
+Model(s) and budget are not fixed in the plan: passed as run parameters and recorded with each run.
 Hard per-task cost cap in the adapter. Same turn/time limits as published baselines; record deviations.
 
 ## Remaining tasks
@@ -29,18 +30,18 @@ Hard per-task cost cap in the adapter. Same turn/time limits as published baseli
    - Tests in `MainTest`/`CliArgsTest` (fake model, no network): outcome-to-code, result shape, timeout.
 2. Sandbox for in-container use: inspect `LocalShell`, `CwdSandboxExecutor`, `LocalDirSandboxExecutor`, `ScratchJailBackend`
    (core/jllm-harness `.../harness/sandbox/`) for access outside `--workdir`. If jailed, add `--sandbox none`, only with `--mode auto`
-   (open: new flag vs unjailing `local` in auto). Done when a task writing under `/tmp` and `/app` works in a plain container.
+   (decided: new flag, `local` keeps its jail). Done when a task writing under `/tmp` and `/app` works in a plain container.
 3. Packaging: shaded jar plus pinned JRE 21 URL per OS/arch; `install.sh` installs JRE if `java -version` < 21, copies jar to `/opt/jllm/`.
    Check size and startup in clean Ubuntu and Debian containers.
-4. Harbor adapter (`eval/jllm-harbor/`): `JllmAgent(BaseInstalledAgent)`; `run()` executes
+4. SWE-bench runner (`eval/jllm-swe/`), first benchmark: per instance, repo at `base_commit`, CLI `--mode auto --workdir /testbed`,
+   `git diff` as patch; write `predictions.jsonl`; score with official harness; Verified subset (~20) then 500.
+   Prompt contains only the issue text.
+5. Harbor adapter (`eval/jllm-harbor/`), second: `JllmAgent(BaseInstalledAgent)`; `run()` executes
    `java -jar jllm.jar --mode auto --workdir <cwd> --prompt <instruction> --max-turns N --timeout T --json-result /logs/jllm-result.json`;
    key via env only; parse result into Harbor token/cost fields; optional ATIF trajectory later; smoke 3-5 tasks, then full set.
    Record model, commit, limits, pass rate, cost per task in `eval/results/harbor/`.
-5. SWE-bench runner (`eval/jllm-swe/`): per instance, repo at `base_commit`, CLI `--mode auto --workdir /testbed`, `git diff` as patch;
-   write `predictions.jsonl`; score with official harness; Verified subset (~20) then 500. Prompt contains only the issue text.
-6. Done criteria: tests green on all three OS (1); 5 Terminal-Bench tasks end to end with score and cost (3-4); 20 SWE-bench Verified instances scored (5).
+6. Done criteria: tests green on all three OS (1); 20 SWE-bench Verified instances scored (4); 5 Terminal-Bench tasks end to end with score and cost (3, 5).
 
-## Open questions
-- Terminal-Bench first (recommended) or SWE-bench?
-- Model(s) and budget for first runs.
-- Rules: never run benchmark jobs during a `core/jllm-eval` run; Java in arbitrary containers (memory, startup) is the main risk.
+## Rules and risks
+- Never run benchmark jobs during a `core/jllm-eval` run.
+- Main risk: Java in arbitrary containers (memory, startup).

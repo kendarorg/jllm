@@ -6,7 +6,7 @@ an earlier security review and must be re-checked against the code before work s
 Work that has its own plan is **not** listed here, only in the plan: [litellm](litellm.md) (per-user model keys and
 limits, role settings, provider management, CLI), [saml](saml.md), [backup-restore](backup-restore.md) (settings
 backup, maintenance mode, SQL schema migration), [secdoc](secdoc.md) (auth documentation, doc updates when those
-features land), [evalfolder](evalfolder.md), [harborswe](harborswe.md).
+features land), [evalfolder](evalfolder.md), [harborswe](harborswe.md), [sandbox_hard](sandbox_hard.md).
 
 ## Plans
 
@@ -16,6 +16,7 @@ features land), [evalfolder](evalfolder.md), [harborswe](harborswe.md).
 - [secdoc](secdoc.md): documentation of how authentication and authorization fit together.
 - [evalfolder](evalfolder.md): `eval/` folder layout and build wiring (jllm-eval, jllm-harbor, jllm-swe).
 - [harborswe](harborswe.md): running the harness against Terminal-Bench/Harbor and SWE-bench.
+- [sandbox_hard](sandbox_hard.md): rework and hardening of the sandbox executors (layout/runner split, factory, local mode, JS sandbox docs).
 
 ## 1. Pilot blockers (multi-user web)
 

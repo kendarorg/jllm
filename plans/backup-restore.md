@@ -72,8 +72,8 @@ CLI
 
 ## Remaining tasks
 
-1. Decide schema migration for `roles.settings` and the maintenance flag: small versioned migration in `Schema`
-   (none today) or manual script. Do in phase 0 of `litellm.md`.
+1. Schema migration for `roles.settings` and the maintenance flag: small versioned migration in `Schema` (none today;
+   decided, no manual script). Do in phase 0 of `litellm.md`.
 2. Add a writable settings sink next to `SettingsSource`.
 3. `MaintenanceState` + `Gate` enforcement + store mirror + node polling.
 4. Archive writer/reader (manifest, checksums, zip-slip guard), secrets encryption.
