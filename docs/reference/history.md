@@ -72,7 +72,7 @@ It then got a standalone CLI (`Main`), slash commands, and a set of extension po
 
   The mode is stated in a per-turn note, so switching mode does not break the cache. `/mode` opens a menu, and
   `BYPASS` was renamed `AUTO`.
-- **CLI sandbox rooted at the current directory** (`CwdSandboxExecutor`), which rejects `..` and symlink escapes.
+- **CLI sandbox rooted at the current directory** (`CwdSandboxExecutor`, now `CwdLayout`), which rejects `..` and symlink escapes.
 - **A scratch directory** per chat and agent (`<root>/<chatId>/<agentId>`), writable in every mode.
 - **Compaction rewritten in the opencode style:**
   - It triggers at the context window minus the larger of 15% and 16k tokens.
@@ -164,7 +164,7 @@ only. Not done on purpose: restoring the last `/model`.
   instead of `==` for the CLI's `EOF` sentinel (now a plain constant), and small fixes in the context, tools,
   session and provider classes. No behaviour change intended.
 - **Portable tests.** `McpStdioClientTest` no longer needs `sh`: the fake MCP server is a Java class run by the
-  current JVM. `DockerSandboxExecutorTest` was reworked so it runs on Windows too.
+  current JVM. `DockerSandboxExecutorTest` (since removed with the per-command docker runner) was reworked so it runs on Windows too.
 - **Docs.** `docs/HARNESSES-COMPARE.md` (now `docs/comparisons/harnesses-compare.md`) added: a feature matrix of jllm against mini-swe-agent, Pi, OpenCode, Qwen
   Code and Hermes Agent (competitor columns are from memory and unverified). The root `history.md` was removed in
   favour of this file; README links updated.

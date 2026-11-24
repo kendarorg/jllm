@@ -12,6 +12,7 @@ import org.kendar.llm.harness.identity.Principal;
 import org.kendar.llm.web.commons.me.MeApi;
 import org.kendar.llm.web.commons.users.Permissions;
 import org.kendar.llm.harness.identity.Role;
+import org.kendar.llm.harness.identity.RoleSandbox;
 import org.kendar.llm.harness.identity.RoleInUseException;
 import org.kendar.llm.harness.identity.UnknownRoleException;
 import org.kendar.llm.harness.identity.SkillRepository;
@@ -163,6 +164,11 @@ public class AdminApi {
         Map<String, String> perms = new LinkedHashMap<>();
         r.toolPermissions().forEach((pattern, p) -> perms.put(pattern, p.name().toLowerCase()));
         m.put("toolPermissions", perms);
+        Map<String, Object> sb = new LinkedHashMap<>();
+        sb.put("kind", r.sandbox().kind().wire());
+        sb.put("scope", r.sandbox().scope());
+        sb.put("network", r.sandbox().network());
+        m.put("sandbox", sb);
         m.put("fixed", r.fixed());
         m.put("users", all.stream().filter(u -> r.name().equals(u.role())).count());
         return m;
@@ -184,8 +190,8 @@ public class AdminApi {
     public Map<String, Object> updateRole(String name, Map<String, Object> body) {
         if (User.ADMIN_ROLE.equals(name)) { // every tool stays; only the approval changes
             try {
-                return row(permissions.save(Role.admin(Api.text(body, "approval"),
-                        toolPermissions(body))), users.all());
+                return row(permissions.save(Role.admin(Api.text(body, "approval"), toolPermissions(body),
+                        sandbox(body, permissions.role(name).map(Role::sandbox).orElse(RoleSandbox.NONE)))), users.all());
             } catch (IllegalArgumentException e) {
                 throw new ApiException(400, e.getMessage());
             }
@@ -204,11 +210,29 @@ public class AdminApi {
         String approval = Api.text(body, "approval");
         try {
             Role saved = permissions.save(new Role(name, tools.stream().distinct().toList(),
-                    readOnly, approval, toolPermissions(body)));
+                    readOnly, approval, toolPermissions(body),
+                    sandbox(body, permissions.role(name).map(Role::sandbox).orElse(RoleSandbox.NONE))));
             return row(saved, users.all());
         } catch (IllegalArgumentException e) {
             throw new ApiException(400, e.getMessage());
         }
+    }
+
+    /**
+     * {@code sandbox}: {@code {kind: none|local|docker-isolated|docker-open, scope, network}}; absent keeps {@code current} (a client
+     * that does not know the field must not take a role's sandbox away).
+     */
+    private static RoleSandbox sandbox(Map<String, Object> body, RoleSandbox current) {
+        Object raw = body == null ? null : body.get("sandbox");
+        if (raw == null) return current;
+        if (!(raw instanceof Map<?, ?> m)) {
+            throw new IllegalArgumentException("'sandbox' must be an object {kind, scope, network}");
+        }
+        return RoleSandbox.of(text(m.get("kind")), text(m.get("scope")), text(m.get("network")));
+    }
+
+    private static String text(Object o) {
+        return o == null ? null : o.toString();
     }
 
     /** {@code toolPermissions}: object of tool pattern to allow / ask / deny; absent = none. */

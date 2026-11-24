@@ -20,21 +20,21 @@ class EnvironmentWhitelistTest {
 
     private static final String LIST = System.getProperty("os.name").toLowerCase().contains("win") ? "set" : "env";
 
-    private List<String> names(LocalDirSandboxExecutor box) {
+    private List<String> names(LocalSandboxExecutor box) {
         String out = box.execute("c1", LIST, Duration.ofSeconds(30)).stdout();
         return out.lines().filter(l -> l.contains("=")).map(l -> l.substring(0, l.indexOf('='))).toList();
     }
 
     @Test
     void allVariablesAreInheritedByDefault() {
-        LocalDirSandboxExecutor box = new LocalDirSandboxExecutor(config(base));
+        LocalSandboxExecutor box = LocalSandboxExecutor.of(config(base));
 
         assertTrue(names(box).size() > 3);
     }
 
     @Test
     void onlyWhitelistedVariablesReachTheShell() {
-        LocalDirSandboxExecutor box = new LocalDirSandboxExecutor(config(base));
+        LocalSandboxExecutor box = LocalSandboxExecutor.of(config(base));
         box.environmentWhitelist(List.of("PATH"));
 
         List<String> names = names(box);
@@ -49,7 +49,7 @@ class EnvironmentWhitelistTest {
 
     @Test
     void anEmptyWhitelistPassesNothingAndWildcardsWork() {
-        LocalDirSandboxExecutor box = new LocalDirSandboxExecutor(config(base));
+        LocalSandboxExecutor box = LocalSandboxExecutor.of(config(base));
         box.environmentWhitelist(List.of("*ath"));
 
         assertTrue(names(box).stream().anyMatch(n -> n.equalsIgnoreCase("PATH")));

@@ -42,11 +42,10 @@ For your own tools, validate inside the tool as you would any user-supplied inpu
 |---|---|---|
 | File tools | path jail, always on | `read_file`, `write_file`, `edit_file`, `glob`, `grep` run in the JVM and cannot leave the chat's working directory (`..` rejected; a symlink or junction that leaves the directory follows `files.externalLinks`: the CLI default is read-only follow, the web app always refuses, see [tools](../guides/tools.md#links-that-leave-the-work-dir-filesexternallinks)) |
 | `bash` on the host | `local` sandbox (default) | **none**: commands run as the user of the JVM |
-| `bash` in a container | `docker` `oneshot` | a container per command, working directory mounted |
-| Container per chat | `docker` `daemon`, optionally remote | one long-running container per chat, removed with the chat; file tools can go through it too, so no host path is used |
+| `bash` in a container | `docker` (`RemoteExecSandboxExecutor`), optionally remote | one long-running container per chat (`chat` scope) or per user (`user` scope), `standard` or `hardened` profile; file tools go through it too, so no host path is used |
 | Scripting | [`jllm-js`](../guides/js.md) | GraalJS with no host access; reaches the world only through the tools you allow |
 
-For untrusted input or multi-user hosting, use `docker` in daemon mode or the JavaScript sandbox, and withhold `bash`
+For untrusted input or multi-user hosting, use `docker` (`hardened` profile for temporary users, `chat` scope for untrusted chats) or the JavaScript sandbox, and withhold `bash`
 from roles that do not need it. The daemon listens on `127.0.0.1` only, requires a per-container token compared in
 constant time, and strips `JLLM_*` variables from the commands it runs ([SANDBOX](../guides/sandbox.md#security)).
 It does not protect against code already inside the container, and the daemon itself speaks plain HTTP (a remote host needs an `https://` `remoteHost` through a TLS proxy, an SSH tunnel or a private network; `sandbox.docker.allowInsecure=false` refuses plain http to a non-loopback host).
@@ -63,8 +62,9 @@ It does not protect against code already inside the container, and the daemon it
 - `web_search` and `wikipedia_search` call fixed hosts.
 - MCP servers and REST APIs are reachable only if listed in the settings.
 - To remove web access entirely, add `deny` rules for the web tools or leave them out of the role.
-- The `local` sandbox has no network, memory, CPU or process limits. The Docker `oneshot` sandbox can cut the network
-  with `sandbox.docker.network: none` (the default); daemon mode ignores that setting ([SANDBOX](../guides/sandbox.md#security)).
+- The `local` sandbox has no network, memory, CPU or process limits and is for testing and trusted single-user use only.
+  The `hardened` docker profile has no network by default (`sandbox.docker.network: none`); `standard` uses docker's default
+  network ([SANDBOX](../guides/sandbox.md#profiles)).
 
 ## 4. Secrets
 

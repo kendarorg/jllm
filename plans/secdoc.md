@@ -1,5 +1,7 @@
 # Authentication and authorization documentation
 
+NO RETROCOMPATIBILITY
+
 ## Goal
 
 One canonical page, `docs/enterprise/authn-and-authz.md` ("Authentication and authorization: how it fits together"),

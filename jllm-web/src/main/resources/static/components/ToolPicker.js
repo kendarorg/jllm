@@ -1,4 +1,4 @@
-import {computed, ref} from 'vue';
+import {computed, ref} from '../vendor/vue.esm-browser.prod.js';
 
 /** Case-insensitive match where '*' stands for any run of characters (the server's Wildcard). */
 export function wildcard(pattern, text) {

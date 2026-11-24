@@ -15,6 +15,7 @@ import java.util.Optional;
 public final class SqlUserRepository implements UserRepository {
 
     private static final String COLS = "id, name, role, password_hash, external_id, email";
+    private static final String SELECT = COLS + ", settings";
 
     private final Database db;
 
@@ -100,6 +101,11 @@ public final class SqlUserRepository implements UserRepository {
     @Override
     public User setEmail(String id, String email) {
         return set(id, "email", email == null || email.isBlank() ? null : email.strip());
+    }
+
+    @Override
+    public User setSettings(String id, String json) {
+        return set(id, "settings", UserRepository.checkSettings(json));
     }
 
     @Override
@@ -199,8 +205,9 @@ public final class SqlUserRepository implements UserRepository {
     }
 
     private static Optional<User> load(Tx tx, String id) {
-        return tx.one("SELECT " + COLS + " FROM users WHERE id = ?", rs -> new String[]{
-                rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5), rs.getString(6)
+        return tx.one("SELECT " + SELECT + " FROM users WHERE id = ?", rs -> new String[]{
+                rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5), rs.getString(6),
+                rs.getString(7)
         }, id).map(r -> {
             Map<String, Map<String, String>> creds = new LinkedHashMap<>();
             tx.query("SELECT source, header, value FROM user_credentials WHERE user_id = ? ORDER BY source, header",
@@ -212,7 +219,7 @@ public final class SqlUserRepository implements UserRepository {
                     rs -> rs.getString(1), id);
             List<String> skills = tx.query("SELECT name FROM user_disabled_skills WHERE user_id = ? ORDER BY ord",
                     rs -> rs.getString(1), id);
-            return new User(r[0], r[1], r[2], creds, r[3], tools, skills, r[4], r[5]);
+            return new User(r[0], r[1], r[2], creds, r[3], tools, skills, r[4], r[5], r[6]);
         });
     }
 }

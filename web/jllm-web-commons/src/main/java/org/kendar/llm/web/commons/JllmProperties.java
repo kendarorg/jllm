@@ -21,8 +21,9 @@ package org.kendar.llm.web.commons;
  * @param pricing       USD per million tokens, for the cost estimate
  * @param sandbox       local | docker; wins over the settings file
  * @param dockerImage   image of the docker sandbox; wins over the settings file
- * @param dockerMode    oneshot | daemon: a throwaway container per command, or one long-running container per chat
- * @param dockerRemote  daemon mode with a docker daemon on another machine: the workspace is uploaded and backed up
+ * @param dockerScope   chat | user: one container per chat (removed with the chat) or one per user; the admin decides
+ * @param dockerProfile standard | hardened container profile (hardened: no network by default, limits)
+ * @param dockerRemote  a a docker daemon on another machine: the workspace is uploaded and backed up
  * @param dockerRemoteHost address at which the published ports of the remote docker host are reached
  * @param pluginDir     directory of plugin jars; blank = {@code ./plugins} when it exists
  * @param plugins       {@code jllm.plugins.<id>.enabled} and {@code jllm.plugins.<id>.settings.*}; same as the
@@ -34,7 +35,7 @@ package org.kendar.llm.web.commons;
 public record JllmProperties(String provider, String apiKey, String baseUrl, String model, Integer maxTokens,
                              Integer contextTokens, Integer maxTurns, String workdir, String settings,
                              String contextStrategy, Boolean smallModel, String systemPrompt, String systemPromptFile, String systemPromptReplace, String searchApiKey, Pricing pricing,
-                             String sandbox, String dockerImage, String dockerMode,
+                             String sandbox, String dockerImage, String dockerScope, String dockerProfile,
                              Boolean dockerRemote, String dockerRemoteHost, String pluginDir,
                              java.util.Map<String, Plugin> plugins, Web web) {
 
@@ -71,7 +72,7 @@ public record JllmProperties(String provider, String apiKey, String baseUrl, Str
     /** Nothing set: every key at its default. */
     public static JllmProperties defaults() {
         return new JllmProperties(null, null, null, null, null, null, null, null, null, null, null, null, null, null,
-                null, null, null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null, null, null);
     }
 
     public String providerOrDefault() {

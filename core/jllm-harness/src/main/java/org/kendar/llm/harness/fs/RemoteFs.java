@@ -84,6 +84,8 @@ public final class RemoteFs {
             return call.run();
         } catch (org.kendar.llm.harness.sandbox.SandboxUnavailableException e) {
             throw new FsException(503, e.getMessage());
+        } catch (org.kendar.llm.harness.sandbox.SandboxDisabledException e) {
+            throw new FsException(403, e.getMessage());
         } catch (NoSuchFileException e) {
             throw new FsException(404, "Not found");
         } catch (IllegalArgumentException e) {

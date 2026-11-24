@@ -42,6 +42,8 @@ class DockerWslIntegrationTest {
     HarnessConfig config;
     DockerCommandRunner wslDocker;
     final List<String> created = new ArrayList<>();
+    final List<String> createdVolumes = new ArrayList<>();
+    final List<String> createdImages = new ArrayList<>();
 
     /** Local TCP endpoint of a docker daemon (e.g. dockerd in WSL listening on localhost). */
     private static final String LOCAL_TCP = "tcp://127.0.0.1:2375";
@@ -85,30 +87,42 @@ class DockerWslIntegrationTest {
         }
         final List<String> pre = prefix;
         final List<String> ins = inserted;
-        wslDocker = (argv, timeout) -> {
-            if (argv.size() > 1 && argv.get(1).equals("create")) creates.incrementAndGet();
-            List<String> a = new ArrayList<>(pre);
-            a.add(argv.get(0));
-            a.addAll(ins);
-            a.addAll(argv.subList(1, argv.size()));
-            return real.run(a, timeout);
+        wslDocker = new DockerCommandRunner() {
+            private List<String> wrap(List<String> argv) {
+                List<String> a = new ArrayList<>(pre);
+                a.add(argv.get(0));
+                a.addAll(ins);
+                a.addAll(argv.subList(1, argv.size()));
+                return a;
+            }
+
+            @Override
+            public Result run(List<String> argv, Duration timeout) throws IOException, InterruptedException {
+                if (argv.size() > 1 && argv.get(1).equals("create")) creates.incrementAndGet();
+                return real.run(wrap(argv), timeout);
+            }
+
+            @Override
+            public Process start(List<String> argv) throws IOException {
+                return real.start(wrap(argv));
+            }
         };
-        var d = HarnessConfig.defaults().sandbox().docker();
-        config = HarnessConfig.defaults().withDocker(new HarnessConfig.Docker(d.binary(), d.image(), d.memory(), d.cpus(),
-                d.pidsLimit(), d.user(), d.network(), "daemon", true, "127.0.0.1", true, "", ""));
+        config = HarnessConfig.defaults().withDockerRemote(true, "127.0.0.1").withDockerScope("user");
     }
 
     @AfterEach
     void tearDown() throws Exception {
         if (wslDocker != null) {
             for (String n : created) wslDocker.run(List.of("docker", "rm", "-f", "-v", n), Duration.ofSeconds(60));
+            for (String v : createdVolumes) wslDocker.run(List.of("docker", "volume", "rm", "-f", v), Duration.ofSeconds(60));
+            for (String i : createdImages) wslDocker.run(List.of("docker", "rmi", "-f", i), Duration.ofSeconds(60));
         }
         System.clearProperty("jllm.home");
     }
 
     private RemoteExecSandboxExecutor cli(Path project) {
-        return new RemoteExecSandboxExecutor(config, wslDocker, null, new CwdSandboxExecutor(config, project),
-                RemoteExecSandboxExecutor.Kind.CLI, project);
+        return new RemoteExecSandboxExecutor(config, wslDocker, null, new CwdLayout(config, project),
+                RemoteExecSandboxExecutor.Kind.CLI, project, null, null, null);
     }
 
     private static String run(RemoteExecSandboxExecutor box, String tool, String chat, String json) throws Exception {
@@ -142,7 +156,7 @@ class DockerWslIntegrationTest {
         Files.writeString(project.resolve("secret.txt"), "project data");
         RemoteExecSandboxExecutor box = cli(project);
         created.add(RemoteExecSandboxExecutor.containerName(RemoteExecSandboxExecutor.Kind.CLI,
-                RemoteExecSandboxExecutor.hash(project.toAbsolutePath().normalize().toString()).substring(0, 12)));
+                Placement.hash(project.toAbsolutePath().normalize().toString()).substring(0, 12)));
         assertTrue(ok(box, "cat secret.txt").contains("project data"));
         // another agent of the chat has a file of its own
         run(box, "write_file", "c1", "{\"path\":\"/workspace/.jllm/scratchpad/other/theirs.txt\",\"content\":\"x\"}");
@@ -170,7 +184,7 @@ class DockerWslIntegrationTest {
         Files.createDirectories(project.resolve("bin"));
         RemoteExecSandboxExecutor box = cli(project);
         String name = RemoteExecSandboxExecutor.containerName(RemoteExecSandboxExecutor.Kind.CLI,
-                RemoteExecSandboxExecutor.hash(project.toAbsolutePath().normalize().toString()).substring(0, 12));
+                Placement.hash(project.toAbsolutePath().normalize().toString()).substring(0, 12));
         created.add(name);
 
         // upload at creation, and a Linux shell
@@ -247,18 +261,176 @@ class DockerWslIntegrationTest {
     @Test
     void webChatSurvivesAContainerLossThroughItsBackup() throws Exception {
         Path base = Files.createDirectories(tmp.resolve("web"));
-        RemoteExecSandboxExecutor box = new RemoteExecSandboxExecutor(config, wslDocker, null,
-                new ChatDirSandboxExecutor(config, base), RemoteExecSandboxExecutor.Kind.WEB, base);
+        config = config.withDockerScope("chat");
+        RemoteExecSandboxExecutor box = web(base, null, null);
         created.add("jllm-web-chat-1");
+        createdImages.add("jllm-backup/web-chat-chat-1");
         assertEquals(0, box.execute("chat-1", "echo precious > data.txt", Duration.ofSeconds(120)).exitCode());
         assertTrue(box.backup("chat-1").startsWith("Backed up"));
         wslDocker.run(List.of("docker", "rm", "-f", "-v", "jllm-web-chat-1"), Duration.ofSeconds(60));
-        RemoteExecSandboxExecutor next = new RemoteExecSandboxExecutor(config, wslDocker, null,
-                new ChatDirSandboxExecutor(config, base), RemoteExecSandboxExecutor.Kind.WEB, base);
+        RemoteExecSandboxExecutor next = web(base, null, null);
         assertEquals("precious", next.execute("chat-1", "cat data.txt", Duration.ofSeconds(120)).stdout().strip());
         assertEquals(List.of("jllm-web-chat-1"), next.sweepOrphans(id -> false));
         assertTrue(inspectMissing("jllm-web-chat-1"));
     }
+
+    private RemoteExecSandboxExecutor web(Path base, java.util.function.Function<String, String> userOf,
+                                          java.util.function.Function<String, SandboxPolicy> policy) {
+        return new RemoteExecSandboxExecutor(config, wslDocker, null, new ChatDirLayout(base),
+                RemoteExecSandboxExecutor.Kind.WEB, base, userOf, policy, null).onWarning(System.err::println);
+    }
+
+    private static String id() {
+        return "it" + java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+    }
+
+    /** Output of a docker command; null when it failed (e.g. inspect of something that is gone). */
+    private String docker(String... args) throws Exception {
+        List<String> argv = new ArrayList<>();
+        argv.add("docker");
+        argv.addAll(List.of(args));
+        DockerCommandRunner.Result r = wslDocker.run(argv, Duration.ofSeconds(60));
+        return r.exitCode() == 0 ? r.stdout() : null;
+    }
+
+    private String sh(RemoteExecSandboxExecutor box, String chat, String command) {
+        ExecutionResult r = box.execute(chat, command, Duration.ofSeconds(120));
+        assertEquals(0, r.exitCode(), r.stdout() + r.stderr());
+        return r.stdout();
+    }
+
+    @Test
+    void userScopeSharesANamedVolumeAndKeepsOneDirectoryPerChat() throws Exception {
+        String user = id(), c1 = id(), c2 = id();
+        Path base = Files.createDirectories(tmp.resolve("web"));
+        RemoteExecSandboxExecutor box = web(base, c -> user, null);
+        created.add("jllm-web-user-" + user);
+        createdVolumes.add("jllm-" + user);
+        assertEquals("/workspace/" + c1, box.workDir(c1).toString().replace('\\', '/'));
+        sh(box, c1, "echo one > f.txt");
+        sh(box, c2, "echo two > f.txt");
+        assertEquals(1, countCreates(), "one container for the user's chats");
+        assertNotNull(docker("volume", "inspect", "jllm-" + user), "named volume");
+        assertEquals("one", sh(box, c1, "cat f.txt").strip());
+        assertEquals("two", sh(box, c2, "cat f.txt").strip());
+        assertEquals("one", sh(box, c1, "cat /workspace/" + c1 + "/f.txt").strip());
+        // the file tools of a chat see its own directory only
+        assertTrue(run(box, "read_file", c1, "{\"path\":\"f.txt\"}").contains("one"));
+        assertThrows(IllegalArgumentException.class,
+                () -> run(box, "read_file", c1, "{\"path\":\"../" + c2 + "/f.txt\"}"));
+        // deleting a chat removes its directory only
+        box.deleteWorkDir(c1);
+        assertEquals("", sh(box, c2, "ls /workspace/" + c1 + " 2>/dev/null; true").strip());
+        assertEquals("two", sh(box, c2, "cat f.txt").strip());
+    }
+
+    @Test
+    void hardenedProfileHasNoNetworkAndIsReachedThroughTheExecTunnel() throws Exception {
+        String chat = id();
+        config = config.withDockerScope("chat").withDockerProfile("hardened");
+        Path base = Files.createDirectories(tmp.resolve("web"));
+        RemoteExecSandboxExecutor box = web(base, null, null);
+        created.add("jllm-web-" + chat);
+        assertEquals("up", sh(box, chat, "echo up").strip());
+        var host = JSON.readTree(docker("inspect", "jllm-web-" + chat)).get(0).path("HostConfig");
+        assertEquals("none", host.path("NetworkMode").asText());
+        assertTrue(host.path("ReadonlyRootfs").asBoolean());
+        assertTrue(host.path("CapDrop").toString().contains("ALL"));
+        assertTrue(host.path("PortBindings").isEmpty(), "nothing published");
+        ExecutionResult net = box.execute(chat,
+                "python -c \"import socket;socket.create_connection(('1.1.1.1',53),3)\"", Duration.ofSeconds(30));
+        assertNotEquals(0, net.exitCode(), "no network");
+        sh(box, chat, "echo data > d.txt");
+        assertTrue(run(box, "read_file", chat, "{\"path\":\"d.txt\"}").contains("data"));
+        assertNotEquals(0, box.execute(chat, "touch /etc/x", Duration.ofSeconds(30)).exitCode(), "read-only rootfs");
+        // an admin grant: the default network and the normal published port
+        String chat2 = id();
+        created.add("jllm-web-" + chat2);
+        RemoteExecSandboxExecutor granted = web(base, null,
+                c -> new SandboxPolicy(null, null, null, null, null, "default", null, null));
+        sh(granted, chat2, "echo up");
+        assertNotEquals("none", JSON.readTree(docker("inspect", "jllm-web-" + chat2)).get(0).path("HostConfig")
+                .path("NetworkMode").asText());
+    }
+
+    @Test
+    void backupCommitsAnImageTheNextContainerRestoresFromAndRetentionDeletesIt() throws Exception {
+        String chat = id();
+        config = config.withDockerScope("chat");
+        String image = "jllm-backup/web-chat-" + chat.toLowerCase();
+        createdImages.add(image);
+        created.add("jllm-web-" + chat);
+        Path base = Files.createDirectories(tmp.resolve("web"));
+        RemoteExecSandboxExecutor box = web(base, c -> "alice", null);
+        sh(box, chat, "echo precious > data.txt");
+        box.close(); // backup (tarball, image, record), then the container goes
+        assertNull(docker("inspect", "jllm-web-" + chat));
+        assertNotNull(docker("image", "inspect", image), "the committed image");
+        assertTrue(Files.isRegularFile(base.resolve(chat + "/.jllm/workspace-backup.zip")));
+        assertTrue(Files.isRegularFile(base.resolve(chat + "/.jllm/backup.json")));
+
+        RemoteExecSandboxExecutor next = web(base, c -> "alice", null);
+        assertEquals("precious", sh(next, chat, "cat data.txt").strip());
+        assertEquals(image, JSON.readTree(docker("inspect", "jllm-web-" + chat)).get(0).path("Config").path("Image")
+                .asText(), "created from the image");
+        // retention over: tarball, image and record are deleted
+        BackupRecordStore store = new FileBackupRecordStore(k -> base.resolve(chat + "/.jllm"), base);
+        BackupRecord rec = store.get("chat/" + chat).orElseThrow();
+        store.put("chat/" + chat, new BackupRecord(rec.image(), rec.tarball(), rec.dockerHost(), rec.createdAt(),
+                System.currentTimeMillis() - 1000, rec.userId()));
+        assertEquals(List.of("expired backup chat/" + chat), next.sweep());
+        assertNull(docker("image", "inspect", image));
+        assertFalse(Files.exists(base.resolve(chat + "/.jllm/workspace-backup.zip")));
+    }
+
+    @Test
+    void theIdleSweepBacksUpAndRemovesOrStopsAndTheNextUseRestores() throws Exception {
+        String chat = id(), chat2 = id();
+        config = config.withDockerScope("chat");
+        createdImages.add("jllm-backup/web-chat-" + chat.toLowerCase());
+        created.add("jllm-web-" + chat);
+        created.add("jllm-web-" + chat2);
+        Path base = Files.createDirectories(tmp.resolve("web"));
+        var removeAfterIdle = new SandboxPolicy(null, null, null, null, null, null, null,
+                new HarnessConfig.Cleanup(1, "backup-remove", 0, 0));
+        RemoteExecSandboxExecutor box = web(base, null, c -> removeAfterIdle);
+        sh(box, chat, "echo idle > i.txt");
+        assertEquals(List.of(), box.sweep(System.currentTimeMillis()));
+        assertEquals(List.of("backed up and removed jllm-web-" + chat),
+                box.sweep(System.currentTimeMillis() + 2 * 60_000));
+        assertNull(docker("inspect", "jllm-web-" + chat));
+        assertEquals("idle", sh(box, chat, "cat i.txt").strip());
+
+        var stopAfterIdle = new SandboxPolicy(null, null, null, null, null, null, null,
+                new HarnessConfig.Cleanup(1, "stop", 0, 0));
+        RemoteExecSandboxExecutor s = web(base, null, c -> stopAfterIdle);
+        sh(s, chat2, "echo s > s.txt");
+        assertEquals(List.of("stopped jllm-web-" + chat2), s.sweep(System.currentTimeMillis() + 2 * 60_000));
+        assertEquals("false", JSON.readTree(docker("inspect", "jllm-web-" + chat2)).get(0).path("State")
+                .path("Running").asText());
+        assertEquals("s", sh(s, chat2, "cat s.txt").strip());
+    }
+
+    @Test
+    void droppingAUserRemovesTheirContainersVolumeBackupsAndImages() throws Exception {
+        String user = id(), chat = id();
+        config = config.withDockerScope("user");
+        created.add("jllm-web-user-" + user);
+        createdVolumes.add("jllm-" + user);
+        createdImages.add("jllm-backup/web-user-" + user.toLowerCase());
+        Path base = Files.createDirectories(tmp.resolve("web"));
+        RemoteExecSandboxExecutor box = web(base, c -> user, null);
+        sh(box, chat, "echo mine > m.txt");
+        assertTrue(box.backup(chat).startsWith("Backed up"));
+        assertTrue(Files.isRegularFile(base.resolve(".sandbox/" + user + "/workspace-backup.zip")));
+        List<String> removed = box.dropUser(user);
+        assertTrue(removed.contains("jllm-web-user-" + user), removed.toString());
+        assertNull(docker("inspect", "jllm-web-user-" + user));
+        assertNull(docker("volume", "inspect", "jllm-" + user));
+        assertNull(docker("image", "inspect", "jllm-backup/web-user-" + user.toLowerCase()));
+        assertFalse(Files.exists(base.resolve(".sandbox/" + user + "/workspace-backup.zip")));
+    }
+
 
     private boolean inspectMissing(String name) throws IOException, InterruptedException {
         return wslDocker.run(List.of("docker", "inspect", name), Duration.ofSeconds(60)).exitCode() != 0;

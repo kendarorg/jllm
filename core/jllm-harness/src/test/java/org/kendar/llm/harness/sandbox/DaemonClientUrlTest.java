@@ -38,7 +38,7 @@ class DaemonClientUrlTest {
     void missingTruststoreFailsFast() {
         var d = HarnessConfig.defaults().sandbox().docker();
         var bad = new HarnessConfig.Docker(d.binary(), d.image(), d.memory(), d.cpus(), d.pidsLimit(), d.user(),
-                d.network(), "daemon", true, "", false, "no-such-store.p12", "");
+                d.network(), true, "", false, "no-such-store.p12", "", d.profile(), d.scope(), d.cleanup());
         assertThrows(SandboxUnavailableException.class, () -> new DaemonClient(bad, "https://example.org", 443, "t"));
     }
 }

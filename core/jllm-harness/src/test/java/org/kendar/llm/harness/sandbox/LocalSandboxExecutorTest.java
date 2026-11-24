@@ -14,18 +14,18 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.kendar.llm.harness.HarnessTestSupport.config;
 import static org.kendar.llm.harness.HarnessTestSupport.json;
 
-class LocalDirSandboxExecutorTest {
+class LocalSandboxExecutorTest {
 
     private static final boolean WINDOWS = System.getProperty("os.name", "").toLowerCase().contains("win");
 
     @TempDir
     Path base;
 
-    LocalDirSandboxExecutor sandbox;
+    LocalSandboxExecutor sandbox;
 
     @BeforeEach
     void setUp() {
-        sandbox = new LocalDirSandboxExecutor(config(base));
+        sandbox = LocalSandboxExecutor.of(config(base));
     }
 
     private static String sleepCommand(int seconds) {

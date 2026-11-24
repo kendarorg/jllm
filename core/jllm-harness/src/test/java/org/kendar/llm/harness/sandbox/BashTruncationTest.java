@@ -20,7 +20,7 @@ class BashTruncationTest {
 
     @Test
     void hugeOutputKeepsTailWritesCappedLogAndReportsExitCode() throws Exception {
-        String full = run(new LocalDirSandboxExecutor(config(base)));
+        String full = run(LocalSandboxExecutor.of(config(base)));
         assertTrue(full.startsWith("line-000001 "));
         assertFalse(full.contains("line-100000"));
         assertTrue(full.endsWith("[log truncated at " + TailCapture.DEFAULT_LOG_LIMIT + " bytes]\n"));
@@ -30,7 +30,7 @@ class BashTruncationTest {
 
     @Test
     void hugeOutputWritesFullLogWhenUncapped() throws Exception {
-        LocalDirSandboxExecutor sandbox = new LocalDirSandboxExecutor(config(base));
+        LocalSandboxExecutor sandbox = LocalSandboxExecutor.of(config(base));
         sandbox.outputLogLimit(0);
         String full = run(sandbox);
         assertTrue(full.contains("line-000001 "));
@@ -42,7 +42,7 @@ class BashTruncationTest {
     private String lastOut;
 
     /** Runs a command printing 100000 lines through the bash tool; returns the content of the spill log. */
-    private String run(LocalDirSandboxExecutor sandbox) throws Exception {
+    private String run(LocalSandboxExecutor sandbox) throws Exception {
         Path gen = base.resolve("Gen.java");
         Files.writeString(gen, "public class Gen { public static void main(String[] a) {\n"
                 + "for (int i = 1; i <= 100000; i++) System.out.println(String.format(\"line-%06d \", i) + \"x\".repeat(40));\n"
@@ -69,7 +69,7 @@ class BashTruncationTest {
 
     @Test
     void smallOutputIsUntouched() {
-        LocalDirSandboxExecutor sandbox = new LocalDirSandboxExecutor(config(base));
+        LocalSandboxExecutor sandbox = LocalSandboxExecutor.of(config(base));
         ExecutionResult r = sandbox.execute("c1", "echo hi", Duration.ofSeconds(10));
         assertNull(r.logFile());
         assertEquals(0, r.omittedLines());

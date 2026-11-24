@@ -28,7 +28,7 @@ Hard per-task cost cap in the adapter. Same turn/time limits as published baseli
    - `--json-result FILE` (also on failure): `{chatId, outcome, turns, durationMs, usage{input,output,cacheRead,cacheCreation}, costUsd, toolCalls[{name,input,isError}], error}`.
    - `--timeout SECONDS`: `harness.cancel`, outcome `cancelled`, exit 4.
    - Tests in `MainTest`/`CliArgsTest` (fake model, no network): outcome-to-code, result shape, timeout.
-2. Sandbox for in-container use: inspect `LocalShell`, `CwdSandboxExecutor`, `LocalDirSandboxExecutor`, `ScratchJailBackend`
+2. Sandbox for in-container use: inspect `LocalShell`, `CwdLayout`, `LocalSandboxExecutor`, `ScratchJailBackend`
    (core/jllm-harness `.../harness/sandbox/`) for access outside `--workdir`. If jailed, add `--sandbox none`, only with `--mode auto`
    (decided: new flag, `local` keeps its jail). Done when a task writing under `/tmp` and `/app` works in a plain container.
 3. Packaging: shaded jar plus pinned JRE 21 URL per OS/arch; `install.sh` installs JRE if `java -version` < 21, copies jar to `/opt/jllm/`.

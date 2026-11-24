@@ -8,21 +8,20 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 /**
- * Command line sandbox: the work dir is the real project directory (every chat), scratch directories live in
- * {@code <cwd>/.jllm/scratchpad}; when the project directory is not writable they fall back to the configured sandbox base dir
- * (the system temp dir by default), still under the chat id. No isolation: commands run as this process's user.
+ * Command line layout: the work dir is the real project directory (every chat), scratch directories live in
+ * {@code <cwd>/.jllm/scratchpad}; when the project directory is not writable they fall back to the configured sandbox
+ * base dir (the system temp dir by default), still under the chat id.
  */
-public class CwdSandboxExecutor extends LocalDirSandboxExecutor {
+public class CwdLayout implements Layout {
 
     private final Path cwd;
     private final Path scratchRoot;
 
     static final String SCRATCH_DIR = ".jllm/scratchpad";
 
-    public CwdSandboxExecutor(HarnessConfig config, Path cwd) {
-        super(config);
+    public CwdLayout(HarnessConfig config, Path cwd) {
         this.cwd = cwd.toAbsolutePath().normalize();
-        this.scratchRoot = projectScratch(this.cwd, super.location());
+        this.scratchRoot = projectScratch(this.cwd, Path.of(config.sandbox().baseDir()).toAbsolutePath().normalize());
     }
 
     /** {@code <cwd>/.jllm/scratchpad} when it can be created and written, else the fallback root. */
@@ -67,7 +66,7 @@ public class CwdSandboxExecutor extends LocalDirSandboxExecutor {
 
     @Override
     public Path scratchDir(String chatId, String agentId) {
-        Path dir = resolveJailed(chatScratch(chatId).toString(), agentId);
+        Path dir = Layout.resolveJailed(chatScratch(chatId).toString(), agentId);
         try {
             Files.createDirectories(dir);
         } catch (IOException e) {
@@ -87,7 +86,7 @@ public class CwdSandboxExecutor extends LocalDirSandboxExecutor {
     }
 
     private Path chatScratch(String chatId) {
-        return resolveJailed(scratchRoot.toString(), chatId);
+        return Layout.resolveJailed(scratchRoot.toString(), chatId);
     }
 
     /** Deletes the scratch directories of the chat; the project directory is never touched. */

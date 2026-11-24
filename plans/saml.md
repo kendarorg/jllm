@@ -1,5 +1,7 @@
 # SAML 2.0 sign-in
 
+NO RETROCOMPATIBILITY
+
 ## Goal
 
 Let a SAML-only IdP sign users in directly, producing the same `jllm_session` and the same `User` linking as OIDC,

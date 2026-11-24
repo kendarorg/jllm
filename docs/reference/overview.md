@@ -128,7 +128,7 @@ MCP servers and REST APIs need no code, only configuration:
 - **Ports** for your infrastructure: `ChatSessionStore`, `SubAgentRunLog`, `ToolApprovalPolicy`, `HarnessMetrics`,
   `SandboxExecutor`. The defaults are in memory.
 - **Isolation**: the default sandbox has none. For untrusted input set `sandbox.backend` to `docker` (CLI
-  `--sandbox docker`, optionally `--docker-mode daemon`) or use your own `SandboxExecutor`.
+  `--sandbox docker`: a long-running container, optionally `--sandbox-profile hardened` and `--sandbox-scope user`) or use your own `SandboxExecutor`.
 
 Details: [harness README](../../core/jllm-harness/README.md), [EXTENDING](../guides/extending.md) (custom tools, hooks, policies,
 providers, stores), [MCP and REST](../guides/mcp.md), [TOOLS](../guides/tools.md).

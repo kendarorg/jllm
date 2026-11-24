@@ -1,4 +1,4 @@
-import {computed} from 'vue';
+import {computed} from '../vendor/vue.esm-browser.prod.js';
 import {newStep, partOf, preceding, setNum, setOpt, slotsFor, STEP_TYPES, TYPE_LABEL, uniqueId} from '../flowModel.js';
 import {isWarning} from '../flowCheck.js';
 import KeyValueTable from './KeyValueTable.js';

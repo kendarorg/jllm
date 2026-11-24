@@ -96,7 +96,7 @@ flowchart TD
 ```
 
 `glob` and `grep` walk the working directory. In plan mode `bash` runs with the scratch directory as its current
-directory; only `DockerSandboxExecutor` mounts the working directory read-only.
+directory; the local runner cannot enforce it (plan mode is advisory for `bash` there), and the container runner's `bash` is a convention too; the file tools refuse writes outside the scratch directory in both.
 
 ## 3. Registry and ordering
 

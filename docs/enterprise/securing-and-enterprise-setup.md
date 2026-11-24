@@ -173,12 +173,13 @@ ask separately. To remove web access, add `deny` rules or leave the tools out of
 
 ```properties
 jllm.sandbox=docker
-jllm.docker-mode=daemon
 ```
 
 | Setting | Note |
 |---|---|
-| `sandbox.docker.network` | `none` by default for `oneshot`; daemon mode ignores it |
+| `sandbox.docker.profile` | `standard` (docker's default network) or `hardened` (no network, limits per user and chat; for temporary users) |
+| `sandbox.docker.network` | `hardened` only: `none` (default) or `default`; `standard` ignores it |
+| `sandbox.docker.scope` | `chat` (default) or `user`; `user` shares one container across a user's chats, so untrusted chats use `chat` |
 | remote daemon | `jllm.docker-remote=true`, `jllm.docker-remote-host`. The daemon protocol is plain HTTP by default |
 | `sandbox.docker.allowInsecure=false` | refuses plain http to a non-loopback remote host (default `true`: WARN only). Set it on shared setups |
 | `remoteHost: "https://..."` | TLS to a TLS-terminating proxy in front of the daemon; `sandbox.docker.trustStore` / `trustStorePassword` for a private CA |
@@ -255,7 +256,6 @@ jllm.web.use-real-password=true
 jllm.web.enforce-password-change-on-loopback=true
 jllm.auth.mode=oidc                       # plus jllm.auth.oidc.* with an env: secret
 jllm.sandbox=docker
-jllm.docker-mode=daemon
 jllm.store=sql
 jllm.sql.url=jdbc:sqlite:/var/lib/jllm/jllm.db
 jllm.max-turns=40

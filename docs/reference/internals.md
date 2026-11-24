@@ -59,7 +59,7 @@ disabled by `/tools`, are never seen by sub-agents, and never clash with registr
 flowchart TD
     A["settings.applyTo(config)"] --> B{"maxParallel (default 1)"}
     B -->|yes| B1["main client = LimitedModelClient(client, 1)"]
-    B --> C["sandbox = given or LocalDirSandboxExecutor"]
+    B --> C["sandbox = given or LocalSandboxExecutor.of(config)"]
     B1 --> C
     C --> D["tools = Files + Shell + Web (unless withoutStandardTools)<br/>+ builder/plugin tools + skill (if any skill)"]
     D --> E["HarnessToolRegistry: reject duplicates, sort, policy.registered(each)"]

@@ -24,7 +24,9 @@ final class SettingsOverrides {
         if (CliArgs.flag(a, "small-model")) b.smallModel(true);
         if (a.containsKey("sandbox")) b.sandboxBackend(a.get("sandbox"));
         if (a.containsKey("docker-image")) b.dockerImage(a.get("docker-image"));
-        if (a.containsKey("docker-mode")) b.dockerMode(a.get("docker-mode"));
+        // container scope of this session: chat (default) or user; the profile: standard or hardened
+        if (a.containsKey("sandbox-scope")) b.dockerScope(a.get("sandbox-scope"));
+        if (a.containsKey("sandbox-profile")) b.dockerProfile(a.get("sandbox-profile"));
         // what the file tools do with a link that leaves the project: none, read (default) or readwrite
         if (a.containsKey("external-links")) {
             b.externalLinks(ExternalLinks.parse(a.get("external-links"), ExternalLinks.DEFAULT));

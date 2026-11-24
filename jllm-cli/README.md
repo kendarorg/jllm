@@ -22,7 +22,7 @@ Main [--provider anthropic|openai|openaiGpt62|gemini|grok|qwen|llamacpp|ollama] 
      [--mode default|plan|edit|auto] [--workdir DIR] [--prompt TEXT] [--settings FILE] [--system-prompt TEXT] [--system-prompt-file FILE] [--system-prompt-replace FILE]
      [--max-turns N] [--context-tokens TOKENS] [--max-tokens TOKENS] [--resume prompt|no|CHAT_ID] [--plugin-dir DIR]
      [--context-strategy compaction|mnemonic|scope] [--search-api-key BRAVE_KEY] [--small-model]
-     [--sandbox local|docker] [--docker-image IMAGE] [--docker-mode oneshot|daemon]
+     [--sandbox local|docker] [--docker-image IMAGE] [--sandbox-scope chat|user] [--sandbox-profile standard|hardened]
      [--docker-remote] [--docker-remote-host ADDRESS]
      [--external-links none|read|readwrite] [--pricing.input-per-million=USD] [--pricing.output-per-million=USD] [--pricing.cache-read-per-million=USD] [--pricing.cache-write-per-million=USD]
      [--sandbox-clean] [--sandbox-clean-all]
@@ -50,13 +50,14 @@ Main [--provider anthropic|openai|openaiGpt62|gemini|grok|qwen|llamacpp|ollama] 
 | `--resume` | `prompt` | `prompt` asks to continue the newest saved chat, `no` starts a new one, anything else is a chat id or prefix; `--prompt` and piped input never ask |
 | `--plugin-dir` | `./plugins` if it exists | directory of plugin jars (see Plugins) |
 | `--pricing.input-per-million`, `output-per-million`, `cache-read-per-million`, `cache-write-per-million` | 0 | USD per million tokens, for the cost estimate; same keys as `jllm.pricing.*` of the web app |
-| `--sandbox` | `local` | `local` (no isolation) or `docker`: `bash` runs in a container with the project directory mounted ([SANDBOX](../docs/guides/sandbox.md)); wins over `sandbox.backend` |
+| `--sandbox` | `local` | `local` (no isolation, for testing and trusted single-user use only) or `docker`: `bash` runs in a container with the project directory mounted ([SANDBOX](../docs/guides/sandbox.md)); wins over `sandbox.backend` |
 | `--docker-image` | `python:3.12-slim` | image of the docker sandbox; wins over `sandbox.docker.image` |
-| `--docker-mode` | `oneshot` | `oneshot` (a container per command) or `daemon` (one long-running container for `bash` and the file tools; kept between runs); wins over `sandbox.docker.mode` |
+| `--sandbox-scope` | `chat` | with `docker`: `chat` (one container per session, removed when the session ends) or `user` (one container for this user and project path, kept between runs and reused if running); fixed for the session; wins over `sandbox.docker.scope` |
+| `--sandbox-profile` | `standard` | `standard` or `hardened` (no network by default, limits for temporary users) container profile; wins over `sandbox.docker.profile` |
 | `--docker-remote` | off | bare, or `=false`; the docker daemon is on another machine: the project is uploaded to the container and backed up on exit and on `/sandbox backup` ([SANDBOX](../docs/guides/sandbox.md#remote-docker)); wins over `sandbox.docker.remote` |
 | `--docker-remote-host` | from `DOCKER_HOST` | address where the remote host's published ports are reached |
 | `--external-links` | `read` | `none`, `read` or `readwrite`: what the file tools do with a symlink or junction in the project whose target is outside it. `read` follows it for read tools and refuses writes through it, `readwrite` follows both (the approval prompt shows the resolved target), `none` refuses all; wins over `files.externalLinks`. The web app always uses `none` |
-| `--sandbox-clean` | | no value; removes the daemon-mode container of the startup directory, prints what was removed, exits. Project files stay |
+| `--sandbox-clean` | | no value; removes the sandbox container(s) of the startup directory, prints what was removed, exits. Project files stay |
 | `--sandbox-clean-all` | | no value; removes every CLI sandbox container, then exits |
 | `-h`, `--help` | | print usage |
 
@@ -138,8 +139,8 @@ included.
 | `/back` | one level up in a menu (also Esc or `b`) |
 | `/cost` | tokens (input, output, cache read, cache write) and estimated cost |
 | `/where` | working and scratch directory |
-| `/sandbox clean|backup` | docker daemon mode: remove the sandbox container (project files stay) or copy a remote container back |
-| `/status` | context strategy, estimated context size against the window, usage, chat count |
+| `/sandbox clean|backup` | remove the sandbox container (project files stay) or copy the container workspace back |
+| `/status` | context strategy, estimated context size against the window, usage, chat count, sandbox (runner, profile, scope, container, work dir, whether `run_js` uses the container storage) |
 | `/chats` `/resume <id\|prefix>` `/title <text>` | list, switch, rename chats |
 | `/chats delete <id>` `/chats clean [days]` | delete one chat; list chats older than `days` (default 30), `/chats clean confirm` deletes them |
 | `/export [md\|html] [file]` | write the chat as a transcript into the scratch directory |
@@ -163,7 +164,7 @@ by default (`execution.maxParallel`), which suits one local GPU. `--small-model`
 
 ## Wiring
 
-`Main` builds the harness with `CwdSandboxExecutor` (rooted at the project dir), `FileChatSessionStore`,
+`Main` builds the harness with a `CwdLayout` (rooted at the project dir) and the runner chosen by `SandboxFactory`, `FileChatSessionStore`,
 `FileHistorySubAgentRunLog` and `FileMnemonicStore`, then subscribes to the chat's events. Precedence for the same
 setting: flag, then settings file, then default. See [USAGE](../docs/reference/usage.md) for the settings file and the event
 contract.

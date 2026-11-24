@@ -12,7 +12,8 @@ import org.kendar.llm.harness.HarnessConfig;
 import org.kendar.llm.harness.llm.ModelClient;
 import org.kendar.llm.harness.llm.ModelRequest;
 import org.kendar.llm.harness.llm.ModelResponse;
-import org.kendar.llm.harness.sandbox.ChatDirSandboxExecutor;
+import org.kendar.llm.harness.sandbox.ChatDirLayout;
+import org.kendar.llm.harness.sandbox.LocalSandboxExecutor;
 import org.kendar.llm.harness.session.InMemoryChatSessionStore;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
@@ -59,7 +60,7 @@ class FilesControllerJailTest {
         };
         harness = new AgentHarnessBuilder()
                 .modelClient(unused)
-                .sandbox(new ChatDirSandboxExecutor(HarnessConfig.defaults(), dir.resolve("chats")))
+                .sandbox(new LocalSandboxExecutor(new ChatDirLayout(dir.resolve("chats"))))
                 .sessionStore(new InMemoryChatSessionStore())
                 .objectMapper(mapper)
                 .build();

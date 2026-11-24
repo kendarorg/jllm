@@ -113,10 +113,10 @@ each in its own work dir.
   mean one container for everything; it is keyed by user plus project path. `chat` scope (default) is one container per
   session. A `user` container survives between runs and is reused if running.
 - The scope for the current session is chosen with a command line option (overrides the config, e.g.
-  `--sandbox-scope chat|user`). The existing `/sandbox` slash command (today `clean` and `backup`, in `SlashCommands`) gets a read-only `status`
-  form that shows the approach in effect: runner, scope,
-  container key/name, work dir, and whether `run_js` uses the remote storage. The scope cannot be changed mid-session;
-  the slash command is read-only.
+  `--sandbox-scope chat|user`). No new slash command: the existing `/status` (context usage, cost, chat count, in
+  `SlashCommands.status`) also returns the sandbox status: runner, profile, scope, container key/name, work dir, and
+  whether `run_js` uses the remote storage. `/sandbox` keeps only its actions (`clean`, `backup`). The scope cannot be
+  changed mid-session.
 
 ### Backup and retention
 
@@ -177,7 +177,7 @@ Decided: the local runner stays unisolated and is meant for testing and trusted 
    the new `Layout`; allow, not require, the remote executor as its storage.
 8. **Remote scope (chat or user)**: `sandbox.remote.scope` and the `ContainerRegistry`, resolved in `SandboxFactory`.
    Web: allowed storages per user, per-user docker host override, per-role clean-up policy, backup records, tarball
-   download, admin-only scope change with warning. CLI: `--sandbox-scope` option and read-only `/sandbox` slash command.
+   download, admin-only scope change with warning. CLI: `--sandbox-scope` option; sandbox status added to the existing `/status`.
 9. **Hardened profile**: per user/per chat configurable limits on `RemoteExecSandboxExecutor`, for temporary users.
 
 ## Constraints
@@ -188,6 +188,30 @@ Decided: the local runner stays unisolated and is meant for testing and trusted 
 
 ## Status
 
-Analysis and proposal agreed (including `DockerSandboxExecutor` removal, `run_js` in the layer model, remote scope per
-chat or user, hardened profile, backup and retention). Nothing implemented. To be planned in detail (scope, order,
-tests) in a later session.
+Implemented (core, CLI, web wiring), see `docs/guides/sandbox.md`:
+
+- `Layout` (`DirLayout`, `CwdLayout`, `ChatDirLayout`) split from the runners; `LocalSandboxExecutor` and
+  `RemoteExecSandboxExecutor`; `DockerSandboxExecutor` and `docker.mode`/`oneshot`/`--docker-mode` removed,
+  `sandbox.backend=docker` means the daemon runner.
+- Interface narrowed to `Layout`, `Exec`, `SandboxFiles`, `Lifecycle`.
+- `SandboxFactory.create(settings, config, layout, kind)` used by CLI and web.
+- `RemoteExecSandboxExecutor` broken up: `ContainerRegistry` (lifecycle, idle sweep by clean-up policy), `WorkspaceBackups`,
+  `BackupRecordStore` (zip plus `docker commit` image, record per owner, retention expiry, user-dropped clean-up),
+  `DaemonClient`.
+- Profiles `standard` and `hardened` (`sandbox.docker.profile`; hardened without network through an exec tunnel, because
+  docker cannot publish a port on `--network none`), per user/per chat overrides through `SandboxPolicy`.
+- Scope `chat` | `user` (`sandbox.docker.scope`, CLI `--sandbox-scope`, `--sandbox-profile`), daemon header `X-Jllm-Chat`,
+  named volume `jllm-<userId>`, `/workspace/<chatId>` work dir; CLI chat scope = container per session.
+- `/status` shows the sandbox; local runner documented as testing-only with advisory plan mode; `run_js` described as
+  always present beside the runner.
+- Web wiring: factory call, `userOf`, `SandboxPolicy` seam, orphan sweep.
+
+Deviation: the scope key is `sandbox.docker.scope`, not `sandbox.remote.scope` (`sandbox.docker.remote` already means a
+docker daemon on another machine).
+
+Not yet:
+
+- Per-user allowed storages, per-user docker host override and per-role clean-up policy persisted in the SQL store.
+- Admin UI (local-runner warning, scope and policy editing, scope-change warning), role selection combo box.
+- Tarball download endpoint and its role permission.
+- Scope-change migration of existing workspaces.

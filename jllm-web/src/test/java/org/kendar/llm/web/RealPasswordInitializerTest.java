@@ -38,7 +38,7 @@ class RealPasswordInitializerTest {
 
     private static JllmProperties props(Boolean useRealPassword) {
         return new JllmProperties(null, null, null, null, null, null, null, null, null, null, null, null, null, null,
-                null, null, null, null, null, null, null, null, null, new JllmProperties.Web(null, useRealPassword, null, null));
+                null, null, null, null, null, null, null, null, null, null, new JllmProperties.Web(null, useRealPassword, null, null));
     }
 
     private String logged() {

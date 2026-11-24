@@ -19,6 +19,11 @@ public class ProcessDockerCommandRunner implements DockerCommandRunner {
     static final int CONTROL_CAPTURE_LIMIT = 1024 * 1024;
 
     @Override
+    public Process start(List<String> argv) throws IOException {
+        return new ProcessBuilder(argv).redirectError(ProcessBuilder.Redirect.DISCARD).start();
+    }
+
+    @Override
     public Result run(List<String> argv, Duration timeout) throws IOException, InterruptedException {
         Result r = run(argv, timeout, CONTROL_CAPTURE_LIMIT, TailCapture.DEFAULT_LOG_LIMIT);
         if (r.log() != null) Files.deleteIfExists(r.log());
@@ -47,7 +52,7 @@ public class ProcessDockerCommandRunner implements DockerCommandRunner {
                 p.destroyForcibly();
                 p.waitFor(5, TimeUnit.SECONDS);
             }
-            Duration wait = finished ? LocalDirSandboxExecutor.READER_GRACE : Duration.ofSeconds(5);
+            Duration wait = finished ? LocalSandboxExecutor.READER_GRACE : Duration.ofSeconds(5);
             out.await(outReader, stdout, wait);
             err.await(errReader, stderr, wait);
         } catch (InterruptedException e) {

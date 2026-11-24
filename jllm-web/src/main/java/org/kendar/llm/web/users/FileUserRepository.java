@@ -138,6 +138,18 @@ public final class FileUserRepository implements UserRepository {
     }
 
     @Override
+    public User setSettings(String id, String json) {
+        String checked = UserRepository.checkSettings(json);
+        return update(id, n -> {
+            try {
+                n.set("settings", mapper.readTree(checked));
+            } catch (java.io.IOException e) {
+                throw new IllegalArgumentException("Settings are not valid JSON");
+            }
+        });
+    }
+
+    @Override
     public User setName(String id, String name) {
         return update(id, n -> n.put("name", name == null || name.isBlank() ? id : name.strip()));
     }
@@ -218,6 +230,7 @@ public final class FileUserRepository implements UserRepository {
         return new User(fileId, n.path("name").asText(fileId), n.path("role").asText("none"), creds, password,
                 strings(n.path("disabledTools")), strings(n.path("disabledSkills")),
                 n.path("externalId").isTextual() ? n.path("externalId").asText() : null,
-                n.path("email").isTextual() ? n.path("email").asText() : null);
+                n.path("email").isTextual() ? n.path("email").asText() : null,
+                n.path("settings").isObject() ? n.path("settings").toString() : null);
     }
 }

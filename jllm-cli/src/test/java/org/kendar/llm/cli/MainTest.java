@@ -101,7 +101,7 @@ class MainTest {
                 "--system-prompt", "SYS-MARK-1"));
         s.await("project dir: ");
         s.await(project.getFileName().toString());
-        s.await("(no isolation");
+        s.await("no isolation");
         s.await("echo: hi there");
         String out = s.end();
 

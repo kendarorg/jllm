@@ -52,7 +52,7 @@ class SettingsLimitsTest {
     void commandLineOverridesKeepTheLimits() throws Exception {
         HarnessSettings s = load("{\"files\":{\"maxReadBytes\":2000},\"web\":{\"fetchMaxBytes\":3000},"
                 + "\"sandbox\":{\"outputLogMaxBytes\":4000}}")
-                .toBuilder().sandboxBackend("docker").dockerImage("img").dockerMode("daemon")
+                .toBuilder().sandboxBackend("docker").dockerImage("img").dockerScope("user")
                 .dockerRemote(true, "h").maxTokens(1000).contextStrategy("compaction")
                 .smallModel(true).chatRetentionLimit(3).build().withPlugin("x", true, null);
         assertEquals(2000, s.filesMaxReadBytes());

@@ -11,7 +11,8 @@ import org.kendar.llm.harness.plugin.MemoryPluginStorage;
 import org.kendar.llm.harness.plugin.PluginStorages;
 import org.kendar.llm.harness.plugin.ServiceRegistry;
 import org.kendar.llm.harness.plugin.WebRequest;
-import org.kendar.llm.harness.sandbox.ChatDirSandboxExecutor;
+import org.kendar.llm.harness.sandbox.ChatDirLayout;
+import org.kendar.llm.harness.sandbox.LocalSandboxExecutor;
 import org.kendar.llm.harness.session.InMemoryChatSessionStore;
 import org.kendar.llm.harness.settings.HarnessSettings;
 import org.kendar.llm.harness.settings.HarnessSettingsLoader;
@@ -57,7 +58,7 @@ class SettingsFileStartupTest {
         services.publish(PluginStorages.class, id -> mem);
         HarnessSettings settings = HarnessSettingsLoader.load(file);
         new AgentHarnessBuilder().modelClient(NO_MODEL)
-                .sandbox(new ChatDirSandboxExecutor(HarnessConfig.defaults(), dir.resolve("work")))
+                .sandbox(new LocalSandboxExecutor(new ChatDirLayout(dir.resolve("work"))))
                 .sessionStore(new InMemoryChatSessionStore()).services(services).settings(settings)
                 .discoverPlugins().build();
         WebPluginHost web = new WebPluginHost(services, id -> mem, settings.plugins());

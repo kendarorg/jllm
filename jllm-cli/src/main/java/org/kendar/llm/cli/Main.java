@@ -10,7 +10,7 @@ import org.kendar.llm.harness.agent.AgentEvent;
 import org.kendar.llm.harness.commands.SlashCommands;
 import org.kendar.llm.harness.context.mnemonic.FileMnemonicStore;
 import org.kendar.llm.harness.permission.PermissionMode;
-import org.kendar.llm.harness.sandbox.CwdSandboxExecutor;
+import org.kendar.llm.harness.sandbox.CwdLayout;
 import org.kendar.llm.harness.session.FileChatSessionStore;
 import org.kendar.llm.harness.session.FileHistorySubAgentRunLog;
 import org.kendar.llm.harness.session.HistoryRootLock;
@@ -143,15 +143,12 @@ public final class Main {
             cleanSandbox(config, projectDir, a.containsKey("sandbox-clean-all"));
             return;
         }
-        CwdSandboxExecutor cwdSandbox = new CwdSandboxExecutor(config, projectDir);
+        CwdLayout cwdSandbox = new CwdLayout(config, projectDir);
         HistoryRootLock historyLock = HistoryRootLock.acquire(cwdSandbox.historyRoot()); // held until the process ends
-        var dockerRunner = new org.kendar.llm.harness.sandbox.ProcessDockerCommandRunner();
-        org.kendar.llm.harness.sandbox.SandboxExecutor sandbox = !settings.dockerSandbox() ? cwdSandbox
-                : settings.dockerDaemon()
-                ? new org.kendar.llm.harness.sandbox.RemoteExecSandboxExecutor(config, dockerRunner, cwdSandbox,
-                org.kendar.llm.harness.sandbox.RemoteExecSandboxExecutor.Kind.CLI, projectDir)
+        org.kendar.llm.harness.sandbox.SandboxExecutor sandbox = new org.kendar.llm.harness.sandbox.SandboxFactory()
+                .runner(new org.kendar.llm.harness.sandbox.ProcessDockerCommandRunner())
                 .onWarning(w -> System.err.println("warning: " + w))
-                : new org.kendar.llm.harness.sandbox.DockerSandboxExecutor(config, dockerRunner, cwdSandbox);
+                .create(settings, config, cwdSandbox, org.kendar.llm.harness.sandbox.RemoteExecSandboxExecutor.Kind.CLI);
         ProviderChooser.ProviderChoice choice = ProviderChooser.choose(a, settings, mapper, config.maxTokens());
         AgentHarnessBuilder builder = new AgentHarnessBuilder();
         if (a.containsKey("plugin-dir")) builder.pluginDir(Path.of(a.get("plugin-dir")));
@@ -181,9 +178,9 @@ public final class Main {
         term = a.containsKey("prompt") ? null : terminal.apply(names, cwdSandbox.historyRoot().resolve("cli-history"));
         renderer = new Renderer(Main::say, Main::sayErr, term != null);
         say("project dir: " + harness.sandbox().location() + (settings.dockerSandbox()
-                ? " (shell commands run in docker image " + config.sandbox().docker().image()
-                + (settings.dockerDaemon() ? ", long-running container, project mounted at /workspace)" : ")")
-                : " (no isolation: shell commands run as you, plan mode cannot stop them writing here)"));
+                ? " (shell commands run in a container from docker image " + config.sandbox().docker().image()
+                + ", project mounted at /workspace; /status shows the sandbox)"
+                : " (local runner, for testing only: no isolation, shell commands run as you, plan mode cannot stop them writing here)"));
         say("scratch dir: " + cwdSandbox.scratchRoot());
         say("history dir: " + cwdSandbox.historyRoot());
         // shown, never stored: not part of any chat
@@ -536,7 +533,7 @@ public final class Main {
         }
     }
 
-    /** {@code --sandbox-clean[-all]}: removes the docker daemon-mode container(s), prints what went, and exits. */
+    /** {@code --sandbox-clean[-all]}: removes the sandbox container(s) of the project (or all), prints what went, and exits. */
     private static void cleanSandbox(HarnessConfig config, Path projectDir, boolean all) throws IOException {
         var runner = new org.kendar.llm.harness.sandbox.ProcessDockerCommandRunner();
         List<String> removed = all

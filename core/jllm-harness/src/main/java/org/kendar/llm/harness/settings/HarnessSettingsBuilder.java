@@ -12,7 +12,7 @@ import java.util.List;
 /**
  * Builds a {@link HarnessSettings}: one setter per component, unset ones stay at their defaults. Start from
  * {@link HarnessSettings#builder()} or {@link HarnessSettings#toBuilder()}. The command line flags that replace one
- * nested value ({@link #sandboxBackend}, {@link #dockerImage}, {@link #dockerMode}, {@link #dockerRemote},
+ * nested value ({@link #sandboxBackend}, {@link #dockerImage}, {@link #dockerScope}, {@link #dockerProfile}, {@link #dockerRemote},
  * {@link #maxTokens}, {@link #contextStrategy}) keep the rest of that section.
  */
 public final class HarnessSettingsBuilder {
@@ -119,28 +119,39 @@ public final class HarnessSettingsBuilder {
     public HarnessSettingsBuilder dockerImage(String image) {
         DockerSettings d = currentDocker();
         return docker(new DockerSettings(d.binary(), image, d.memory(), d.cpus(), d.pidsLimit(), d.user(),
-                d.network(), d.mode(), d.remote(), d.remoteHost(),
-                d.allowInsecure(), d.trustStore(), d.trustStorePassword()));
+                d.network(), d.remote(), d.remoteHost(), d.allowInsecure(), d.trustStore(), d.trustStorePassword(),
+                d.profile(), d.scope(), d.cleanup()));
     }
 
-    /** Replaces {@code sandbox.docker.mode}. */
-    public HarnessSettingsBuilder dockerMode(String mode) {
-        if (!"oneshot".equalsIgnoreCase(mode) && !"daemon".equalsIgnoreCase(mode)) {
-            throw new IllegalArgumentException("Unknown docker mode '" + mode + "' (oneshot or daemon)");
+    /** Replaces {@code sandbox.docker.scope}. @throws IllegalArgumentException unless {@code chat} or {@code user} */
+    public HarnessSettingsBuilder dockerScope(String scope) {
+        if (!"chat".equalsIgnoreCase(scope) && !"user".equalsIgnoreCase(scope)) {
+            throw new IllegalArgumentException("Unknown sandbox scope '" + scope + "' (chat or user)");
         }
         DockerSettings d = currentDocker();
         return docker(new DockerSettings(d.binary(), d.image(), d.memory(), d.cpus(), d.pidsLimit(), d.user(),
-                d.network(), mode.toLowerCase(), d.remote(), d.remoteHost(),
-                d.allowInsecure(), d.trustStore(), d.trustStorePassword()));
+                d.network(), d.remote(), d.remoteHost(), d.allowInsecure(), d.trustStore(), d.trustStorePassword(),
+                d.profile(), scope.toLowerCase(), d.cleanup()));
+    }
+
+    /** Replaces {@code sandbox.docker.profile}. @throws IllegalArgumentException unless {@code standard} or {@code hardened} */
+    public HarnessSettingsBuilder dockerProfile(String profile) {
+        if (!"standard".equalsIgnoreCase(profile) && !"hardened".equalsIgnoreCase(profile)) {
+            throw new IllegalArgumentException("Unknown sandbox profile '" + profile + "' (standard or hardened)");
+        }
+        DockerSettings d = currentDocker();
+        return docker(new DockerSettings(d.binary(), d.image(), d.memory(), d.cpus(), d.pidsLimit(), d.user(),
+                d.network(), d.remote(), d.remoteHost(), d.allowInsecure(), d.trustStore(), d.trustStorePassword(),
+                profile.toLowerCase(), d.scope(), d.cleanup()));
     }
 
     /** Replaces {@code sandbox.docker.remote} and {@code remoteHost}; a null argument keeps the current value. */
     public HarnessSettingsBuilder dockerRemote(Boolean remote, String remoteHost) {
         DockerSettings d = currentDocker();
         return docker(new DockerSettings(d.binary(), d.image(), d.memory(), d.cpus(), d.pidsLimit(), d.user(),
-                d.network(), d.mode(), remote != null ? remote : d.remote(),
+                d.network(), remote != null ? remote : d.remote(),
                 remoteHost != null ? remoteHost : d.remoteHost(),
-                d.allowInsecure(), d.trustStore(), d.trustStorePassword()));
+                d.allowInsecure(), d.trustStore(), d.trustStorePassword(), d.profile(), d.scope(), d.cleanup()));
     }
 
     /** Replaces {@code context.maxTokens}. */
@@ -181,7 +192,7 @@ public final class HarnessSettingsBuilder {
 
     private DockerSettings currentDocker() {
         DockerSettings d = currentSandbox().docker();
-        return d == null ? new DockerSettings(null, null, null, null, null, null, null, null, null, null, null, null, null) : d;
+        return d == null ? new DockerSettings(null, null, null, null, null, null, null, null, null, null, null, null, null, null, null) : d;
     }
 
     private ContextSettings currentContext() {

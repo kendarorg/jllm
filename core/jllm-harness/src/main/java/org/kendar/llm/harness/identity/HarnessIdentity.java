@@ -32,6 +32,11 @@ public interface HarnessIdentity {
 
     UserPolicyResolver policies();
 
+    /** The sandbox of a user id (that of their role); {@link RoleSandbox#NONE} when unknown. */
+    default Function<String, RoleSandbox> sandboxes() {
+        return id -> RoleSandbox.NONE;
+    }
+
     /** The principal of a user id; null when unknown. */
     Function<String, HarnessPrincipal> principals();
 

@@ -1,4 +1,4 @@
-import {onMounted, onUnmounted, ref} from 'vue';
+import {onMounted, onUnmounted, ref} from '../vendor/vue.esm-browser.prod.js';
 import {onRunChanged, refreshWaiting, wf} from '../workflows.js';
 import {toast} from '../store.js';
 import QuestionForm from './QuestionForm.js';

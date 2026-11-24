@@ -106,6 +106,21 @@ class SqlStoresTest {
     }
 
     @Test
+    void userSettingsAreFreeTextJson() {
+        var u = s.users();
+        saveRoles(s, "dev");
+        assertEquals("{}", u.create("amy", "Amy", "dev", null, null).settings());
+        User got = u.setSettings("amy", " { \"theme\" : \"dark\", \"n\": 2 } ");
+        assertEquals("{\"theme\":\"dark\",\"n\":2}", got.settings());
+        assertEquals(got.settings(), u.find("amy").orElseThrow().settings());
+        assertThrows(IllegalArgumentException.class, () -> u.setSettings("amy", "[1]"));
+        assertThrows(IllegalArgumentException.class, () -> u.setSettings("amy", "{bad"));
+        assertEquals("{\"theme\":\"dark\",\"n\":2}", u.find("amy").orElseThrow().settings()); // a rejected value changes nothing
+        assertEquals("{}", u.setSettings("amy", null).settings());
+        assertThrows(NoSuchElementException.class, () -> u.setSettings("nobody", "{}"));
+    }
+
+    @Test
     void externalUsers() {
         var u = s.users();
         saveRoles(s, "dev");
@@ -120,12 +135,27 @@ class SqlStoresTest {
     }
 
     @Test
+    void roleSandboxIsStoredAndDefaultsToNone() {
+        var r = s.roles();
+        r.save(new Role("box", List.of("*"), false, "ask", Map.of(),
+                org.kendar.llm.harness.identity.RoleSandbox.of("docker-isolated", "user", "none")));
+        var sb = r.find("box").orElseThrow().sandbox();
+        assertEquals(org.kendar.llm.harness.sandbox.SandboxKind.DOCKER_ISOLATED, sb.kind());
+        assertEquals("hardened", sb.profile());
+        assertEquals("user", sb.scope());
+        assertEquals("none", sb.network());
+        r.save(new Role("plain", List.of("*"), false, "ask", Map.of(), null));
+        assertEquals(org.kendar.llm.harness.sandbox.SandboxKind.NONE, r.find("plain").orElseThrow().sandbox().kind());
+        assertEquals(org.kendar.llm.harness.sandbox.SandboxKind.NONE, r.find("admin").orElseThrow().sandbox().kind());
+    }
+
+    @Test
     void roles() {
         var r = s.roles();
         Map<String, ToolPermission> perms = new LinkedHashMap<>();
         perms.put("send_mail", ToolPermission.ALLOW);
         perms.put("bash", ToolPermission.DENY);
-        r.save(new Role("dev", List.of("read_file", "mcp__docs__*"), true, "off", perms));
+        r.save(new Role("dev", List.of("read_file", "mcp__docs__*"), true, "off", perms, org.kendar.llm.harness.identity.RoleSandbox.NONE));
         Role got = r.find("dev").orElseThrow();
         assertEquals(List.of("read_file", "mcp__docs__*"), got.tools());
         assertTrue(got.readOnly());
@@ -133,11 +163,11 @@ class SqlStoresTest {
         assertEquals(perms, got.toolPermissions());
         assertEquals(List.of("send_mail", "bash"), List.copyOf(got.toolPermissions().keySet()));
 
-        r.save(new Role("dev", List.of("*"), false, "ask", Map.of()));
+        r.save(new Role("dev", List.of("*"), false, "ask", Map.of(), org.kendar.llm.harness.identity.RoleSandbox.NONE));
         got = r.find("dev").orElseThrow();
         assertEquals(List.of("*"), got.tools());
         assertTrue(got.toolPermissions().isEmpty());
-        r.save(new Role("a", List.of(), false, "ask", Map.of()));
+        r.save(new Role("a", List.of(), false, "ask", Map.of(), org.kendar.llm.harness.identity.RoleSandbox.NONE));
         assertEquals(List.of("a", "admin", "dev"), r.all().stream().map(Role::name).toList());
         assertTrue(r.find("Bad Name").isEmpty());
         assertTrue(r.delete("dev"));
@@ -146,7 +176,7 @@ class SqlStoresTest {
     }
 
     private static void saveRoles(SqlStores st, String... names) {
-        for (String n : names) st.roles().save(new Role(n, List.of(), false, "ask", Map.of()));
+        for (String n : names) st.roles().save(new Role(n, List.of(), false, "ask", Map.of(), org.kendar.llm.harness.identity.RoleSandbox.NONE));
     }
 
     @Test

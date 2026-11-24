@@ -35,7 +35,7 @@ public class JllmWebApplication {
             + "[--base-url U] [--api-key K] [--workdir DIR] [--system-prompt TEXT] [--max-turns N] "
             + "[--context-tokens TOKENS] [--search-api-key BRAVE_KEY] [--settings FILE] "
             + "[--context-strategy compaction|mnemonic|scope] [--max-tokens TOKENS] [--small-model] "
-            + "[--sandbox local|docker] [--docker-image IMAGE] [--docker-mode oneshot|daemon] "
+            + "[--sandbox local|docker] [--docker-image IMAGE] [--docker-scope chat|user] [--docker-profile standard|hardened] "
             + "[--docker-remote] [--docker-remote-host ADDRESS]"
             + System.lineSeparator() + "Flags take --flag value or --flag=value. Spring's own flags (--server.port=9000) work too.";
 

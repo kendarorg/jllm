@@ -19,20 +19,22 @@ import java.util.Map;
  * @param toolPermissions tool name pattern ({@code *} = any run of characters) to {@code allow} (runs unattended,
  *                        no question ever), {@code ask} or {@code deny}; deny wins over ask over allow, then the
  *                        approval above applies
+ * @param sandbox         the sandbox of the role's users; null = none (no file tools, no shell)
  */
 public record Role(String name, List<String> tools, boolean readOnly, String approval,
-                   Map<String, ToolPermission> toolPermissions) {
+                   Map<String, ToolPermission> toolPermissions, RoleSandbox sandbox) {
 
-    /** The administrator role: every tool; only its approval and tool permissions can be changed (default: ask). */
-    public static final Role ADMIN = admin("ask", Map.of());
+    /** The administrator role: every tool; only its approval, tool permissions and sandbox can be changed (default: ask, no sandbox). */
+    public static final Role ADMIN = admin("ask", Map.of(), RoleSandbox.NONE);
 
-    public static Role admin(String approval, Map<String, ToolPermission> toolPermissions) {
-        return new Role(User.ADMIN_ROLE, List.of("*"), false, approval, toolPermissions);
+    public static Role admin(String approval, Map<String, ToolPermission> toolPermissions, RoleSandbox sandbox) {
+        return new Role(User.ADMIN_ROLE, List.of("*"), false, approval, toolPermissions, sandbox);
     }
 
     public Role {
         tools = tools == null ? List.of() : List.copyOf(tools);
         approval = approval == null ? "ask" : approval;
+        sandbox = sandbox == null ? RoleSandbox.NONE : sandbox;
         if (!"ask".equals(approval) && !"off".equals(approval)) {
             throw new IllegalArgumentException("'approval' of role " + name + " must be \"ask\" or \"off\"");
         }

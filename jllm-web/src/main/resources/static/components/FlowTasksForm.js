@@ -1,4 +1,4 @@
-import {computed, ref, watch} from 'vue';
+import {computed, ref, watch} from '../vendor/vue.esm-browser.prod.js';
 import {setOpt} from '../flowModel.js';
 import KeyValueTable from './KeyValueTable.js';
 

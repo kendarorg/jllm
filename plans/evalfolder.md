@@ -1,5 +1,7 @@
 # Plan: `eval/` folder (jllm-eval + jllm-harbor + jllm-swe)
 
+NO RETROCOMPATIBILITY
+
 ## Goal
 Group the evaluation tooling under `eval/`: the existing in-process suite plus Python runners for Terminal-Bench/Harbor and SWE-bench.
 CLI changes and benchmark flow: `plans/harborswe.md`.

@@ -86,12 +86,40 @@ class SampleUsersTest {
     }
 
     @Test
+    void userSettingsAreStoredAsAJsonObjectInTheUserFile(@TempDir Path dir) {
+        ObjectMapper mapper = new ObjectMapper();
+        UserRepository users = new FileUserRepository(dir, mapper, new FileRoleRepository(dir.resolve("permissions"), mapper));
+        users.create("amy", "Amy", "admin", null, null);
+        assertEquals("{}", users.find("amy").orElseThrow().settings());
+        assertEquals("{\"k\":{\"a\":1}}", users.setSettings("amy", "{\"k\": {\"a\": 1}}").settings());
+        assertEquals("{\"k\":{\"a\":1}}", users.find("amy").orElseThrow().settings());
+        assertThrows(IllegalArgumentException.class, () -> users.setSettings("amy", "\"text\""));
+        assertEquals("{}", users.setSettings("amy", "").settings());
+    }
+
+    @Test
+    void roleSandboxIsStoredInTheRoleFileAndDefaultsToNone(@TempDir Path dir) {
+        Permissions perms = new Permissions(new FileRoleRepository(dir, new ObjectMapper()));
+        perms.save(new org.kendar.llm.harness.identity.Role("ops", List.of("*"), false, "ask", Map.of(),
+                org.kendar.llm.harness.identity.RoleSandbox.of("docker-isolated", null, "default")));
+        var sb = perms.role("ops").orElseThrow().sandbox();
+        assertEquals(org.kendar.llm.harness.sandbox.SandboxKind.DOCKER_ISOLATED, sb.kind());
+        assertEquals("hardened", sb.profile());
+        assertNull(sb.scope());
+        assertEquals("default", sb.network());
+        perms.save(new org.kendar.llm.harness.identity.Role("plain", List.of("*"), false, "ask", Map.of(), null));
+        assertEquals(org.kendar.llm.harness.sandbox.SandboxKind.NONE, perms.role("plain").orElseThrow().sandbox().kind());
+        assertEquals(org.kendar.llm.harness.sandbox.SandboxKind.NONE, perms.role("admin").orElseThrow().sandbox().kind());
+    }
+
+    @Test
     void toolPermissionsAreStoredAndDecideDenyThenAskThenAllow(@TempDir Path dir) throws Exception {
         Permissions perms = new Permissions(new FileRoleRepository(dir, new ObjectMapper()));
         perms.save(new org.kendar.llm.harness.identity.Role("ops", List.of("*"), false, "ask", Map.of(
                 "send_*", org.kendar.llm.harness.permission.ToolPermission.ALLOW,
                 "send_secret", org.kendar.llm.harness.permission.ToolPermission.DENY,
-                "bash", org.kendar.llm.harness.permission.ToolPermission.ASK)));
+                "bash", org.kendar.llm.harness.permission.ToolPermission.ASK),
+                org.kendar.llm.harness.identity.RoleSandbox.NONE));
         UserPolicy p = perms.forRole("ops").orElseThrow();
         assertEquals(org.kendar.llm.harness.permission.ToolPermission.ALLOW, p.permissionOf(tool("send_mail", ToolKind.OTHER)));
         assertEquals(org.kendar.llm.harness.permission.ToolPermission.DENY, p.permissionOf(tool("send_secret", ToolKind.OTHER)));

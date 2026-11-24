@@ -2,7 +2,8 @@
 CREATE TABLE roles (
     name      TEXT PRIMARY KEY,
     read_only INTEGER NOT NULL DEFAULT 0,
-    approval  TEXT NOT NULL DEFAULT 'ask'
+    approval  TEXT NOT NULL DEFAULT 'ask',
+    settings TEXT
 );
 CREATE TABLE role_tools (
     role    TEXT NOT NULL REFERENCES roles(name) ON DELETE CASCADE,
@@ -26,7 +27,8 @@ CREATE TABLE users (
     role          TEXT NOT NULL REFERENCES roles(name) ON DELETE RESTRICT,
     password_hash TEXT,
     external_id   TEXT,
-    email         TEXT
+    email         TEXT,
+    settings      TEXT
 );
 CREATE INDEX idx_users_external ON users(external_id);
 CREATE INDEX idx_users_email ON users(email);

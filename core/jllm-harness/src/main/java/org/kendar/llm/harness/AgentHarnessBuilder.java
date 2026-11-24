@@ -20,7 +20,7 @@ import org.kendar.llm.harness.plugin.PluginLoader;
 import org.kendar.llm.harness.plugin.ServiceRegistry;
 import org.kendar.llm.harness.safety.ContentScanner;
 import org.kendar.llm.harness.safety.ContentWarnings;
-import org.kendar.llm.harness.sandbox.LocalDirSandboxExecutor;
+import org.kendar.llm.harness.sandbox.LocalSandboxExecutor;
 import org.kendar.llm.harness.sandbox.SandboxExecutor;
 import org.kendar.llm.harness.session.ChatSessionService;
 import org.kendar.llm.harness.session.ChatSessionStore;
@@ -307,7 +307,7 @@ public final class AgentHarnessBuilder {
         return this;
     }
 
-    /** Default: {@link LocalDirSandboxExecutor}, which has no isolation. */
+    /** Default: {@link LocalSandboxExecutor}, which has no isolation. */
     public AgentHarnessBuilder sandbox(SandboxExecutor sandbox) {
         this.sandbox = sandbox;
         return this;
@@ -397,7 +397,7 @@ public final class AgentHarnessBuilder {
         HarnessConfig cfg = HarnessConfigMapper.apply(settings, config);
         ModelAssembler.Models models = ModelAssembler.assemble(settings, cfg, mapper, modelClient, activeProvider,
                 sessionProvider);
-        SandboxExecutor box = sandbox != null ? sandbox : new LocalDirSandboxExecutor(cfg);
+        SandboxExecutor box = sandbox != null ? sandbox : LocalSandboxExecutor.of(cfg);
         box.environmentWhitelist(settings.whitelistedEnvVars());
         box.outputLogLimit(settings.sandboxOutputLogMaxBytes());
         box.shell(settings.sandboxShell()); // before the bash tool reads its description

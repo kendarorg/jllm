@@ -310,13 +310,14 @@ class SlashCommandsTest {
         assertTrue(status.contains("running agents: none"), status);
         assertTrue(status.contains("context strategy: "), status);
         assertTrue(status.contains("chats: 1"), status);
+        assertTrue(status.contains("sandbox: "), status);
     }
 
     @Test
     void sandboxSubcommandsOnALocalSandbox() {
         assertEquals("usage: /sandbox clean | /sandbox backup", run("/sandbox"));
         assertEquals("usage: /sandbox clean | /sandbox backup", run("/sandbox wipe"));
-        assertEquals("This sandbox needs no backup (only remote docker does)", run("/sandbox backup"));
+        assertEquals("This sandbox needs no backup (only a container workspace does)", run("/sandbox backup"));
         assertEquals("This sandbox has no container to clean", run("/sandbox clean"));
     }
 

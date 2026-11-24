@@ -23,7 +23,7 @@ import org.kendar.llm.harness.llm.ModelResponse;
 import org.kendar.llm.harness.llm.Usage;
 import org.kendar.llm.harness.permission.ApprovalService;
 import org.kendar.llm.harness.permission.PermissionGate;
-import org.kendar.llm.harness.sandbox.LocalDirSandboxExecutor;
+import org.kendar.llm.harness.sandbox.LocalSandboxExecutor;
 import org.kendar.llm.harness.session.ChatSessionService;
 import org.kendar.llm.harness.session.InMemoryChatSessionStore;
 import org.kendar.llm.harness.session.InMemorySubAgentRunLog;
@@ -195,7 +195,7 @@ public final class HarnessTestSupport {
         public PermissionGate gate = new PermissionGate(t -> requiresApproval.getOrDefault(t.name(), false));
         public final List<HarnessTool> registered = Collections.synchronizedList(new ArrayList<>());
         public ApprovalService approvals;
-        public LocalDirSandboxExecutor sandbox;
+        public LocalSandboxExecutor sandbox;
         public ContextManager contextManager;
         /** The strategy the loop uses: compaction over {@link #contextManager}, or mnemonic per the config. */
         public ContextStrategy context;
@@ -245,7 +245,7 @@ public final class HarnessTestSupport {
 
         private void wire() {
             approvals = new ApprovalService(config.approvalTimeoutSeconds());
-            sandbox = new LocalDirSandboxExecutor(config);
+            sandbox = LocalSandboxExecutor.of(config);
             contextManager = new ContextManager(config, model, approvals, MAPPER, metrics);
             if (config.contextStrategy() == ContextStrategyKind.MNEMONIC) {
                 context = new MnemonicStrategy(config, MAPPER, metrics, mnemonicStore, runLog);

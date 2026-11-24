@@ -61,7 +61,7 @@ settings for what must never run.
 ## 6. Production ports
 
 Defaults are in memory. Replace what you need: `ChatSessionStore`, `SubAgentRunLog`, `StateStore`, `TokenStore`,
-`HarnessMetrics`, `SandboxExecutor`. See [EXTENDING](../guides/extending.md) and the
+`HarnessMetrics`, `SandboxExecutor` (build it with `SandboxFactory`: a `Layout` plus the local or the container runner). See [EXTENDING](../guides/extending.md) and the
 [harness README](../../core/jllm-harness/README.md#embedding).
 
 ## Next

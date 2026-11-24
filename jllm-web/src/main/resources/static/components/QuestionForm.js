@@ -1,4 +1,4 @@
-import {computed, ref, watch} from 'vue';
+import {computed, ref, watch} from '../vendor/vue.esm-browser.prod.js';
 
 /**
  * One open question of a run, shown by its kind: a text box, a radio list (single) or a checkbox list (multi).

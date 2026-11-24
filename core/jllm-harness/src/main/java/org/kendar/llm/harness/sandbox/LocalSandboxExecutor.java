@@ -4,32 +4,80 @@ import org.kendar.llm.harness.HarnessConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
 import java.io.InputStream;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
-/** Default executor: plain subprocess in {@code base-dir/{chatId}}. No isolation, network or resource limits. */
-public class LocalDirSandboxExecutor implements SandboxExecutor {
+/**
+ * The local runner: plain subprocesses on this machine in the directories of a {@link Layout}. No isolation, network
+ * or resource limits: commands run as this process's user. For testing and trusted single-user use only; use
+ * {@link RemoteExecSandboxExecutor} for anything real. Plan mode is advisory here: file tools are blocked from writing
+ * but a shell command can still write.
+ */
+public class LocalSandboxExecutor implements SandboxExecutor {
 
-    private static final Logger log = LoggerFactory.getLogger(LocalDirSandboxExecutor.class);
+    private static final Logger log = LoggerFactory.getLogger(LocalSandboxExecutor.class);
 
-    private final HarnessConfig config;
+    private final Layout layout;
     private volatile LocalShell shell = LocalShell.osDefault();
+    private final AtomicBoolean warned = new AtomicBoolean();
 
-    public LocalDirSandboxExecutor(HarnessConfig config) {
-        this.config = config;
-        log.warn("LocalDirSandboxExecutor has NO isolation: agent commands run as this process's user in {}. "
-                + "Use a SandboxExecutor such as DockerSandboxExecutor for untrusted input.", config.sandbox().baseDir());
+    public LocalSandboxExecutor(Layout layout) {
+        this.layout = layout;
     }
+
+    /** The runner over the default {@link DirLayout} of the configuration ({@code sandbox.baseDir}). */
+    public static LocalSandboxExecutor of(HarnessConfig config) {
+        return new LocalSandboxExecutor(DirLayout.of(config));
+    }
+
+    /** The layout this runner works in. */
+    public Layout layout() {
+        return layout;
+    }
+
+    // ── layout ────────────────────────────────────────────────────────────────
 
     @Override
     public Path location() {
-        return Path.of(config.sandbox().baseDir()).toAbsolutePath().normalize();
+        return layout.location();
+    }
+
+    @Override
+    public Path workDir(String chatId) {
+        return layout.workDir(chatId);
+    }
+
+    @Override
+    public Path scratchDir(String chatId, String agentId) {
+        return layout.scratchDir(chatId, agentId);
+    }
+
+    @Override
+    public boolean sharedWorkDir() {
+        return layout.sharedWorkDir();
+    }
+
+    @Override
+    public Path chatStorage(String chatId) {
+        return layout.chatStorage(chatId);
+    }
+
+    @Override
+    public void deleteWorkDir(String chatId) {
+        layout.deleteWorkDir(chatId);
+    }
+
+    // ── commands ──────────────────────────────────────────────────────────────
+
+    @Override
+    public String sandboxStatus(String chatId) {
+        return "runner: local (no isolation: commands run on this machine as this user; testing and trusted use only)"
+                + " | work dir: " + workDir(chatId) + " | run_js storage: host";
     }
 
     @Override
@@ -40,31 +88,6 @@ public class LocalDirSandboxExecutor implements SandboxExecutor {
     @Override
     public void shell(LocalShell shell) {
         if (shell != null) this.shell = shell;
-    }
-
-    @Override
-    public Path workDir(String chatId) {
-        Path dir = resolveJailed(config.sandbox().baseDir(), chatId);
-        Process p = null;
-        try {
-            Files.createDirectories(dir);
-        } catch (IOException e) {
-            throw new IllegalStateException("Cannot create work dir " + dir, e);
-        }
-        return dir;
-    }
-
-    /** Validates chatId and resolves {@code base/chatId}, guaranteeing it stays under base. */
-    static Path resolveJailed(String baseDir, String chatId) {
-        if (chatId == null || !chatId.matches("[A-Za-z0-9._-]{1,64}") || chatId.contains("..")) {
-            throw new IllegalArgumentException("Invalid chatId");
-        }
-        Path base = Path.of(baseDir).toAbsolutePath().normalize();
-        Path dir = base.resolve(chatId).normalize();
-        if (!dir.startsWith(base) || dir.equals(base)) {
-            throw new IllegalArgumentException("Invalid chatId");
-        }
-        return dir;
     }
 
     @Override
@@ -105,6 +128,11 @@ public class LocalDirSandboxExecutor implements SandboxExecutor {
     }
 
     private ExecutionResult run(Path dir, String command, Duration timeout) {
+        if (warned.compareAndSet(false, true)) {
+            log.warn("The local sandbox runner has NO isolation: agent commands run as this process's user "
+                    + "(work dirs under {}). Use RemoteExecSandboxExecutor (sandbox.backend=docker) for untrusted input.",
+                    layout.location());
+        }
         List<String> cmd = shell.argv(command);
         Process p = null;
         TailCapture capture = new TailCapture(CAPTURE_LIMIT, logLimit);

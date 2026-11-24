@@ -20,7 +20,10 @@ final class Schema {
 
     /** Creates the tables when missing; safe when several instances start together. */
     static void ensure(Database db) {
-        if (exists(db)) return;
+        if (exists(db)) {
+            upgrade(db);
+            return;
+        }
         db.locked(() -> {
             if (exists(db)) return null; // another instance created it while this one waited
             List<String> statements = statements(read(db.dialect()));
@@ -29,6 +32,31 @@ final class Schema {
             });
             return null;
         });
+    }
+
+    /**
+     * {@code roles.settings} and {@code users.settings}, the free-text JSON of a role (its sandbox, later settings) and
+     * of a user, added to a database created before them (null = no settings). The only change that has an upgrade
+     * path: a missing column must not stop the server.
+     */
+    private static void upgrade(Database db) {
+        for (String table : List.of("roles", "users")) {
+            if (columnExists(db, table, "settings")) continue;
+            db.locked(() -> {
+                if (columnExists(db, table, "settings")) return null;
+                db.run(tx -> tx.update("ALTER TABLE " + table + " ADD COLUMN settings TEXT"));
+                return null;
+            });
+        }
+    }
+
+    private static boolean columnExists(Database db, String table, String column) {
+        try (Connection c = db.dataSource().getConnection(); var st = c.createStatement()) {
+            st.executeQuery("SELECT " + column + " FROM " + table + " WHERE 1 = 0").close();
+            return true;
+        } catch (SQLException e) {
+            return false;
+        }
     }
 
     private static boolean exists(Database db) {

@@ -19,7 +19,7 @@ reload the page (with the server running from `target/classes`, or restart it).
 ## Configuration
 
 Standard Spring Boot properties, prefix `jllm.` (`application.properties`, environment). On the command line use the same
-flags as the CLI, without the prefix: `--provider openai`, `--sandbox docker`, `--docker-mode daemon`, `--small-model`
+flags as the CLI, without the prefix: `--provider openai`, `--sandbox docker`, `--docker-scope user`, `--small-model`
 (`--flag value` or `--flag=value`). Spring's own flags (`--server.port=9000`) are unchanged.
 
 The file tools never follow a symlink or junction that leaves a chat's work dir: the web application forces `files.externalLinks` to `none` and logs one WARN at startup when the settings ask for another value ([tools guide](../docs/guides/tools.md#links-that-leave-the-work-dir-filesexternallinks)).
@@ -37,9 +37,10 @@ The file tools never follow a symlink or junction that leaves a chat's work dir:
 | `jllm.settings` (flag `--settings`) | none | merged over `~/.jllm/settings.json` and `<workdir>/.jllm/settings.json`; harness [settings file](../docs/reference/usage.md#5-settings-file) (MCP, REST, skills, agents) |
 | `jllm.context-strategy` | `compaction` | `compaction`, `mnemonic` or `scope`; wins over the settings file |
 | `jllm.small-model` | `false` | append the small-model rules to the system prompt |
-| `jllm.sandbox` | `local` | `local` or `docker` (`bash` in a container, chat directory mounted; see [SANDBOX](../docs/guides/sandbox.md)); wins over the settings file |
+| `jllm.sandbox` | | ignored on the web: the sandbox kind is per role (see below). Still read by the CLI |
 | `jllm.docker-image` | `python:3.12-slim` | image of the docker sandbox; wins over the settings file |
-| `jllm.docker-mode` | `oneshot` | `oneshot` or `daemon`: one long-running container per chat for `bash` and the file tools, removed with the chat (see [SANDBOX](../docs/guides/sandbox.md)); wins over the settings file |
+| `jllm.docker-scope` | `chat` | `chat` (one container per chat, removed with the chat) or `user` (one container per user, shared by the user's chats; the admin decides, see [SANDBOX](../docs/guides/sandbox.md)); wins over the settings file |
+| `jllm.docker-profile` | `standard` | `standard` or `hardened` (no network by default, resource limits; for temporary users); wins over the settings file |
 | `jllm.docker-remote` | `false` | flag `--docker-remote`: docker on another machine; each chat's workspace is uploaded to its container and backed up under `<X>/<chatId>/.jllm/` ([SANDBOX](../docs/guides/sandbox.md#remote-docker)) |
 | `jllm.docker-remote-host` | from `DOCKER_HOST` | address where the remote host's published ports are reached |
 | `jllm.system-prompt-file` (flag `--system-prompt-file`) | none | file appended to the system prompt |
@@ -49,7 +50,7 @@ The file tools never follow a symlink or junction that leaves a chat's work dir:
 | `jllm.pricing.input-per-million`, `output-per-million`, `cache-read-per-million`, `cache-write-per-million` | 0 | USD per million tokens, for the cost estimate |
 | `jllm.web.public-url` | none | the externally visible base URL (`https://jllm.example.com`); OAuth logins redirect to `<public-url>/oauth/callback`. Required when a per-user OAuth source uses the authorization code flow |
 | `jllm.web.use-real-password` | `false` | `true`: at startup every user still on the default password gets a random 24-character one. The admin password is logged once at WARN; other users are only logged as generated, an admin resets them. Never regenerated afterwards. Users linked to an identity provider are skipped |
-| `jllm.web.allow-unencrypted-tokens` | `false` | Without `JLLM_TOKEN_KEY` the users' OAuth tokens are stored in clear (file and SQL stores). That starts with a loud WARN naming the variable when the server is local-only; it is refused (the server does not start) when `jllm.web.use-real-password=true` or `server.address` is not loopback (unset, `0.0.0.0` and `::` are not). `true` accepts clear-text tokens anyway, still with the WARN |
+| `jllm.web.allow-unencrypted-tokens` | `false` in the code; **`true` in the shipped `application.properties`** (so the server starts without `JLLM_TOKEN_KEY`; remove that line, or set the key, for shared or exposed installs) | Without `JLLM_TOKEN_KEY` the users' OAuth tokens are stored in clear (file and SQL stores). That starts with a loud WARN naming the variable when the server is local-only; it is refused (the server does not start) when `jllm.web.use-real-password=true` or `server.address` is not loopback (unset, `0.0.0.0` and `::` are not). `true` accepts clear-text tokens anyway, still with the WARN |
 | `jllm.web.enforce-password-change-on-loopback` | `false` | A user on the default password can only change it, sign in or out: every other `/api` call answers `403 password_change_required`. Requests from the loopback address are exempt unless this is `true`, a forwarding header (`X-Forwarded-For`, `Forwarded`, `X-Real-IP`) is present, or `server.address` is not a loopback address (unset, `0.0.0.0` and `::` count as non-loopback). A reverse proxy, tunnel or sidecar on the same host that sends no forwarding header makes remote requests look local: set this to `true` there |
 | `jllm.web.content-security-policy` | built-in | `Content-Security-Policy` value for every response. Blank: `default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'` (`unsafe-eval`: Vue compiles its templates in the browser; `unsafe-inline` styles: `style=""` attributes). `off`: no CSP header. Any other text replaces the policy. `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer` are always sent, unless a handler already set them |
 | `jllm.store`, `jllm.sql.url`, `.user`, `.password`, `.pool`, `.seed`, `.driver-dir` | `sql` with the SQL starter, else `file` | where users, roles, chats, tokens and settings live; see [SQL store](#sql-store). `jllm.webauth-dir` (default `webauth`) is the file store folder and the default place of the SQLite file |
@@ -60,7 +61,11 @@ The file tools never follow a symlink or junction that leaves a chat's work dir:
 Also set: `server.port=8080` and `spring.mvc.async.request-timeout=-1` (SSE streams must not time out).
 
 The sandbox, history and scratch directories are the same as in the CLI (`.jllm/` under the project directory).
-There is no isolation unless `--sandbox docker`: shell commands run as the user running the server. Sign-in is a
+The sandbox is set **per role** by an administrator (Administration, Roles, Sandbox): `none` (the default: no file tools and no `bash`;
+each attempt is a tool error the model sees, the server keeps running), `local` (processes on the server, no isolation:
+trusted users only), `docker-isolated` (hardened container: no network unless granted, resource limits) or `docker-open`
+(standard container with network). Scope (chat or user) and, for isolated, network are per role; image and the rest come from `jllm.docker-*`.
+`jllm.sandbox` is ignored on the web (a warning is logged). A chat without a user, or a role that cannot be read, is `none`. Sign-in is a
 simple reference implementation (below); bind the server to localhost or put it behind your own HTTPS proxy.
 
 ## Users, roles, skills and sign-in
@@ -77,7 +82,7 @@ use, so changes (by hand or from the UI) apply without a restart.
 | Path | Content |
 |---|---|
 | `webauth/users/<id>.json` | `{name, role, email?, externalId?, password?, credentials, disabledTools?, disabledSkills?}` |
-| `webauth/permissions/<role>.json` | `{tools, readOnly?, approval?, toolPermissions?}` |
+| `webauth/permissions/<role>.json` | `{tools, readOnly?, approval?, toolPermissions?, sandbox?}` |
 | `webauth/global-skills/<name>.md` | skills written by the admin, offered to every user |
 | `webauth/user-skills/<id>/<name>.md` | a user's own skills |
 
@@ -132,7 +137,7 @@ jllm.auth.oidc.default-role=user                       # required (and must exis
   server, also tools it adds later), `"billing__*"` (a REST API), `["*"]` (everything).
 - `readOnly`: optional; `true` keeps only read-only tools. `approval`: optional; `"off"` turns approval prompts off,
   `"ask"` (default) uses the harness policy. A role without a valid file gets no tools.
-- `admin` is fixed: it always has every tool; only its `approval` (default `ask`) and `toolPermissions` can be changed, and it cannot be deleted or recreated. At least
+- `admin` is fixed: it always has every tool; only its `approval` (default `ask`), `toolPermissions` and `sandbox` can be changed, and it cannot be deleted or recreated. At least
   one admin user always remains, and an admin cannot delete their own account.
 - One role per user. Shipped: `guest` (`run_js` and the web tools), `reader` (`run_js` and read-only file tools), `poweru` (`run_js`, `bash`, file and web tools), `admin`. A role lists `run_js`, `bash`, both or neither.
 
@@ -233,7 +238,7 @@ Chat endpoints are under `/api/chat`; the other tables below list their own path
 | `POST /api/me/skills`, `PUT /api/me/skills/{name}`, `DELETE /api/me/skills/{name}` | `{name, description, content}` | own skills; 409 name taken, 413 too large, 403 not own |
 | `GET/POST /api/admin/users`, `PUT/DELETE /api/admin/users/{id}` | `{id, name, role, password?}` | admin only (403 otherwise) |
 | `POST /api/admin/users/{id}/password` | `{password?}` | set, or reset to the default when absent |
-| `GET/POST /api/admin/roles`, `PUT/DELETE /api/admin/roles/{name}` | `{name, tools, readOnly, approval, toolPermissions?}` | `admin` 403; delete 409 while held |
+| `GET/POST /api/admin/roles`, `PUT/DELETE /api/admin/roles/{name}` | `{name, tools, readOnly, approval, toolPermissions?, sandbox?: {kind: none\|local\|docker-isolated\|docker-open, scope?, network?}}` | `admin` 403; delete 409 while held |
 | `GET /api/admin/catalog` | | `{tools, mcp, api}`: everything a role can be granted |
 | `GET/POST /api/admin/skills`, `GET/PUT/DELETE /api/admin/skills/{name}` | `{name, description, content}` | global skills; settings-file skills read-only |
 
@@ -268,14 +273,14 @@ Typical turn: `POST /messages` → events until `run_finished`; on `approval_req
 
 ## Frontend
 
-Vue 3 loaded as an ES module through an import map (`vue` → `vendor/vue.esm-browser.prod.js`). Components are plain
+Vue 3 loaded as an ES module by relative import (`vendor/vue.esm-browser.prod.js`; no import map, since an inline one violates the CSP `script-src`). Components are plain
 JavaScript objects with a `template` string, so nothing is compiled or transpiled. No router, one reactive store
 (`store.js`) fed by the SSE stream. To upgrade Vue, replace the vendored file with `vue.esm-browser.prod.js` from the
 `vue` npm package.
 
 | File (under `src/main/resources/static`) | Role |
 |---|---|
-| `index.html` | import map, stylesheets, mount point |
+| `index.html` | stylesheets, mount point |
 | `main.js`, `App.js` | create the app, layout |
 | `store.js` | state, SSE subscription, actions (send, cancel, mode, approvals) |
 | `api.js` | `fetch` wrapper (`api`, `post`) that turns `{error}` into exceptions |

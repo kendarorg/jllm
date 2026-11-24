@@ -8,8 +8,8 @@ import org.kendar.llm.harness.context.compaction.CutPlanner;
 import org.kendar.llm.harness.llm.ModelException;
 import org.kendar.llm.harness.permission.ApprovalService;
 import org.kendar.llm.harness.permission.PermissionMode;
-import org.kendar.llm.harness.sandbox.CwdSandboxExecutor;
-import org.kendar.llm.harness.sandbox.LocalDirSandboxExecutor;
+import org.kendar.llm.harness.sandbox.LocalSandboxExecutor;
+import org.kendar.llm.harness.sandbox.CwdLayout;
 import org.kendar.llm.harness.settings.HarnessConfigMapper;
 import org.kendar.llm.harness.settings.HarnessSettings;
 import org.kendar.llm.harness.settings.HarnessSettingsLoader;
@@ -77,7 +77,7 @@ class ModesScratchContextTest {
 
     @Test
     void scratchIsPerChatAndAgentAndJailed() {
-        LocalDirSandboxExecutor box = new LocalDirSandboxExecutor(config(base));
+        LocalSandboxExecutor box = LocalSandboxExecutor.of(config(base));
         Path a = box.scratchDir("chat1", "main");
         Path b = box.scratchDir("chat1", "sub-1");
         assertEquals(box.location().resolve("chat1").resolve("main"), a);
@@ -90,7 +90,7 @@ class ModesScratchContextTest {
     @Test
     void planModeWritesOnlyToScratch() throws Exception {
         Path cwd = Files.createDirectories(base.resolve("project"));
-        CwdSandboxExecutor box = new CwdSandboxExecutor(config(base.resolve("tmp")), cwd);
+        LocalSandboxExecutor box = new LocalSandboxExecutor(new CwdLayout(config(base.resolve("tmp")), cwd));
         Path scratch = box.scratchDir("c1", "main");
         ToolContext plan = new ToolContext("c1", box.workDir("c1"), scratch, true, null);
 
@@ -112,7 +112,7 @@ class ModesScratchContextTest {
     void deletingAChatNeverTouchesTheProjectDirectory() throws Exception {
         Path cwd = Files.createDirectories(base.resolve("project"));
         Files.writeString(cwd.resolve("keep.txt"), "x");
-        CwdSandboxExecutor box = new CwdSandboxExecutor(config(base.resolve("tmp")), cwd);
+        LocalSandboxExecutor box = new LocalSandboxExecutor(new CwdLayout(config(base.resolve("tmp")), cwd));
         Path scratch = box.scratchDir("c1", "main");
         box.deleteWorkDir("c1");
         assertFalse(Files.exists(scratch));

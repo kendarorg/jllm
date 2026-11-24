@@ -7,7 +7,8 @@ import org.kendar.llm.harness.AgentHarnessBuilder;
 import org.kendar.llm.harness.agent.AgentEvent;
 import org.kendar.llm.harness.llm.ModelResponse;
 import org.kendar.llm.harness.llm.Usage;
-import org.kendar.llm.harness.sandbox.CwdSandboxExecutor;
+import org.kendar.llm.harness.sandbox.LocalSandboxExecutor;
+import org.kendar.llm.harness.sandbox.CwdLayout;
 import org.kendar.llm.harness.tools.ToolKind;
 
 import java.nio.file.Files;
@@ -61,7 +62,7 @@ class JsLifecycleAndJailTest {
         Path settings = base.resolve("settings.json");
         Files.writeString(settings, settingsJson);
         return new AgentHarnessBuilder().modelClient(model).config(cfg)
-                .sandbox(new CwdSandboxExecutor(cfg, project))
+                .sandbox(new LocalSandboxExecutor(new CwdLayout(cfg, project)))
                 .settings(settings)
                 .plugin(new JsPlugin()).build();
     }

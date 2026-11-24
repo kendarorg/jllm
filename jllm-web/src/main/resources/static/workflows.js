@@ -1,4 +1,4 @@
-import {reactive} from 'vue';
+import {reactive} from './vendor/vue.esm-browser.prod.js';
 import {api, del, post, put} from './api.js';
 
 const BASE = '/api/plugins/jllm-workflow-web';

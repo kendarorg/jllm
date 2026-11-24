@@ -2,10 +2,16 @@ package org.kendar.llm.web.sql;
 
 import org.kendar.llm.harness.identity.Role;
 import org.kendar.llm.harness.identity.RoleInUseException;
+import org.kendar.llm.harness.identity.RoleSandbox;
 import org.kendar.llm.harness.identity.User;
 import org.kendar.llm.harness.identity.RoleRepository;
 import org.kendar.llm.harness.permission.ToolPermission;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -16,6 +22,7 @@ import java.util.regex.Pattern;
 /** {@link RoleRepository} on {@code roles}, {@code role_tools} and {@code role_permissions}. */
 public final class SqlRoleRepository implements RoleRepository {
 
+    private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final Pattern NAME = Pattern.compile("[a-z0-9_-]{1,64}");
 
     private final Database db;
@@ -45,8 +52,8 @@ public final class SqlRoleRepository implements RoleRepository {
     public void save(Role role) {
         if (!valid(role.name())) throw new IllegalArgumentException("Invalid role name: " + role.name());
         db.run(tx -> {
-            tx.upsert("roles", List.of("name"), List.of("read_only", "approval"), role.name(), role.readOnly(),
-                    role.approval());
+            tx.upsert("roles", List.of("name"), List.of("read_only", "approval", "settings"), role.name(),
+                    role.readOnly(), role.approval(), settingsJson(role.sandbox()));
             tx.update("DELETE FROM role_tools WHERE role = ?", role.name());
             tx.update("DELETE FROM role_permissions WHERE role = ?", role.name());
             int ord = 0;
@@ -74,20 +81,42 @@ public final class SqlRoleRepository implements RoleRepository {
         });
     }
 
+    /** {@code roles.settings}: free-text JSON, {@code {"sandbox": {"kind": ..., "scope": ..., "network": ...}}}. */
+    private static String settingsJson(RoleSandbox sb) {
+        ObjectNode root = MAPPER.createObjectNode();
+        ObjectNode n = root.putObject("sandbox");
+        n.put("kind", sb.kind().wire());
+        if (sb.scope() != null) n.put("scope", sb.scope());
+        if (sb.network() != null) n.put("network", sb.network());
+        return root.toString();
+    }
+
+    /** A missing, unreadable or invalid value is no sandbox: a bad row must not stop the server. */
+    private static RoleSandbox sandboxOf(String json) {
+        if (json == null || json.isBlank()) return RoleSandbox.NONE;
+        try {
+            JsonNode n = MAPPER.readTree(json).path("sandbox");
+            return RoleSandbox.of(n.path("kind").asText(null), n.path("scope").asText(null),
+                    n.path("network").asText(null));
+        } catch (IOException | RuntimeException e) {
+            return RoleSandbox.NONE;
+        }
+    }
+
     private static boolean valid(String name) {
         return name != null && NAME.matcher(name).matches();
     }
 
     private static Optional<Role> load(Tx tx, String name) {
-        return tx.one("SELECT read_only, approval FROM roles WHERE name = ?",
-                rs -> new Object[]{rs.getInt(1) != 0, rs.getString(2)}, name).map(r -> {
+        return tx.one("SELECT read_only, approval, settings FROM roles WHERE name = ?",
+                rs -> new Object[]{rs.getInt(1) != 0, rs.getString(2), sandboxOf(rs.getString(3))}, name).map(r -> {
             List<String> tools = tx.query("SELECT pattern FROM role_tools WHERE role = ? ORDER BY ord",
                     rs -> rs.getString(1), name);
             Map<String, ToolPermission> perms = new LinkedHashMap<>();
             tx.query("SELECT pattern, permission FROM role_permissions WHERE role = ? ORDER BY ord",
                     rs -> new String[]{rs.getString(1), rs.getString(2)}, name)
                     .forEach(p -> perms.put(p[0], ToolPermission.parse(p[1])));
-            return new Role(name, tools, (Boolean) r[0], (String) r[1], perms);
+            return new Role(name, tools, (Boolean) r[0], (String) r[1], perms, (RoleSandbox) r[2]);
         });
     }
 }

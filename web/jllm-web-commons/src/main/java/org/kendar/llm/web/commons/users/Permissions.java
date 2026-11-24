@@ -2,6 +2,7 @@ package org.kendar.llm.web.commons.users;
 
 import org.kendar.llm.harness.identity.User;
 import org.kendar.llm.harness.identity.Role;
+import org.kendar.llm.harness.identity.RoleSandbox;
 import org.kendar.llm.harness.identity.UserRepository;
 import org.kendar.llm.harness.identity.RoleRepository;
 import org.kendar.llm.harness.identity.SkillRepository;
@@ -41,7 +42,7 @@ public final class Permissions {
     /** The role, or empty when it has no valid record. {@code admin} always exists. */
     public Optional<Role> role(String name) {
         if (User.ADMIN_ROLE.equals(name)) {
-            return Optional.of(roles.find(name).map(r -> Role.admin(r.approval(), r.toolPermissions()))
+            return Optional.of(roles.find(name).map(r -> Role.admin(r.approval(), r.toolPermissions(), r.sandbox()))
                     .orElse(Role.ADMIN));
         }
         if (!validName(name)) return Optional.empty();
@@ -58,8 +59,8 @@ public final class Permissions {
 
     /** Stores a role (for {@code admin} only its approval). @throws IllegalArgumentException for an invalid name */
     public Role save(Role role) {
-        if (role.fixed()) { // tools are always all of them; only the approval is kept
-            roles.save(Role.admin(role.approval(), role.toolPermissions()));
+        if (role.fixed()) { // tools are always all of them; the approval, permissions and sandbox are kept
+            roles.save(Role.admin(role.approval(), role.toolPermissions(), role.sandbox()));
             return role(role.name()).orElseThrow();
         }
         if (!validName(role.name())) throw new IllegalArgumentException("Invalid role name: " + role.name());
@@ -70,6 +71,15 @@ public final class Permissions {
     public boolean delete(String name) {
         if (User.ADMIN_ROLE.equals(name)) throw new IllegalArgumentException("The admin role cannot be deleted");
         return validName(name) && roles.delete(name);
+    }
+
+    /**
+     * The sandbox of a user, that of their role. {@link RoleSandbox#NONE} for an unknown user or role: nothing opens a
+     * shell by accident.
+     */
+    public RoleSandbox sandboxOf(UserRepository users, String userId) {
+        if (userId == null || users == null) return RoleSandbox.NONE;
+        return users.find(userId).flatMap(u -> role(u.role())).map(Role::sandbox).orElse(RoleSandbox.NONE);
     }
 
     /** The policy of a role, or empty when the role has no valid record. */

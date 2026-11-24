@@ -18,9 +18,12 @@ import java.util.Set;
  * @param disabledSkills skill names the user switched off for themselves
  * @param externalId     {@code <issuer>#<sub>} of the identity provider account linked to the user; null = none
  * @param email          optional address, used to link a pre-created user to an identity provider account
+ * @param settings       free-text JSON object of the user's own settings; {@code {}} when none. Validated when stored
+ *                       ({@link UserRepository#setSettings}), so what is read back is always a JSON object
  */
 public record User(String id, String name, String role, Map<String, Map<String, String>> credentials,
-                      String password, List<String> disabledTools, List<String> disabledSkills, String externalId, String email)
+                      String password, List<String> disabledTools, List<String> disabledSkills, String externalId, String email,
+                   String settings)
         implements Principal {
 
     public static final String ADMIN_ROLE = "admin";
@@ -31,10 +34,11 @@ public record User(String id, String name, String role, Map<String, Map<String, 
         disabledSkills = disabledSkills == null ? List.of() : List.copyOf(disabledSkills);
         externalId = externalId == null || externalId.isBlank() ? null : externalId;
         email = email == null || email.isBlank() ? null : email.strip();
+        settings = settings == null || settings.isBlank() ? "{}" : settings;
     }
 
     public User(String id, String name, String role, Map<String, Map<String, String>> credentials) {
-        this(id, name, role, credentials, null, null, null, null, null);
+        this(id, name, role, credentials, null, null, null, null, null, null);
     }
 
     @Override

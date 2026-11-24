@@ -126,7 +126,13 @@ public class WebAuthConfiguration {
         CredentialResolver credentials = new UserCredentialResolver(users);
         UserPolicyResolver policies = permissions.resolver(users, skills);
         Function<String, HarnessPrincipal> principals = id -> users.find(id).map(User::principal).orElse(null);
+        Function<String, org.kendar.llm.harness.identity.RoleSandbox> sandboxes = id -> permissions.sandboxOf(users, id);
         return new HarnessIdentity() {
+            @Override
+            public Function<String, org.kendar.llm.harness.identity.RoleSandbox> sandboxes() {
+                return sandboxes;
+            }
+
             @Override
             public CredentialResolver credentials() {
                 return credentials;

@@ -2,7 +2,8 @@
 CREATE TABLE roles (
     name      VARCHAR(64) NOT NULL PRIMARY KEY,
     read_only TINYINT(1) NOT NULL DEFAULT 0,
-    approval  VARCHAR(16) NOT NULL DEFAULT 'ask'
+    approval  VARCHAR(16) NOT NULL DEFAULT 'ask',
+    settings TEXT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 CREATE TABLE role_tools (
     role    VARCHAR(64) NOT NULL,
@@ -29,6 +30,7 @@ CREATE TABLE users (
     password_hash VARCHAR(512) NULL,
     external_id   VARCHAR(512) NULL,
     email         VARCHAR(320) NULL,
+    settings      TEXT NULL,
     INDEX idx_users_external (external_id),
     INDEX idx_users_email (email),
     FOREIGN KEY (role) REFERENCES roles(name) ON DELETE RESTRICT

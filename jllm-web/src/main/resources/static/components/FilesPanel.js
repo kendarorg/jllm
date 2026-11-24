@@ -1,4 +1,4 @@
-import {computed, onMounted, ref, watch} from 'vue';
+import {computed, onMounted, ref, watch} from '../vendor/vue.esm-browser.prod.js';
 import {store, toast} from '../store.js';
 
 async function call(path, opts = {}) {

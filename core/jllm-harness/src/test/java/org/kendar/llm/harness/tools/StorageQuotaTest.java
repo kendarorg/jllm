@@ -3,7 +3,7 @@ package org.kendar.llm.harness.tools;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.kendar.llm.harness.sandbox.LocalDirSandboxExecutor;
+import org.kendar.llm.harness.sandbox.LocalSandboxExecutor;
 import org.kendar.llm.harness.settings.HarnessSettings;
 import org.kendar.llm.harness.settings.HarnessSettingsLoader;
 
@@ -18,10 +18,10 @@ class StorageQuotaTest {
     @TempDir
     Path base;
 
-    private LocalDirSandboxExecutor box;
+    private LocalSandboxExecutor box;
 
     private HarnessTool write(long max) {
-        box = new LocalDirSandboxExecutor(config(base));
+        box = LocalSandboxExecutor.of(config(base));
         return new FileSystemAgentTools(null, null, new StorageQuota(max, box::chatStorage)).tools().stream()
                 .filter(t -> t.name().equals("write_file")).findFirst().orElseThrow();
     }
@@ -108,7 +108,7 @@ class StorageQuotaTest {
 
     @Test
     void checkpointBackupsAreCounted() throws Exception {
-        box = new LocalDirSandboxExecutor(config(base));
+        box = LocalSandboxExecutor.of(config(base));
         StorageQuota quota = new StorageQuota(25, box::chatStorage);
         Checkpoints cp = new Checkpoints();
         FileSystemAgentTools fs = new FileSystemAgentTools(null, cp, quota);

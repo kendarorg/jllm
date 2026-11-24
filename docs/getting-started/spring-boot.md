@@ -23,7 +23,6 @@ jllm.provider=anthropic
 jllm.model=claude-sonnet-4-5
 jllm.workdir=/var/lib/jllm
 jllm.sandbox=docker
-jllm.docker-mode=daemon
 jllm.web.public-url=https://agents.example.com
 spring.mvc.async.request-timeout=-1
 ```

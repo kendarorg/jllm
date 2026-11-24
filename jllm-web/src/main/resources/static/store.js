@@ -1,6 +1,6 @@
 import {api, post} from './api.js';
 
-import {reactive} from 'vue';
+import {reactive} from './vendor/vue.esm-browser.prod.js';
 
 const EVENTS = ['run_started', 'text', 'tool_call', 'tool_result', 'approval_request', 'usage', 'compaction',
   'warning', 'error', 'cancelled', 'run_finished', 'plan_ready', 'login', 'login_required', 'stuck', 'verify_failed',
@@ -374,6 +374,8 @@ async function poll() {
   } catch (e) { /* next tick retries */ } finally { polling = false; }
 }
 
+let pollTimer = null;
+
 export async function init() {
   try { store.commands = await api('/api/chat/commands'); } catch (e) { /* optional */ }
   try { store.contentWarnings = await api('/api/content-warnings'); } catch (e) { /* optional */ }
@@ -381,7 +383,7 @@ export async function init() {
   const last = remembered();
   const known = last && store.sessions.find(s => s.chatId === last);
   if (known) store.resumeOffer = { chatId: known.chatId, title: known.title || 'Chat' };
-  setInterval(poll, 5000);
+  if (!pollTimer) pollTimer = setInterval(poll, 5000);
 }
 
 // ── actions ─────────────────────────────────────────────────────────────────

@@ -9,6 +9,8 @@ Standard library only. Configuration (environment):
   JLLM_SCRATCH    scratch root (default <workspace>/.jllm/scratchpad)
   JLLM_LOG_MAX_BYTES  cap of a command's spill log when the request gives none (default 51200; 0: unlimited)
   JLLM_EXTERNAL_LINKS  none (default), read or readwrite: what a link that leaves the root does (files.externalLinks)
+  X-Jllm-Chat     optional request header: a chat id. The file roots of that request are /workspace/<chat> and its
+                  .jllm/scratchpad (user-scope containers keep one directory per chat in one workspace volume)
   JLLM_ALIAS      tests only: absolute paths under this prefix (e.g. /workspace) are mapped onto the workspace
 
 Endpoints: see docs/guides/sandbox.md. A request with a missing or wrong token gets an empty 401 and nothing is executed.
@@ -66,12 +68,20 @@ def unalias(p):
     return p
 
 
+CTX = threading.local()   # per request: the chat whose directory the file roots are (user-scope containers)
+CHAT_ID = re.compile(r"[A-Za-z0-9._-]{1,64}")
+
+
 def root_of(name):
+    chat = getattr(CTX, "chat", None)
+    work = os.path.join(WORKSPACE, chat) if chat else WORKSPACE
+    scratch = os.path.join(work, ".jllm", "scratchpad") if chat else SCRATCH
     if name in (None, "", "workspace"):
-        return WORKSPACE
+        os.makedirs(work, exist_ok=True)
+        return work
     if name == "scratch":
-        os.makedirs(SCRATCH, exist_ok=True)
-        return SCRATCH
+        os.makedirs(scratch, exist_ok=True)
+        return scratch
     raise HttpError(400, "unknown root")
 
 
@@ -354,6 +364,8 @@ def start_exec(body):
     if not isinstance(command, str) or not command:
         raise HttpError(400, "command is required")
     cwd = resolve(WORKSPACE, body.get("cwd") or WORKSPACE)
+    if not os.path.exists(cwd):
+        os.makedirs(cwd, exist_ok=True)  # a chat's directory in a user-scope workspace, or a scratch dir not used yet
     if not os.path.isdir(cwd):
         raise HttpError(400, "cwd is not a directory")
     timeout = max(1, min(int(body.get("timeoutSeconds") or 120), 3600))
@@ -922,6 +934,10 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         try:
+            chat = self.headers.get("X-Jllm-Chat")
+            if chat is not None and (not CHAT_ID.fullmatch(chat) or ".." in chat):
+                raise HttpError(400, "bad chat id")
+            CTX.chat = chat
             u = urlparse(self.path)
             q = {k: v[0] for k, v in parse_qs(u.query, keep_blank_values=True).items()}
             self._route(self.command, u.path, q)

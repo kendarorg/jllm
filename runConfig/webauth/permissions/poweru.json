@@ -1,4 +1,8 @@
 {
-  "tools": ["run_js", "bash", "read_file", "write_file", "edit_file", "ls", "glob", "grep", "grep_code",
-            "web_search", "wikipedia_search", "web_fetch", "web_download"]
+  "tools" : [ "run_js", "bash", "read_file", "write_file", "edit_file", "ls", "glob", "grep", "grep_code", "web_search", "wikipedia_search", "web_fetch", "web_download" ],
+  "readOnly" : false,
+  "approval" : "ask",
+  "sandbox" : {
+    "kind" : "docker-open"
+  }
 }

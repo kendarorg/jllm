@@ -1,6 +1,7 @@
 package org.kendar.llm.web.sql.spring;
 
 import org.kendar.llm.harness.identity.Role;
+import org.kendar.llm.harness.identity.RoleSandbox;
 import org.kendar.llm.harness.identity.RoleRepository;
 import org.kendar.llm.harness.identity.UserRepository;
 import org.kendar.llm.harness.permission.ToolPermission;
@@ -31,12 +32,12 @@ public final class SqlSeeder {
         // the admin role row always exists (schema); only other roles or any user mean the database is in use
         if (!users.all().isEmpty() || roles.all().stream().anyMatch(r -> !r.fixed())) return false;
         try {
-            roles.save(Role.admin("ask", Map.of()));
+            roles.save(Role.admin("ask", Map.of(), RoleSandbox.NONE));
             roles.save(new Role("poweru", List.of("run_js", "bash", "read_file", "write_file", "edit_file", "ls", "glob",
                     "grep", "grep_code", "web_search", "wikipedia_search", "web_fetch", "web_download"), false, "ask",
-                    Map.of()));
+                    Map.of(), RoleSandbox.NONE));
             roles.save(new Role("guest", List.of("run_js", "web_search", "wikipedia_search", "web_fetch", "web_download"),
-                    false, "ask", Map.of("bash", ToolPermission.DENY)));
+                    false, "ask", Map.of("bash", ToolPermission.DENY), RoleSandbox.NONE));
             boolean created = false;
             created |= createIfAbsent(users, "admin", "Admin");
             created |= createIfAbsent(users, "poweru", "Power user");

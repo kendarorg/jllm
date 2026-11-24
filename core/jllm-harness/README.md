@@ -13,7 +13,7 @@ Micrometer. Java 21, Jackson, the JDK `HttpClient`, jsoup, json-schema-validator
   prefix stays stable.
 - **Permissions**: `plan` / `edit` / `auto` modes, deny rules, approval policy, per-chat grants, fast-model
   classifier in `auto`.
-- **Sandbox**: current directory (CLI), per-chat directory or Docker; a writable scratch directory per chat and agent.
+- **Sandbox**: a layout (current directory for the CLI, per-chat directory for the web) plus a runner (local, no isolation, or a long-running Docker container with `standard`/`hardened` profile and `chat`/`user` scope); a writable scratch directory per chat and agent.
 - **Context**: three strategies. `compaction` (default) clears old tool results, then summarizes, then proposes a
   rewrite for approval. `mnemonic` never rewrites the log: it masks old content behind receipts, switches segments
   with handoff notes and offers `history_recall`. `scope` measures the whole request, offloads large tool results to
@@ -105,7 +105,7 @@ AgentHarness h = new AgentHarnessBuilder()
   "permissions": {"deny": ["bash(rm -rf .*)"], "ask": ["bash(.*curl.*)"], "allow": ["bash(mvn .*)"]},
   "execution":  {"maxParallel": 1},
   "sandbox":    {"tempDir": "/var/tmp/harness", "timeoutSeconds": 120, "backend": "docker",
-                 "docker": {"image": "maven:3-eclipse-temurin-21", "network": "none"}},
+                 "docker": {"image": "maven:3-eclipse-temurin-21", "profile": "hardened", "scope": "chat"}},
   "context":    {"maxTokens": 100000, "auto": true, "keepTokens": 15000, "buffer": null, "keepRecentTurns": 6,
                  "strategy": "compaction", "scope": {"offloadChars": 20000, "safetyPercent": 2}},
   "output":     {"toolMaxChars": 30000, "eventMaxChars": 2000},
@@ -145,7 +145,7 @@ AgentHarness h = new AgentHarnessBuilder()
   ```json
   {"sandbox": {"shell": "/bin/zsh"}}
   ```
-  Windows (PowerShell 7), Linux/Unix (bash), macOS (zsh). A Docker backend always runs `sh -c` in the container.
+  Windows (PowerShell 7), Linux/Unix (bash), macOS (zsh). The container runner always runs `sh -c` in the container.
 - `execution.useContextStack` (default `true`): a sub-agent continues the parent's request prefix (same pinned text,
   system prompt and tool list; role text and task go in its first message) so the parent's KV cache is reused and still
   valid when the sub-agent returns. The agent type's tool restrictions are applied when a call is executed. `false`
@@ -174,8 +174,9 @@ AgentHarness h = new AgentHarnessBuilder()
 - Tools are sorted by group, then name, once, in the registry. Injection order does not matter, which keeps
   the prompt-cache prefix stable. Duplicate tool names are rejected at `build()`.
 - The tool set of a chat is fixed on its first message and only grows through `request_tool_group`.
-- The default sandbox, `LocalDirSandboxExecutor`, has **no isolation** (a startup warning is logged).
-  Pass `DockerSandboxExecutor` or your own `SandboxExecutor` for untrusted input.
+- The default sandbox, `LocalSandboxExecutor`, has **no isolation** (a warning is logged at the first command); it is for
+  testing and trusted single-user use. Build a `RemoteExecSandboxExecutor` with `SandboxFactory` (or pass your own
+  `SandboxExecutor`) for untrusted input.
 - Ports to implement: `ChatSessionStore`, `SubAgentRunLog`, `ToolApprovalPolicy`, `HarnessMetrics`, `SandboxExecutor`.
 - `HarnessTestSupport` (scripted fake model, rig) is in the `core/jllm-test-support` module.
 - `mvn -Prelease package` additionally builds the javadoc jar; the sources jar is always built.
@@ -197,8 +198,8 @@ AgentHarness h = new AgentHarnessBuilder()
 - Scratch dir: `<sandbox.tempDir>/<chatId>/<agentId>` (default `${java.io.tmpdir}/agent-harness`); the main agent and
   each sub-agent get their own. Sub-agents inherit the caller's mode; types marked `readOnly` (explore, plan) stay read-only.
 - Front ends ([jllm-cli](../../jllm-cli/README.md), [jllm-web](../../jllm-web/README.md)): the working directory is the
-  project directory and the file tools are confined to it. There is no isolation: in plan mode shell commands run from scratch but cannot be stopped from
-  writing to the working directory. The Docker executor mounts the working directory read-only in plan mode.
+  project directory and the file tools are confined to it. With the local runner there is no isolation: plan mode is advisory, shell commands run from scratch but cannot be stopped from
+  writing to the working directory (the container runner does not enforce it either). See [SANDBOX](../../docs/guides/sandbox.md).
 
 ## Context window and compaction
 

@@ -115,6 +115,31 @@ public interface UserRepository {
     /** @throws NoSuchElementException when the user does not exist */
     User setDisabledSkills(String id, List<String> names);
 
+    /**
+     * Replaces the user's free-text settings.
+     *
+     * @param json a JSON object; null or blank = {@code {}}
+     * @throws IllegalArgumentException when it is not a JSON object, or longer than {@link #MAX_SETTINGS} characters
+     * @throws NoSuchElementException   when the user does not exist
+     */
+    User setSettings(String id, String json);
+
+    /** Longest accepted settings text. */
+    int MAX_SETTINGS = 64_000;
+
+    /** The normalized text of {@code json}: a compact JSON object ({@code {}} for null or blank). */
+    static String checkSettings(String json) {
+        if (json == null || json.isBlank()) return "{}";
+        if (json.length() > MAX_SETTINGS) throw new IllegalArgumentException("Settings longer than " + MAX_SETTINGS);
+        try {
+            var n = new com.fasterxml.jackson.databind.ObjectMapper().readTree(json);
+            if (n == null || !n.isObject()) throw new IllegalArgumentException("Settings must be a JSON object");
+            return n.toString();
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new IllegalArgumentException("Settings are not valid JSON");
+        }
+    }
+
     /** @return whether the user existed */
     boolean delete(String id);
 }

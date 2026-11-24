@@ -91,8 +91,8 @@ public final class SlashCommands {
             new Info("/back", "Go back one level in an open menu (Esc in a terminal)"),
             new Info("/cost", "Token usage and estimated cost of this chat"),
             new Info("/where", "Show the working directory and the scratch directory"),
-            new Info("/sandbox", "Docker daemon mode: /sandbox clean removes the sandbox container (project files stay), /sandbox backup copies a remote container back"),
-            new Info("/status", "Context usage, cost and chat count"),
+            new Info("/sandbox", "Container sandbox: /sandbox clean removes the sandbox container (project files stay), /sandbox backup copies the container workspace back"),
+            new Info("/status", "Context usage, cost, chat count and sandbox (runner, profile, scope, container)"),
             new Info("/chats", "List the chats; /chats delete <id>, /chats clean [days]"),
             new Info("/resume", "Switch to another chat: /resume <id or prefix>"),
             new Info("/title", "Rename this chat: /title <text>"),
@@ -306,7 +306,7 @@ public final class SlashCommands {
                 case "/sandbox" -> {
                     if (arg.equals("backup")) {
                         String done = harness.sandbox().backup(chatId);
-                        yield Result.text(done == null ? "This sandbox needs no backup (only remote docker does)" : done);
+                        yield Result.text(done == null ? "This sandbox needs no backup (only a container workspace does)" : done);
                     }
                     if (!arg.equals("clean")) yield Result.text("usage: /sandbox clean | /sandbox backup");
                     String cleaned = harness.sandbox().clean(chatId);
@@ -578,7 +578,8 @@ public final class SlashCommands {
                 + "context strategy: " + harness.contextStrategy().kind().name().toLowerCase() + "\n"
                 + "context: ~" + used + " / " + budget + " tokens (" + (budget > 0 ? used * 100 / budget : 0) + "%)\n"
                 + "usage: " + usage(s) + "\n"
-                + "chats: " + harness.sessions().list(who.owner()).size();
+                + "chats: " + harness.sessions().list(who.owner()).size() + "\n"
+                + "sandbox: " + harness.sandbox().sandboxStatus(chatId);
     }
 
     private String help(Caller who) {

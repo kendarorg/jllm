@@ -48,11 +48,12 @@ class SettingsOverridesTest {
     }
 
     @Test
-    void sandboxFlagsSelectDockerDaemon() {
+    void sandboxFlagsSelectDocker() {
         HarnessSettings s = SettingsOverrides.applyToSettings(args("sandbox", "docker", "docker-image", "img:1",
-                "docker-mode", "daemon", "docker-remote-host", "tcp://h:2375"), HarnessSettings.empty());
+                "sandbox-scope", "user", "sandbox-profile", "hardened", "docker-remote-host", "tcp://h:2375"), HarnessSettings.empty());
         assertTrue(s.dockerSandbox());
-        assertTrue(s.dockerDaemon());
+        assertEquals("user", s.sandbox().docker().scope());
+        assertEquals("hardened", s.sandbox().docker().profile());
         assertEquals("img:1", s.sandbox().docker().image());
         assertEquals("tcp://h:2375", s.sandbox().docker().remoteHost());
         assertNull(s.sandbox().docker().remote(), "only the host was given");
@@ -66,7 +67,7 @@ class SettingsOverridesTest {
         assertThrows(IllegalArgumentException.class,
                 () -> SettingsOverrides.applyToSettings(args("sandbox", "vm"), HarnessSettings.empty()));
         assertThrows(IllegalArgumentException.class,
-                () -> SettingsOverrides.applyToSettings(args("docker-mode", "forever"), HarnessSettings.empty()));
+                () -> SettingsOverrides.applyToSettings(args("sandbox-scope", "forever"), HarnessSettings.empty()));
     }
 
     @Test

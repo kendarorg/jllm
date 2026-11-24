@@ -14,7 +14,8 @@ import org.kendar.llm.harness.HarnessConfig;
 import org.kendar.llm.harness.llm.ModelClient;
 import org.kendar.llm.harness.llm.ModelRequest;
 import org.kendar.llm.harness.llm.ModelResponse;
-import org.kendar.llm.harness.sandbox.ChatDirSandboxExecutor;
+import org.kendar.llm.harness.sandbox.ChatDirLayout;
+import org.kendar.llm.harness.sandbox.LocalSandboxExecutor;
 import org.kendar.llm.harness.session.InMemoryChatSessionStore;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
@@ -58,7 +59,7 @@ class WebSecurityFixesTest {
             }
         };
         harness = new AgentHarnessBuilder().modelClient(unused)
-                .sandbox(new ChatDirSandboxExecutor(HarnessConfig.defaults(), dir))
+                .sandbox(new LocalSandboxExecutor(new ChatDirLayout(dir)))
                 .sessionStore(new InMemoryChatSessionStore()).objectMapper(mapper).build();
         chats = MockMvcBuilders.standaloneSetup(TestUser.chatController(harness, mapper))
                 .setControllerAdvice(new ApiExceptionAdvice())

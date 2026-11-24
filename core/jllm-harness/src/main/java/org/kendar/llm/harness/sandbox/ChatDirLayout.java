@@ -1,22 +1,20 @@
 package org.kendar.llm.harness.sandbox;
 
-import org.kendar.llm.harness.HarnessConfig;
-
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
 /**
- * One self-contained sandbox per chat under a base directory X: {@code X/<chatId>} is the work dir and holds its own
- * {@code .jllm} (history, scratchpad, checkpoints). Deleting the chat deletes {@code X/<chatId>} entirely.
+ * One self-contained directory per chat under a base directory X: {@code X/<chatId>} is the work dir and holds its own
+ * {@code .jllm} (history, scratchpad, checkpoints). Deleting the chat deletes {@code X/<chatId>} entirely. The web
+ * layout.
  */
-public class ChatDirSandboxExecutor extends LocalDirSandboxExecutor {
+public class ChatDirLayout implements Layout {
 
     private final Path base;
 
-    public ChatDirSandboxExecutor(HarnessConfig config, Path base) {
-        super(config);
+    public ChatDirLayout(Path base) {
         this.base = base.toAbsolutePath().normalize();
     }
 
@@ -28,7 +26,7 @@ public class ChatDirSandboxExecutor extends LocalDirSandboxExecutor {
 
     @Override
     public Path workDir(String chatId) {
-        Path dir = resolveJailed(base.toString(), chatId);
+        Path dir = Layout.resolveJailed(base.toString(), chatId);
         try {
             Files.createDirectories(dir);
         } catch (IOException e) {
@@ -39,13 +37,13 @@ public class ChatDirSandboxExecutor extends LocalDirSandboxExecutor {
 
     /** {@code X/<chatId>/.jllm/history}: the per-agent history directories live below it. */
     public Path historyRoot(String chatId) {
-        return resolveJailed(base.toString(), chatId).resolve(".jllm").resolve("history");
+        return Layout.resolveJailed(base.toString(), chatId).resolve(".jllm").resolve("history");
     }
 
     @Override
     public Path scratchDir(String chatId, String agentId) {
-        Path dir = resolveJailed(resolveJailed(base.toString(), chatId).resolve(".jllm").resolve("scratchpad")
-                .toString(), agentId);
+        Path dir = Layout.resolveJailed(Layout.resolveJailed(base.toString(), chatId).resolve(".jllm")
+                .resolve("scratchpad").toString(), agentId);
         try {
             Files.createDirectories(dir);
         } catch (IOException e) {
@@ -56,7 +54,7 @@ public class ChatDirSandboxExecutor extends LocalDirSandboxExecutor {
 
     @Override
     public void deleteWorkDir(String chatId) {
-        Path dir = resolveJailed(base.toString(), chatId);
+        Path dir = Layout.resolveJailed(base.toString(), chatId);
         try {
             Links.deleteTree(dir); // junctions and symlinks are removed, never followed
         } catch (IOException e) {

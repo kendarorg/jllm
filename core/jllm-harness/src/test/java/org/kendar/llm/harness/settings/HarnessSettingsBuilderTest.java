@@ -17,7 +17,7 @@ class HarnessSettingsBuilderTest {
     private static final String FULL = "{\"mcpServers\":[{\"name\":\"s\",\"url\":\"http://x/mcp\"}],"
             + "\"instructionFiles\":[\"A.md\"],\"execution\":{\"maxParallel\":3,\"useContextStack\":false},"
             + "\"sandbox\":{\"tempDir\":\"/t\",\"timeoutSeconds\":9,\"backend\":\"docker\",\"docker\":{\"image\":\"i\","
-            + "\"mode\":\"daemon\"},\"outputLogMaxBytes\":7,\"shell\":\"sh\"},"
+            + "\"profile\":\"hardened\",\"scope\":\"user\",\"cleanup\":{\"idleMinutes\":5,\"action\":\"remove\"}},\"outputLogMaxBytes\":7,\"shell\":\"sh\"},"
             + "\"context\":{\"maxTokens\":5000,\"strategy\":\"mnemonic\",\"scope\":{\"previewChars\":4},"
             + "\"mnemonic\":{\"maskTrigger\":1},\"todos\":false},\"output\":{\"toolMaxChars\":11,\"validation\":\"strict\"},"
             + "\"smallModel\":true,\"permissions\":{\"deny\":[\"bash\\\\(rm.*\"]},\"chatRetentionLimit\":4,"
@@ -67,12 +67,12 @@ class HarnessSettingsBuilderTest {
 
     @Test
     void commandLineSettersKeepTheRestOfTheirSection() throws Exception {
-        HarnessSettings s = full().toBuilder().sandboxBackend("LOCAL").dockerImage("alpine").dockerMode("ONESHOT")
+        HarnessSettings s = full().toBuilder().sandboxBackend("LOCAL").dockerImage("alpine").dockerScope("USER")
                 .dockerRemote(true, null).maxTokens(1234).contextStrategy("compaction").build();
 
         assertEquals("local", s.sandbox().backend());
         assertEquals("alpine", s.sandbox().docker().image());
-        assertEquals("oneshot", s.sandbox().docker().mode());
+        assertEquals("user", s.sandbox().docker().scope());
         assertEquals(true, s.sandbox().docker().remote());
         assertEquals("/t", s.sandbox().tempDir());
         assertEquals(7L, s.sandbox().outputLogMaxBytes());
@@ -85,7 +85,7 @@ class HarnessSettingsBuilderTest {
     @Test
     void invalidCommandLineValuesAreRefused() {
         assertThrows(IllegalArgumentException.class, () -> HarnessSettings.builder().sandboxBackend("vm"));
-        assertThrows(IllegalArgumentException.class, () -> HarnessSettings.builder().dockerMode("x"));
+        assertThrows(IllegalArgumentException.class, () -> HarnessSettings.builder().dockerScope("x"));
         assertThrows(IllegalArgumentException.class, () -> HarnessSettings.builder().contextStrategy("magic"));
     }
 

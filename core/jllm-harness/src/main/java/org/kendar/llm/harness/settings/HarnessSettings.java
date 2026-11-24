@@ -199,15 +199,9 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
                 : PermissionRules.parse(permissions.deny(), permissions.ask(), permissions.allow());
     }
 
-    /** True when the settings select the docker backend. */
+    /** True when the settings select the docker backend: the container runner ({@code RemoteExecSandboxExecutor}). */
     public boolean dockerSandbox() {
         return sandbox != null && sandbox.backend() != null && sandbox.backend().strip().equalsIgnoreCase("docker");
-    }
-
-    /** True when the docker backend runs in daemon mode (long-running container). */
-    public boolean dockerDaemon() {
-        return dockerSandbox() && sandbox.docker() != null && sandbox.docker().mode() != null
-                && sandbox.docker().mode().strip().equalsIgnoreCase("daemon");
     }
 
     /** The scope strategy options: {@code defaults} with the {@code context.scope} settings on top. */

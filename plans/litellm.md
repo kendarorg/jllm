@@ -1,5 +1,7 @@
 # LiteLLM integration
 
+NO RETROCOMPATIBILITY
+
 ## Goal
 
 Per-user model limits (spend budget, RPM, TPM) enforced by a LiteLLM proxy, with one virtual key per JLLM user and

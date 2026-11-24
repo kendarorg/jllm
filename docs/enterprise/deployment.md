@@ -57,8 +57,10 @@ files and sessions in memory, so a restart signs everyone out). That fits one in
 
 ## Docker sandbox
 
-`oneshot` starts a container per command, `daemon` keeps one per chat and removes it with the chat, and `remote` runs
-the containers on another host and uploads each workspace. Settings and the daemon's security are in
+`sandbox.backend: docker` keeps one long-running container per chat (`chat` scope) or per user (`user` scope, admin
+only) with an exec daemon inside; `hardened` profile for temporary users (no network, limits). `remote` runs the
+containers on another host and uploads each workspace. Idle containers are stopped, backed up and removed by the role's
+clean-up policy. Settings, the daemon's security and what is not yet in the admin UI are in
 [SANDBOX](../guides/sandbox.md).
 
 ## Build

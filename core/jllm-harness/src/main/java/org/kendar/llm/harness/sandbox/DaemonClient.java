@@ -33,6 +33,8 @@ public final class DaemonClient {
 
     /** Header carrying the per-container token. */
     public static final String TOKEN_HEADER = "X-Jllm-Token";
+    /** Header naming the chat whose directory is the file root of the request (user-scope containers). */
+    public static final String CHAT_HEADER = "X-Jllm-Chat";
 
     public record Response(int status, byte[] body) {
         public String text() {
@@ -46,6 +48,7 @@ public final class DaemonClient {
     private final HttpClient http;
     private final String base;
     private final String token;
+    private final String chat;
 
     /**
      * @param hostSpec where the published port is reachable: 127.0.0.1, the address of a remote docker host, either
@@ -57,9 +60,22 @@ public final class DaemonClient {
     public DaemonClient(HarnessConfig.Docker docker, String hostSpec, int port, String token) {
         this.base = baseUrl(hostSpec, port, docker.allowInsecure());
         this.token = token;
+        this.chat = null;
         HttpClient.Builder hb = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5));
         if (base.startsWith("https://")) hb.sslContext(sslContext(docker.trustStore(), docker.trustStorePassword()));
         this.http = hb.build();
+    }
+
+    private DaemonClient(DaemonClient from, String chat) {
+        this.http = from.http;
+        this.base = from.base;
+        this.token = from.token;
+        this.chat = chat;
+    }
+
+    /** The same daemon, with the file roots of {@code chatId}: {@code /workspace/<chatId>} and its scratchpad. */
+    public DaemonClient forChat(String chatId) {
+        return new DaemonClient(this, chatId);
     }
 
     /** Builds {@code scheme://host:port}; refuses (or warns about) cleartext http to a non-loopback host. */
@@ -126,6 +142,7 @@ public final class DaemonClient {
         }
         HttpRequest.Builder b = HttpRequest.newBuilder(URI.create(url.toString())).timeout(timeout)
                 .header(TOKEN_HEADER, token);
+        if (chat != null) b.header(CHAT_HEADER, chat);
         HttpRequest.BodyPublisher pub = body == null ? HttpRequest.BodyPublishers.noBody()
                 : HttpRequest.BodyPublishers.ofByteArray(body);
         if (contentType != null) b.header("Content-Type", contentType);

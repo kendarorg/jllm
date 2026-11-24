@@ -1,5 +1,7 @@
 # Backup / restore of web settings, with maintenance mode
 
+NO RETROCOMPATIBILITY
+
 ## Goal
 
 An admin exports the configuration of a JLLM web installation as one archive and restores it later (same or another

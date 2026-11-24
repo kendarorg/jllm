@@ -32,7 +32,7 @@ class RemoteExecSandboxExecutorTest {
     @TempDir
     Path tmp;
     FakeDocker docker;
-    HarnessConfig config = HarnessConfig.defaults().withDockerMode("daemon");
+    HarnessConfig config = HarnessConfig.defaults();
 
     @BeforeEach
     void setUp() throws Exception {
@@ -59,13 +59,25 @@ class RemoteExecSandboxExecutorTest {
     }
 
     private RemoteExecSandboxExecutor cli(Path project) {
-        return new RemoteExecSandboxExecutor(config, docker, null,
-                new CwdSandboxExecutor(config, project), RemoteExecSandboxExecutor.Kind.CLI, project);
+        return new RemoteExecSandboxExecutor(config, docker, null, new CwdLayout(config, project),
+                RemoteExecSandboxExecutor.Kind.CLI, project, null, null, null);
     }
 
     private RemoteExecSandboxExecutor web(Path base) {
-        return new RemoteExecSandboxExecutor(config, docker, null,
-                new ChatDirSandboxExecutor(config, base), RemoteExecSandboxExecutor.Kind.WEB, base);
+        return new RemoteExecSandboxExecutor(config, docker, null, new ChatDirLayout(base),
+                RemoteExecSandboxExecutor.Kind.WEB, base, null, null, null);
+    }
+
+    private RemoteExecSandboxExecutor web(Path base, java.util.function.Function<String, String> userOf,
+                                          java.util.function.Function<String, SandboxPolicy> policy,
+                                          BackupRecordStore store) {
+        return new RemoteExecSandboxExecutor(config, docker, null, new ChatDirLayout(base),
+                RemoteExecSandboxExecutor.Kind.WEB, base, userOf, policy, store);
+    }
+
+    private RemoteExecSandboxExecutor withHost(String host, Path dir) {
+        return new RemoteExecSandboxExecutor(config, docker, host, new CwdLayout(config, dir),
+                RemoteExecSandboxExecutor.Kind.CLI, dir, null, null, null);
     }
 
     private static ToolContext ctx(RemoteExecSandboxExecutor box, String chat, boolean plan) {
@@ -230,8 +242,7 @@ class RemoteExecSandboxExecutorTest {
 
     @Test
     void remoteDockerHostIsRefused() {
-        RemoteExecSandboxExecutor box = new RemoteExecSandboxExecutor(config, docker, "tcp://10.1.2.3:2375",
-                new CwdSandboxExecutor(config, tmp), RemoteExecSandboxExecutor.Kind.CLI, tmp);
+        RemoteExecSandboxExecutor box = withHost("tcp://10.1.2.3:2375", tmp);
         SandboxUnavailableException e = assertThrows(SandboxUnavailableException.class,
                 () -> box.execute("c1", "true", Duration.ofSeconds(5)));
         assertTrue(e.getMessage().contains("remote"), e.getMessage());
@@ -261,9 +272,7 @@ class RemoteExecSandboxExecutorTest {
     }
 
     private void remoteConfig() {
-        var d = config.sandbox().docker();
-        config = config.withDocker(new HarnessConfig.Docker(d.binary(), d.image(), d.memory(), d.cpus(), d.pidsLimit(),
-                d.user(), d.network(), "daemon", true, "127.0.0.1", true, "", ""));
+        config = config.withDockerRemote(true, "127.0.0.1");
     }
 
     @Test
@@ -273,8 +282,7 @@ class RemoteExecSandboxExecutorTest {
         Files.writeString(project.resolve("file.txt"), "local\n");
         Files.createDirectories(project.resolve(".jllm/scratchpad/main"));
         Files.writeString(project.resolve(".jllm/scratchpad/main/tmp.txt"), "scratch");
-        RemoteExecSandboxExecutor box = new RemoteExecSandboxExecutor(config, docker, "tcp://10.9.9.9:2375",
-                new CwdSandboxExecutor(config, project), RemoteExecSandboxExecutor.Kind.CLI, project);
+        RemoteExecSandboxExecutor box = withHost("tcp://10.9.9.9:2375", project);
         ExecutionResult r = box.execute("c1", "cat file.txt; ls .jllm/scratchpad 2>&1 | head -1", Duration.ofSeconds(30));
         assertTrue(r.stdout().startsWith("local"), r.stdout());
         assertFalse(r.stdout().contains("tmp.txt"), "scratchpad is not uploaded");
@@ -293,8 +301,7 @@ class RemoteExecSandboxExecutorTest {
     }
 
     private RemoteExecSandboxExecutor remoteCli(Path project) {
-        return new RemoteExecSandboxExecutor(config, docker, "tcp://10.9.9.9:2375",
-                new CwdSandboxExecutor(config, project), RemoteExecSandboxExecutor.Kind.CLI, project);
+        return withHost("tcp://10.9.9.9:2375", project);
     }
 
     @Test
@@ -360,8 +367,7 @@ class RemoteExecSandboxExecutorTest {
 
     @Test
     void remoteDockerNeedsTheSetting() {
-        RemoteExecSandboxExecutor box = new RemoteExecSandboxExecutor(config, docker, "tcp://10.1.2.3:2375",
-                new CwdSandboxExecutor(config, tmp), RemoteExecSandboxExecutor.Kind.CLI, tmp);
+        RemoteExecSandboxExecutor box = withHost("tcp://10.1.2.3:2375", tmp);
         SandboxUnavailableException e = assertThrows(SandboxUnavailableException.class,
                 () -> box.execute("c1", "true", Duration.ofSeconds(5)));
         assertTrue(e.getMessage().contains("--docker-remote"), e.getMessage());
@@ -408,6 +414,7 @@ class RemoteExecSandboxExecutorTest {
         String labels = "";
         String env = "";
         boolean exists;
+        final java.util.Set<String> volumes = new java.util.HashSet<>();
         int port;
         Process daemon;
         String agentDir;
@@ -454,6 +461,9 @@ class RemoteExecSandboxExecutorTest {
                     exists = true;
                     for (int i = 0; i < argv.size(); i++) {
                         String a = argv.get(i);
+                        if (a.endsWith(":/workspace") && !a.startsWith("/") && !a.matches("[A-Za-z]:.*")) {
+                            volumes.add(a.substring(0, a.length() - ":/workspace".length()));
+                        }
                         if (a.startsWith("JLLM_TOKEN=")) token = a.substring("JLLM_TOKEN=".length());
                         if (a.startsWith("jllm.config=")) labels = a.substring("jllm.config=".length());
                         if (a.endsWith(":/agent:ro")) agentDir = a.substring(0, a.length() - ":/agent:ro".length());
@@ -470,9 +480,23 @@ class RemoteExecSandboxExecutorTest {
                     return new Result("", "", 0, false);
                 case "ps":
                     return new Result(listing, "", 0, false);
+                case "volume":
+                    if (argv.get(2).equals("inspect")) {
+                        return volumes.contains(argv.get(3)) ? new Result("[]", "", 0, false)
+                                : new Result("", "No such volume", 1, false);
+                    }
+                    if (argv.get(2).equals("rm")) volumes.remove(argv.get(argv.size() - 1));
+                    return new Result("", "", 0, false);
                 default:
                     return new Result("", "", 0, false);
             }
+        }
+
+        /** {@code docker exec -i}: a process whose streams are a connection to the daemon (the exec tunnel). */
+        @Override
+        public Process start(List<String> argv) throws IOException {
+            calls.add(argv);
+            return new SocketProcess(new java.net.Socket("127.0.0.1", port));
         }
 
         private String unpackAgent(String b64) {
@@ -500,6 +524,57 @@ class RemoteExecSandboxExecutorTest {
             pb.environment().put("JLLM_ALIAS", "/workspace");
             pb.redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.DISCARD);
             daemon = pb.start();
+        }
+    }
+
+    /** A {@link Process} that is a TCP connection: what {@code docker exec -i ... relay} amounts to. */
+    static final class SocketProcess extends Process {
+        private final java.net.Socket socket;
+
+        SocketProcess(java.net.Socket socket) {
+            this.socket = socket;
+        }
+
+        @Override
+        public java.io.OutputStream getOutputStream() {
+            try {
+                return socket.getOutputStream();
+            } catch (IOException e) {
+                throw new java.io.UncheckedIOException(e);
+            }
+        }
+
+        @Override
+        public java.io.InputStream getInputStream() {
+            try {
+                return socket.getInputStream();
+            } catch (IOException e) {
+                throw new java.io.UncheckedIOException(e);
+            }
+        }
+
+        @Override
+        public java.io.InputStream getErrorStream() {
+            return java.io.InputStream.nullInputStream();
+        }
+
+        @Override
+        public int waitFor() {
+            return 0;
+        }
+
+        @Override
+        public int exitValue() {
+            return 0;
+        }
+
+        @Override
+        public void destroy() {
+            try {
+                socket.close();
+            } catch (IOException ignored) {
+                // already closed
+            }
         }
     }
 }

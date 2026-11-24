@@ -83,7 +83,7 @@ flowchart TD
     A["settings.applyTo(config)"] --> B{"maxParallel != -1?"}
     B -->|yes, default| C["wrap modelClient in LimitedModelClient(1)"]
     B -->|no| D
-    C --> D["sandbox = given or LocalDirSandboxExecutor"]
+    C --> D["sandbox = given or LocalSandboxExecutor.of(config)"]
     D --> E["collect tools: Files + Shell + Web (unless withoutStandardTools) + injected + SkillTool"]
     E --> F["HarnessToolRegistry (dup names rejected, sorted by group,name)"]
     F --> G["ExternalSources: discover MCP + REST tools, setSource()"]
@@ -96,7 +96,7 @@ flowchart TD
     M --> N["AgentHarness + plugin commands registered"]
 ```
 
-`jllm-cli` Main additionally wires `CwdSandboxExecutor` (workdir = project dir, scratch under `.jllm/scratchpad`) and `FileHistory*` stores (`.jllm/history/<chatId>/<agentId>/messages.jsonl`).
+`jllm-cli` Main additionally wires `CwdLayout` through `SandboxFactory` (workdir = project dir, scratch under `.jllm/scratchpad`) and `FileHistory*` stores (`.jllm/history/<chatId>/<agentId>/messages.jsonl`).
 
 ## 3. One user turn, end to end
 
@@ -484,12 +484,16 @@ not replayed them and gets the final `text` instead.
 flowchart LR
     BASH["bash tool"] --> SE["SandboxExecutor.execute(chatId, runDir, readOnlyDir, cmd, timeout)"]
     FT["file tools"] --> JAIL["path jail: workDir(chatId)<br/>(PLAN: scratch only)"]
-    SE --> L["LocalDirSandboxExecutor<br/>no isolation, process as user"]
-    SE --> CW["CwdSandboxExecutor<br/>workDir = project dir<br/>scratch = .jllm/scratchpad"]
-    SE --> DK["DockerSandboxExecutor<br/>docker run: --network none, memory/cpus/pids limits,<br/>workdir mounted, read-only in PLAN"]
+    SF["SandboxFactory.create(settings, config, layout, kind)"] --> SE
+    SE --> L["LocalSandboxExecutor<br/>no isolation, process as user<br/>(testing, trusted single user)"]
+    SE --> RX["RemoteExecSandboxExecutor<br/>long-running container + HTTP daemon<br/>profile standard|hardened, scope chat|user"]
+    LAY["Layout: DirLayout, CwdLayout (CLI), ChatDirLayout (web)<br/>work dir, scratch, history"] --> L
+    LAY --> RX
+    RX --> CR["ContainerRegistry<br/>get-or-start, idle sweep, backups"]
 ```
 
-Plan mode runs the shell from scratch; only Docker can enforce that the workdir is not written.
+Plan mode runs the shell from scratch; it is advisory for `bash` on both runners (the file tools refuse writes outside
+scratch). `run_js` is always present next to the runner.
 
 ## 13. Slash commands (no agent loop)
 

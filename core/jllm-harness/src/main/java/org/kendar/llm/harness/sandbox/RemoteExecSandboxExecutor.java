@@ -1,34 +1,32 @@
 package org.kendar.llm.harness.sandbox;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.kendar.llm.harness.HarnessConfig;
-import org.kendar.llm.harness.tools.ExternalLinks;
+import org.kendar.llm.harness.sandbox.ContainerRegistry.Container;
+import org.kendar.llm.harness.sandbox.WorkspaceBackups.Backup;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Predicate;
 
 /**
- * Docker backend with a long-running container and a small HTTP daemon inside ({@code sandbox-agent.py}). Every tool
- * (bash and the file tools) runs through the daemon, so files, installed packages and background processes persist
+ * The container runner: a long-running container with a small HTTP daemon inside ({@code sandbox-agent.py}). Every
+ * tool (bash and the file tools) runs through the daemon, so files, installed packages and background processes persist
  * between calls and a command does not pay container startup.
  * <p>
- * Layout: {@link Kind#CLI} keeps one container per startup directory, with that directory bind-mounted at
- * {@code /workspace}; {@link Kind#WEB} has one container per chat with {@code /workspace} on an anonymous volume that
- * is not on the host. The directory layout on the host (history, sessions) comes from the wrapped
- * {@link LocalDirSandboxExecutor}. The daemon listens on {@code 127.0.0.1} only (published port) and every request
+ * Containers come from a {@link ContainerRegistry}, keyed by scope: {@code chat} (one container per chat, work dir
+ * {@code /workspace}) or {@code user} (one container per user, work dir {@code /workspace/<chatId>}). The
+ * {@code standard} profile is the container with the limits of the configuration; the {@code hardened} profile adds no
+ * network by default (the daemon is then reached through an {@link ExecTunnel}). {@link Kind#CLI} bind-mounts the
+ * project at {@code /workspace}; {@link Kind#WEB} uses a volume. The directory layout on the host (history, sessions)
+ * comes from the {@link Layout}. The daemon listens on {@code 127.0.0.1} only (published port) and every request
  * carries a per-container token; see docs/guides/sandbox.md.
  */
 public class RemoteExecSandboxExecutor implements SandboxExecutor {
@@ -42,65 +40,115 @@ public class RemoteExecSandboxExecutor implements SandboxExecutor {
         }
     }
 
-    /** Work directory in the container. */
+    /** Work directory in the container ({@code chat} scope and CLI). */
     public static final String WORKSPACE = "/workspace";
-    /** Scratchpad in the container; each agent has a directory below it. */
+    /** Scratchpad in the container ({@code chat} scope and CLI); each agent has a directory below it. */
     public static final String SCRATCHPAD = "/workspace/.jllm/scratchpad";
     static final int DAEMON_PORT = 8080;
-    private static final String AGENT_RESOURCE = "sandbox-agent.py";
-    private static final Duration CONTROL_TIMEOUT = Duration.ofSeconds(60);
-    private static final Duration START_TIMEOUT = Duration.ofSeconds(60);
-    private static final Duration POLL = Duration.ofSeconds(20);
-    private static final Duration TRANSFER_TIMEOUT = Duration.ofMinutes(10);
-    private static final ObjectMapper JSON = new ObjectMapper();
     private static final Logger log = LoggerFactory.getLogger(RemoteExecSandboxExecutor.class);
 
     private final HarnessConfig config;
-    private final DockerCommandRunner runner;
-    private final String dockerHost;
-    private final LocalDirSandboxExecutor layout;
+    private final Layout layout;
     private final Kind kind;
     private final Path startupDir;
-    private final Map<String, Container> containers = new ConcurrentHashMap<>();
-    private final Map<String, Object> locks = new ConcurrentHashMap<>();
+    private final LocalSandboxExecutor local;
+    private final ContainerRegistry registry;
+    private final WorkspaceBackups backups;
+    private final Function<String, String> userOf;
+    private final Function<String, SandboxPolicy> policyOf;
     private volatile Consumer<String> warn = log::warn;
-    private final java.util.Set<String> localChats = ConcurrentHashMap.newKeySet();
-    private volatile boolean verified;
+    private final Set<String> localChats = ConcurrentHashMap.newKeySet();
     private volatile long logLimit = TailCapture.DEFAULT_LOG_LIMIT;
-    /** The endpoint of the current docker context when DOCKER_HOST is unset; null until read. */
-    private volatile String contextHost;
 
-    private record Container(String name, DaemonClient client) {
-    }
-
-    /** What a backup did; {@code ok} false when the container's files may not be safe on the host. */
-    private record Backup(boolean ok, String message) {
+    /** As the long form with the docker host of this process, no users, no per-user policy and file backup records. */
+    public RemoteExecSandboxExecutor(HarnessConfig config, DockerCommandRunner runner, Layout layout, Kind kind,
+                                     Path startupDir) {
+        this(config, runner, System.getenv("DOCKER_HOST"), layout, kind, startupDir, null, null, null);
     }
 
     /**
-     * @param layout     directory layout on the host (a {@link CwdSandboxExecutor} for the CLI, a
-     *                   {@link ChatDirSandboxExecutor} for the web)
+     * @param dockerHost the DOCKER_HOST of this process (decides local or remote docker); null: the docker context
+     * @param layout     directory layout on the host (a {@link CwdLayout} for the CLI, a {@link ChatDirLayout} for the web)
      * @param startupDir CLI: the directory mounted at {@code /workspace}; ignored for the web
+     * @param userOf     chat id to user id (the key of a {@code user}-scope container); null: no users
+     * @param policyOf   chat id to the policy of its user (profile, scope, limits, docker host, clean-up); null: none
+     * @param store      where the backup records are kept; null: files next to the tarballs
      */
-    public RemoteExecSandboxExecutor(HarnessConfig config, DockerCommandRunner runner, LocalDirSandboxExecutor layout,
-                                     Kind kind, Path startupDir) {
-        this(config, runner, System.getenv("DOCKER_HOST"), layout, kind, startupDir);
-    }
-
-    RemoteExecSandboxExecutor(HarnessConfig config, DockerCommandRunner runner, String dockerHost,
-                              LocalDirSandboxExecutor layout, Kind kind, Path startupDir) {
+    public RemoteExecSandboxExecutor(HarnessConfig config, DockerCommandRunner runner, String dockerHost, Layout layout,
+                                     Kind kind, Path startupDir, Function<String, String> userOf,
+                                     Function<String, SandboxPolicy> policyOf, BackupRecordStore store) {
         this.config = config;
-        this.runner = runner;
-        this.dockerHost = dockerHost;
         this.layout = layout;
         this.kind = kind;
         this.startupDir = startupDir == null ? layout.location() : startupDir.toAbsolutePath().normalize();
+        this.local = new LocalSandboxExecutor(layout);
+        this.userOf = userOf;
+        this.policyOf = policyOf;
+        this.backups = new WorkspaceBackups(layout, kind, this.startupDir, store);
+        this.registry = new ContainerRegistry(config, runner, dockerHost, kind, this.startupDir, backups,
+                s -> this.warn.accept(s));
     }
 
     /** Where warnings go (default: the log); the CLI prints them. */
     public RemoteExecSandboxExecutor onWarning(Consumer<String> warn) {
         this.warn = warn;
         return this;
+    }
+
+    // ── placement ─────────────────────────────────────────────────────────────
+
+    private boolean remote() {
+        return config.sandbox().docker().remote();
+    }
+
+    private String projectHash() {
+        return Placement.hash(startupDir.toString()).substring(0, 12);
+    }
+
+    static String containerName(Kind kind, String owner) {
+        return "jllm-" + kind.label() + "-" + owner;
+    }
+
+    /** Settings, docker host and container identity of the chat, from the configuration and the policy of its user. */
+    Placement placement(String chatId) {
+        SandboxPolicy pol = policyOf == null ? null : policyOf.apply(chatId);
+        if (pol == null) pol = SandboxPolicy.none();
+        HarnessConfig.Docker d = pol.over(config.sandbox().docker());
+        String userId = userOf == null ? null : userOf.apply(chatId);
+        boolean user = d.userScope();
+        if (kind == Kind.WEB) {
+            if (user && userId == null) {
+                warn.accept("Chat " + chatId + " has no user: its container is per chat instead of per user.");
+                user = false;
+            }
+            if (user) {
+                String key = Placement.safe(userId);
+                return new Placement(d, pol.dockerHost(), key, containerName(kind, "user-" + key), "jllm-" + key,
+                        null, userId, true);
+            }
+            return new Placement(d, pol.dockerHost(), chatId, containerName(kind, chatId), null, null, userId, false);
+        }
+        String h = projectHash();
+        String key = user ? h : h + "-" + Placement.safe(chatId);
+        return new Placement(d, pol.dockerHost(), key, containerName(kind, key), null, h, userId, user);
+    }
+
+    private static boolean perChatDirs(Placement p, Kind kind) {
+        return kind == Kind.WEB && p.userScope();
+    }
+
+    private String workspace(Placement p, String chatId) {
+        return perChatDirs(p, kind) ? WORKSPACE + "/" + chatId : WORKSPACE;
+    }
+
+    private String scratchpad(Placement p, String chatId) {
+        return workspace(p, chatId) + "/.jllm/scratchpad";
+    }
+
+    private DaemonClient clientFor(String chatId) throws IOException {
+        Placement p = placement(chatId);
+        Container c = registry.acquire(p);
+        return perChatDirs(p, kind) ? c.client.forChat(chatId) : c.client;
     }
 
     // ── layout ────────────────────────────────────────────────────────────────
@@ -110,7 +158,6 @@ public class RemoteExecSandboxExecutor implements SandboxExecutor {
         return layout.location();
     }
 
-    /** The work dir inside the container (display only; the file tools go through {@link #files}). */
     @Override
     public boolean allowLocalFallback(String chatId) {
         if (!config.sandbox().localDirSandboxAllowed()) return false;
@@ -119,25 +166,19 @@ public class RemoteExecSandboxExecutor implements SandboxExecutor {
     }
 
     @Override
-    public void environmentWhitelist(java.util.List<String> patterns) {
-        layout.environmentWhitelist(patterns); // only the local fallback runs commands on the host
+    public void environmentWhitelist(List<String> patterns) {
+        local.environmentWhitelist(patterns); // only the local fallback runs commands on the host
     }
 
     @Override
     public void outputLogLimit(long maxBytes) {
         this.logLimit = maxBytes;
-        layout.outputLogLimit(maxBytes);
+        local.outputLogLimit(maxBytes);
     }
 
-    /** DOCKER_HOST, or when it is unset the endpoint of the current docker context (cached once read). */
-    private String effectiveHost() {
-        if (dockerHost != null && !dockerHost.isBlank()) return dockerHost;
-        String h = contextHost;
-        if (h == null) {
-            h = DockerSandboxExecutor.contextHost(runner, config.sandbox().docker().binary());
-            if (h != null) contextHost = h;
-        }
-        return h == null || h.isEmpty() ? null : h;
+    @Override
+    public void shell(LocalShell shell) {
+        local.shell(shell); // only the local fallback runs commands on the host
     }
 
     @Override
@@ -159,7 +200,7 @@ public class RemoteExecSandboxExecutor implements SandboxExecutor {
     public Path workDir(String chatId) {
         if (localFallbackActive(chatId)) return layout.workDir(chatId);
         if (kind == Kind.WEB) layout.workDir(chatId); // host directory holding the chat's history
-        return Path.of(WORKSPACE);
+        return Path.of(workspace(placement(chatId), chatId));
     }
 
     @Override
@@ -168,7 +209,7 @@ public class RemoteExecSandboxExecutor implements SandboxExecutor {
         if (agentId == null || !agentId.matches("[A-Za-z0-9._-]{1,64}") || agentId.contains("..")) {
             throw new IllegalArgumentException("Invalid agentId");
         }
-        return Path.of(SCRATCHPAD, agentId);
+        return Path.of(scratchpad(placement(chatId), chatId), agentId);
     }
 
     @Override
@@ -186,266 +227,79 @@ public class RemoteExecSandboxExecutor implements SandboxExecutor {
 
     @Override
     public String shellDescription() {
-        return "Runs sh -c (POSIX sh, not bash) in a long-running Linux container ("
-                + config.sandbox().docker().image() + ") with the working directory at " + WORKSPACE
+        HarnessConfig.Docker d = config.sandbox().docker();
+        boolean none = d.hardened() && !"default".equalsIgnoreCase(d.network());
+        return "Runs sh -c (POSIX sh, not bash) in a long-running Linux container (" + d.image()
+                + ") with the working directory at " + WORKSPACE
                 + ". Files and installed tools persist between commands; each command is a fresh shell, so cd and "
                 + "exported variables do not carry over. Background jobs a command starts (cmd &) are killed when "
                 + "it ends: start a server and use it within the same command. The file tools work in the same "
-                + "container. Network: docker's default.";
+                + "container. Network: " + (none ? "none." : "docker's default.");
     }
 
     @Override
     public FileBackend files(String chatId, String agentId) {
         if (localFallbackActive(chatId)) return null;
-        return new RemoteFileBackend(() -> client(chatId), WORKSPACE, SCRATCHPAD, agentId);
+        Placement p = placement(chatId);
+        return new RemoteFileBackend(() -> clientFor(chatId), workspace(p, chatId), scratchpad(p, chatId), agentId);
+    }
+
+    @Override
+    public String sandboxStatus(String chatId) {
+        if (localFallbackActive(chatId)) return "runner: local fallback (no isolation, commands run on this machine)";
+        Placement p = placement(chatId);
+        return "runner: container (" + p.docker().image() + ") | profile: " + (p.docker().hardened() ? "hardened" : "standard")
+                + (p.noNetwork() ? ", no network" : "") + " | scope: " + (p.userScope() ? "user" : "chat")
+                + " | container: " + p.name() + " (key " + p.key() + ")"
+                + " | work dir: " + workspace(p, chatId) + " | run_js storage: host";
     }
 
     // ── commands ──────────────────────────────────────────────────────────────
 
     @Override
     public ExecutionResult execute(String chatId, String command, Duration timeout) {
-        if (localFallbackActive(chatId)) return layout.execute(chatId, command, timeout);
-        return exec(chatId, WORKSPACE, SCRATCHPAD + "/main", command, timeout);
+        if (localFallbackActive(chatId)) return local.execute(chatId, command, timeout);
+        Placement p = placement(chatId);
+        return exec(chatId, p, workspace(p, chatId), scratchpad(p, chatId) + "/main", command, timeout);
     }
 
     @Override
     public ExecutionResult execute(String chatId, Path runDir, Path readOnlyDir, String command, Duration timeout) {
-        if (localFallbackActive(chatId)) return layout.execute(chatId, runDir, readOnlyDir, command, timeout);
-        return exec(chatId, posix(runDir), posix(runDir), command, timeout);
+        if (localFallbackActive(chatId)) return local.execute(chatId, runDir, readOnlyDir, command, timeout);
+        return exec(chatId, placement(chatId), posix(runDir), posix(runDir), command, timeout);
     }
 
     @Override
     public ExecutionResult execute(String chatId, Path scratchDir, boolean planMode, String command, Duration timeout) {
-        if (localFallbackActive(chatId)) return layout.execute(chatId, scratchDir, planMode, command, timeout);
-        String scratch = scratchDir == null ? SCRATCHPAD + "/main" : posix(scratchDir);
-        return exec(chatId, planMode ? scratch : WORKSPACE, scratch, command, timeout);
+        if (localFallbackActive(chatId)) return local.execute(chatId, scratchDir, planMode, command, timeout);
+        Placement p = placement(chatId);
+        String scratch = scratchDir == null ? scratchpad(p, chatId) + "/main" : posix(scratchDir);
+        return exec(chatId, p, planMode ? scratch : workspace(p, chatId), scratch, command, timeout);
     }
 
-    private ExecutionResult exec(String chatId, String cwd, String logDir, String command, Duration timeout) {
-        String id = null;
-        DaemonClient c = null;
+    private ExecutionResult exec(String chatId, Placement p, String cwd, String logDir, String command, Duration timeout) {
         try {
-            c = client(chatId);
-            Map<String, Object> body = Map.of("command", command, "cwd", cwd, "logDir", logDir,
-                    "timeoutSeconds", Math.max(1, timeout.toSeconds()), "logMaxBytes", Math.max(0, logLimit));
-            DaemonClient.Response r = c.call("POST", "/exec", null, JSON.writeValueAsBytes(body),
-                    "application/json", CONTROL_TIMEOUT);
-            if (r.status() != 200) return new ExecutionResult("", "Sandbox error " + r.status() + ": " + r.text(), -1, false);
-            id = JSON.readTree(r.body()).path("id").asText();
-            long deadline = System.nanoTime() + timeout.plusSeconds(60).toNanos();
-            while (true) {
-                DaemonClient.Response p = c.call("GET", "/exec/" + id, Map.of("wait", String.valueOf(POLL.toSeconds())),
-                        null, null, POLL.plusSeconds(20));
-                if (p.status() != 200) return new ExecutionResult("", "Sandbox error " + p.status() + ": " + p.text(), -1, false);
-                JsonNode n = JSON.readTree(p.body());
-                if (!n.path("running").asBoolean(false)) {
-                    String logPath = n.path("logPath").isNull() ? null : n.path("logPath").asText(null);
-                    return new ExecutionResult(n.path("stdout").asText(""), "", n.path("exitCode").asInt(-1),
-                            n.path("timedOut").asBoolean(false), n.path("omittedLines").asLong(0),
-                            logPath == null || logPath.isEmpty() ? null : Path.of(logPath));
-                }
-                if (System.nanoTime() > deadline) return new ExecutionResult("", "Sandbox command did not finish", -1, true);
-            }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return new ExecutionResult("", "Interrupted", -1, false);
+            Container c = registry.acquire(p);
+            return DaemonExec.run(c.client, command, cwd, logDir, timeout, logLimit);
         } catch (IOException e) {
-            containers.remove(owner(chatId)); // the daemon may be gone: check the container again next time
+            registry.forget(p.key()); // the daemon may be gone: check the container again next time
             return new ExecutionResult("", "Sandbox unavailable: " + e.getMessage(), 127, false);
-        } finally {
-            if (id != null && c != null) release(c, id);
         }
     }
 
-    /** Kills (if still running) and forgets a command; the container stays up. */
-    private static void release(DaemonClient c, String id) {
-        boolean interrupted = Thread.interrupted();
-        try {
-            c.call("DELETE", "/exec/" + id, null, null, null, CONTROL_TIMEOUT);
-        } catch (InterruptedException e) {
-            interrupted = true;
-        } catch (IOException ignored) {
-            // daemon gone: nothing to release
-        } finally {
-            if (interrupted) Thread.currentThread().interrupt();
-        }
-    }
+    // ── backup ────────────────────────────────────────────────────────────────
 
-    // ── container lifecycle ───────────────────────────────────────────────────
-
-    private String owner(String chatId) {
-        return kind == Kind.WEB ? chatId : hash(startupDir.toString()).substring(0, 12);
-    }
-
-    static String containerName(Kind kind, String owner) {
-        return "jllm-" + kind.label() + "-" + owner;
-    }
-
-    private DaemonClient client(String chatId) throws IOException {
-        String owner = owner(chatId);
-        Container c = containers.get(owner);
-        if (c != null) return c.client();
-        synchronized (locks.computeIfAbsent(owner, k -> new Object())) {
-            c = containers.get(owner);
-            if (c == null) {
-                c = start(chatId, owner);
-                containers.put(owner, c);
-            }
-            return c.client();
-        }
-    }
-
-    private Container start(String chatId, String owner) throws IOException {
-        requireDocker();
-        String name = containerName(kind, owner);
-        String wanted = configHash();
-        JsonNode existing = inspect(name);
-        if (existing != null) {
-            String have = existing.path("Config").path("Labels").path("jllm.config").asText("");
-            if (have.equals(wanted)) {
-                if (!existing.path("State").path("Running").asBoolean(false)) docker("start", name);
-                String token = tokenOf(existing);
-                if (token != null) {
-                    Container c = new Container(name, new DaemonClient(config.sandbox().docker(), daemonHost(), hostPort(name), token));
-                    if (waitHealthy(c, name, Duration.ofSeconds(20))) return c;
-                }
-                warn.accept("Sandbox container " + name + " does not answer; recreating it.");
-            } else {
-                warn.accept("Sandbox container " + name + " was made with other settings (image, limits or mode); "
-                        + "recreating it. Background processes and tools installed in it are lost"
-                        + (kind == Kind.CLI ? "; project files are not (they are in the mounted directory)." : "."));
-            }
-            removeContainer(name);
-        }
-        return create(chatId, owner, name, wanted);
-    }
-
-    /** Remote docker: nothing can be bind-mounted, the daemon script travels in the environment. */
-    private boolean remote() {
-        return config.sandbox().docker().remote();
-    }
-
-    /** Where this machine reaches the published port: 127.0.0.1, or the remote docker host. */
-    private String daemonHost() {
-        String set = config.sandbox().docker().remoteHost();
-        if (set != null && !set.isBlank()) return set.strip();
-        String effective = remote() ? effectiveHost() : null;
-        if (remote() && DockerSandboxExecutor.isRemote(effective)) {
-            String h = java.net.URI.create(effective.strip()).getHost();
-            if (h != null) return h;
-            throw new SandboxUnavailableException("Cannot read a host from the docker endpoint " + effective
-                    + "; set sandbox.docker.remoteHost.");
-        }
-        return "127.0.0.1";
-    }
-
-    /** The zip with the workspace to start from: the project directory (CLI) or the last backup (web); null: none. */
-    private byte[] initialWorkspace(String chatId) throws IOException {
-        if (kind == Kind.CLI) return WorkspaceArchive.hasContent(startupDir) ? WorkspaceArchive.pack(startupDir) : null;
-        Path f = backupFile(chatId);
-        return Files.isRegularFile(f) ? Files.readAllBytes(f) : null;
-    }
-
-    private Path backupFile(String chatId) {
-        return layout.location().resolve(chatId).resolve(".jllm").resolve("workspace-backup.zip");
-    }
-
-    private Container create(String chatId, String owner, String name, String configHash) throws IOException {
-        Path agentDir = remote() ? null : installAgent();
-        String token = hash(UUID.randomUUID().toString());
-        HarnessConfig.Docker d = config.sandbox().docker();
-        List<String> a = new ArrayList<>(List.of("create", "--name", name,
-                "--label", "jllm=1", "--label", "jllm.kind=" + kind.label(), "--label", "jllm.owner=" + owner,
-                "--label", "jllm.config=" + configHash,
-                "--memory", d.memory(), "--cpus", d.cpus(), "--pids-limit", String.valueOf(d.pidsLimit()),
-                "--read-only", "--tmpfs", "/tmp:rw,size=64m",
-                "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
-                "--user", d.user(),
-                "-e", "HOME=/tmp", "-e", "JLLM_TOKEN=" + token, "-e", "JLLM_PORT=" + DAEMON_PORT,
-                "-e", "JLLM_BIND=0.0.0.0", "-e", "JLLM_WORKSPACE=" + WORKSPACE,
-                "-e", "JLLM_EXTERNAL_LINKS=" + externalLinks().settingValue(),
-                "-p", (remote() ? "0.0.0.0" : "127.0.0.1") + "::" + DAEMON_PORT));
-        if (remote()) {
-            a.addAll(List.of("-e", "JLLM_AGENT_B64=" + agentPayload()));
-        } else {
-            a.addAll(List.of("-v", DockerSandboxExecutor.mountSource(agentDir) + ":/agent:ro"));
-        }
-        if (kind == Kind.CLI && !remote()) {
-            a.addAll(List.of("-v", DockerSandboxExecutor.mountSource(startupDir) + ":" + WORKSPACE));
-        } else {
-            a.addAll(List.of("-v", WORKSPACE));
-        }
-        a.addAll(List.of("-w", WORKSPACE, d.image(), "python"));
-        if (remote()) {
-            a.addAll(List.of("-c", "import base64,zlib,os;exec(compile(zlib.decompress(base64.b64decode("
-                    + "os.environ['JLLM_AGENT_B64'])),'sandbox-agent.py','exec'),{'__name__':'__main__'})"));
-        } else {
-            a.add("/agent/" + AGENT_RESOURCE);
-        }
-        docker(a.toArray(String[]::new));
-        try {
-            if (kind == Kind.WEB || remote()) {
-                // a fresh volume is owned by root: hand it to the container user before the daemon starts
-                docker("run", "--rm", "-u", "0", "--cap-drop", "ALL", "--cap-add", "CHOWN",
-                        "--security-opt", "no-new-privileges", "--volumes-from", name, d.image(),
-                        "chown", d.user(), WORKSPACE);
-            }
-            docker("start", name);
-            Container c = new Container(name, new DaemonClient(config.sandbox().docker(), daemonHost(), hostPort(name), token));
-            if (!waitHealthy(c, name, START_TIMEOUT)) {
-                throw new IOException("The sandbox daemon in " + name + " did not become ready. "
-                        + "Does the image have python3 and sh? " + logsTail(name));
-            }
-            if (remote()) upload(c, chatId);
-            return c;
-        } catch (IOException | RuntimeException e) { // boundary: remove the container, rethrown unchanged
-            removeContainer(name);
-            throw e;
-        }
-    }
-
-    /** Sends the starting workspace (remote docker only) to a container that was just created. */
-    private void upload(Container c, String chatId) throws IOException {
-        byte[] zip = initialWorkspace(chatId);
-        if (zip == null) return;
-        log.info("Uploading the workspace ({} KB) to {}", zip.length / 1024, c.name());
-        try {
-            DaemonClient.Response r = c.client().call("POST", "/setup", null, zip, "application/zip", TRANSFER_TIMEOUT);
-            if (r.status() != 200) throw new IOException("Workspace upload failed: " + r.status() + " " + r.text());
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IOException("Interrupted", e);
-        }
-    }
-
-    /** Downloads the container's workspace into the project directory (CLI) or the chat's backup file (web). */
+    /**
+     * Downloads the container's workspace into the project directory (CLI, remote docker only) or the owner's tarball
+     * (web) and commits an image; null when nothing needs a backup (the project is mounted).
+     */
     @Override
     public String backup(String chatId) {
-        if (!remote()) return null;
-        return doBackup(chatId, containers.get(owner(chatId))).message();
-    }
-
-    private Backup doBackup(String chatId, Container c) {
-        if (c == null) return new Backup(false, "No running sandbox container to back up.");
-        try {
-            DaemonClient.Response r = c.client().call("GET", "/backup", null, null, null, TRANSFER_TIMEOUT);
-            if (r.status() != 200) return new Backup(false, "Backup failed: " + r.status() + " " + r.text());
-            if (kind == Kind.CLI) {
-                int files = WorkspaceArchive.unpack(r.body(), startupDir);
-                return new Backup(true, "Backed up " + files + " file(s) from " + c.name() + " into " + startupDir + ".");
-            }
-            Path f = backupFile(chatId);
-            Files.createDirectories(f.getParent());
-            Path tmp = Files.createTempFile(f.getParent(), "backup", ".tmp");
-            Files.write(tmp, r.body());
-            Files.move(tmp, f, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-            return new Backup(true, "Backed up " + r.body().length / 1024 + " KB from " + c.name() + " to " + f + ".");
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return new Backup(false, "Backup interrupted.");
-        } catch (IOException | RuntimeException e) { // boundary: reported to the caller as a failed backup
-            return new Backup(false, "Backup failed: " + e.getMessage());
-        }
+        if (kind == Kind.CLI && !remote()) return null;
+        Placement p = placement(chatId);
+        Container c = registry.current(p.key());
+        if (c == null) return "No running sandbox container to back up.";
+        return registry.backup(c).message();
     }
 
     /** How to get the files out of a container that was kept because its backup failed. */
@@ -456,316 +310,142 @@ public class RemoteExecSandboxExecutor implements SandboxExecutor {
                 + "--sandbox-clean removes it without a backup.";
     }
 
-    /**
-     * The client of an existing container this executor is not connected to yet (a new session): started if stopped,
-     * reached with the token in its environment. Null when it does not answer. Unlike {@link #start} it never
-     * recreates the container, whatever its settings.
-     */
-    private Container attach(String name, JsonNode existing) throws IOException {
-        String token = tokenOf(existing);
-        if (token == null) return null;
-        if (!existing.path("State").path("Running").asBoolean(false)) docker("start", name);
-        Container c = new Container(name, new DaemonClient(config.sandbox().docker(), daemonHost(), hostPort(name), token));
-        return waitHealthy(c, name, Duration.ofSeconds(20)) ? c : null;
-    }
-
-    private static String agentPayload() throws IOException {
-        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
-        try (java.util.zip.DeflaterOutputStream z = new java.util.zip.DeflaterOutputStream(out)) {
-            z.write(agentBytes());
-        }
-        return java.util.Base64.getEncoder().encodeToString(out.toByteArray());
-    }
-
-    private boolean waitHealthy(Container c, String name, Duration max) throws IOException {
-        long end = System.nanoTime() + max.toNanos();
-        while (System.nanoTime() < end) {
-            try {
-                if (c.client().call("GET", "/health", null, null, null, Duration.ofSeconds(3)).status() == 200) return true;
-            } catch (IOException ignored) {
-                // not listening yet
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new IOException("Interrupted", e);
-            }
-            JsonNode st = inspect(name);
-            if (st == null || !st.path("State").path("Running").asBoolean(false)) return false;
-            try {
-                Thread.sleep(200);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new IOException("Interrupted", e);
-            }
-        }
-        return false;
-    }
-
-    private String logsTail(String name) {
-        try {
-            DockerCommandRunner.Result r = runner.run(
-                    List.of(config.sandbox().docker().binary(), "logs", "--tail", "20", name), CONTROL_TIMEOUT);
-            return (r.stdout() + r.stderr()).strip();
-        } catch (IOException | InterruptedException e) {
-            if (e instanceof InterruptedException) Thread.currentThread().interrupt();
-            return "";
-        }
-    }
-
-    private int hostPort(String name) throws IOException {
-        String out = docker("port", name, DAEMON_PORT + "/tcp").strip();
-        for (String line : out.split("\\R")) {
-            int colon = line.lastIndexOf(':');
-            if (colon > 0) return Integer.parseInt(line.substring(colon + 1).strip());
-        }
-        throw new IOException("No published port for container " + name + ": " + out);
-    }
-
-    /** Inspect document of a container, or null when it does not exist. */
-    private JsonNode inspect(String name) throws IOException {
-        DockerCommandRunner.Result r = run("inspect", name);
-        if (r.exitCode() != 0) return null;
-        JsonNode n = JSON.readTree(r.stdout());
-        return n.isArray() && !n.isEmpty() ? n.get(0) : null;
-    }
-
-    private static String tokenOf(JsonNode inspect) {
-        for (JsonNode e : inspect.path("Config").path("Env")) {
-            String s = e.asText();
-            if (s.startsWith("JLLM_TOKEN=")) return s.substring("JLLM_TOKEN=".length());
-        }
-        return null;
-    }
-
-    private void removeContainer(String name) {
-        try {
-            run("rm", "-f", "-v", name);
-        } catch (IOException ignored) {
-            // already gone
-        }
-    }
-
-    private DockerCommandRunner.Result run(String... args) throws IOException {
-        List<String> argv = new ArrayList<>();
-        argv.add(config.sandbox().docker().binary());
-        argv.addAll(List.of(args));
-        try {
-            return runner.run(argv, CONTROL_TIMEOUT);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IOException("Interrupted", e);
-        }
-    }
-
-    /** Runs a docker command that must succeed; returns its stdout. */
-    private String docker(String... args) throws IOException {
-        DockerCommandRunner.Result r = run(args);
-        if (r.exitCode() != 0 || r.timedOut()) {
-            throw new IOException("docker " + args[0] + " failed: " + (r.stderr().isBlank() ? r.stdout() : r.stderr()).strip());
-        }
-        return r.stdout();
-    }
-
-    /** @throws SandboxUnavailableException when docker cannot be used; the agent loop offers to run locally instead */
-    private void requireDocker() throws IOException {
-        if (!remote() && DockerSandboxExecutor.isRemote(effectiveHost())) {
-            String where = dockerHost != null && !dockerHost.isBlank() ? "DOCKER_HOST=" + dockerHost
-                    : "the docker context endpoint " + effectiveHost();
-            throw new SandboxUnavailableException("Docker daemon mode needs a local docker daemon: " + where
-                    + " is remote (its published port and bind mounts would not be reachable). "
-                    + "Allow it with sandbox.docker.remote (--docker-remote): the workspace is then uploaded and backed up.");
-        }
-        if (verified) return;
-        String bin = config.sandbox().docker().binary();
-        try {
-            DockerCommandRunner.Result r = runner.run(List.of(bin, "version", "--format", "{{.Server.Version}}"),
-                    CONTROL_TIMEOUT);
-            if (r.exitCode() != 0 || r.timedOut()) {
-                throw new SandboxUnavailableException("Docker sandbox unavailable: '" + bin
-                        + " version' failed (is the docker daemon running?): " + r.stderr().strip());
-            }
-            verified = true;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IOException("Interrupted", e);
-        } catch (IOException e) {
-            throw new SandboxUnavailableException("Docker sandbox unavailable: docker binary '" + bin
-                    + "' not found or not executable (" + e.getMessage() + ")");
-        }
-    }
-
     // ── cleaning ──────────────────────────────────────────────────────────────
 
+    /**
+     * Web: removes the container of a {@code chat}-scope chat with its backup; of a {@code user}-scope chat only its
+     * directory {@code /workspace/<chatId>}. The host directory goes in both cases.
+     */
     @Override
     public void deleteWorkDir(String chatId) {
-        if (kind == Kind.WEB) {
-            String owner = owner(chatId);
-            containers.remove(owner);
-            removeContainer(containerName(kind, owner));
+        if (kind == Kind.WEB && !localFallbackActive(chatId)) {
+            Placement p = placement(chatId);
+            if (p.userScope()) {
+                removeChatDirInContainer(chatId, p);
+            } else {
+                registry.remove(p);
+                backups.expire(p.ownerKey(), registry::endpointOfRecord);
+            }
         }
         layout.deleteWorkDir(chatId);
     }
 
-    /** CLI: removes the container of the startup directory (the next command makes a new one). */
+    private void removeChatDirInContainer(String chatId, Placement p) {
+        try {
+            Container c = registry.acquire(p);
+            Layout.resolveJailed(layout.location().toString(), chatId); // a valid chat id: nothing to inject
+            ExecutionResult r = DaemonExec.run(c.client, "rm -rf -- " + chatId, WORKSPACE,
+                    WORKSPACE + "/.jllm", Duration.ofSeconds(120), 0);
+            if (r.exitCode() != 0) warn.accept("Cannot remove " + WORKSPACE + "/" + chatId + ": " + r.stdout() + r.stderr());
+        } catch (IOException | RuntimeException e) { // boundary: the host directory is deleted anyway
+            warn.accept("Cannot remove the sandbox directory of chat " + chatId + ": " + e.getMessage());
+        }
+    }
+
+    /** CLI: removes the container of this session ({@code chat} scope) or project ({@code user} scope). */
     @Override
     public String clean(String chatId) {
         if (kind != Kind.CLI) return "Not available for web chats: deleting the chat removes its container and files.";
-        String owner = owner(chatId);
-        String name = containerName(kind, owner);
+        Placement p = placement(chatId);
+        DockerEndpoint ep = registry.endpoint(p.dockerHost());
         String saved = null;
         try {
-            requireDocker();
-            JsonNode existing = inspect(name);
+            ep.require();
+            JsonNode existing = ep.inspect(p.name());
             if (existing == null) {
-                containers.remove(owner);
+                registry.forget(p.key());
                 return "No sandbox container for " + startupDir;
             }
             if (remote()) { // nothing is mounted: keep the files before removing, and keep the container if that fails
-                Container c = containers.get(owner);
-                if (c == null) c = attach(name, existing);
-                Backup b = doBackup(chatId, c);
-                if (!b.ok()) return b.message() + "\n" + keptMessage(name);
+                Container c = registry.current(p.key());
+                if (c == null) c = registry.attach(p, existing);
+                Backup b = c == null ? new Backup(false, "No running sandbox container to back up.") : registry.backup(c);
+                if (!b.ok()) return b.message() + "\n" + keptMessage(p.name());
                 saved = b.message();
             }
         } catch (IOException | RuntimeException e) { // boundary: reported to the caller as text
             return "Cannot clean the sandbox: " + e.getMessage();
         }
-        containers.remove(owner);
-        removeContainer(name);
-        return (saved == null ? "" : saved + "\n") + "Removed sandbox container " + name
+        registry.remove(p);
+        return (saved == null ? "" : saved + "\n") + "Removed sandbox container " + p.name()
                 + (remote() ? "." : " (project files untouched).");
     }
 
-    /** Web: removes the containers this executor started. CLI containers are kept for the next run. */
+    /**
+     * Web: backs the workspaces up and removes the containers this executor started. CLI: {@code chat}-scope containers
+     * (one per session) are removed, {@code user}-scope ones are kept for the next run; a container whose backup failed
+     * is always kept.
+     */
     @Override
     public void close() {
-        Set<String> keep = new HashSet<>();
-        if (remote()) { // nothing is mounted: bring the files home before the session (or the web container) ends
-            for (Map.Entry<String, Container> e : new ArrayList<>(containers.entrySet())) {
-                String chatId = kind == Kind.WEB ? e.getKey() : "-";
-                Backup b = doBackup(chatId, e.getValue());
+        registry.shutdownSweeper();
+        for (Container c : registry.all()) {
+            Placement p = c.placement;
+            boolean keep = false;
+            if (kind == Kind.WEB || p.docker().remote()) { // nothing is mounted: bring the files home first
+                Backup b = registry.backup(c);
                 if (b.ok()) {
                     log.info(b.message());
                 } else {
-                    keep.add(e.getKey());
-                    warn.accept(b.message() + " " + keptMessage(e.getValue().name()));
+                    keep = true;
+                    warn.accept(b.message() + " " + keptMessage(c.name));
                 }
             }
+            if (keep) {
+                registry.forget(p.key());
+            } else if (kind == Kind.WEB || !p.userScope()) {
+                registry.remove(p);
+            } else {
+                registry.forget(p.key());
+            }
         }
-        if (kind != Kind.WEB) return;
-        for (Map.Entry<String, Container> e : new ArrayList<>(containers.entrySet())) {
-            if (!keep.contains(e.getKey())) removeContainer(e.getValue().name());
-        }
-        containers.clear();
     }
 
+    // ── sweeps ────────────────────────────────────────────────────────────────
+
     /**
-     * Web, at startup: removes the {@code jllm.kind=web} containers whose chat no longer exists. CLI containers are
-     * never touched. Returns the names removed.
+     * Web, at startup: removes the {@code chat}-scope containers whose chat no longer exists. CLI containers are never
+     * touched. Returns the names removed.
      */
     public List<String> sweepOrphans(Predicate<String> chatExists) {
-        List<String> removed = new ArrayList<>();
-        if (kind != Kind.WEB) return removed;
-        try {
-            requireDocker();
-            // {{.Labels}} is "a=b,c=d": no quotes in the template, which survive neither wsl.exe nor cmd
-            String out = docker("ps", "-a", "--filter", "label=jllm.kind=web", "--format", "{{.Names}} {{.Labels}}");
-            java.util.regex.Pattern owner = java.util.regex.Pattern.compile("jllm\\.owner=([^,\\s]*)");
-            for (String line : out.split("\\R")) {
-                String[] f = line.strip().split("\\s+", 2);
-                java.util.regex.Matcher m = f.length < 2 ? null : owner.matcher(f[1]);
-                if (m == null || !m.find()) continue;
-                if (!chatExists.test(m.group(1))) {
-                    removeContainer(f[0]);
-                    removed.add(f[0]);
-                }
-            }
-        } catch (IOException | RuntimeException e) { // boundary: the sweep is best effort
-            log.debug("Orphan sweep skipped: {}", e.getMessage());
-        }
-        return removed;
+        return registry.sweepOrphans(chatExists);
     }
 
-    /** CLI flag {@code --sandbox-clean}: removes the container of {@code startupDir}. Returns the names removed. */
-    public static List<String> cleanStartupDir(HarnessConfig config, DockerCommandRunner runner, Path startupDir)
-            throws IOException {
-        String owner = hash(startupDir.toAbsolutePath().normalize().toString()).substring(0, 12);
-        return removeAll(config, runner, "name=^" + containerName(Kind.CLI, owner) + "$");
-    }
-
-    /** CLI flag {@code --sandbox-clean-all}: removes every {@code jllm.kind=cli} container. */
-    public static List<String> cleanAllCli(HarnessConfig config, DockerCommandRunner runner) throws IOException {
-        return removeAll(config, runner, "label=jllm.kind=cli");
-    }
-
-    private static List<String> removeAll(HarnessConfig config, DockerCommandRunner runner, String filter)
-            throws IOException {
-        String bin = config.sandbox().docker().binary();
-        try {
-            DockerCommandRunner.Result ps = runner.run(
-                    List.of(bin, "ps", "-a", "--filter", "label=jllm=1", "--filter", filter, "--format", "{{.Names}}"),
-                    CONTROL_TIMEOUT);
-            if (ps.exitCode() != 0) throw new IOException("docker ps failed: " + ps.stderr().strip());
-            List<String> removed = new ArrayList<>();
-            for (String name : ps.stdout().split("\\R")) {
-                if (name.isBlank()) continue;
-                DockerCommandRunner.Result rm = runner.run(List.of(bin, "rm", "-f", "-v", name.strip()), CONTROL_TIMEOUT);
-                if (rm.exitCode() == 0) removed.add(name.strip());
-            }
-            return removed;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IOException("Interrupted", e);
-        }
-    }
-
-    // ── helpers ───────────────────────────────────────────────────────────────
-
-    /** What the daemon does with a link that leaves the workspace: the web host never follows one. */
-    private ExternalLinks externalLinks() {
-        return kind == Kind.WEB ? ExternalLinks.NONE : config.externalLinks();
-    }
-
-    /** Hash of what a container is made of; a different value recreates a reused container. */
-    private String configHash() throws IOException {
-        HarnessConfig.Docker d = config.sandbox().docker();
-        return hash(String.join("|", d.image(), d.memory(), d.cpus(), String.valueOf(d.pidsLimit()), d.user(),
-                "daemon", String.valueOf(remote()), externalLinks().settingValue(), agentHash())).substring(0, 12);
-    }
-
-    private static volatile String agentHash;
-
-    private static String agentHash() throws IOException {
-        if (agentHash == null) agentHash = hash(new String(agentBytes(), StandardCharsets.UTF_8));
-        return agentHash;
-    }
-
-    private static byte[] agentBytes() throws IOException {
-        try (InputStream in = RemoteExecSandboxExecutor.class.getResourceAsStream(AGENT_RESOURCE)) {
-            if (in == null) throw new IOException("Missing resource " + AGENT_RESOURCE);
-            return in.readAllBytes();
-        }
+    /** Web, at startup: removes the {@code user}-scope containers whose user no longer exists. */
+    public List<String> sweepOrphanUsers(Predicate<String> userExists) {
+        return registry.sweepOrphanUsers(userExists);
     }
 
     /**
-     * Writes the daemon script to a stable per-version directory under the user's home (a reused container keeps
-     * bind-mounting it after this JVM is gone) and returns the directory.
+     * One pass of the clean-up policy: stops or backs up and removes the containers idle for longer than their policy
+     * allows, and deletes the expired backups. Runs by itself every minute once a container with a policy is started.
+     * Returns what was done.
      */
-    static synchronized Path installAgent() throws IOException {
-        Path dir = Path.of(System.getProperty("jllm.home", System.getProperty("user.home")), ".jllm", "sandbox-agent", agentHash().substring(0, 12));
-        Path file = dir.resolve(AGENT_RESOURCE);
-        byte[] bytes = agentBytes();
-        if (!Files.isRegularFile(file) || !java.util.Arrays.equals(Files.readAllBytes(file), bytes)) {
-            Files.createDirectories(dir);
-            Files.write(file, bytes);
-        }
-        return dir;
+    public List<String> sweep() {
+        return registry.sweep(System.currentTimeMillis());
     }
 
-    static String hash(String s) {
-        try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(s.getBytes(StandardCharsets.UTF_8)));
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException(e);
-        }
+    List<String> sweep(long nowMillis) {
+        return registry.sweep(nowMillis);
+    }
+
+    /**
+     * A user was dropped (temporary user expired, user deleted): removes all of their data: containers, volume,
+     * backups, tarballs and image records. Returns what was removed.
+     */
+    public List<String> dropUser(String userId) {
+        return registry.dropUser(userId);
+    }
+
+    /** CLI flag {@code --sandbox-clean}: removes the containers of {@code startupDir}. Returns the names removed. */
+    public static List<String> cleanStartupDir(HarnessConfig config, DockerCommandRunner runner, Path startupDir)
+            throws IOException {
+        String h = Placement.hash(startupDir.toAbsolutePath().normalize().toString()).substring(0, 12);
+        return ContainerRegistry.removeAll(config, runner, "label=jllm.project=" + h);
+    }
+
+    /** CLI flag {@code --sandbox-clean-all}: removes every {@code jllm.kind=cli} container. Returns the names removed. */
+    public static List<String> cleanAllCli(HarnessConfig config, DockerCommandRunner runner) throws IOException {
+        return ContainerRegistry.removeAll(config, runner, "label=jllm.kind=cli");
     }
 }

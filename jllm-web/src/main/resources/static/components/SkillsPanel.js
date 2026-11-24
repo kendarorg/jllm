@@ -1,4 +1,4 @@
-import {computed, onMounted, ref} from 'vue';
+import {computed, onMounted, ref} from '../vendor/vue.esm-browser.prod.js';
 import {api, del, post, put} from '../api.js';
 import {toast} from '../store.js';
 import SkillEditor from './SkillEditor.js';

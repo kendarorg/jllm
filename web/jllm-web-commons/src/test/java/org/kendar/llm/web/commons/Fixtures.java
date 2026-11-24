@@ -12,7 +12,8 @@ import org.kendar.llm.harness.llm.ModelClient;
 import org.kendar.llm.harness.llm.ModelRequest;
 import org.kendar.llm.harness.llm.ModelResponse;
 import org.kendar.llm.harness.llm.Usage;
-import org.kendar.llm.harness.sandbox.ChatDirSandboxExecutor;
+import org.kendar.llm.harness.sandbox.ChatDirLayout;
+import org.kendar.llm.harness.sandbox.LocalSandboxExecutor;
 import org.kendar.llm.harness.session.InMemoryChatSessionStore;
 
 import java.io.IOException;
@@ -48,7 +49,7 @@ final class Fixtures {
             }
         };
         return new AgentHarnessBuilder().modelClient(model)
-                .sandbox(new ChatDirSandboxExecutor(HarnessConfig.defaults(), dir))
+                .sandbox(new LocalSandboxExecutor(new ChatDirLayout(dir)))
                 .sessionStore(new InMemoryChatSessionStore()).objectMapper(MAPPER).build();
     }
 

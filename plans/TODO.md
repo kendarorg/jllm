@@ -1,5 +1,7 @@
 # TODO
 
+NO RETROCOMPATIBILITY
+
 Backlog of open work, grouped by theme and ordered by priority inside each group. `[ ]` open. Items marked *(review)* come from
 an earlier security review and must be re-checked against the code before work starts.
 
@@ -28,6 +30,12 @@ features land), [evalfolder](evalfolder.md), [harborswe](harborswe.md), [sandbox
   - [ ] Treat the Docker socket as root: rootless Docker, gVisor (`--runtime=runsc`) or a separate host.
   - [ ] One container and volume per chat, removed on chat delete or idle timeout, with disk quotas.
   - [ ] Pin the sandbox image by digest, not by tag.
+- [ ] **Allowed containers per role.** A role picks its sandbox kind today (none, local, docker-isolated, docker-open) but
+  the image is one server-wide `jllm.docker-image`. Let the admin define a list of allowed container images, each with
+  its mode (`isolated` = hardened profile, `exposed` = standard profile with network), and let a role choose among them
+  (one or several, with a default for the chat). Open points: where the list lives (settings and SQL like roles),
+  image pinning by digest per entry, who may add an entry, and whether a user may switch between the allowed ones in
+  a chat.
 
 ## 2. Security hardening
 

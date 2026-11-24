@@ -28,7 +28,7 @@ class AdminApprovalCasesTest extends SuiteBase {
 
     /** The admin role with this approval; {@code null} is the template default (the key is absent). */
     private static Consumer<AgentHarnessBuilder> admin(String approval) {
-        return b -> b.userPolicyResolver(UserPolicyResolver.single(Role.admin(approval, Map.of()).policy()));
+        return b -> b.userPolicyResolver(UserPolicyResolver.single(Role.admin(approval, Map.of(), org.kendar.llm.harness.identity.RoleSandbox.NONE).policy()));
     }
 
     private static Consumer<AgentHarnessBuilder> adminWithEnvDeny(String approval) {

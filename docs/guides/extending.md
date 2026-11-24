@@ -535,35 +535,59 @@ Other choices:
 
 ## 9. Sandbox
 
+A sandbox is a `Layout` (where a chat works on the host) plus a runner (how commands run). `SandboxExecutor` is the
+runner seen by the harness; it extends four narrow interfaces:
+
 ```java
-public interface SandboxExecutor {
+public interface Layout {                     // host directories
+    Path location();
+    Path workDir(String chatId);              // root of the file tools' jail
+    Path scratchDir(String chatId, String agentId);
+    default boolean sharedWorkDir();
+    default Path chatStorage(String chatId);
+    void deleteWorkDir(String chatId);
+}
+public interface Exec {                       // commands
     ExecutionResult execute(String chatId, String command, Duration timeout);
     default ExecutionResult execute(String chatId, Path runDir, Path readOnlyDir, String command, Duration timeout);
-    Path workDir(String chatId);          // root of the file tools' jail
-    Path location();
-    default Path scratchDir(String chatId, String agentId);
-    default String shellDescription();    // appended to the bash tool description (shell syntax)
-    default void deleteWorkDir(String chatId);
-    default FileBackend files(String chatId, String agentId);  // null: the file tools use workDir on the host
-    default String displayPath(Path p);   // how the model and the user see a path
-    default String clean(String chatId);  // remove sandbox resources outside the work dir (container)
-    default void close();                 // release resources (web containers)
+    ExecutionResult execute(String chatId, Path scratchDir, boolean planMode, String command, Duration timeout);
+    default String shellDescription();        // appended to the bash tool description (shell syntax)
+    default String displayPath(Path p);       // how the model and the user see a path
+    // environmentWhitelist, outputLogLimit, shell
 }
+public interface SandboxFiles {
+    default FileBackend files(String chatId, String agentId);  // null: the file tools use workDir on the host
+}
+public interface Lifecycle {
+    // allowLocalFallback, localFallbackActive, backup, clean (resources outside the work dir), close
+}
+public interface SandboxExecutor extends Layout, Exec, SandboxFiles, Lifecycle { }
 ```
 
-| Implementation | Work dir | Isolation |
-|---|---|---|
-| `LocalDirSandboxExecutor` (default) | `<sandbox.tempDir>/<chatId>` | none (warning at startup) |
-| `CwdSandboxExecutor` (CLI) | the project directory for every chat | none |
-| `ChatDirSandboxExecutor` (web) | `<base>/<chatId>`, with its own `.jllm` | none |
-| `RemoteExecSandboxExecutor(config, runner, layoutExecutor, Kind, projectDir)` (settings `sandbox.backend: docker`, `sandbox.docker.mode: daemon`) | `/workspace` in a long-running container; bind mount (CLI) or volume (web) | as `Docker…`, plus a per-container token; default docker network |
-| `DockerSandboxExecutor(config, new ProcessDockerCommandRunner()[, layoutExecutor])` (settings `sandbox.backend: docker`) | that of the layout executor, mounted into the container | `--network none`, memory/cpu/pids limits, user `1000:1000`, work dir mounted read-only in plan mode |
+| Layout | Work dir |
+|---|---|
+| `DirLayout` (default) | `<sandbox.tempDir>/<chatId>` |
+| `CwdLayout` (CLI) | the project directory for every chat |
+| `ChatDirLayout` (web) | `<base>/<chatId>`, with its own `.jllm` |
 
-Docker settings come from `HarnessConfig.Docker` (`binary`, `image` default `python:3.12-slim`, `memory`, `cpus`,
-`pidsLimit`, `user`, `network`, `mode`), set in the settings file under `sandbox.docker`. The file tools run in the JVM
-against `workDir`, and only `bash` goes through the executor, unless `files(chatId, agentId)` returns a `FileBackend`
-(daemon mode): then all file tools go through it and no host paths are used. To plug in another remote sandbox,
-implement `FileBackend` (read, write, stat, glob, grep and the browse calls) and return it from `files`. Full description of each backend: [SANDBOX](sandbox.md).
+| Runner | Isolation |
+|---|---|
+| `LocalSandboxExecutor(layout)` (default: `LocalSandboxExecutor.of(config)`; settings `sandbox.backend: local`) | none: plain processes as the JVM user, for testing and trusted single-user use only; plan mode is advisory |
+| `RemoteExecSandboxExecutor` (settings `sandbox.backend: docker`) | a long-running container with an HTTP daemon, `standard` or `hardened` profile, `chat` or `user` scope, per-container token; the only isolated runner |
+
+Do not call the constructors for the container runner: `new SandboxFactory().runner(new ProcessDockerCommandRunner())
+.create(settings, config, layout, Kind.CLI | Kind.WEB)` is the single place that turns settings into a runner (CLI and web
+both use it). It also takes `userOf` (chat id to user id, `user` scope), `policy` (a `SandboxPolicy`: per user and per
+chat profile, limits and network), `backupRecords` (`BackupRecordStore`) and `onWarning`. The per-command docker runner
+and `docker.mode` are removed.
+
+Docker settings come from `HarnessConfig.Docker` (`binary`, `image` default `python:3.12-slim`, `profile`, `scope`,
+`memory`, `cpus`, `pidsLimit`, `user`, `network`, clean-up policy), set in the settings file under `sandbox.docker`. With
+the local runner the file tools run in the JVM against `workDir` and only `bash` goes through the executor; `files(chatId,
+agentId)` returns a `FileBackend` for the container runner: then all file tools go through it and no host paths are used.
+To plug in another remote sandbox, implement `FileBackend` (read, write, stat, glob, grep and the browse calls) and return
+it from `files`. `run_js` is not a runner: it is always present next to the runner and may use the container as its
+storage. Full description: [SANDBOX](sandbox.md).
 
 ## 10. Metrics and pricing
 
