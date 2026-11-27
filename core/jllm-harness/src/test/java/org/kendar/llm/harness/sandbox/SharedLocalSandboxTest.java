@@ -393,7 +393,16 @@ class SharedLocalSandboxTest {
         assertTrue(SharedLocalSandbox.forHost(new ChatDirLayout(base), null, true, host).isPresent());
         host.tools.clear();
         assertTrue(SharedLocalSandbox.forHost(new ChatDirLayout(base), null, false, host).isEmpty());
+    }
+
+    @Test
+    void forHostRefusesANonLinuxHostWhenInUseUnlessTesting() {
+        FakeHost host = new FakeHost();
         host.linux = false;
-        assertTrue(SharedLocalSandbox.forHost(new ChatDirLayout(base), null, true, host).isPresent());
+        var e = assertThrows(SandboxUnavailableException.class,
+                () -> SharedLocalSandbox.forHost(new ChatDirLayout(base), null, true, host));
+        assertTrue(e.getMessage().contains("Startup aborted"), e.getMessage());
+        // the testing flag arrives as required=false
+        assertTrue(SharedLocalSandbox.forHost(new ChatDirLayout(base), null, false, host).isPresent());
     }
 }

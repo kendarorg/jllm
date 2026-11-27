@@ -179,6 +179,9 @@
                                 <format>JSON</format>
                             </formats>
                             <outputDirectory>${project.build.directory}</outputDirectory>
+                            <suppressionFiles>
+                                <suppressionFile>${maven.multiModuleProjectDirectory}/owasp-suppressions.xml</suppressionFile>
+                            </suppressionFiles>
                         </configuration>
                         <executions>
                             <execution>

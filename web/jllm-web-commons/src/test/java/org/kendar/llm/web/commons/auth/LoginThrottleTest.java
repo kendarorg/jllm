@@ -136,6 +136,28 @@ class LoginThrottleTest {
     }
 
     @Test
+    void aStrangerLocksTheLoginOnlyForTheirOwnAddress() {
+        String attacker = LoginThrottle.userKey("admin", "203.0.113.9");
+        String owner = LoginThrottle.userKey("admin", "198.51.100.4");
+        for (int i = 0; i < 3; i++) fail(attacker);
+        assertTrue(t.begin(attacker) > 0, "locked for the attacker");
+        assertEquals(0, t.begin(owner), "the owner's address is not affected");
+        assertTrue(t.lockedForUser("admin") > 0);
+        assertEquals(0, t.lockedForUser("adminx"), "another login is not matched by prefix");
+    }
+
+    @Test
+    void resetUserLiftsTheLocksOfEveryAddress() {
+        for (String a : new String[]{"10.0.0.1", "10.0.0.2"}) for (int i = 0; i < 3; i++) fail(LoginThrottle.userKey("rita", a));
+        fail(LoginThrottle.userKey("ritaa", "10.0.0.1"));
+        assertTrue(t.resetUser("rita"));
+        assertEquals(0, t.lockedForUser("rita"));
+        assertEquals(0, t.begin(LoginThrottle.userKey("rita", "10.0.0.1")));
+        assertTrue(t.resetUser("ritaa"), "a login that only shares a prefix is kept apart");
+        assertFalse(t.resetUser("nobody"));
+    }
+
+    @Test
     void theMapIsBoundedAndNeverFreezesOutNewKeys() {
         LoginThrottle small = new LoginThrottle(clock, 100);
         for (int i = 0; i < 5000; i++) assertEquals(0, small.begin("id:user" + i));

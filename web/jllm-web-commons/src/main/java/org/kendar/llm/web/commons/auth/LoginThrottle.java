@@ -5,12 +5,14 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
- * Attempts per key, with a lock. Keys starting with {@code id:} (a login id) have the user policy: {@value
- * #USER_MAX_FAILURES} failed sign-ins lock the login for {@link #USER_LOCK} (an administrator can unlock it with
- * {@link #reset}). Every other key (a remote address) has the address policy: {@value #ADDRESS_MAX_ATTEMPTS} attempts
+ * Attempts per key, with a lock. Keys starting with {@code id:} (a login id and the address it came from, see
+ * {@link #userKey}) have the user policy: {@value #USER_MAX_FAILURES} failed sign-ins lock that login for that address
+ * for {@link #USER_LOCK}, so knowing a login does not let a stranger lock its owner out (an administrator can unlock
+ * a login everywhere with {@link #resetUser}). Every other key (a remote address) has the address policy: {@value #ADDRESS_MAX_ATTEMPTS} attempts
  * in {@link #ADDRESS_LOCK} lock the address for that long.
  *
  * <p>{@link #begin} checks and counts in one atomic step, before the password is checked, so parallel guesses cannot
@@ -30,6 +32,7 @@ public final class LoginThrottle {
     public static final int MAX_ENTRIES = 10_000;
     /** Prefix of the key of a login id. */
     public static final String USER_PREFIX = "id:";
+    private static final char SEP = '\u0000';
 
     private record State(int attempts, Instant windowEnds, Instant lockedUntil) {
     }
@@ -107,7 +110,34 @@ public final class LoginThrottle {
         return seconds(now, s.lockedUntil());
     }
 
-    /** Forgets a key, locked or not (the administrator's unlock). @return whether it had a state */
+    /**
+     * The key of a login id seen from an address: the lock is per login <em>and</em> address, so a stranger who knows
+     * a login (administrator, say) can only lock it for their own address, never for its owner. A null address is
+     * the signed-in caller (password change): only the account holder can reach it.
+     */
+    public static String userKey(String id, String address) {
+        String safe = id == null ? "" : id.replace(SEP, ' ');
+        if (safe.length() > 128) safe = safe.substring(0, 128);
+        return USER_PREFIX + safe + SEP + (address == null ? "-" : address);
+    }
+
+    /** Longest remaining lock of a login over every address; 0 when none. Counts nothing. */
+    public synchronized long lockedForUser(String id) {
+        String prefix = userKey(id, "");
+        long max = 0;
+        for (String k : List.copyOf(states.keySet())) {
+            if (k.startsWith(prefix)) max = Math.max(max, lockedFor(k));
+        }
+        return max;
+    }
+
+    /** Forgets every key of a login, whatever the address (the administrator's unlock). @return whether any existed */
+    public synchronized boolean resetUser(String id) {
+        String prefix = userKey(id, "");
+        return states.keySet().removeIf(k -> k.startsWith(prefix));
+    }
+
+    /** Forgets a key, locked or not. @return whether it had a state */
     public synchronized boolean reset(String key) {
         return states.remove(key) != null;
     }

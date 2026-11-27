@@ -163,8 +163,10 @@ machine without docker. It extends the local runner with:
   error. A role given `shared-local` later, with the property off, gets the same tool errors until `bwrap` works.
 - **Taint:** shell output counts as outside content when the sandbox has network access (the role grants it, or the
   system is unconfined), so a later side effect asks. A plain host shell is not tracked.
-- **Windows and macOS:** no confinement exists. A warning is logged at startup and only the environment, HOME, TMPDIR
-  and the limits that exist there (timeout, output cap, `ulimit -t` on macOS) apply. Testing use only.
+- **Windows and macOS:** no confinement exists. The web refuses to start when `shared-local` is the backend or any role
+  uses it, unless `jllm.web.allow-missing-bwrap=true` (testing only). With the flag a warning is logged and only the
+  environment, HOME, TMPDIR and the limits that exist there (timeout, output cap, `ulimit -t` on macOS) apply: commands
+  run as the server user on the host network.
 
 ### Permissions on the host shell
 

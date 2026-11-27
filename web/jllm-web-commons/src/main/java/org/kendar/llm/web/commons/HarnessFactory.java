@@ -158,7 +158,8 @@ public final class HarnessFactory {
                 .systemPrompt(promptAppend)
                 .systemPromptReplace(promptReplace)
                 .sandbox(executor(identity, config, sandbox,
-                        sharedLocalRequired(p, settings.sharedLocalSandbox(), identity.usesSharedLocal()), harnessRef))
+                        sharedLocalRequired(p, settings.sharedLocalSandbox(), identity.usesSharedLocal()),
+                        p.allowMissingBwrap(), harnessRef))
                 // chat history: files under each chat's history root, unless the application supplies the beans
                 .sessionStore(sessionStore != null ? sessionStore
                         : new FileChatSessionStore(sandbox::historyRoot, () -> chatHistoryRoots(sandbox), mapper))
@@ -228,6 +229,7 @@ public final class HarnessFactory {
     private static org.kendar.llm.harness.sandbox.SandboxExecutor executor(HarnessIdentity identity, HarnessConfig config,
                                                                           ChatDirLayout layout,
                                                                           boolean sharedLocalUsed,
+                                                                          boolean allowUnconfined,
                                                                           java.util.concurrent.atomic.AtomicReference<AgentHarness> harness) {
         java.util.function.Function<String, String> userOf = chatId -> {
             AgentHarness h = harness.get();
@@ -248,7 +250,9 @@ public final class HarnessFactory {
                 }, null);
         docker.onWarning(LOG::warn);
         // the role decides (admin-only); the web never falls back because of a setting
-        docker.fallbackAllowed(chatId -> roleSandboxOf.apply(chatId).localFallback());
+        // outside Linux the fallback would run unconfined as the server user: only under the testing flag
+        boolean confinable = allowUnconfined || System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("linux");
+        docker.fallbackAllowed(chatId -> confinable && roleSandboxOf.apply(chatId).localFallback());
         var runners = new java.util.HashMap<SandboxKind, org.kendar.llm.harness.sandbox.SandboxExecutor>();
         runners.put(SandboxKind.NONE, new DisabledSandboxExecutor(layout));
         runners.put(SandboxKind.DOCKER_ISOLATED, docker);
@@ -261,7 +265,7 @@ public final class HarnessFactory {
     }
 
     /**
-     * Whether a missing or broken bwrap stops the start: the shared-local sandbox is used (backend or a role) and
+     * Whether a missing or broken bwrap (or a non-Linux host, which has none) stops the start: the shared-local sandbox is used (backend or a role) and
      * {@code jllm.web.allow-missing-bwrap} is not true.
      */
     static boolean sharedLocalRequired(JllmProperties p, boolean backend, boolean anyRole) {

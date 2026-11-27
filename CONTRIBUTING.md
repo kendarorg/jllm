@@ -51,4 +51,7 @@ mvn -Powasp verify -DskipTests
   by `exec-maven-plugin`) converts it to [docs/OWASP_DC.md](docs/OWASP_DC.md), which is committed.
 - The build fails when a vulnerability has CVSS 7.0 or higher. The Markdown file is written before that check, so it is
   up to date even when the build fails.
+- False positives go in [owasp-suppressions.xml](owasp-suppressions.xml): one entry per package and CVE, with the
+  review notes and an expiry date. Review it at every release.
+- Run the profile on the build server for every release.
 - Convert a report by hand: `java scripts/OwaspReport.java target/dependency-check-report.json docs/OWASP_DC.md`.

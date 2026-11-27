@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Reviewed suppressions for the dependency scan (mvn -Powasp verify), which fails the build on CVSS >= 7.
+  Every entry needs: a reason (what was checked and why the finding does not apply), the reviewer, and an
+  expiry date after which the scan reports it again. No blanket suppressions: name the package and the CVE.
+
+  <suppress until="2027-06-30Z">
+      <notes><![CDATA[Reviewed by NAME on 2026-11-27: why this CVE does not apply here (link to the evidence).]]></notes>
+      <packageUrl regex="true">^pkg:maven/group\.id/artifact@.*$</packageUrl>
+      <cve>CVE-0000-00000</cve>
+  </suppress>
+-->
+<suppressions xmlns="https://jeremylong.github.io/DependencyCheck/dependency-suppression.1.3.xsd">
+</suppressions>

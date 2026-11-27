@@ -134,7 +134,7 @@ class AuthHardeningWebTest {
         login(f.mvc, "rita", "rita").andExpect(status().isTooManyRequests());
 
         // the throttle runs on the real clock here: its own clock is tested in LoginThrottleTest; this checks the wiring
-        assertTrue(f.throttle.lockedFor(LoginThrottle.USER_PREFIX + "rita") > Duration.ofMinutes(29).toSeconds());
+        assertTrue(f.throttle.lockedForUser("rita") > Duration.ofMinutes(29).toSeconds());
     }
 
     @Test

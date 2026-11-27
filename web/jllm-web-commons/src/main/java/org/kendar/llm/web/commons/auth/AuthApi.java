@@ -48,8 +48,8 @@ public class AuthApi {
     }
 
     /**
-     * Unknown id and wrong password answer the same 401, after the same work. Three failures for a login lock it for
-     * 30 minutes, and an address that tries too often is locked too (429); the check and the count are one atomic
+     * Unknown id and wrong password answer the same 401, after the same work. Three failures for a login from one address lock
+     * that login for that address for 30 minutes, and an address that tries too often is locked too (429); the check and the count are one atomic
      * step ({@link LoginThrottle#begin}). The session ends {@code sessionMaxAge} after sign-in at the latest.
      *
      * @param remoteAddress the caller's address (see {@link org.kendar.llm.web.commons.ClientAddress}), for the lock
@@ -59,8 +59,8 @@ public class AuthApi {
         if (!auth.passwordEnabled()) throw new ApiException(404, "Password sign-in is off");
         String id = Api.text(body, "id");
         String password = Api.text(body, "password");
-        String idKey = LoginThrottle.USER_PREFIX + (id == null ? "" : id.length() > 128 ? id.substring(0, 128) : id);
         String addressKey = "ip:" + remoteAddress;
+        String idKey = LoginThrottle.userKey(id, remoteAddress); // per login and address: no lock-out by a stranger
         // the address first: a locked address must not use up the attempts of the login it names
         long locked = throttle.begin(addressKey);
         if (locked == 0) locked = throttle.begin(idKey);

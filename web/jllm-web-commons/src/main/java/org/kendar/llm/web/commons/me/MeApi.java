@@ -70,7 +70,7 @@ public class MeApi {
     public void password(Map<String, Object> body, Principal principal, String sessionToken) {
         User u = user(principal);
         if (u.passwordless()) throw new ApiException(409, "This account signs in through the identity provider");
-        String key = LoginThrottle.USER_PREFIX + u.id();
+        String key = LoginThrottle.userKey(u.id(), null);
         long locked = throttle.begin(key);
         if (locked > 0) throw new ApiException(429, "Too many failed attempts; retry in " + locked + " s");
         String current = Api.text(body, "current");

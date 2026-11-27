@@ -157,8 +157,10 @@ public class SharedLocalSandbox extends LocalSandboxExecutor {
     /**
      * Builds the sandbox for a host that serves users. When {@code required} (the backend or a role uses
      * {@code shared-local}) a Linux machine without a working {@code bwrap} stops the start with a
-     * {@link SandboxUnavailableException}; otherwise the problem is logged and the result is empty (a role added later
-     * gets tool errors until it is fixed).
+     * {@link SandboxUnavailableException}, and so does any other operating system (Windows, macOS: no confinement at
+     * all); otherwise the problem is logged and the result is empty (a role added later gets tool errors until it is
+     * fixed). The caller passes {@code required=false} only under the explicit testing flag, which also lets a
+     * non-Linux host start unconfined.
      */
     public static java.util.Optional<SharedLocalSandbox> forHost(Layout layout, Function<String, Boolean> networkOf,
                                                                  boolean required) {
@@ -167,6 +169,12 @@ public class SharedLocalSandbox extends LocalSandboxExecutor {
 
     static java.util.Optional<SharedLocalSandbox> forHost(Layout layout, Function<String, Boolean> networkOf,
                                                           boolean required, Host host) {
+        if (required && !host.linux()) {
+            throw new SandboxUnavailableException("shared-local sandbox: no confinement exists on this operating system, "
+                    + "commands would run as the server user on the host network. The shared-local sandbox is in use "
+                    + "(backend or a role): run on Linux with bubblewrap or use a docker sandbox; for testing only, set "
+                    + "jllm.web.allow-missing-bwrap=true. Startup aborted.");
+        }
         try {
             return java.util.Optional.of(new SharedLocalSandbox(layout, networkOf, null, host));
         } catch (SandboxUnavailableException e) {

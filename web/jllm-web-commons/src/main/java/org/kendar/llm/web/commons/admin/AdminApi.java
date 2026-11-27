@@ -81,7 +81,7 @@ public class AdminApi {
         m.put("ownSkills", skills.own(u.id()).size());
         m.put("disabledTools", u.disabledTools());
         m.put("disabledSkills", u.disabledSkills());
-        m.put("lockedFor", throttle.lockedFor(LoginThrottle.USER_PREFIX + u.id())); // seconds; 0 = not locked
+        m.put("lockedFor", throttle.lockedForUser(u.id())); // seconds; 0 = not locked
         return m;
     }
 
@@ -184,15 +184,15 @@ public class AdminApi {
         }
         users.setPassword(id, hash);
         sessions.revokeUser(id, null);
-        throttle.reset(LoginThrottle.USER_PREFIX + id);
+        throttle.resetUser(id);
         return out;
     }
 
     /** {@code POST /api/admin/users/{id}/unlock}: lifts the sign-in lock of a login (the 30 minutes after 3 failures). */
     public Map<String, Object> unlockUser(String id) {
         if (users.find(id).isEmpty()) throw new ApiException(404, "Unknown user " + id);
-        boolean wasLocked = throttle.lockedFor(LoginThrottle.USER_PREFIX + id) > 0;
-        throttle.reset(LoginThrottle.USER_PREFIX + id);
+        boolean wasLocked = throttle.lockedForUser(id) > 0;
+        throttle.resetUser(id);
         return Map.of("id", id, "wasLocked", wasLocked);
     }
 
