@@ -68,6 +68,11 @@
         <spring-ai.version>1.0.0</spring-ai.version>
         <!-- 1.21.4+: tries Docker API 1.44 before 1.32; Docker 29 refuses 1.32 (the Spring Boot 3.5.0 BOM gives 1.21.0) -->
         <testcontainers.version>1.21.4</testcontainers.version>
+        <!-- CVE fixes ahead of the Spring Boot BOM (overrides of its version properties) -->
+        <tomcat.version>10.1.62</tomcat.version>
+        <log4j2.version>2.26.1</log4j2.version>
+        <sqlite-jdbc.version>3.54.1.0</sqlite-jdbc.version>
+        <httpcore5.version>5.4.4</httpcore5.version>
         <plugins.location>${maven.multiModuleProjectDirectory}/target/plugins</plugins.location>
     </properties>
 
@@ -163,7 +168,7 @@
             </modules>
         </profile>
         <!-- Dependency scan, never part of the default build. Use: mvn -Powasp verify (see CONTRIBUTING.md).
-             Order in verify: scan without failing (JSON report), convert to docs/OWASP_DC.md, scan again and fail on CVSS >= 7 (cached database). -->
+             Order: package = scan without failing (JSON report) then convert to docs/OWASP_DC.md; verify = scan again and fail on CVSS >= 7 (cached database). The threshold runs last so the report is always produced. -->
         <profile>
             <id>owasp</id>
             <build>
@@ -186,7 +191,7 @@
                         <executions>
                             <execution>
                                 <id>owasp-report</id>
-                                <phase>verify</phase>
+                                <phase>package</phase>
                                 <goals><goal>aggregate</goal></goals>
                                 <configuration>
                                     <failBuildOnCVSS>11</failBuildOnCVSS>
@@ -210,7 +215,7 @@
                         <executions>
                             <execution>
                                 <id>owasp-markdown</id>
-                                <phase>verify</phase>
+                                <phase>package</phase>
                                 <goals><goal>exec</goal></goals>
                                 <configuration>
                                     <executable>${java.home}/bin/java</executable>
