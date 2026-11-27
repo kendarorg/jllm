@@ -83,6 +83,93 @@ class RoleModesWebTest {
         assertEquals("AUTO", chat.mode(id, Map.of("mode", "auto")).get("mode"));
     }
 
+    /** Model that calls the tool named in {@code script} once, then answers; the requests it saw are kept. */
+    private static final class ScriptedModel implements ModelClient {
+        final List<ModelRequest> requests = new java.util.concurrent.CopyOnWriteArrayList<>();
+        private final java.util.Iterator<String> calls;
+
+        ScriptedModel(String... tools) {
+            this.calls = List.of(tools).iterator();
+        }
+
+        @Override
+        public synchronized ModelResponse complete(ModelRequest request) {
+            requests.add(request);
+            var content = MAPPER.createArrayNode();
+            if (calls.hasNext()) {
+                String tool = calls.next();
+                content.addObject().put("type", "tool_use").put("id", "t-" + tool).put("name", tool)
+                        .set("input", MAPPER.createObjectNode());
+                return new ModelResponse(content, "tool_use", new Usage(1, 1, 0, 0));
+            }
+            content.addObject().put("type", "text").put("text", "done");
+            return new ModelResponse(content, "end_turn", new Usage(1, 1, 0, 0));
+        }
+
+        @Override
+        public String simpleComplete(String system, String user, int maxTokens) {
+            return "";
+        }
+    }
+
+    private static org.kendar.llm.harness.tools.HarnessTool tool(String name, java.util.concurrent.atomic.AtomicInteger runs) {
+        return new org.kendar.llm.harness.tools.HarnessTool() {
+            public String name() {
+                return name;
+            }
+
+            public String description() {
+                return name;
+            }
+
+            public JsonNode inputSchema() {
+                return MAPPER.createObjectNode().put("type", "object");
+            }
+
+            public String group() {
+                return "Test";
+            }
+
+            public org.kendar.llm.harness.tools.ToolKind kind() {
+                return org.kendar.llm.harness.tools.ToolKind.OTHER;
+            }
+
+            public String execute(org.kendar.llm.harness.tools.ToolContext ctx, JsonNode input) {
+                runs.incrementAndGet();
+                return name + " ran";
+            }
+        };
+    }
+
+    @Test
+    void aRoleMarkedUnattendedDeniesWhatWouldAskThroughTheChatApiButAllowRulesRun() throws Exception {
+        Role night = new Role("night", List.of("*"), false, "ask",
+                Map.of("safe", org.kendar.llm.harness.permission.ToolPermission.ALLOW),
+                Map.of(Role.UNATTENDED, MAPPER.readTree("true")));
+        var runs = new java.util.concurrent.atomic.AtomicInteger();
+        ScriptedModel model = new ScriptedModel("pay", "safe");
+        AgentHarness harness = new AgentHarnessBuilder().modelClient(model)
+                .tools(List.of(tool("pay", runs), tool("safe", runs)))
+                .sandbox(new LocalSandboxExecutor(new ChatDirLayout(dir)))
+                .sessionStore(new InMemoryChatSessionStore()).objectMapper(MAPPER)
+                .userPolicyResolver(p -> night.policy())
+                .principalDirectory(id -> new org.kendar.llm.harness.auth.HarnessPrincipal(id, Set.of(night.name()), Map.of()))
+                .build();
+        ChatApi chat = Fixtures.chatApi(harness);
+        String id = (String) chat.create(Map.of(), ANN).get("chatId");
+
+        chat.send(id, Map.of("text", "go"), ANN);
+        for (int i = 0; i < 400 && harness.isRunning(id); i++) Thread.sleep(25);
+        boolean stuck = harness.isRunning(id); // a run waiting for an answer nobody gives
+        if (stuck) chat.cancel(id, true);
+        assertFalse(stuck, "an unattended role never waits for an approval");
+
+        String seen = model.requests.get(model.requests.size() - 1).messages().toString();
+        assertTrue(seen.contains("denied: unattended run, no one can approve pay"), seen);
+        assertTrue(seen.contains("safe ran"), "the allow rule still runs: " + seen);
+        assertEquals(1, runs.get(), "only the allowed tool ran");
+    }
+
     @Test
     void thePolicyOfAUserCarriesTheRoleLimits() throws Exception {
         Role r = role("night", Map.of(Role.UNATTENDED, MAPPER.readTree("true"),
