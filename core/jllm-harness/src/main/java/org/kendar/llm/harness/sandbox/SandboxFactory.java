@@ -24,6 +24,7 @@ public final class SandboxFactory {
     private Function<String, SandboxPolicy> policy;
     private Consumer<String> warn;
     private BackupRecordStore backupStore;
+    private boolean confinePaths = true;
 
     /** The docker CLI runner; default: the docker binary as a subprocess. */
     public SandboxFactory runner(DockerCommandRunner runner) {
@@ -56,12 +57,23 @@ public final class SandboxFactory {
     }
 
     /**
+     * False: the local runner is {@link LocalSandboxExecutor#unconfined} (no path jail); default true. Ignored when the
+     * settings select docker.
+     */
+    public SandboxFactory confinePaths(boolean confine) {
+        this.confinePaths = confine;
+        return this;
+    }
+
+    /**
      * @param kind which front end owns the containers (used when the settings select docker; the layout is the
      *             front end's: {@link CwdLayout} for the CLI, {@link ChatDirLayout} for the web)
      */
     public SandboxExecutor create(HarnessSettings settings, HarnessConfig config, Layout layout,
                                   RemoteExecSandboxExecutor.Kind kind) {
-        if (!settings.dockerSandbox()) return new LocalSandboxExecutor(layout);
+        if (!settings.dockerSandbox()) {
+            return confinePaths ? new LocalSandboxExecutor(layout) : LocalSandboxExecutor.unconfined(layout);
+        }
         RemoteExecSandboxExecutor box = new RemoteExecSandboxExecutor(config, runner, System.getenv("DOCKER_HOST"),
                 layout, kind, layout.location(), userOf, policy, backupStore);
         if (warn != null) box.onWarning(warn);

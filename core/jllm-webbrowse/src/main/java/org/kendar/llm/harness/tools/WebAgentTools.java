@@ -78,7 +78,7 @@ public class WebAgentTools implements HarnessToolSet {
 
     @Override
     public List<HarnessTool> tools() {
-        return List.of(webSearch(), wikipediaSearch(), webFetch(), webDownload());
+        return List.of(webSearch(), wikipediaSearch(), webFetch(), webDownload(), webAllowed());
     }
 
     /**
@@ -89,28 +89,38 @@ public class WebAgentTools implements HarnessToolSet {
         URI current = uri;
         java.util.Set<String> insecure = new java.util.HashSet<>(); // hosts the user let through, for this call only
         for (int hop = 0; ; hop++) {
-            addresses.check(current); // before the approval question: a blocked address is never offered
-            checkHost(ctx, current, hop == 0 ? null : uri);
-            HttpRequest req = HttpRequest.newBuilder(current)
-                    .timeout(Duration.ofSeconds(30))
-                    .header("User-Agent", "jllm-harness/1.0")
-                    .GET().build();
             HttpResponse<T> resp;
-            String host = current.getHost() == null ? "" : HostMatcher.normalize(current.getHost());
-            while (true) {
-                try {
-                    resp = (insecure.contains(host) ? insecureClient() : direct).send(req, handler);
-                    break;
-                } catch (java.io.IOException e) {
-                    String why = insecure.contains(host) ? null : certificateProblem(e);
-                    if (why == null) throw e;
-                    HostApprover approver = ctx == null ? null : ctx.hosts();
-                    if (approver == null || !approver.approveInsecure(current.getHost(), current.toString(), why)) {
-                        throw new IllegalStateException("The certificate of '" + current.getHost() + "' is not valid ("
-                                + why + ") and the call was not allowed to go on without checking it");
+            // Checked before the approval question (a blocked address is never offered) and again after it, since the
+            // user may take longer than a pin lives. The approved addresses stay pinned until the response headers
+            // are in, so the connect goes to an address that was checked.
+            addresses.check(current).close();
+            checkHost(ctx, current, hop == 0 ? null : uri);
+            GuardedResolverProvider.Handle pin = addresses.check(current);
+            try {
+                HttpRequest req = HttpRequest.newBuilder(current)
+                        .timeout(Duration.ofSeconds(30))
+                        .header("User-Agent", "jllm-harness/1.0")
+                        .GET().build();
+                String host = current.getHost() == null ? "" : HostMatcher.normalize(current.getHost());
+                while (true) {
+                    try {
+                        resp = (insecure.contains(host) ? insecureClient() : direct).send(req, handler);
+                        break;
+                    } catch (java.io.IOException e) {
+                        String why = insecure.contains(host) ? null : certificateProblem(e);
+                        if (why == null) throw e;
+                        HostApprover approver = ctx == null ? null : ctx.hosts();
+                        if (approver == null || !approver.approveInsecure(current.getHost(), current.toString(), why)) {
+                            throw new IllegalStateException("The certificate of '" + current.getHost() + "' is not valid ("
+                                    + why + ") and the call was not allowed to go on without checking it");
+                        }
+                        insecure.add(host);
+                        pin.close(); // the question may have outlived the pin
+                        pin = addresses.check(current);
                     }
-                    insecure.add(host);
                 }
+            } finally {
+                pin.close();
             }
             int sc = resp.statusCode();
             String location = resp.headers().firstValue("Location").orElse(null);
@@ -305,6 +315,65 @@ public class WebAgentTools implements HarnessToolSet {
         String t = href.substring(i + 5);
         int amp = t.indexOf('&');
         return java.net.URLDecoder.decode(amp < 0 ? t : t.substring(0, amp), StandardCharsets.UTF_8);
+    }
+
+    /**
+     * The host of an address as the guard sees it: scheme, user info, port, path, query and fragment are dropped
+     * ({@code https://user@Example.com:8443/a?b=1#c} and {@code example.com} are the same host).
+     *
+     * @throws IllegalArgumentException when no host is left
+     */
+    static URI hostOnly(String raw) {
+        String s = raw == null ? "" : raw.strip();
+        s = s.replaceFirst("^[A-Za-z][A-Za-z0-9+.-]*://", "");
+        int end = s.length();
+        for (char c : new char[]{'/', '?', '#', '\\'}) {
+            int i = s.indexOf(c);
+            if (i >= 0 && i < end) end = i;
+        }
+        s = s.substring(0, end);
+        int at = s.lastIndexOf('@');
+        if (at >= 0) s = s.substring(at + 1);
+        String host;
+        if (s.startsWith("[")) {
+            int close = s.indexOf(']');
+            host = close < 0 ? s.substring(1) : s.substring(1, close);
+        } else if (s.indexOf(':') == s.lastIndexOf(':')) {
+            int colon = s.indexOf(':');
+            host = colon < 0 ? s : s.substring(0, colon); // host:port
+        } else {
+            host = s; // a bare IPv6 address
+        }
+        host = host.strip();
+        if (host.isEmpty()) throw new IllegalArgumentException("No host in '" + raw + "'");
+        try {
+            return new URI("http://" + (host.indexOf(':') >= 0 ? "[" + host + "]" : host) + "/");
+        } catch (java.net.URISyntaxException e) {
+            throw new IllegalArgumentException("Not a valid host: '" + host + "'");
+        }
+    }
+
+    private HarnessTool webAllowed() {
+        return new SimpleTool("web_allowed",
+                "Tell whether web_fetch and web_download may reach an address under the current web limits "
+                        + "(web.blockLocalHost, web.blockExtraAddresses). Only the host counts: protocol, port, path "
+                        + "and parameters are ignored. The first line is ALLOWED or NOT_ALLOWED. A refused address "
+                        + "stays refused for every other tool: do not look for another way to reach it.",
+                SimpleTool.schema("address", "URL, host name or IP address to check"),
+                GROUP, ToolKind.READ_ONLY, (ctx, in) -> {
+            URI host;
+            try {
+                host = hostOnly(in.path("address").asText());
+            } catch (IllegalArgumentException e) {
+                return "NOT_ALLOWED\n" + e.getMessage();
+            }
+            try {
+                addresses.check(host).close();
+                return "ALLOWED";
+            } catch (IllegalStateException e) {
+                return "NOT_ALLOWED\n" + e.getMessage();
+            }
+        });
     }
 
     private HarnessTool webFetch() {

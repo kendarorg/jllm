@@ -33,6 +33,7 @@ final class CliSession implements AutoCloseable {
     private final java.util.function.BiFunction<List<String>, Path, Term> savedTerminal = Main.terminal;
     private Thread thread;
     private volatile Throwable failure;
+    private volatile Integer exit;
     private int mark;
     private boolean restored;
 
@@ -46,7 +47,17 @@ final class CliSession implements AutoCloseable {
         return this;
     }
 
+    /** Runs {@link Main#run}: what it throws is kept for {@link #failure}, the exit code for {@link #exitCode}. */
     CliSession start(String... args) {
+        return launch(() -> Main.run(args, System.currentTimeMillis()));
+    }
+
+    /** Runs {@link Main#exitCode}, as {@code main} does: failures become exit codes and the result file. */
+    CliSession startProcess(String... args) {
+        return launch(() -> Main.exitCode(args));
+    }
+
+    private CliSession launch(java.util.concurrent.Callable<Integer> body) {
         System.setIn(input);
         System.setOut(capture);
         System.setErr(capture);
@@ -54,7 +65,7 @@ final class CliSession implements AutoCloseable {
         Main.terminal = (commands, history) -> null; // plain input and output, as with a pipe
         thread = new Thread(() -> {
             try {
-                Main.run(args);
+                exit = body.call();
             } catch (Throwable t) {
                 failure = t;
             }
@@ -94,6 +105,14 @@ final class CliSession implements AutoCloseable {
         close();
         if (failure != null) throw failure;
         return output();
+    }
+
+    /** Waits for the CLI to return; its exit code, null when it threw. */
+    Integer exitCode() throws InterruptedException {
+        input.eof();
+        thread.join(TIMEOUT_MS);
+        if (thread.isAlive()) fail("the CLI did not end:\n" + output());
+        return exit;
     }
 
     /** What {@link Main#run} threw; null when it returned. */

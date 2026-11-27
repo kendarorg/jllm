@@ -38,7 +38,7 @@ searching, use the group id.
 
 JLLM's emphasis is control: tool kinds and approvals, deny rules, a path jail, Docker sandboxes, sandboxed JavaScript,
 per-user OAuth tokens and per-user env headers for REST/OpenAPI and HTTP MCP tools (the model-provider key is one
-per deployment, stdio MCP servers are shared, and provider logins are not shipped; see
+per deployment, stdio MCP servers are CLI only, and provider logins are not shipped; see
 [identity and access](../enterprise/identity-and-access.md)) and deterministic flows ([why JLLM](../why-jllm.md)), with a core that has no Spring, JPA or
 Micrometer dependency.
 

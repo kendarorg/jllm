@@ -14,6 +14,9 @@ import org.kendar.llm.web.commons.auth.AuthApi;
 import org.kendar.llm.web.commons.auth.OidcApi;
 import org.kendar.llm.web.commons.me.MeApi;
 import org.kendar.llm.web.commons.auth.OidcProperties;
+import org.kendar.llm.web.commons.auth.RoleMappingProperties;
+import org.kendar.llm.web.commons.auth.RoleMappingSettings;
+import org.kendar.llm.harness.settings.SettingsSink;
 import org.kendar.llm.web.commons.JllmProperties;
 import org.kendar.llm.web.commons.auth.LoginThrottle;
 import org.kendar.llm.harness.identity.LoginSessionRepository;
@@ -80,10 +83,23 @@ public class WebAuthConfiguration {
         return client;
     }
 
+    /**
+     * The role mapping options: the {@code jllm.auth.oidc.role-mapping.*} properties, overridden by what an
+     * administrator stores in the settings sink. Invalid properties stop the server naming the key.
+     */
+    @Bean
+    public RoleMappingSettings roleMappingSettings(RoleMappingProperties properties, OidcProperties auth,
+                                                   ObjectProvider<SettingsSink> sink) {
+        return new RoleMappingSettings(properties, sink.getIfAvailable(),
+                auth.oidc() == null ? null : auth.oidc().defaultRole());
+    }
+
+    /** Role changes made by the mapping are raised to the harness hooks ({@code ROLE_CHANGED}). */
     @Bean
     public OidcApi oidcApi(OidcProperties auth, OidcClient client, UserRepository users,
-                           LoginSessionRepository sessions, LoginThrottle throttle) {
-        return new OidcApi(auth, client, users, sessions, throttle);
+                           LoginSessionRepository sessions, LoginThrottle throttle, RoleMappingSettings roleMapping,
+                           Permissions permissions, AgentHarness harness) {
+        return new OidcApi(auth, client, users, sessions, throttle, roleMapping, permissions, harness::runHooks);
     }
 
     @Bean
@@ -101,8 +117,9 @@ public class WebAuthConfiguration {
 
     @Bean
     public AdminApi adminApi(UserRepository users, Permissions permissions, SkillRepository skills,
-                             LoginSessionRepository sessions, AgentHarness harness, ToolCatalogView catalog) {
-        return new AdminApi(users, permissions, skills, sessions, harness, catalog);
+                             LoginSessionRepository sessions, AgentHarness harness, ToolCatalogView catalog,
+                             RoleMappingSettings roleMapping) {
+        return new AdminApi(users, permissions, skills, sessions, harness, catalog, roleMapping);
     }
 
     /** Both the {@code WebAuthentication} and the {@code ChatAccess} of the web API. */

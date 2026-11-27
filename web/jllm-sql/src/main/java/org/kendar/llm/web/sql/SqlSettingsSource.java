@@ -10,7 +10,10 @@ import java.io.UncheckedIOException;
 import java.util.Comparator;
 import java.util.List;
 
-/** {@link SettingsSource} on {@code settings_layer(kind, origin, doc)}: one JSON document per layer kind. */
+/**
+ * {@link SettingsSource} on {@code settings_layer(kind, origin, doc)}: one JSON document per layer kind. The sections an
+ * administrator edits at runtime are not here but in {@link SqlSettingsSink}.
+ */
 public final class SqlSettingsSource implements SettingsSource {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -34,8 +37,16 @@ public final class SqlSettingsSource implements SettingsSource {
         return out.stream().sorted(Comparator.comparing(SettingsLayer::kind)).toList();
     }
 
-    /** Stores (replaces) the layer. @param origin for messages, e.g. {@code sql:global} */
+    /**
+     * Stores (replaces) the layer. @param origin for messages, e.g. {@code sql:global}
+     *
+     * @throws IllegalArgumentException for {@link SettingsLayer.Kind#STORED}: those sections are kept by
+     *                                  {@link SqlSettingsSink}
+     */
     public void put(SettingsLayer.Kind kind, String origin, JsonNode tree) {
+        if (kind == SettingsLayer.Kind.STORED) {
+            throw new IllegalArgumentException("The stored settings are kept by SqlSettingsSink, not as a layer");
+        }
         String doc;
         try {
             doc = MAPPER.writeValueAsString(tree);

@@ -40,6 +40,7 @@ class DockerWslIntegrationTest {
     @TempDir
     Path tmp;
     HarnessConfig config;
+    String daemonHost = "127.0.0.1";
     DockerCommandRunner wslDocker;
     final List<String> created = new ArrayList<>();
     final List<String> createdVolumes = new ArrayList<>();
@@ -107,7 +108,15 @@ class DockerWslIntegrationTest {
                 return real.start(wrap(argv));
             }
         };
-        config = HarnessConfig.defaults().withDockerRemote(true, "127.0.0.1").withDockerScope("user");
+        // published ports are reachable on the host the daemon runs on: the DOCKER_HOST one when the docker of this
+        // machine is used as configured, else localhost
+        daemonHost = "127.0.0.1";
+        String env = System.getenv("DOCKER_HOST");
+        if (pre.isEmpty() && ins.isEmpty() && env != null && env.startsWith("tcp://")) {
+            String h = URI.create(env.strip()).getHost();
+            if (h != null) daemonHost = h;
+        }
+        config = HarnessConfig.defaults().withDockerRemote(true, daemonHost).withDockerScope("user");
     }
 
     @AfterEach
@@ -206,11 +215,11 @@ class DockerWslIntegrationTest {
         String hostPort = wslDocker.run(List.of("docker", "port", name, "8080/tcp"), Duration.ofSeconds(60)).stdout()
                 .lines().findFirst().orElseThrow().replaceAll(".*:", "");
         HttpClient http = HttpClient.newHttpClient();
-        var anon = http.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + hostPort + "/health")).build(),
+        var anon = http.send(HttpRequest.newBuilder(URI.create("http://" + daemonHost + ":" + hostPort + "/health")).build(),
                 HttpResponse.BodyHandlers.ofString());
         assertEquals(401, anon.statusCode());
         assertEquals("", anon.body());
-        var authed = http.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + hostPort + "/health"))
+        var authed = http.send(HttpRequest.newBuilder(URI.create("http://" + daemonHost + ":" + hostPort + "/health"))
                 .header("X-Jllm-Token", token).build(), HttpResponse.BodyHandlers.ofString());
         assertEquals(200, authed.statusCode());
 

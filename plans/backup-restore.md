@@ -13,15 +13,19 @@ has no admin store.
 Nothing implemented (checked: no backup, restore or maintenance code in `web/*`, `jllm-web`, `core/*`).
 Prerequisites that exist: `RoleRepository`, `UserRepository`, `SkillRepository`, `LoginSessionRepository`
 (`core/jllm-harness`, package `identity`), `TokenStore` (`core/jllm-commons`), `SettingsSource` (read-only, `layers()`
-only; no writable sink), file stores in `jllm-web`, SQL stores in `web/jllm-sql`, `Gate` in `web/jllm-web-commons`.
-Missing: roles `settings` column (planned in `litellm.md`), any SQL schema versioning (`Schema` in `web/jllm-sql` has
-none), a writable settings sink.
+only), file stores in `jllm-web`, SQL stores in `web/jllm-sql`, `Gate` in `web/jllm-web-commons`.
+Also done: `Role.settings` free map (keys `sandbox`, `idp`); versioned SQL migration (`Schema` steps 2-4); writable
+settings sink (`SettingsSink`, file and SQL impls; stored sections such as `web.roleMapping`). Missing: everything in
+this plan from task 3 on, and the maintenance-flag migration step.
 
 ## Design
 
 Contents
-- Included: global settings layer (providers, defaultProvider, tools, MCP/REST sources, permissions); roles (incl.
-  `settings`); users (id, name, role, email, external id, password hash); global skills; per-user skills, plugin
+- Included: global settings layer (providers, defaultProvider, tools, MCP/REST sources, permissions); stored settings
+  sections of the sink (incl. `web.roleMapping`, the IdP role-mapping options); roles (incl. `settings`: `sandbox`,
+  `idp`, later `litellm`); users (id, name, role, email, external id, password hash, `users.settings`: per-user
+  sandbox overrides such as the docker host); sandbox backup records (`BackupRecordStore`, once in SQL; the images and
+  zips they point to are not in the archive); global skills; per-user skills, plugin
   storage, project MCP trust.
 - Opt-in `includeSecrets` (per-user tokens: LiteLLM keys, OAuth): encrypted with a passphrase given at backup time,
   never with the instance key. Wrong passphrase refuses the whole restore before any write.
@@ -74,9 +78,8 @@ CLI
 
 ## Remaining tasks
 
-1. Schema migration for `roles.settings` and the maintenance flag: small versioned migration in `Schema` (none today;
-   decided, no manual script). Do in phase 0 of `litellm.md`.
-2. Add a writable settings sink next to `SettingsSource`.
+1. Maintenance flag as a new `Schema` step (versioned migration itself done; no manual script).
+2. (done) Writable settings sink next to `SettingsSource`.
 3. `MaintenanceState` + `Gate` enforcement + store mirror + node polling.
 4. Archive writer/reader (manifest, checksums, zip-slip guard), secrets encryption.
 5. Restore service: dry-run, pre-restore backup, replace/merge, invariants, rollback, reload, audit.

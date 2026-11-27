@@ -77,6 +77,42 @@ public class AdminController {
         return Responses.noContent();
     }
 
+    @GetMapping("/roles/{name}/settings")
+    public Map<String, Object> roleSettings(@PathVariable String name) {
+        return admin.roleSettings(name);
+    }
+
+    @PutMapping("/roles/{name}/settings/{feature}")
+    public Map<String, Object> putRoleSetting(@PathVariable String name, @PathVariable String feature,
+                                              @RequestBody(required = false) Object body) {
+        return admin.putRoleSetting(name, feature, body);
+    }
+
+    @DeleteMapping("/roles/{name}/settings/{feature}")
+    public Map<String, Object> deleteRoleSetting(@PathVariable String name, @PathVariable String feature) {
+        return admin.deleteRoleSetting(name, feature);
+    }
+
+    @GetMapping("/auth/role-mapping")
+    public Map<String, Object> roleMapping() {
+        return admin.roleMapping();
+    }
+
+    @PutMapping("/auth/role-mapping")
+    public Map<String, Object> putRoleMapping(@RequestBody(required = false) Map<String, Object> body) {
+        return admin.putRoleMapping(body);
+    }
+
+    @DeleteMapping("/auth/role-mapping")
+    public Map<String, Object> resetRoleMapping() {
+        return admin.resetRoleMapping();
+    }
+
+    @PostMapping("/auth/role-mapping/preview")
+    public Map<String, Object> previewRoleMapping(@RequestBody(required = false) Map<String, Object> body) {
+        return admin.previewRoleMapping(body);
+    }
+
     @GetMapping("/catalog")
     public ToolCatalogView.Catalog catalog() {
         return admin.catalog();

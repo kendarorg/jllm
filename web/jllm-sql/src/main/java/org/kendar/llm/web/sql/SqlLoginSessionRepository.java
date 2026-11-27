@@ -7,6 +7,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Clock;
+import java.time.Instant;
 import java.util.Base64;
 import java.util.HexFormat;
 import java.util.List;
@@ -33,15 +34,15 @@ public final class SqlLoginSessionRepository implements LoginSessionRepository {
     }
 
     @Override
-    public String create(String userId) {
+    public String create(String userId, Instant notAfter) {
         byte[] b = new byte[32];
         RANDOM.nextBytes(b);
         String token = Base64.getUrlEncoder().withoutPadding().encodeToString(b);
         long now = clock.millis();
         db.run(tx -> {
             tx.update("DELETE FROM login_sessions WHERE expires_at < ?", now);
-            tx.update("INSERT INTO login_sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)", hash(token),
-                    userId, now + TTL.toMillis());
+            tx.update("INSERT INTO login_sessions (token_hash, user_id, expires_at, not_after) VALUES (?, ?, ?, ?)",
+                    hash(token), userId, now + TTL.toMillis(), notAfter == null ? null : notAfter.toEpochMilli());
         });
         return token;
     }
@@ -52,10 +53,15 @@ public final class SqlLoginSessionRepository implements LoginSessionRepository {
         String h = hash(token);
         long now = clock.millis();
         return db.tx(tx -> {
-            List<Object[]> rows = tx.query("SELECT user_id, expires_at FROM login_sessions WHERE token_hash = ?",
-                    rs -> new Object[]{rs.getString(1), rs.getLong(2)}, h);
+            List<Object[]> rows = tx.query("SELECT user_id, expires_at, not_after FROM login_sessions WHERE token_hash = ?",
+                    rs -> {
+                        long notAfter = rs.getLong(3);
+                        Long hardEnd = rs.wasNull() ? null : notAfter;
+                        return new Object[]{rs.getString(1), rs.getLong(2), hardEnd};
+                    }, h);
             if (rows.isEmpty()) return Optional.<String>empty();
-            if (now > (Long) rows.get(0)[1]) {
+            Long notAfter = (Long) rows.get(0)[2];
+            if (now > (Long) rows.get(0)[1] || (notAfter != null && now > notAfter)) {
                 tx.update("DELETE FROM login_sessions WHERE token_hash = ?", h);
                 return Optional.<String>empty();
             }

@@ -66,6 +66,7 @@ cloud tunnel, or a sidecar makes remote requests look local. The exemption is al
 | `jllm.web.use-real-password=true` | at startup every user on the default password (password = login) gets a random 24-character one. The admin password is logged once at WARN; other users are only logged as generated, reset them in the admin screen. Never regenerated; OIDC-linked users skipped. Also counts as "exposed" for the token key check |
 | `jllm.auth.mode` | `password` (default), `oidc`, `both` |
 | `jllm.auth.oidc.*` | `name`, `issuer`, `client-id`, `client-secret` (`env:NAME` only), `scopes`, `allowed-domains`, `auto-provision`, `default-role` |
+| `jllm.auth.oidc.role-mapping.*` | `enabled` (false), `claim` (`groups`), `on-no-match` (`default`, `keep`, `refuse`), `allow-admin` (false), `max-age` (none): roles from IdP groups, see [IdP role mapping](idp-role-mapping.md). Initial values; the admin screen can store others, which win |
 
 Passwords are PBKDF2 (210000 iterations); 5 failed attempts lock a login or address for 30 s (429); changing a password
 signs out the user's other sessions; minimum 8 characters.
@@ -85,12 +86,18 @@ jllm.auth.oidc.default-role=guest
 
 Register `<public-url>/auth/oidc/callback` exactly. Discovery and token endpoints must be HTTPS; startup fails naming the
 key if something is missing. Users link by `issuer#sub`, or on first login by a verified email equal to exactly one
-unlinked user's email. The provider never changes a role: no group-to-role mapping, an administrator assigns roles.
+unlinked user's email. By default the provider never changes a role and an administrator assigns roles; the
+[IdP role mapping](idp-role-mapping.md), off by default, sets the role from the token's groups at each sign-in
+(never the admin role unless `allow-admin`, never demoting the last admin; a linked user's role is set at each provider
+sign-in, password sign-ins do not change it; the break-glass admin signs in with its password, or is not linked to the
+provider). With mapping on, set `max-age` so a group removed at the provider takes effect within hours.
 With `auto-provision` use a least-privilege `default-role`. Mode `oidc` disables `/api/login`.
 
 ### Roles and permissions
 
-Roles are `permissions/<role>.json` (files) or rows (SQL): `{tools, readOnly?, approval?, toolPermissions?, sandbox?}`.
+Roles are `permissions/<role>.json` (files) or rows (SQL): `{tools, readOnly?, approval?, toolPermissions?, <settings>...}`.
+Every other top-level key is a role setting: free JSON per feature (`sandbox` is one; unknown keys are kept), key
+`[a-z0-9_-]{1,64}`, at most 64 KB and 16 levels in all (`roles.settings` in SQL).
 One role per user; `admin` always has every tool and cannot be deleted. `sandbox` is `none` unless an administrator sets
 it (see [Sandbox](#sandbox)), and without a sandbox a role has no file tools and no `bash`, whatever its `tools` say.
 
@@ -98,7 +105,7 @@ it (see [Sandbox](#sandbox)), and without a sandbox a role has no file tools and
 |---|---|
 | `admin` | everything |
 | `poweru` | `run_js`, `bash`, file tools, web tools |
-| `guest` | `run_js`, `web_search`, `wikipedia_search`, `web_fetch`, `web_download`; `bash` denied |
+| `guest` | `run_js`, `web_search`, `wikipedia_search`, `web_fetch`, `web_download`, `web_allowed`; `bash` denied |
 | `reader` | `run_js`, read-only file tools |
 
 - `tools` accept patterns (`mcp__docs__*`, `billing__*`). `toolPermissions` sets `allow`, `ask` or `deny` per tool.
@@ -132,8 +139,8 @@ sessions in memory (a restart signs everyone out).
 | Database | `jllm.sql.url` | Driver | Status |
 |---|---|---|---|
 | SQLite (default) | none, or `jdbc:sqlite:/var/lib/jllm/jllm.db` | bundled | supported; default file `<jllm.webauth-dir>/jllm.db`, else `data/jllm.db`; pool 1 |
-| MySQL 8+ | `jdbc:mysql://host:3306/jllm?useUnicode=true&characterEncoding=utf8` | download, GPL | experimental: DDL never run against a real server by the project |
-| PostgreSQL | `jdbc:postgresql://host:5432/jllm` | download | experimental, same caveat |
+| MySQL 8+ | `jdbc:mysql://host:3306/jllm?useUnicode=true&characterEncoding=utf8` | download, GPL | supported |
+| PostgreSQL | `jdbc:postgresql://host:5432/jllm` | download | supported |
 
 The dialect comes from the URL scheme alone. Other settings: `jllm.sql.user`, `jllm.sql.password`, `jllm.sql.pool`
 (default 10 for non-SQLite), `jllm.sql.seed` (default `true`: a new database gets admin, poweru, guest with password =
@@ -161,11 +168,12 @@ restore yourself.
 
 | Key | Default | Effect |
 |---|---|---|
-| `web.blockLocalHost` | `false` (the web release template sets `true`) | `web_fetch` and `web_download` refuse loopback, link-local (169.254.169.254), private, any-local and IPv6 `fc00::/7`; checked on the first URL and every redirect |
+| `web.blockLocalHost` | `false` (the web release template sets `true`) | `web_fetch` and `web_download` refuse loopback, link-local (169.254.169.254), private, any-local, shared `100.64.0.0/10`, benchmark, reserved, multicast, broadcast, IPv6 `fc00::/7` and `fec0::/10`, and IPv6 forms carrying one of these IPv4 addresses (mapped, NAT64, 6to4, Teredo); checked on the first URL and every redirect |
 | `web.blockExtraAddresses` | `[]` | more refused entries: IP, CIDR, host, `*.suffix` |
 
-Gap: the name is resolved by the guard and again by the HTTP client, so DNS rebinding is not covered. Also: every new
-host asks for approval (grantable per chat with subdomains); https to http redirects are refused; invalid certificates
+With any block active a name that cannot be resolved is refused, and the checked addresses are pinned for the
+connection (DNS rebinding is not followed). The guard covers only `web_fetch` and `web_download`: MCP, REST sources,
+OIDC and model calls are not guarded; put an egress proxy in front of the JVM to filter those. Also: every new host asks for approval (grantable per chat with subdomains); https to http redirects are refused; invalid certificates
 ask separately. To remove web access, add `deny` rules or leave the tools out of the role.
 
 ### Sandbox
@@ -188,7 +196,7 @@ container). `jllm.sandbox` is ignored on the web.
 
 The daemon listens on loopback, checks a per-container token and strips `JLLM_*` variables. It has no TLS and does not
 protect against code already inside the container. Details: [Sandboxes](../guides/sandbox.md#security). Run the JVM as an
-unprivileged user: MCP stdio servers are children of it, outside any sandbox.
+unprivileged user. The web host does not start MCP stdio servers: they are ignored with a warning in the log.
 
 ### Permissions
 
@@ -223,7 +231,7 @@ Example settings fragment (rule syntax: [usage](../reference/usage.md#5-settings
   64 KB per user, approval wait 600 s.
 - Cost: `jllm.pricing.*` gives an estimate only; nothing enforces it.
 - Updates: dependencies are pinned in the poms, SQL drivers and GraalJS by SHA-256 manifests; no vulnerability scan is
-  shipped. The SQL schema has no upgrade path: changing it means deleting the database.
+  shipped. The SQL schema upgrades itself at start (versioned steps); a database newer than the server is refused.
 - Metrics and tracing: recipes in [Observability](observability.md).
 
 ## Known gaps
@@ -237,10 +245,8 @@ Not available yet, from the other pages of this section:
 | Health and metrics endpoints | no `/api/health`; no shipped metrics module |
 | Backups with tested restore | not documented or tested beyond the notes above |
 | Dependency scanning in CI | not set up |
-| DNS pinning for the SSRF guard | rebinding window open |
-| IdP group/role mapping, SAML, SCIM | not available; one OIDC provider |
+| SAML, SCIM | not available; one OIDC provider (IdP group to role mapping is available, off by default) |
 | Per-user model credentials | model key is global |
-| MySQL and PostgreSQL | experimental |
 | Plugin storage, workspace files | on disk, not in SQL |
 | External security audit | none |
 

@@ -9,7 +9,7 @@ standard tools. Entry point `org.kendar.llm.cli.Main`, packaged as a shaded runn
 
 ```sh
 mvn -pl jllm-cli -am package
-java -jar jllm-cli/target/jllm-cli-1.3.0-jllm.jar --provider anthropic --mode edit
+java -jar jllm-cli/target/jllm-cli-1.4.0-jllm.jar --provider anthropic --mode edit
 ```
 
 The API key comes from `--api-key` or the `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GROK_API_KEY` / `QWEN_API_KEY` environment variable.
@@ -19,10 +19,10 @@ The API key comes from `--api-key` or the `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`
 
 ```text
 Main [--provider anthropic|openai|openaiGpt62|gemini|grok|qwen|llamacpp|ollama] [--model M] [--base-url U] [--api-key K]
-     [--mode default|plan|edit|auto] [--workdir DIR] [--prompt TEXT] [--settings FILE] [--system-prompt TEXT] [--system-prompt-file FILE] [--system-prompt-replace FILE]
+     [--mode default|plan|edit|auto] [--workdir DIR] [--prompt TEXT] [--timeout SECONDS] [--json-result FILE] [--settings FILE] [--system-prompt TEXT] [--system-prompt-file FILE] [--system-prompt-replace FILE]
      [--max-turns N] [--context-tokens TOKENS] [--max-tokens TOKENS] [--resume prompt|no|CHAT_ID] [--plugin-dir DIR]
      [--context-strategy compaction|mnemonic|scope] [--search-api-key BRAVE_KEY] [--small-model]
-     [--sandbox local|docker] [--docker-image IMAGE] [--sandbox-scope chat|user] [--sandbox-profile standard|hardened]
+     [--sandbox local|docker|none] [--docker-image IMAGE] [--sandbox-scope chat|user] [--sandbox-profile standard|hardened]
      [--docker-remote] [--docker-remote-host ADDRESS]
      [--external-links none|read|readwrite] [--pricing.input-per-million=USD] [--pricing.output-per-million=USD] [--pricing.cache-read-per-million=USD] [--pricing.cache-write-per-million=USD]
      [--sandbox-clean] [--sandbox-clean-all]
@@ -36,7 +36,9 @@ Main [--provider anthropic|openai|openaiGpt62|gemini|grok|qwen|llamacpp|ollama] 
 | `--api-key` | `<PROVIDER>_API_KEY` env var | `ASK_TOKEN` asks for it on startup |
 | `--mode` | `default` | initial [permission mode](../core/jllm-harness/README.md#modes-working-directory-and-scratch-directory) |
 | `--workdir` | current directory | project directory; the file tools are confined to it |
-| `--prompt` | none | run one turn non-interactively, then exit |
+| `--prompt` | none | run one turn non-interactively, then exit with the code of its outcome (see [Headless runs](#headless-runs)) |
+| `--timeout` | none | with `--prompt`: seconds (whole, positive) after which the run is cancelled; outcome `cancelled`, exit code 4 |
+| `--json-result` | none | with `--prompt`: file the run result is written to as JSON, also on failure (see [Headless runs](#headless-runs)) |
 | `--settings` | none | harness [settings file](../docs/reference/usage.md#5-settings-file), merged over `~/.jllm/settings.json` and `.jllm/settings.json` |
 | `--system-prompt` | none | text appended to the built-in system prompt |
 | `--system-prompt-file` | none | file appended to the system prompt |
@@ -50,7 +52,7 @@ Main [--provider anthropic|openai|openaiGpt62|gemini|grok|qwen|llamacpp|ollama] 
 | `--resume` | `prompt` | `prompt` asks to continue the newest saved chat, `no` starts a new one, anything else is a chat id or prefix; `--prompt` and piped input never ask |
 | `--plugin-dir` | `./plugins` if it exists | directory of plugin jars (see Plugins) |
 | `--pricing.input-per-million`, `output-per-million`, `cache-read-per-million`, `cache-write-per-million` | 0 | USD per million tokens, for the cost estimate; same keys as `jllm.pricing.*` of the web app |
-| `--sandbox` | `local` | `local` (no isolation, for testing and trusted single-user use only) or `docker`: `bash` runs in a container with the project directory mounted ([SANDBOX](../docs/guides/sandbox.md)); wins over `sandbox.backend` |
+| `--sandbox` | `local` | `local` (no isolation, for testing and trusted single-user use only), `none` (as `local` without the path jail: the file tools and the shell reach any path; only with `--mode auto`, for a disposable container that is itself the sandbox) or `docker`: `bash` runs in a container with the project directory mounted ([SANDBOX](../docs/guides/sandbox.md)); wins over `sandbox.backend` |
 | `--docker-image` | `python:3.12-slim` | image of the docker sandbox; wins over `sandbox.docker.image` |
 | `--sandbox-scope` | `chat` | with `docker`: `chat` (one container per session, removed when the session ends) or `user` (one container for this user and project path, kept between runs and reused if running); fixed for the session; wins over `sandbox.docker.scope` |
 | `--sandbox-profile` | `standard` | `standard` or `hardened` (no network by default, limits for temporary users) container profile; wins over `sandbox.docker.profile` |
@@ -78,6 +80,52 @@ When the project directory is not writable, scratch and history go under `sandbo
 
 The CLI has **no isolation**: shell commands run as the current user, and plan mode cannot stop a shell command from
 writing to the project directory.
+
+## Headless runs
+
+`--prompt` runs one turn and exits; nobody is asked anything: every approval question (a tool call, the turn limit,
+a stuck agent) is answered no. The exit code tells how the run ended (the `outcome` of `run_finished`):
+
+| Exit code | Outcome |
+|---|---|
+| 0 | `completed` |
+| 1 | `failed`, `refused`, or a failure before the run (provider, settings) |
+| 2 | `stuck` |
+| 3 | `max_turns`, `truncated`, `unverified` |
+| 4 | `cancelled`, `--timeout` reached |
+| 64 | usage error: unknown or invalid flags, `--sandbox none` without `--mode auto`, `--timeout`/`--json-result` without `--prompt` |
+
+The interactive chat always exits with 0.
+
+`--json-result FILE` is written when the run ends, and also when the CLI fails before or outside it (then `chatId`
+is null and `outcome` is `failed`):
+
+```json
+{
+  "chatId": "0199...",
+  "outcome": "completed",
+  "turns": 2,
+  "durationMs": 1830,
+  "usage": {"input": 2410, "output": 312, "cacheRead": 0, "cacheCreation": 0},
+  "costUsd": 0.0119,
+  "toolCalls": [{"name": "write_file", "input": {"path": "out.txt", "content": "..."}, "isError": false}],
+  "error": null
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `chatId` | the chat of the run (kept in the history dir) |
+| `outcome` | as above; `cancelled` after `--timeout` |
+| `turns` | model calls of the main agent |
+| `durationMs` | wall time from the CLI start |
+| `usage` | tokens of this run, sub-agents included (a resumed chat's earlier turns are not counted) |
+| `costUsd` | estimate from the `--pricing.*` flags; 0 when unpriced |
+| `toolCalls` | the main agent's calls in order (script calls included); `isError` true also for a call that got no result |
+| `error` | the last error message, `timeout after N s`, or null |
+
+In a container (a benchmark) run `--mode auto --sandbox none --prompt ...`: the container is the isolation, and the
+task may need paths outside `--workdir` (such as `/tmp`). Never use `--sandbox none` on a machine with data to protect.
 
 ## Interactive session
 

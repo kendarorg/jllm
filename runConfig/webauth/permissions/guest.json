@@ -1,5 +1,5 @@
 {
-  "tools" : [ "run_js", "web_search", "wikipedia_search", "web_fetch", "web_download" ],
+  "tools" : [ "run_js", "web_search", "wikipedia_search", "web_fetch", "web_download", "web_allowed" ],
   "readOnly" : false,
   "approval" : "ask",
   "toolPermissions" : {

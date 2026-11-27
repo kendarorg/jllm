@@ -39,7 +39,7 @@ flowchart TB
         REG["HarnessToolRegistry<br/>sorted group,name"]
         FS["Files: read_file write_file edit_file ls glob grep grep_code"]
         SH["Shell: bash"]
-        WB["Web: web_search wikipedia_search web_fetch web_download"]
+        WB["Web: web_search wikipedia_search web_fetch web_download web_allowed"]
         SK["skill"]
         EXT["ExternalSources<br/>mcp__srv__tool / api__operationId"]
     end

@@ -72,11 +72,14 @@ final class ToolRound {
         }
         if (cut != null) results.add(guards.truncatedResult(cut, windowFull, run.toolContext));
         StuckDetector.Detection loopSeen = run.stuck.record(toolUses, results);
-        if (loopSeen != null && guards.onStuck(loopSeen, run.stuck, results, req.chatId(), req.sink(),
-                req.cancelled(), req.interactive(), req.label())) {
+        RunGuards.StuckAction action = loopSeen == null ? RunGuards.StuckAction.GO_ON
+                : guards.onStuck(loopSeen, run.stuck, results, messages, req.chatId(), req.sink(), req.cancelled(),
+                req.interactive(), req.label());
+        if (action == RunGuards.StuckAction.STOP) {
             if (req.persist()) deps.sessions().saveMessages(req.chatId(), messages);
             return new AgentLoop.LoopResult(run.finalText, AgentLoop.Outcome.STUCK);
         }
+        if (action == RunGuards.StuckAction.WRAP_UP) run.wrapUp = true;
         injections.scoped(messages, toolUses, results, byName, run.toolContext, req.sink(), req.label(),
                 req.chatId());
         if (req.persist()) deps.sessions().saveMessages(req.chatId(), messages);

@@ -2,6 +2,7 @@ package org.kendar.llm.harness;
 
 import org.kendar.llm.harness.agent.AgentService;
 import org.kendar.llm.harness.context.ContextStrategy;
+import org.kendar.llm.harness.hooks.Hooks;
 import org.kendar.llm.harness.integration.ExternalSources;
 import org.kendar.llm.harness.llm.ModelSwitch;
 import org.kendar.llm.harness.llm.ProviderCatalog;
@@ -22,5 +23,5 @@ record HarnessParts(AgentService service, ChatSessionService sessions, HarnessTo
                     SubAgentRunLog subAgentRuns, ContextStrategy context, HarnessConfig config,
                     HarnessPricing pricing, PermissionRules permissionRules, ContentWarnings contentWarnings,
                     ServiceRegistry services, ProviderCatalog providers, ModelSwitch modelSwitch, int maxParallel,
-                    Checkpoints checkpoints, StorageQuota quota, HarnessAuth auth) {
+                    Checkpoints checkpoints, StorageQuota quota, HarnessAuth auth, Hooks hooks) {
 }

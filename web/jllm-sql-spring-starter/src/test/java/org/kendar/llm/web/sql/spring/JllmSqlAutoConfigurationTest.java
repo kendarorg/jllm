@@ -32,7 +32,8 @@ import static org.junit.jupiter.api.Assertions.*;
 class JllmSqlAutoConfigurationTest {
 
     private static final Class<?>[] TYPES = {UserRepository.class, RoleRepository.class, SkillRepository.class,
-            LoginSessionRepository.class, TokenStore.class, SettingsSource.class, ProjectMcpTrust.class,
+            LoginSessionRepository.class, TokenStore.class, SettingsSource.class,
+            org.kendar.llm.harness.settings.SettingsSink.class, ProjectMcpTrust.class,
             ChatSessionStore.class, StateStore.class, MnemonicStore.class, SubAgentRunLog.class,
             org.kendar.llm.harness.plugin.PluginStorages.class};
 

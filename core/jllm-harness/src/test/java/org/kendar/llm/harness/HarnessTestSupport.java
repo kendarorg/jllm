@@ -208,6 +208,8 @@ public final class HarnessTestSupport {
         private org.kendar.llm.harness.auth.Identity identity;
         private java.util.Collection<HarnessTool> builtinFileTools = List.of();
         private org.kendar.llm.harness.instructions.ScopedInstructions scopedInstructions;
+        private org.kendar.llm.harness.agent.StuckJudge stuckJudge;
+        private boolean unconfined;
 
         public Rig(Path baseDir) {
             this(baseDir, HarnessMetrics.noop());
@@ -236,6 +238,13 @@ public final class HarnessTestSupport {
             return this;
         }
 
+        /** Uses the local runner without the path jail ({@code --sandbox none}); rebuilds the loop. */
+        public Rig unconfined() {
+            unconfined = true;
+            wire();
+            return this;
+        }
+
         /** Changes the config and rebuilds every component that captured it. */
         public Rig configure(UnaryOperator<HarnessConfig> change) {
             config = change.apply(config);
@@ -245,7 +254,8 @@ public final class HarnessTestSupport {
 
         private void wire() {
             approvals = new ApprovalService(config.approvalTimeoutSeconds());
-            sandbox = LocalSandboxExecutor.of(config);
+            sandbox = unconfined ? LocalSandboxExecutor.unconfined(org.kendar.llm.harness.sandbox.DirLayout.of(config))
+                    : LocalSandboxExecutor.of(config);
             contextManager = new ContextManager(config, model, approvals, MAPPER, metrics);
             if (config.contextStrategy() == ContextStrategyKind.MNEMONIC) {
                 context = new MnemonicStrategy(config, MAPPER, metrics, mnemonicStore, runLog);
@@ -272,7 +282,14 @@ public final class HarnessTestSupport {
             when(registry.all()).thenAnswer(i -> new ArrayList<>(registered));
             return new AgentLoop(new AgentLoop.Deps(config, client, context, selector, gate, approvals, sessions,
                     sandbox, registry, subAgentTool, null, runLog, MAPPER, metrics, "", hooks, classifier, identity,
-                    null, builtinFileTools, scopedInstructions, null, null));
+                    null, builtinFileTools, scopedInstructions, null, null, stuckJudge));
+        }
+
+        /** The confirming model of stuck detections ({@code loop.stuck.confirm}); rebuilds the loop. */
+        public Rig stuckJudge(org.kendar.llm.harness.agent.StuckJudge judge) {
+            stuckJudge = judge;
+            wire();
+            return this;
         }
 
         /** The built-in file tools (free from a script) and the scoped instructions of the loop; rebuilds the loop. */

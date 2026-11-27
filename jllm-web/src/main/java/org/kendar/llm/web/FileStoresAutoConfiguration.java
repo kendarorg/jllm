@@ -13,6 +13,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.kendar.llm.harness.auth.TokenKeyGuard;
 import org.kendar.llm.harness.auth.TokenStore;
+import org.kendar.llm.harness.settings.FileSettingsSink;
+import org.kendar.llm.harness.settings.SettingsSink;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -29,7 +31,7 @@ import java.util.Set;
 import java.util.function.Function;
 
 /**
- * The file stores of users, roles and skills (and in-memory sign-in sessions): the fallback when no other store bean
+ * The file stores of users, roles, skills and the stored settings (and in-memory sign-in sessions): the fallback when no other store bean
  * exists. Ordered after the SQL starter, so with it on the class path and {@code jllm.store} not {@code file}
  * its beans win. {@code jllm.store} is {@code file} or {@code sql}; anything else stops the start.
  */
@@ -98,6 +100,13 @@ public class FileStoresAutoConfiguration {
     @ConditionalOnMissingBean(SkillRepository.class)
     public SkillRepository skillRepository(@Value("${jllm.webauth-dir:webauth}") String webauthDir) {
         return new FileSkillRepository(root(webauthDir));
+    }
+
+    /** {@code <webauth>/stored-settings.json}: the settings an administrator edits at runtime. */
+    @Bean
+    @ConditionalOnMissingBean(SettingsSink.class)
+    public SettingsSink settingsSink(@Value("${jllm.webauth-dir:webauth}") String webauthDir) {
+        return new FileSettingsSink(root(webauthDir).resolve("stored-settings.json"));
     }
 
     /** Sign-in sessions in memory. */

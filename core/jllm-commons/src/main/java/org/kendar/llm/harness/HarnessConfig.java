@@ -367,16 +367,24 @@ public record HarnessConfig(String agentId, int maxTurns, int maxTokens, boolean
      * @param repeat            the same step (or the same failing call) this many times in a row is a loop
      * @param alternationCycles A-B-A-B alternation of two steps this many cycles is a loop
      * @param malformed         unknown tool, rejected input or cut-off call this many times in a row is a loop
+     * @param polling           tools whose successful calls are not counted (a status check that returns the same
+     *                          result while waiting is not a loop); a failing call still counts
+     * @param wrapUp            when the run would stop as stuck, the agent first gets one more turn with tool use
+     *                          off to answer with what it has
+     * @param confirm           before acting on a detection, the fast model reads the last steps and may judge them
+     *                          progress; without a fast model the detection stands
      */
-    public record Stuck(boolean enabled, int repeat, int alternationCycles, int malformed) {
+    public record Stuck(boolean enabled, int repeat, int alternationCycles, int malformed, Set<String> polling,
+                        boolean wrapUp, boolean confirm) {
         public Stuck {
             repeat = Math.max(2, repeat);
             alternationCycles = Math.max(2, alternationCycles);
             malformed = Math.max(2, malformed);
+            polling = polling == null ? Set.of() : Set.copyOf(polling);
         }
 
         public static Stuck defaults() {
-            return new Stuck(true, 3, 3, 3);
+            return new Stuck(true, 3, 3, 3, Set.of(), true, false);
         }
     }
 

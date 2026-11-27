@@ -20,5 +20,11 @@ public enum HookEvent {
     /** An agent (the main one for a user turn, or a sub-agent) is about to start. Can deny it. */
     PRE_AGENT,
     /** An agent finished, successfully or not. Observation only. */
-    POST_AGENT
+    POST_AGENT,
+    /**
+     * Raised by the host, outside any chat: the sign-in changed a user's role (identity provider group mapping).
+     * {@link HookContext#input()} holds {@code user}, {@code from}, {@code to}, {@code group} (the matched group, or
+     * null) and {@code reason}. Observation only: an audit trail.
+     */
+    ROLE_CHANGED
 }

@@ -46,7 +46,7 @@ class ToolReplacementTest {
 
         assertFalse(names(h).contains("bash"));
         assertNull(h.tools().get("bash"));
-        assertEquals(11, names(h).size());
+        assertEquals(12, names(h).size());
     }
 
     @Test

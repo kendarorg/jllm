@@ -107,10 +107,10 @@ act under approval and isolation. Comparison: [JVM landscape](docs/comparisons/j
 
 ```sh
 mvn -pl jllm-cli -am package
-java -jar jllm-cli/target/jllm-cli-1.3.0-jllm.jar --provider anthropic --mode edit      # terminal
+java -jar jllm-cli/target/jllm-cli-1.4.0-jllm.jar --provider anthropic --mode edit      # terminal
 
 mvn -pl jllm-web -am package
-java -jar jllm-web/target/jllm-web-1.3.0-jllm.jar --provider anthropic                 # http://localhost:8080
+java -jar jllm-web/target/jllm-web-1.4.0-jllm.jar --provider anthropic                 # http://localhost:8080
 ```
 
 Set `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`, `GROK_API_KEY`, `QWEN_API_KEY`) first.
@@ -151,7 +151,7 @@ the [security model](docs/enterprise/security-model.md) for the reasoning.
 ## SQL store
 
 `jllm-web` keeps users, roles, chats, tokens and settings in SQL by default: SQLite in `<jllm.webauth-dir>/jllm.db`
-(bundled, nothing to install), or MySQL / PostgreSQL (both experimental) chosen by the JDBC url alone:
+(bundled, nothing to install), or MySQL / PostgreSQL chosen by the JDBC url alone:
 `jllm.sql.url=jdbc:postgresql://host:5432/jllm`, `jllm.sql.user`, `jllm.sql.password=${JLLM_SQL_PASSWORD}`. `jllm.store=file`
 keeps the files under `webauth/` instead. The MySQL (GPL) and PostgreSQL drivers are never shipped: run
 `scripts/fetch-sql-driver.sh mysql|postgres` (`.ps1` / `.cmd` on Windows; in a release zip the script next to it) or
@@ -169,8 +169,8 @@ All modules are available on Maven Central under the group `org.kendar.llm`.
 
 ## Evaluation
 
-[jllm-eval](core/jllm-eval/README.md) runs the harness features against real models, graded by checks and an LLM
-judge. Every run is recorded in the [eval history](core/jllm-eval/eval-results/history/INDEX.md): one row per run
+[jllm-eval](eval/jllm-eval/README.md) runs the harness features against real models, graded by checks and an LLM
+judge. Every run is recorded in the [eval history](eval/jllm-eval/eval-results/history/INDEX.md): one row per run
 (model, judge, pass rate, pass^k, tokens per trial, comparison with the baseline) linking to the run's recap.
 
 ## Documentation
@@ -184,14 +184,13 @@ judge. Every run is recorded in the [eval history](core/jllm-eval/eval-results/h
 
 ## Known limits and what is next
 
-Today: single OIDC provider and no IdP role mapping; one global API key per model provider; the web app is a
+Today: single OIDC provider (with optional [IdP group to role mapping](docs/enterprise/idp-role-mapping.md)); one global API key per model provider; the web app is a
 reference front end to run behind your proxy; no Spring Boot starter for the harness itself (only the web API starter `jllm-web-spring-starter`; harness beans are recipes); no external security audit.
 
 Stores (chat history, users, roles, tokens): memory or files in the library and the CLI; `jllm-web` uses SQL when `jllm-sql-spring-starter` is present, else files. To use your own storage, implement the store
 interfaces and register them as beans or on the builder ([ports](docs/enterprise/governance-and-audit.md#ports-for-your-stores)).
 
-Next: IdP role mapping (token claims to roles) and per-user model credentials (own API key or OAuth login per
-provider, in development). Details: [roadmap and limits](docs/enterprise/roadmap-and-limits.md).
+Next: per-user model credentials (own API key or OAuth login per provider, in development). Details: [roadmap and limits](docs/enterprise/roadmap-and-limits.md).
 
 ## Credits
 

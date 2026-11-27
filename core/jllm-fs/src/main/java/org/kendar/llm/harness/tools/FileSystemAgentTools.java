@@ -86,6 +86,14 @@ public class FileSystemAgentTools implements HarnessToolSet {
         if (scratch != null && Path.of(path).isAbsolute() && Path.of(path).normalize().startsWith(scratch)) {
             return PathResolver.resolve(scratch, path, ctx.links(), write);
         }
+        if (ctx.unconfined()) {
+            // no jail: a path outside the work dir is resolved under its file system root, links followed anywhere
+            Path work = ctx.workDir().toAbsolutePath().normalize();
+            Path abs = work.resolve(path).normalize();
+            if (!abs.startsWith(work) && abs.getRoot() != null) {
+                return PathResolver.resolve(abs.getRoot(), abs.toString(), ExternalLinks.READ_WRITE, write);
+            }
+        }
         return PathResolver.resolve(ctx.workDir(), path, ctx.links(), write);
     }
 

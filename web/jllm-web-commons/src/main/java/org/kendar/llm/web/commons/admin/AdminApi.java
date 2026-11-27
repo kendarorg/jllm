@@ -6,7 +6,11 @@ import org.kendar.llm.web.commons.Api;
 import org.kendar.llm.web.commons.ApiException;
 import org.kendar.llm.web.commons.Reply;
 import org.kendar.llm.web.commons.auth.AuthApi;
+import org.kendar.llm.web.commons.auth.IdpSetting;
 import org.kendar.llm.web.commons.auth.PasswordHasher;
+import org.kendar.llm.web.commons.auth.RoleMapper;
+import org.kendar.llm.web.commons.auth.RoleMappingOptions;
+import org.kendar.llm.web.commons.auth.RoleMappingSettings;
 import org.kendar.llm.harness.identity.LoginSessionRepository;
 import org.kendar.llm.harness.identity.Principal;
 import org.kendar.llm.web.commons.me.MeApi;
@@ -18,6 +22,8 @@ import org.kendar.llm.harness.identity.UnknownRoleException;
 import org.kendar.llm.harness.identity.SkillRepository;
 import org.kendar.llm.harness.identity.UserRepository;
 import org.kendar.llm.harness.identity.User;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -31,27 +37,40 @@ import java.util.Optional;
  */
 public class AdminApi {
 
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final com.fasterxml.jackson.core.type.TypeReference<LinkedHashMap<String, Object>> OBJECT =
+            new com.fasterxml.jackson.core.type.TypeReference<>() {
+            };
+
     private final UserRepository users;
     private final Permissions permissions;
     private final SkillRepository skills;
     private final LoginSessionRepository sessions;
     private final AgentHarness harness;
     private final ToolCatalogView catalog;
+    private final RoleMappingSettings roleMapping;
 
+    /** @param roleMapping the options of the identity provider role mapping */
     public AdminApi(UserRepository users, Permissions permissions, SkillRepository skills, LoginSessionRepository sessions,
-                           AgentHarness harness, ToolCatalogView catalog) {
+                    AgentHarness harness, ToolCatalogView catalog, RoleMappingSettings roleMapping) {
         this.users = users;
         this.permissions = permissions;
         this.skills = skills;
         this.sessions = sessions;
         this.harness = harness;
         this.catalog = catalog;
+        this.roleMapping = roleMapping;
     }
 
     // ---- users
 
+    /**
+     * {@code roleManagedByIdp}: the role mapping is enabled and the user is linked to the identity provider, so the next
+     * sign-in through the provider sets the role from the groups (overwriting one set here), password or not.
+     */
     private Map<String, Object> row(User u) {
         Map<String, Object> m = new LinkedHashMap<>(AuthApi.visible(u));
+        m.put("roleManagedByIdp", u.external() && roleMapping.current().enabled());
         m.put("ownSkills", skills.own(u.id()).size());
         m.put("disabledTools", u.disabledTools());
         m.put("disabledSkills", u.disabledSkills());
@@ -169,6 +188,7 @@ public class AdminApi {
         sb.put("scope", r.sandbox().scope());
         sb.put("network", r.sandbox().network());
         m.put("sandbox", sb);
+        m.put("settings", settingsView(r));
         m.put("fixed", r.fixed());
         m.put("users", all.stream().filter(u -> r.name().equals(u.role())).count());
         return m;
@@ -191,7 +211,7 @@ public class AdminApi {
         if (User.ADMIN_ROLE.equals(name)) { // every tool stays; only the approval changes
             try {
                 return row(permissions.save(Role.admin(Api.text(body, "approval"), toolPermissions(body),
-                        sandbox(body, permissions.role(name).map(Role::sandbox).orElse(RoleSandbox.NONE)))), users.all());
+                        settings(body, permissions.role(name).map(Role::settings).orElse(Map.of())))), users.all());
             } catch (IllegalArgumentException e) {
                 throw new ApiException(400, e.getMessage());
             }
@@ -211,7 +231,7 @@ public class AdminApi {
         try {
             Role saved = permissions.save(new Role(name, tools.stream().distinct().toList(),
                     readOnly, approval, toolPermissions(body),
-                    sandbox(body, permissions.role(name).map(Role::sandbox).orElse(RoleSandbox.NONE))));
+                    settings(body, permissions.role(name).map(Role::settings).orElse(Map.of()))));
             return row(saved, users.all());
         } catch (IllegalArgumentException e) {
             throw new ApiException(400, e.getMessage());
@@ -219,16 +239,67 @@ public class AdminApi {
     }
 
     /**
-     * {@code sandbox}: {@code {kind: none|local|docker-isolated|docker-open, scope, network}}; absent keeps {@code current} (a client
-     * that does not know the field must not take a role's sandbox away).
+     * The settings of a saved role. {@code settings}: the whole map (object of feature to JSON), absent keeps
+     * {@code current}; {@code sandbox}: {@code {kind: none|local|docker-isolated|docker-open, scope, network}}, absent
+     * keeps the sandbox of the map (a client that does not know a field must not take it away). Each known feature is
+     * validated (400).
      */
-    private static RoleSandbox sandbox(Map<String, Object> body, RoleSandbox current) {
-        Object raw = body == null ? null : body.get("sandbox");
-        if (raw == null) return current;
-        if (!(raw instanceof Map<?, ?> m)) {
-            throw new IllegalArgumentException("'sandbox' must be an object {kind, scope, network}");
+    private static Map<String, JsonNode> settings(Map<String, Object> body, Map<String, JsonNode> current) {
+        Map<String, JsonNode> out = new LinkedHashMap<>(current);
+        Object raw = body == null ? null : body.get("settings");
+        if (raw != null) {
+            if (!(raw instanceof Map<?, ?> m)) throw new IllegalArgumentException("'settings' must be an object of feature to JSON");
+            out.clear();
+            m.forEach((k, v) -> out.put(String.valueOf(k), MAPPER.valueToTree(v)));
         }
-        return RoleSandbox.of(text(m.get("kind")), text(m.get("scope")), text(m.get("network")));
+        Object sb = body == null ? null : body.get("sandbox");
+        if (sb != null) {
+            if (!(sb instanceof Map<?, ?>)) throw new IllegalArgumentException("'sandbox' must be an object {kind, scope, network}");
+            out.put(Role.SANDBOX, MAPPER.valueToTree(sb));
+        }
+        validate(out);
+        return out;
+    }
+
+    /** Strict checks of the features this server knows; the stored form of the sandbox is its normalized one. */
+    private static void validate(Map<String, JsonNode> settings) {
+        JsonNode sb = settings.get(Role.SANDBOX);
+        if (sb != null && !sb.isNull()) settings.put(Role.SANDBOX, RoleSandbox.parse(sb).toJson());
+        JsonNode idp = settings.get(IdpSetting.KEY);
+        if (idp != null && !idp.isNull()) settings.put(IdpSetting.KEY, IdpSetting.parse(idp).toJson());
+    }
+
+    private static Map<String, Object> settingsView(Role r) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        r.settings().forEach((k, v) -> out.put(k, MAPPER.convertValue(v, Object.class)));
+        return out;
+    }
+
+    /** {@code GET /api/admin/roles/{name}/settings}: the settings map of a role. */
+    public Map<String, Object> roleSettings(String name) {
+        return settingsView(permissions.role(name).orElseThrow(() -> new ApiException(404, "Unknown role " + name)));
+    }
+
+    /** {@code PUT /api/admin/roles/{name}/settings/{feature}}: replaces one feature's settings. */
+    public Map<String, Object> putRoleSetting(String name, String feature, Object value) {
+        Role role = permissions.role(name).orElseThrow(() -> new ApiException(404, "Unknown role " + name));
+        if (value == null) throw new ApiException(400, "A JSON value is required");
+        try {
+            Map<String, JsonNode> next = new LinkedHashMap<>(role.settings());
+            next.put(feature, MAPPER.valueToTree(value));
+            validate(next);
+            return settingsView(permissions.save(new Role(role.name(), role.tools(), role.readOnly(), role.approval(),
+                    role.toolPermissions(), next)));
+        } catch (IllegalArgumentException e) {
+            throw new ApiException(400, e.getMessage());
+        }
+    }
+
+    /** {@code DELETE /api/admin/roles/{name}/settings/{feature}}: removes one feature's settings. */
+    public Map<String, Object> deleteRoleSetting(String name, String feature) {
+        Role role = permissions.role(name).orElseThrow(() -> new ApiException(404, "Unknown role " + name));
+        if (role.setting(feature) == null) throw new ApiException(404, "Role " + name + " has no settings '" + feature + "'");
+        return settingsView(permissions.save(role.withSetting(feature, null)));
     }
 
     private static String text(Object o) {
@@ -260,6 +331,65 @@ public class AdminApi {
         } catch (RoleInUseException e) { // a user got the role meanwhile
             throw new ApiException(409, e.getMessage());
         }
+    }
+
+    // ---- identity provider role mapping
+
+    /**
+     * {@code GET /api/admin/auth/role-mapping}: the options in force, whether they are stored (else the properties
+     * apply), whether they can be edited, the default role and the values of the properties.
+     */
+    public Map<String, Object> roleMapping() {
+        Map<String, Object> out = MAPPER.convertValue(roleMapping.current().toJson(), OBJECT);
+        out.put("stored", roleMapping.stored());
+        out.put("editable", roleMapping.editable());
+        out.put("defaultRole", roleMapping.defaultRole());
+        out.put("properties", MAPPER.convertValue(roleMapping.initial().toJson(), OBJECT));
+        return out;
+    }
+
+    /** {@code PUT /api/admin/auth/role-mapping}: stores the options; an absent key keeps its value (400 on a bad one). */
+    public Map<String, Object> putRoleMapping(Map<String, Object> body) {
+        if (!roleMapping.editable()) throw new ApiException(409, "The role mapping options are read-only here");
+        try {
+            roleMapping.put(MAPPER.valueToTree(body == null ? Map.of() : body));
+        } catch (IllegalArgumentException e) {
+            throw new ApiException(400, e.getMessage());
+        }
+        return roleMapping();
+    }
+
+    /** {@code DELETE /api/admin/auth/role-mapping}: drops the stored options, so the properties apply again. */
+    public Map<String, Object> resetRoleMapping() {
+        if (!roleMapping.editable()) throw new ApiException(409, "The role mapping options are read-only here");
+        roleMapping.reset();
+        return roleMapping();
+    }
+
+    /**
+     * {@code POST /api/admin/auth/role-mapping/preview}: the role a sign-in with {@code groups} (array of strings, or a
+     * space or comma separated string) would get, and why. A dry run: it works whether the mapping is enabled or not.
+     */
+    public Map<String, Object> previewRoleMapping(Map<String, Object> body) {
+        Object raw = body == null ? null : body.get("groups");
+        List<String> groups = new ArrayList<>();
+        if (raw instanceof String s) {
+            for (String g : s.split("[\\s,]+")) if (!g.isBlank()) groups.add(g.strip());
+        } else if (raw instanceof List<?> list) {
+            for (Object o : list) {
+                if (!(o instanceof String s)) throw new ApiException(400, "'groups' must be strings");
+                if (!s.isBlank()) groups.add(s.strip());
+            }
+        } else {
+            throw new ApiException(400, "'groups' must be an array of strings or a string");
+        }
+        groups = groups.stream().distinct().toList();
+        if (groups.size() > org.kendar.llm.web.commons.auth.OidcClient.MAX_GROUPS) {
+            throw new ApiException(400, "At most " + org.kendar.llm.web.commons.auth.OidcClient.MAX_GROUPS + " groups");
+        }
+        RoleMappingOptions options = roleMapping.current();
+        RoleMapper.Decision d = RoleMapper.decide(options, permissions.roles(), groups);
+        return RoleMapper.view(options, roleMapping.defaultRole(), groups, d);
     }
 
     // ---- catalog

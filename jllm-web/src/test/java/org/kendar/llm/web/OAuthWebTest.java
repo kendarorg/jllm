@@ -131,7 +131,9 @@ class OAuthWebTest {
         mvc = MockMvcBuilders.standaloneSetup(
                         new AuthController(new AuthApi(users, auth, sessions, new LoginThrottle(),
                                 new org.kendar.llm.web.commons.auth.OidcProperties(null, null))),
-                        new AdminController(new AdminApi(users, permissions, skills, sessions, harness, catalog)),
+                        new AdminController(new AdminApi(users, permissions, skills, sessions, harness, catalog,
+                                new org.kendar.llm.web.commons.auth.RoleMappingSettings(
+                                        org.kendar.llm.web.commons.auth.RoleMappingProperties.NONE, null, null))),
                         new ChatController(new ChatApi(harness, MAPPER, new HarnessPricing(0, 0, 0, 0), auth), auth),
                         oauth)
                 .setControllerAdvice(new ApiExceptionAdvice())

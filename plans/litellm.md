@@ -9,15 +9,21 @@ limits chosen by role. JLLM builds no budgets, rate limiting or price tables.
 
 ## Status
 
-Nothing implemented. Verified in code:
+LiteLLM itself not implemented. Shared prerequisites done (built for the IdP role mapping and
+`plans/sandbox_hard.md`):
+- `Role` carries `Map<String, JsonNode> settings` (free JSON, unknown keys preserved, caps); `sandbox` is one key read
+  through `Role.sandbox()` / `RoleSandbox`. File and SQL role repositories store the whole map; `AdminApi` role
+  endpoints accept and return `settings`.
+- Versioned migration in `Schema` (`web/jllm-sql`, `Step` list: 2 settings columns, 3 `settings_section`, 4
+  `login_sessions.not_after`); the ad-hoc `Schema.upgrade` is gone.
+- Writable settings sink: `SettingsSink`, `AbstractSettingsSink`, `FileSettingsSink`, `SqlSettingsSink`.
+
+Still true in code:
 - `OpenAiCompatModelClient` (`core/jllm-harness`, `llm/`) already talks to a LiteLLM proxy (handles its "200 with error
   body" case; has `authProvider(...)`; retries `429` and `>=500` with backoff, honours `retry-after`).
 - No per-user model credentials: every call uses the provider's global key (`ProviderSettings`;
   `docs/enterprise/roadmap-and-limits.md`, "Planned: per-user model credentials").
-- `Role` (`core/jllm-harness/.../identity/Role.java`) has no `settings` field.
-- No admin API or UI for providers. `SettingsSource` (`core/jllm-harness/.../settings`) is read-only; impls
-  `FileSettingsSource` and `SqlSettingsSource` (`web/jllm-sql`).
-- `Schema` (`web/jllm-sql`) has no migration mechanism.
+- No `LiteLlmLimits`, `LiteLlmKeyProvisioner`, `credentialMode`, provider admin API or provider UI.
 - No `ProvidersPanel.js`; admin UI is `jllm-web/src/main/resources/static/components/AdminPanel.js` + `RoleEditor.js`.
 - `UserCredentialResolver` (`web/jllm-web-commons/.../users`) covers tool credentials, not model calls.
 - CLI is `jllm-cli` (`Main`, `LineCommands`); no `/providers` command.
@@ -44,14 +50,9 @@ Nothing implemented. Verified in code:
     `TokenStore.removeAll`. Admin re-sync of one or all users.
   - Verify endpoints and fields against the installed LiteLLM version before coding (`/key/generate`, `/user/new`,
     `/key/update`, `/key/delete`; user vs key limits; a key without team keeps its own budget).
-- **Role settings**: `Role` gains `Map<String, JsonNode> settings` (free JSON, top key = feature, e.g. `litellm`;
-  unknown keys preserved; size and depth caps). Change the constructor and fix all callers (`Role.admin`,
-  repositories, `AdminApi`, tests); no compat overload. `LiteLlmLimits.of(role)` validates `max_budget`,
-  `budget_duration` (e.g. `30d`), `rpm_limit`, `tpm_limit`, `models`, optional `team_id`; invalid values give 400 on save.
-  - SQL: `roles.settings` TEXT column in the three `schema.sql` (`web/jllm-sql/src/main/resources/db/{sqlite,postgres,mysql}`),
-    `SqlRoleRepository`, `SqlSeeder` (`web/jllm-sql-spring-starter`). Needs the versioned `Schema` migration (shared
-    with `plans/backup-restore.md`).
-  - Files: `FileRoleRepository` (`jllm-web`) writes a `settings` object.
+- **Role limits**: stored under the `litellm` key of `Role.settings` (map, file and SQL storage done; see Status).
+  `LiteLlmLimits.of(role)` validates `max_budget`, `budget_duration` (e.g. `30d`), `rpm_limit`, `tpm_limit`, `models`,
+  optional `team_id`; invalid values give 400 on save.
   - Saving a role re-syncs its users' keys in the background (failures reported, not fatal).
   - Roles without a `litellm` entry use the provider-level default (`litellm: {url, masterKeyRef, defaultLimits}`).
 - **Admin API** (`AdminApi` in `web/jllm-web-commons`, routes in `web/jllm-web-spring-starter`, admin only via `Gate`):
@@ -59,7 +60,7 @@ Nothing implemented. Verified in code:
     `PUT|DELETE .../settings/{feature}`.
   - `POST /api/admin/litellm/sync[?user=<id>]`, `GET /api/admin/litellm/status`.
   - Providers: `GET/POST/PUT/DELETE /api/admin/providers[/{name}]`, `POST .../{name}/test`, default provider and
-    `order` (fallback chain). Writes go through a new writable sink next to `SettingsSource`. Validation per
+    `order` (fallback chain). Writes go through the existing `SettingsSink`. Validation per
     `ProviderSettings` (unique name, known type, URL).
   - Keys are write-only (`env:NAME` reference or encrypted token store); GET shows `configured: true/false`. Confirm
     how `apiKey` is held in settings today; keep literals out of plain settings JSON.
@@ -82,21 +83,49 @@ Nothing implemented. Verified in code:
 - **Decisions**: master key held by JLLM via env var; limits per role (free-JSON `settings`) with provider-level
   default; automatic provisioning only (users cannot paste their own key); proxy ownership still to be named by the user.
 
+## Gaps settled before task 1
+
+- **Credentials not tied to LiteLLM.** `credentialMode: user-token` is generic, but only LiteLLM has a way to fill it
+  (auto-provisioning). Decided: the web is provisioning-only (users cannot paste their own key); the CLI keeps
+  `/login provider:<name>`. Task 1 must not depend on `LiteLlmKeyProvisioner`: it is the generic mechanism, LiteLLM is
+  its first filler.
+- **Whose key for runs without an interactive user**: flows, scheduled runs, sub-agents, title/summary/compaction
+  helpers, classifier. Rule: the key of the chat owner (or the user who started the flow); a run with no user, or a
+  background job whose owner was deleted/disabled, gets the "connect your account" error, never the global key unless
+  `allowGlobalFallback`. State it in the code and the docs.
+- **Shared chats** (hardening 4 shared deployments): the call is billed to the user who sends the turn, with that user's
+  key; a user without a credential gets the connect error, the chat is not blocked for others.
+- **"Connect your account" flow**: the tool/result must carry an actionable message and the web UI a place to act
+  (user settings tab: state, add/replace/remove key); CLI: `/login provider:<name>`.
+- **Storage**: `TokenStore` is already encrypted at rest (`TokenCipher`, AES-256-GCM, `JLLM_TOKEN_KEY`; `TokenKeyGuard`
+  refuses to start a multi-user web without it). Rely on it; add a test that a provider key never reaches plain
+  settings, logs, audit events or error messages.
+- **Shared client, per-call key**: the `AuthProvider` lookup must not cache across users (no key in a field, no
+  connection-level header reuse); test with two users interleaved on one client.
+- **Audit**: record which credential source was used (`global`, `user-token`) per call, never the key; include in the
+  per-request `metadata`.
+
+## Open decisions
+
+None. Answered 2026-11-27: the ops team runs and pins the LiteLLM proxy (documented); the web stays
+provisioning-only (users cannot paste their own key; the CLI keeps `/login provider:<name>`).
+
 ## Remaining tasks
 
 0. Smoke test, no code: provider `litellm` (openai-compatible, `baseUrl`, `model` alias, `apiKey` from env,
    `useMaxCompletionTokens` per backing model); confirm streaming with `stream_options.include_usage`, tool calls, 429/400.
 1. Per-user model credentials (`credentialMode`, `allowGlobalFallback`, per-call `AuthProvider`, token storage).
-2. `Role.settings` + `LiteLlmLimits` + file/SQL storage + `Schema` migration.
+2. `LiteLlmLimits` (validation of `settings.litellm`, 400 on save). `Role.settings`, file/SQL storage and the
+   versioned `Schema` migration are done.
 3. `LiteLlmKeyProvisioner` + sync/status endpoints.
-4. Provider admin API, atomic catalog reload, `ProvidersPanel.js`, role editor section.
+4. Provider admin API (writes through the existing `SettingsSink`), atomic catalog reload, `ProvidersPanel.js`, role editor section.
 5. CLI `/providers`.
 6. Error mapping (budget vs rate limit, no fallthrough), audit metadata, optional cost display.
 7. Tests (cross-platform; no real LiteLLM or Docker):
-   - role settings round trip in file and sqlite stores, unknown keys preserved, caps, 400 on invalid, migration of a DB without the column;
+   - `settings.litellm` validation: 400 on invalid values, valid limits round trip in file and sqlite stores;
    - provider API: CRUD, secret never returned, reload does not disturb a running chat, non-admin 403;
-   - provisioner against a fake LiteLLM (`FakeLlmServer` style, `core/jllm-eval` fixtures): create, idempotent recreate, update, delete;
+   - provisioner against a fake LiteLLM (`FakeLlmServer` style, `eval/jllm-eval` fixtures): create, idempotent recreate, update, delete;
    - credential resolution never uses another user's key, no silent global fallback, 401 no fallback;
    - budget-exceeded not retried, RPM 429 retried with `retry-after`.
-8. Docs: `docs/enterprise/roadmap-and-limits.md`, `identity-and-access.md`, per-role limit reference, first line of
-   `plans/TODO.md` ("Add litellm provider"); update the target page of `plans/secdoc.md`.
+8. Docs: `docs/enterprise/roadmap-and-limits.md`, `identity-and-access.md`, per-role limit reference; remove litellm from
+   `plans/TODO.md`; update the target page of `plans/secdoc.md`.

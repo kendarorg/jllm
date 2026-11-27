@@ -60,4 +60,37 @@ class CliArgsTest {
         assertTrue(CliArgs.USAGE.contains("--provider"));
         assertTrue(CliArgs.USAGE.contains("--resume"));
     }
+
+    @Test
+    void timeoutIsAPositiveWholeNumberOfSeconds() {
+        assertEquals(0, CliArgs.timeoutSeconds(Map.of()));
+        assertEquals(90, CliArgs.timeoutSeconds(Map.of("timeout", "90")));
+        assertThrows(IllegalArgumentException.class, () -> CliArgs.timeoutSeconds(Map.of("timeout", "0")));
+        assertThrows(IllegalArgumentException.class, () -> CliArgs.timeoutSeconds(Map.of("timeout", "-3")));
+        assertThrows(IllegalArgumentException.class, () -> CliArgs.timeoutSeconds(Map.of("timeout", "1.5")));
+    }
+
+    @Test
+    void headlessFlagsNeedPrompt() {
+        CliArgs.checkHeadless(Map.of("prompt", "p", "timeout", "5", "json-result", "r.json"));
+        CliArgs.checkHeadless(Map.of());
+        assertThrows(IllegalArgumentException.class, () -> CliArgs.checkHeadless(Map.of("timeout", "5")));
+        assertThrows(IllegalArgumentException.class, () -> CliArgs.checkHeadless(Map.of("json-result", "r.json")));
+    }
+
+    @Test
+    void rawValueReadsAFlagEvenWhenTheLineDoesNotParse() {
+        assertEquals("r.json", CliArgs.rawValue(new String[]{"stray", "--json-result", "r.json"}, "json-result"));
+        assertEquals("x.json", CliArgs.rawValue(new String[]{"--json-result=x.json", "stray"}, "json-result"));
+        assertNull(CliArgs.rawValue(new String[]{"--json-result"}, "json-result"));
+        assertNull(CliArgs.rawValue(new String[]{"--prompt", "p"}, "json-result"));
+    }
+
+    @Test
+    void usageDocumentsTheHeadlessContract() {
+        assertTrue(CliArgs.USAGE.contains("--timeout SECONDS"));
+        assertTrue(CliArgs.USAGE.contains("--json-result FILE"));
+        assertTrue(CliArgs.USAGE.contains("--sandbox local|docker|none"));
+        assertTrue(CliArgs.USAGE.contains("64 usage error"));
+    }
 }

@@ -399,4 +399,134 @@ class MainTest {
         second.await("default> ");
         second.end();
     }
+
+    // ---------------------------------------------------------------- headless contract
+
+    private static final com.fasterxml.jackson.databind.ObjectMapper JSON = new com.fasterxml.jackson.databind.ObjectMapper();
+
+    @Test
+    void outcomesMapToExitCodes() {
+        assertEquals(0, RunReport.exitCode("completed"));
+        assertEquals(1, RunReport.exitCode("failed"));
+        assertEquals(1, RunReport.exitCode("refused"));
+        assertEquals(2, RunReport.exitCode("stuck"));
+        assertEquals(3, RunReport.exitCode("max_turns"));
+        assertEquals(3, RunReport.exitCode("truncated"));
+        assertEquals(3, RunReport.exitCode("unverified"));
+        assertEquals(4, RunReport.exitCode("cancelled"));
+        assertEquals(1, RunReport.exitCode(null));
+        assertEquals(1, RunReport.exitCode("something-new"));
+        assertEquals(64, RunReport.EXIT_USAGE);
+    }
+
+    @Test
+    void aCompletedPromptExitsZeroAndWritesTheResult() throws Throwable {
+        Path result = tmp.resolve("out").resolve("result.json");
+        CliSession s = cli().startProcess(args("--mode", "auto", "--prompt", "PLEASE WRITE now",
+                "--json-result", result.toString(),
+                "--pricing.input-per-million=1000000", "--pricing.output-per-million=2000000"));
+        assertEquals(0, s.exitCode(), s.output());
+        assertEquals(FakeOpenAiServer.WRITTEN, Files.readString(project.resolve("out.txt")));
+
+        JsonNode r = JSON.readTree(result.toFile());
+        assertEquals(List.of("chatId", "outcome", "turns", "durationMs", "usage", "costUsd", "toolCalls", "error"),
+                fieldNames(r));
+        assertFalse(r.path("chatId").asText().isEmpty());
+        assertEquals("completed", r.path("outcome").asText());
+        assertEquals(2, r.path("turns").asInt(), r.toString());
+        assertTrue(r.path("durationMs").asLong() >= 0);
+        JsonNode u = r.path("usage");
+        assertEquals(List.of("input", "output", "cacheRead", "cacheCreation"), fieldNames(u));
+        assertTrue(u.path("input").asLong() >= 20, r.toString());
+        assertTrue(u.path("output").asLong() >= 10, r.toString());
+        assertEquals(u.path("input").asLong() + 2.0 * u.path("output").asLong(), r.path("costUsd").asDouble(), 1e-9);
+        assertEquals(1, r.path("toolCalls").size(), r.toString());
+        JsonNode call = r.path("toolCalls").get(0);
+        assertEquals(List.of("name", "input", "isError"), fieldNames(call));
+        assertEquals("write_file", call.path("name").asText());
+        assertEquals("out.txt", call.path("input").path("path").asText());
+        assertFalse(call.path("isError").asBoolean(true));
+        assertTrue(r.path("error").isNull(), r.toString());
+    }
+
+    @Test
+    void theTurnLimitExitsThree() throws Throwable {
+        Path result = tmp.resolve("result.json");
+        CliSession s = cli().startProcess(args("--mode", "auto", "--max-turns", "1", "--prompt", "PLEASE WRITE now",
+                "--json-result", result.toString()));
+        assertEquals(3, s.exitCode(), s.output());
+        assertEquals("max_turns", JSON.readTree(result.toFile()).path("outcome").asText());
+    }
+
+    @Test
+    void theTimeoutCancelsTheRunAndExitsFour() throws Throwable {
+        Path result = tmp.resolve("result.json");
+        CliSession s = cli().startProcess(args("--prompt", "SLOW timed", "--timeout", "1",
+                "--json-result", result.toString()));
+        assertEquals(4, s.exitCode(), s.output());
+        assertTrue(s.output().contains("[timeout]"), s.output());
+        JsonNode r = JSON.readTree(result.toFile());
+        assertEquals("cancelled", r.path("outcome").asText());
+        assertEquals("timeout after 1 s", r.path("error").asText());
+        assertTrue(r.path("durationMs").asLong() >= 1000, r.toString());
+    }
+
+    @Test
+    void aFailedModelCallExitsOne() throws Throwable {
+        Path result = tmp.resolve("result.json");
+        String[] a = args("--prompt", "hi", "--json-result", result.toString());
+        server.close(); // nothing answers on the port any more
+        CliSession s = cli().startProcess(a);
+        assertEquals(1, s.exitCode(), s.output());
+        JsonNode r = JSON.readTree(result.toFile());
+        assertEquals("failed", r.path("outcome").asText());
+        assertFalse(r.path("error").isNull(), r.toString());
+    }
+
+    @Test
+    void usageErrorsExit64AndStillWriteTheResult() throws Throwable {
+        Path result = tmp.resolve("result.json");
+        CliSession s = cli().startProcess(args("--sandbox", "none", "--prompt", "x",
+                "--json-result", result.toString()));
+        assertEquals(64, s.exitCode(), s.output());
+        JsonNode r = JSON.readTree(result.toFile());
+        assertEquals("failed", r.path("outcome").asText());
+        assertTrue(r.path("error").asText().contains("--mode auto"), r.toString());
+        assertTrue(server.requests.isEmpty());
+        s.close();
+
+        assertEquals(64, cli().startProcess("stray", "--json-result", result.toString()).exitCode());
+        assertTrue(JSON.readTree(result.toFile()).path("error").asText().contains("stray"));
+        cli.close();
+        assertEquals(64, cli().startProcess(args("--timeout", "5")).exitCode(), "--timeout needs --prompt");
+        cli.close();
+        assertEquals(64, cli().startProcess(args("--prompt", "x", "--timeout", "0")).exitCode());
+        cli.close();
+        assertEquals(0, cli().startProcess("--help").exitCode());
+    }
+
+    @Test
+    void sandboxNoneWritesOutsideTheWorkdirAndLocalKeepsItsJail() throws Throwable {
+        Path outside = Files.createDirectories(tmp.resolve("elsewhere")).resolve("app").resolve("x.txt");
+        Path result = tmp.resolve("result.json");
+        CliSession jailed = cli().startProcess(args("--mode", "auto", "--prompt", FakeOpenAiServer.WRITE_TO + outside,
+                "--json-result", result.toString()));
+        assertEquals(0, jailed.exitCode(), jailed.output());
+        assertFalse(Files.exists(outside), "the local runner keeps its jail");
+        assertTrue(JSON.readTree(result.toFile()).path("toolCalls").get(0).path("isError").asBoolean());
+        jailed.close();
+
+        CliSession open = cli().startProcess(args("--mode", "auto", "--sandbox", "none",
+                "--prompt", FakeOpenAiServer.WRITE_TO + outside, "--json-result", result.toString()));
+        assertEquals(0, open.exitCode(), open.output());
+        assertTrue(open.output().contains("sandbox none"), open.output());
+        assertEquals(FakeOpenAiServer.WRITTEN, Files.readString(outside));
+        assertFalse(JSON.readTree(result.toFile()).path("toolCalls").get(0).path("isError").asBoolean(true));
+    }
+
+    private static List<String> fieldNames(JsonNode n) {
+        List<String> out = new ArrayList<>();
+        n.fieldNames().forEachRemaining(out::add);
+        return out;
+    }
 }

@@ -292,6 +292,7 @@ SQL, can be plugged in without touching controllers or the harness. File impleme
 ## 18. Evaluation module (`jllm-eval`)
 A test-only module, outside the default build (`eval` Maven profile), that runs the harness features against real
 models.
+- **Location:** `eval/jllm-eval` (first `core/jllm-eval`), under `eval/` with the other evaluation tooling.
 - **Cases:** one suite per feature of `FEATURES.md` (harness core, plugins, prompt-cache layout, context strategies),
   graded by deterministic checks (files, tool calls, server state) and an LLM judge with rubrics (`no-false-claim`,
   grounded correctness). Groups `unit`, `smoke`, `full`, `strategy`, `compaction`. Features without cases are listed

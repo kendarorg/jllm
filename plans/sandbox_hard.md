@@ -1,5 +1,7 @@
 # Sandbox hardening and rework
 
+NO RETROCOMPATIBILITY
+
 Note: in this plan only, `jllm-js` is considered always present (part of the layer model, not a separate plugin).
 
 ## Goal
@@ -102,9 +104,8 @@ each in its own work dir.
   `ContainerRegistry` resolves the host per user, then the container key.
 - **Clean-up policy per role**: configurable per role, e.g. after X time of inactivity stop the container and back it
   up, then remove it (restored on next use). Fields: inactivity timeout, action (stop, backup+remove, remove), backup
-  retention, and a maximum workspace size (per-role quota on the volume, checked at backup and by the sweep). The
-  effective policy for a user is the one of the role they act under. A user with several roles selects
-  the role in a combo box in the UI; via API (no selection) the first role in alphabetical order is used.
+  retention, and a maximum workspace size (per-role quota on the volume, checked at backup and by the sweep). Each
+  user has exactly one role; the effective policy is the one of that role.
 - Only an admin can change scope or docker host policy of a group, and grant the tarball download permission.
 
 ### CLI
@@ -161,30 +162,16 @@ Decided: the local runner stays unisolated and is meant for testing and trusted 
 
 ## Proposed work
 
-1. **`SandboxFactory`**: one `create(settings, config, layout, kind)` used by CLI and web; selection rules in one place.
-2. **Split layout from runner**: `Layout` and `Runner` (local, daemon). Cwd and ChatDir become layouts. Remove
-   `DockerSandboxExecutor`; `docker.mode`/`sandbox.backend=docker` collapses onto the daemon runner. Expose the remote
-   executor's storage so `run_js` can optionally use it.
-3. **Narrow the interface**: `Layout`, `Exec`, `Files`, `Lifecycle` (fallback, backup, clean, close).
-4. **Break up `RemoteExecSandboxExecutor`** (stays the single remote class, with a hardened or standard profile):
-   container lifecycle (`ContainerRegistry`), backup/fallback, daemon client.
-5. **Local mode**: no new enforcement. Document that plan mode is advisory on the local runner and that the local
-   runner is for testing only (docs, and a clear note in the web admin UI).
-6. **Cleanup**: dead code, rename the local executor, refresh javadoc and `docs/guides/sandbox.md`
-   (and `extending.md` section 9).
-7. **JS in the layer model**: `run_js` is an always-available member of the isolation layer. The factory/docs describe
-   it with every runner (role with `run_js` and no `bash` as the no-host profile); check the `fileJail` roots against
-   the new `Layout`; allow, not require, the remote executor as its storage.
-8. **Remote scope (chat or user)**: `sandbox.remote.scope` and the `ContainerRegistry`, resolved in `SandboxFactory`.
-   Web: allowed storages per user, per-user docker host override, per-role clean-up policy, backup records, tarball
-   download, admin-only scope change with warning. CLI: `--sandbox-scope` option; sandbox status added to the existing `/status`.
-9. **Hardened profile**: per user/per chat configurable limits on `RemoteExecSandboxExecutor`, for temporary users.
+The nine design items (factory, layout/runner split, narrowed interface, broken-up remote executor, local mode docs,
+cleanup, JS in the layer model, scope, hardened profile) are implemented; see Status. What is left is in "Remaining
+tasks".
 
 ## Constraints
 
 - No backward-compat overloads or shims: change signatures and fix callers.
 - Must build and pass on Windows, Linux and macOS.
-- Overlaps with TODO section 1 (docker sandbox for web chats): do not duplicate; that list stays the pilot-blocker view.
+- Phase 1 of `plans/TODO.md` (pilot blockers) is this plan's remaining tasks; keep the two in step, do not duplicate.
+- Decisions named below (D1-D5, D7, D12) live in `plans/TODO.md` phase 0; record each answer here.
 
 ## Status
 
@@ -216,12 +203,58 @@ Implemented (core, CLI, web wiring), see `docs/guides/sandbox.md`:
 Deviation: the scope key is `sandbox.docker.scope`, not `sandbox.remote.scope` (`sandbox.docker.remote` already means a
 docker daemon on another machine).
 
-Not yet:
+## Remaining tasks
 
-- Per-user allowed storages, per-user docker host override and per-role clean-up policy persisted in the SQL store
-  (a role stores only kind, scope and network today).
-- Admin UI: clean-up policy editing and the scope-change warning (kind, scope, network and the local-runner warning are
-  done).
-- A list of allowed container images per role, each with its mode (isolated or exposed): see TODO section 1.
-- Tarball download endpoint and its role permission.
-- Scope-change migration of existing workspaces.
+In order. Each task ends with its tests and its docs line (task 12 and 13 gather what is not done inline).
+
+0. **Decisions (answered 2026-11-27).**
+   - D1 Docker socket: rootless Docker, a documented deployment requirement; no code.
+   - D2 Network: documented only. `docker-isolated` keeps `network: none`; `docker-open` uses its own Docker network and
+     blocking metadata and internal ranges is the admin's firewall job. No code.
+   - D3 Allowed images: a stored settings section (`web.*` through `SettingsSink`).
+   - D4 Allowed images: digest optional (the admin UI warns on a bare tag), only admins add entries, no user switch in a
+     chat: the role default applies.
+   - D5 User deletion: a `UserLifecycle` service with registered cleanup steps, called by the admin delete API and the
+     expiry sweep.
+   - D7 Multi-node: single node for the pilot, documented (registry, sweep and DNS pins are per JVM).
+   - D12 `run_js`: implicit, through the chat runner; no new setting.
+1. **Main `docker_host` and per-user override (web).** The web takes the host from `DOCKER_HOST` only
+   (`HarnessFactory.executor`). Add a main `docker_host` to the admin config; a per-user override in `users.settings`
+   feeds `Placement.dockerHost` (the seam exists). Admin-only. Needs D7.
+2. **Role sandbox settings: limits and clean-up policy.** `SandboxPolicy` carries only profile, scope and network from
+   the role; memory, cpu, pids and clean-up are `null`. Add them under the role `sandbox` key (limits; clean-up:
+   inactivity timeout, action stop | backup+remove | remove, backup retention, maximum workspace size as a quota
+   checked at backup and by the sweep), validate on save (400), pass them through `SandboxPolicy`. Includes the disk
+   quota of the sandbox volumes.
+3. **SQL `BackupRecordStore`.** Add the backup-record field to the chat/user storage (versioned `Schema` migration step
+   after version 4), implement the SQL store, wire it in the web instead of `FileBackupRecordStore`.
+4. **`UserLifecycle` service (D5).** One service that, on admin delete and on temporary-user expiry, runs
+   `RemoteExecSandboxExecutor.dropUser` (containers, volumes, backups, tarballs, image records). Define the hook so the
+   LiteLLM key delete and session revoke of other plans attach to it, without building those here. Needs D5, task 3.
+5. **Allowed images per role (D3, D4).** An admin list (settings section, admin only) of allowed images, each with its mode (`isolated` = hardened
+   profile, `exposed` = standard profile with network); a role chooses one or several, with a default for the chat.
+   Pin the default image by digest instead of by tag. Replaces the single server-wide `jllm.docker-image`. Needs D3, D4,
+   task 2 (role settings).
+6. **Network, socket and fallback.** D1 and D2 need no code: document rootless Docker and the network rule in the
+   sandbox guide (`curl` in `bash` bypasses the SSRF guard, so an admin must filter egress for `docker-open`).
+   Code: `localFallback=false` for the web (default is true, today it asks the chat user).
+7. **Per-user allowed storages and picker.** The admin grants scopes per user or group; one allowed is chosen
+   automatically, several give a picker in the UI. Needs task 2.
+8. **Tarball download.** Endpoint and a role permission granted only by an admin; a user gets only their own. Needs
+   task 3.
+9. **Scope-change migration.** When an admin changes the scope of a group, warn in the UI that containers are dropped and
+   only the workspace is kept, then move the workspace tarball into the new layout (`/workspace` of a chat becomes
+   `/workspace/<chatId>`, or the reverse). Needs tasks 3 and 7.
+10. **Admin UI.** Clean-up policy editing (task 2), allowed images (task 5), docker host (task 1). Kind, scope, network
+    and the local-runner warning are done.
+11. **`run_js` and the remote storage (D12: implicit).** Verify the `fileJail` root against `Layout` with the remote runner;
+    script tool calls go through the chat's runner (`RunJsTool.run`); no explicit opt-in.
+12. **Tests**, no real Docker in the default build (Docker tests stay gated as they are):
+    - role settings validation, policy passing, sweep by role policy;
+    - SQL backup store in sqlite, record lifecycle and retention;
+    - lifecycle hook drops everything of a user and nothing of another;
+    - per-user docker host resolves in `Placement`; allowed-image checks refuse an unlisted image;
+    - tarball download refuses another user's archive; scope-change keeps the workspace.
+13. **Docs.** `docs/guides/sandbox.md` (hardening items, multi-node limit from D7, `user` scope shares one container
+    across a user's chats), `docs/guides/extending.md` section 9, `docs/enterprise/roadmap-and-limits.md`; update
+    `plans/TODO.md` phase 1.

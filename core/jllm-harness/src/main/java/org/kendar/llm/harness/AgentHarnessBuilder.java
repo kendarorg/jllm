@@ -419,7 +419,8 @@ public final class AgentHarnessBuilder {
             AgentHarness harness = new AgentHarness(new HarnessParts(wired.service(), sessions, tools.registry(),
                     sources, tools.skills(), box, subAgentRunLog, wired.context(), cfg, pricing,
                     tools.permissionRules(), contentWarnings, plugins.services, models.providers(),
-                    models.modelSwitch(), models.maxParallel(), tools.checkpoints(), tools.quota(), facade));
+                    models.modelSwitch(), models.maxParallel(), tools.checkpoints(), tools.quota(), facade,
+                    plugins.hooks));
             plugins.commands.forEach(c -> harness.commands().register(c.name(), c.description(), c.command()));
             return harness;
         } catch (RuntimeException | Error e) { // boundary: close the MCP processes, rethrown unchanged

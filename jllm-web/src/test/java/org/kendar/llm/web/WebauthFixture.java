@@ -63,13 +63,39 @@ final class WebauthFixture {
     final UserRepository users;
     final Permissions permissions;
     final SkillRepository skills;
-    final LoginSessionRepository sessions = new InMemoryLoginSessionRepository();
+    /** The clock of the sign-in sessions; tests move it. */
+    final MutableClock clock = new MutableClock();
+    final LoginSessionRepository sessions = new InMemoryLoginSessionRepository(clock);
+    /** The stored settings ({@code stored-settings.json}), holding the role mapping options. */
+    final org.kendar.llm.harness.settings.SettingsSink settingsSink;
+    /** No role mapping properties: the options come from {@link #settingsSink}; default role {@code reader}. */
+    final org.kendar.llm.web.commons.auth.RoleMappingSettings roleMapping;
     final LoginThrottle throttle = new LoginThrottle();
     final AgentHarness harness;
     final MockMvc mvc;
     private final CookieAuthentication auth;
     private final ToolCatalogView catalog;
     private final Gate gate;
+
+    /** A clock that stands still unless moved. */
+    static final class MutableClock extends java.time.Clock {
+        volatile java.time.Instant now = java.time.Instant.now();
+
+        @Override
+        public java.time.ZoneId getZone() {
+            return java.time.ZoneOffset.UTC;
+        }
+
+        @Override
+        public java.time.Clock withZone(java.time.ZoneId zone) {
+            return this;
+        }
+
+        @Override
+        public java.time.Instant instant() {
+            return now;
+        }
+    }
 
     /** A tool that reports what it runs on, the way run_js reports its engine. */
     static HarnessTool toolWithStatus(String name, String status) {
@@ -107,6 +133,9 @@ final class WebauthFixture {
         users = new FileUserRepository(root.resolve("users"), MAPPER, roleRepo);
         permissions = new Permissions(roleRepo);
         skills = new FileSkillRepository(root);
+        settingsSink = new org.kendar.llm.harness.settings.FileSettingsSink(root.resolve("stored-settings.json"));
+        roleMapping = new org.kendar.llm.web.commons.auth.RoleMappingSettings(
+                org.kendar.llm.web.commons.auth.RoleMappingProperties.NONE, settingsSink, "reader");
         ModelClient unused = new ModelClient() {
             @Override
             public ModelResponse complete(ModelRequest request) {
@@ -141,7 +170,7 @@ final class WebauthFixture {
                         new AuthController(new AuthApi(users, auth, sessions, throttle,
                                 new org.kendar.llm.web.commons.auth.OidcProperties(null, null))),
                         new MeController(new MeApi(users, permissions, skills, sessions, throttle, harness, catalog)),
-                        new AdminController(new AdminApi(users, permissions, skills, sessions, harness, catalog)),
+                        new AdminController(new AdminApi(users, permissions, skills, sessions, harness, catalog, roleMapping)),
                         new ChatController(new ChatApi(harness, MAPPER, new HarnessPricing(0, 0, 0, 0), auth), auth))
                 .setControllerAdvice(new ApiExceptionAdvice())
                 .addInterceptors(new ApiInterceptor(gate, auth, MAPPER, onLoopback, boundToLoopback),

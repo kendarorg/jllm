@@ -30,14 +30,19 @@ import java.util.stream.Stream;
  *   "sandbox": {"kind": "docker-isolated",     none (default: no files, no shell), local, docker-isolated
  *                                              (hardened container) or docker-open (standard container)
  *               "scope": "user",               docker: chat or user (optional)
- *               "network": "none"}             docker-isolated: none or default (optional)
+ *               "network": "none"},            docker-isolated: none or default (optional)
+ *   "idp": {...}                               every other key is a role setting (free JSON per feature)
  * }
  * </pre>
- * A file for {@code admin} is ignored: that role is fixed ({@link Permissions}).
+ * A file for {@code admin} is read for its {@code approval}, {@code toolPermissions} and settings; its {@code tools} and
+ * {@code readOnly} are ignored: that role always has every tool ({@link Permissions}).
  */
 public final class FileRoleRepository implements RoleRepository {
 
     private static final Logger log = LoggerFactory.getLogger(FileRoleRepository.class);
+    /** The role's own fields; every other top-level key is a setting ({@link Role#settings()}). */
+    private static final java.util.Set<String> FIELDS = java.util.Set.of("tools", "readOnly", "approval", "toolPermissions");
+    private static final java.util.regex.Pattern SETTING_KEY = java.util.regex.Pattern.compile("[a-z0-9_-]{1,64}");
 
     private final Path dir;
     private final ObjectMapper mapper;
@@ -80,6 +85,12 @@ public final class FileRoleRepository implements RoleRepository {
     @Override
     public void save(Role role) {
         JsonFiles.update(mapper, dir.resolve(role.name() + ".json"), n -> {
+            // the settings map is the whole truth: drop the stored ones first (a key the role no longer has goes)
+            List<String> old = new ArrayList<>();
+            n.fieldNames().forEachRemaining(k -> {
+                if (!FIELDS.contains(k) && SETTING_KEY.matcher(k).matches()) old.add(k);
+            });
+            old.forEach(n::remove);
             ArrayNode tools = n.putArray("tools");
             role.tools().forEach(tools::add);
             n.put("readOnly", role.readOnly());
@@ -89,12 +100,7 @@ public final class FileRoleRepository implements RoleRepository {
                 var perms = n.putObject("toolPermissions");
                 role.toolPermissions().forEach((pattern, p) -> perms.put(pattern, p.name().toLowerCase()));
             }
-            var sb = role.sandbox();
-            n.remove("sandbox");
-            var sn = n.putObject("sandbox");
-            sn.put("kind", sb.kind().wire());
-            if (sb.scope() != null) sn.put("scope", sb.scope());
-            if (sb.network() != null) sn.put("network", sb.network());
+            role.settings().forEach(n::set);
         });
     }
 
@@ -121,16 +127,24 @@ public final class FileRoleRepository implements RoleRepository {
         }
         p.fields().forEachRemaining(e -> perms.put(e.getKey(),
                 org.kendar.llm.harness.permission.ToolPermission.parse(e.getValue().asText())));
-        JsonNode sb = n.path("sandbox");
-        org.kendar.llm.harness.identity.RoleSandbox sandbox;
+        java.util.Map<String, JsonNode> settings = new java.util.LinkedHashMap<>();
+        n.fields().forEachRemaining(e -> {
+            if (FIELDS.contains(e.getKey())) return;
+            if (!Role.settingKey(e.getKey())) {
+                log.warn("Key '{}' of role {} ignored: not a valid settings key", e.getKey(), role);
+                return;
+            }
+            settings.put(e.getKey(), e.getValue());
+        });
         try {
-            sandbox = org.kendar.llm.harness.identity.RoleSandbox.of(sb.path("kind").asText(null),
-                    sb.path("scope").asText(null), sb.path("network").asText(null));
-        } catch (IllegalArgumentException e) { // a bad value is no sandbox: the file must not stop the server
-            log.warn("Sandbox of role {} ignored: {}", role, e.getMessage());
-            sandbox = org.kendar.llm.harness.identity.RoleSandbox.NONE;
+            return new Role(role, names(tools), n.path("readOnly").asBoolean(false), n.path("approval").asText("ask"),
+                    perms, settings);
+        } catch (IllegalArgumentException e) {
+            if (settings.isEmpty()) throw e;
+            // settings over the caps: keep the role, drop them (the file must not stop the server)
+            log.warn("Settings of role {} ignored: {}", role, e.getMessage());
+            return new Role(role, names(tools), n.path("readOnly").asBoolean(false), n.path("approval").asText("ask"),
+                    perms, java.util.Map.of());
         }
-        return new Role(role, names(tools), n.path("readOnly").asBoolean(false), n.path("approval").asText("ask"),
-                perms, sandbox);
     }
 }

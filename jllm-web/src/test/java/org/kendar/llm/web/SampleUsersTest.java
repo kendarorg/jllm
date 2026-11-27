@@ -101,7 +101,7 @@ class SampleUsersTest {
     void roleSandboxIsStoredInTheRoleFileAndDefaultsToNone(@TempDir Path dir) {
         Permissions perms = new Permissions(new FileRoleRepository(dir, new ObjectMapper()));
         perms.save(new org.kendar.llm.harness.identity.Role("ops", List.of("*"), false, "ask", Map.of(),
-                org.kendar.llm.harness.identity.RoleSandbox.of("docker-isolated", null, "default")));
+                Map.of("sandbox", org.kendar.llm.harness.identity.RoleSandbox.of("docker-isolated", null, "default").toJson())));
         var sb = perms.role("ops").orElseThrow().sandbox();
         assertEquals(org.kendar.llm.harness.sandbox.SandboxKind.DOCKER_ISOLATED, sb.kind());
         assertEquals("hardened", sb.profile());
@@ -113,13 +113,48 @@ class SampleUsersTest {
     }
 
     @Test
+    void roleSettingsAreTopLevelKeysOfTheRoleFileAndUnknownOnesSurviveASave(@TempDir Path dir) throws Exception {
+        Files.writeString(dir.resolve("ops.json"), "{\"tools\":[\"*\"],\"approval\":\"off\","
+                + "\"sandbox\":{\"kind\":\"local\"},\"idp\":{\"groups\":[\"g1\"],\"deep\":{\"x\":1}},\"flag\":true,"
+                + "\"Bad Key\":1,\"name\":\"ignored\"}");
+        FileRoleRepository repo = new FileRoleRepository(dir, mapper);
+        var ops = repo.find("ops").orElseThrow();
+        assertEquals(List.of("sandbox", "idp", "flag"), List.copyOf(ops.settings().keySet()),
+                "invalid and reserved keys are not settings");
+        assertEquals(org.kendar.llm.harness.sandbox.SandboxKind.LOCAL, ops.sandbox().kind());
+        assertEquals("off", ops.approval());
+
+        repo.save(ops.withSetting("sandbox", org.kendar.llm.harness.identity.RoleSandbox.of("docker-open", "user", null).toJson()));
+        var saved = repo.find("ops").orElseThrow();
+        assertEquals(ops.setting("idp"), saved.setting("idp"));
+        assertTrue(saved.setting("flag").asBoolean());
+        assertEquals("user", saved.sandbox().scope());
+        var file = mapper.readTree(dir.resolve("ops.json").toFile());
+        assertEquals("g1", file.path("idp").path("groups").path(0).asText(), "settings stay top-level keys of the file");
+        assertEquals("docker-open", file.path("sandbox").path("kind").asText());
+
+        repo.save(saved.withSetting("idp", null));
+        assertFalse(mapper.readTree(dir.resolve("ops.json").toFile()).has("idp"), "a removed setting leaves the file");
+        assertEquals(List.of("sandbox", "flag"), List.copyOf(repo.find("ops").orElseThrow().settings().keySet()));
+    }
+
+    @Test
+    void roleFileWithSettingsOverTheCapsKeepsTheRole(@TempDir Path dir) throws Exception {
+        Files.writeString(dir.resolve("big.json"), "{\"tools\":[\"grep\"],\"blob\":\""
+                + "x".repeat(org.kendar.llm.harness.identity.Role.MAX_SETTINGS_BYTES) + "\"}");
+        var big = new FileRoleRepository(dir, mapper).find("big").orElseThrow();
+        assertEquals(List.of("grep"), big.tools());
+        assertTrue(big.settings().isEmpty());
+    }
+
+    @Test
     void toolPermissionsAreStoredAndDecideDenyThenAskThenAllow(@TempDir Path dir) throws Exception {
         Permissions perms = new Permissions(new FileRoleRepository(dir, new ObjectMapper()));
         perms.save(new org.kendar.llm.harness.identity.Role("ops", List.of("*"), false, "ask", Map.of(
                 "send_*", org.kendar.llm.harness.permission.ToolPermission.ALLOW,
                 "send_secret", org.kendar.llm.harness.permission.ToolPermission.DENY,
                 "bash", org.kendar.llm.harness.permission.ToolPermission.ASK),
-                org.kendar.llm.harness.identity.RoleSandbox.NONE));
+                Map.of()));
         UserPolicy p = perms.forRole("ops").orElseThrow();
         assertEquals(org.kendar.llm.harness.permission.ToolPermission.ALLOW, p.permissionOf(tool("send_mail", ToolKind.OTHER)));
         assertEquals(org.kendar.llm.harness.permission.ToolPermission.DENY, p.permissionOf(tool("send_secret", ToolKind.OTHER)));

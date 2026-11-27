@@ -4,14 +4,14 @@
 
 | Area | Limit |
 |---|---|
-| Identity | one OpenID Connect provider; no IdP group or claim to role mapping; no SAML or SCIM ([Identity and access](identity-and-access.md)) |
+| Identity | one OpenID Connect provider; IdP group to role mapping (off by default) applies at sign-in only, from the ID token only (no Graph or userinfo call); no SAML or SCIM ([Identity and access](identity-and-access.md), [IdP role mapping](idp-role-mapping.md)) |
 | Web application | a reference front end: no TLS termination, sign-in lockout is the only rate limit; run behind a proxy |
-| Stores | memory and files in the library; `jllm-web` ships SQL stores (SQLite, MySQL, PostgreSQL); MySQL and PostgreSQL are experimental until run against real servers; no importer of an existing `webauth/` folder; one instance only (file mode), no shared run state |
-| Network guard | `web.blockLocalHost` resolves the name itself and the HTTP client resolves it again: a DNS rebinding window remains (no address pinning). The remote Docker daemon accepts plain http unless `sandbox.docker.allowInsecure=false`; the in-container daemon speaks plain HTTP only (https needs a TLS-terminating proxy in front of it; native TLS is a TODO) |
+| Stores | memory and files in the library; `jllm-web` ships SQL stores (SQLite, MySQL, PostgreSQL); no importer of an existing `webauth/` folder; one instance only (file mode), no shared run state |
+| Network guard | `web.blockLocalHost` / `web.blockExtraAddresses` cover only `web_fetch` and `web_download` (checked address pinned for the connection); MCP, REST, OIDC and model traffic is not guarded (use an egress proxy). If another `InetAddressResolverProvider` is installed in the JVM the pin is off and a warning is logged. The remote Docker daemon accepts plain http unless `sandbox.docker.allowInsecure=false`; the in-container daemon speaks plain HTTP only (https needs a TLS-terminating proxy in front of it; native TLS is a TODO) |
 | Integrations | no Spring Boot starter for the harness itself (`jllm-web-spring-starter` covers only the web REST and SSE API) and no Micrometer or OpenTelemetry module: [recipes](../getting-started/spring-boot.md) only |
 | Model credentials | one global API key per provider; per-user credentials are [in development](#planned-per-user-model-credentials) |
 | Flows | the `who` label of a question is shown, not enforced |
-| Isolation | the web gives a role no sandbox by default (no files, no shell); the `local` sandbox has none; MCP stdio servers run as the JVM user |
+| Isolation | the web gives a role no sandbox by default (no files, no shell); the `local` sandbox has none; on the CLI, MCP stdio servers run as the JVM user (the web ignores them) |
 | Path jail | on Windows, and on file systems without secure directory streams, a junction swapped in between check and use is a residual race (accepted: creating one needs a host shell, which has no jail); the shell tools are not covered ([tools guide](../guides/tools.md#links-that-leave-the-work-dir-filesexternallinks)) |
 | `run_js` | the limits are guesses to tune with eval data (`maxInnerCalls` 200, `loop.innerCallsPerTurn` 10); GraalJS is not shipped in the jars and must be fetched ([JS guide](../guides/js.md)) |
 | Assurance | no external security audit, no certification ([security model](security-model.md#6-what-it-does-not-cover)) |
@@ -51,18 +51,6 @@ the CLI. Until it exists, treat model credentials as global.
 Features jllm does not have yet, taken from the gaps in [HARNESSES-COMPARE](../comparisons/harnesses-compare.md). Nothing here is
 scheduled. Each item says what it is and how it could fit the harness. Model streaming, stuck detection and
 verify-on-stop are implemented (see [HISTORY](../reference/history.md#12-loop-guards-and-streaming)).
-
-## IdP role mapping
-
-Map the groups or claims in the OpenID Connect token to JLLM roles, so that an administrator does not assign roles by
-hand. Today the provider never changes a role: a user is linked or auto-provisioned with a fixed default role
-([Identity and access](identity-and-access.md)).
-
-- A settings entry maps a claim value (for example a `groups` entry) to a role, with a default for no match.
-- The role is applied at each sign-in, so a change at the provider takes effect on the next login; no match means the
-  default role or a refused sign-in, chosen in settings.
-- The `admin` role stays fixed and is never granted through a claim unless the administrator opts in explicitly.
-- Fits the existing `WebAuthentication` and role files; the harness is not involved.
 
 ## Messaging gateway (chat apps)
 

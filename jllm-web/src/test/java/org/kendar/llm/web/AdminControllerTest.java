@@ -144,6 +144,76 @@ class AdminControllerTest {
     }
 
     @Test
+    void roleSettingsAreManagedPerFeatureAndUnknownOnesAreKept() throws Exception {
+        WebauthFixture f = new WebauthFixture(dir);
+        Cookie admin = f.signIn("admin");
+        f.send(admin, "POST", "/api/admin/roles", Map.of("name", "ops", "tools", List.of("*"),
+                "settings", Map.of("idp", Map.of("groups", List.of("g1"))),
+                "sandbox", Map.of("kind", "DOCKER-ISOLATED", "network", "None"))).andExpect(status().isCreated());
+        JsonNode s = json(f.get(admin, "/api/admin/roles/ops/settings").andExpect(status().isOk()));
+        assertEquals("g1", s.path("idp").path("groups").path(0).asText());
+        assertEquals("docker-isolated", s.path("sandbox").path("kind").asText(), "the sandbox is stored normalized");
+        assertEquals("none", s.path("sandbox").path("network").asText());
+
+        // a save without settings keeps them; a save with a sandbox only replaces that key
+        f.send(admin, "PUT", "/api/admin/roles/ops", Map.of("tools", List.of("grep"))).andExpect(status().isOk());
+        f.send(admin, "PUT", "/api/admin/roles/ops", Map.of("tools", List.of("grep"), "sandbox", Map.of("kind", "local")))
+                .andExpect(status().isOk());
+        var ops = f.permissions.role("ops").orElseThrow();
+        assertEquals("g1", ops.setting("idp").path("groups").path(0).asText());
+        assertEquals(org.kendar.llm.harness.sandbox.SandboxKind.LOCAL, ops.sandbox().kind());
+        JsonNode row = null;
+        for (JsonNode r : json(f.get(admin, "/api/admin/roles"))) if ("ops".equals(r.path("name").asText())) row = r;
+        assertNotNull(row);
+        assertEquals("g1", row.path("settings").path("idp").path("groups").path(0).asText());
+        assertEquals("local", row.path("sandbox").path("kind").asText());
+
+        // one feature at a time
+        s = json(f.send(admin, "PUT", "/api/admin/roles/ops/settings/future", Map.of("a", List.of(1, 2)))
+                .andExpect(status().isOk()));
+        assertEquals(2, s.path("future").path("a").path(1).asInt());
+        assertEquals("g1", s.path("idp").path("groups").path(0).asText());
+        assertEquals("local", s.path("sandbox").path("kind").asText());
+        f.send(admin, "PUT", "/api/admin/roles/ops/settings/sandbox", Map.of("kind", "spaceship"))
+                .andExpect(status().isBadRequest());
+        f.send(admin, "PUT", "/api/admin/roles/ops/settings/sandbox", List.of(1)).andExpect(status().isBadRequest());
+        f.send(admin, "PUT", "/api/admin/roles/ops", Map.of("tools", List.of("grep"), "sandbox", Map.of("kind", "x")))
+                .andExpect(status().isBadRequest());
+        f.send(admin, "PUT", "/api/admin/roles/ops", Map.of("tools", List.of("grep"), "settings", List.of()))
+                .andExpect(status().isBadRequest());
+        f.send(admin, "PUT", "/api/admin/roles/ops/settings/tools", Map.of()).andExpect(status().isBadRequest());
+        f.send(admin, "PUT", "/api/admin/roles/ops/settings/Bad", Map.of()).andExpect(status().isBadRequest());
+        assertEquals(org.kendar.llm.harness.sandbox.SandboxKind.LOCAL, f.permissions.role("ops").orElseThrow().sandbox().kind(),
+                "a refused change stores nothing");
+
+        s = json(f.send(admin, "DELETE", "/api/admin/roles/ops/settings/idp", null).andExpect(status().isOk()));
+        assertFalse(s.has("idp"));
+        assertTrue(s.has("future"));
+        f.send(admin, "DELETE", "/api/admin/roles/ops/settings/idp", null).andExpect(status().isNotFound());
+        f.get(admin, "/api/admin/roles/ghost/settings").andExpect(status().isNotFound());
+        f.send(admin, "PUT", "/api/admin/roles/ghost/settings/idp", Map.of()).andExpect(status().isNotFound());
+        f.send(admin, "DELETE", "/api/admin/roles/ghost/settings/idp", null).andExpect(status().isNotFound());
+
+        // the admin role keeps its settings too
+        f.send(admin, "PUT", "/api/admin/roles/admin/settings/idp", Map.of("groups", List.of("ops"), "priority", 1))
+                .andExpect(status().isOk());
+        assertEquals(1, f.permissions.role("admin").orElseThrow().setting("idp").path("priority").asInt());
+        assertTrue(f.permissions.role("admin").orElseThrow().allowsName("anything"));
+        assertEquals(1, json(f.get(admin, "/api/admin/roles")).get(0).path("settings").path("idp").path("priority").asInt());
+    }
+
+    @Test
+    void onlyAdminsReachTheRoleSettings() throws Exception {
+        WebauthFixture f = new WebauthFixture(dir);
+        Cookie rita = f.signIn("rita");
+        f.mvc.perform(get("/api/admin/roles/admin/settings")).andExpect(status().isUnauthorized());
+        f.get(rita, "/api/admin/roles/admin/settings").andExpect(status().isForbidden());
+        f.send(rita, "PUT", "/api/admin/roles/admin/settings/idp", Map.of("x", 1)).andExpect(status().isForbidden());
+        f.send(rita, "DELETE", "/api/admin/roles/admin/settings/idp", null).andExpect(status().isForbidden());
+        assertNull(f.permissions.role("admin").orElseThrow().setting("idp"));
+    }
+
+    @Test
     void adminRoleAlwaysHasEveryToolWhateverItsFile() throws Exception {
         WebauthFixture f = new WebauthFixture(dir);
         Files.writeString(dir.resolve("permissions/admin.json"), "{\"tools\":[]}");

@@ -233,7 +233,7 @@ public final class ToolExecutor {
         }
         // a host shell is not jailed like the file tools: a command line climbing out of the work dir is refused
         String command = commandOf(name, input);
-        if (command != null && ctx.files() == null) {
+        if (command != null && ctx.files() == null && !ctx.unconfined()) {
             Path cwd = ctx.readOnlyWork() && ctx.scratchDir() != null ? ctx.scratchDir() : ctx.workDir();
             String escaping = ShellPaths.escapingPath(command, cwd, ctx.workDir(), ctx.scratchDir());
             if (escaping != null) {

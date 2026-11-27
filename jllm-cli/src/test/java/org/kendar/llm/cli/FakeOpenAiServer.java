@@ -23,7 +23,8 @@ import java.util.concurrent.TimeUnit;
  * An OpenAI compatible {@code /v1/chat/completions} endpoint, streamed or not, that answers from the last message:
  * <ul>
  *   <li>a tool result: {@code tool said: <result>};</li>
- *   <li>a user text with {@code PLEASE WRITE}: a {@code write_file} call of {@code out.txt};</li>
+ *   <li>a user text with {@code PLEASE WRITE}: a {@code write_file} call of {@code out.txt}
+ *   ({@code PLEASE WRITE TO <path>}: of that path);</li>
  *   <li>a user text with {@code SLOW}: waits for {@link #release()}, then {@code slow done};</li>
  *   <li>any other user text: {@code echo: <text>}; a request without tools (titles): {@code A title}.</li>
  * </ul>
@@ -31,6 +32,8 @@ import java.util.concurrent.TimeUnit;
 final class FakeOpenAiServer implements AutoCloseable {
 
     static final String WRITTEN = "hello from the model";
+    /** {@code PLEASE WRITE TO <path>}: the write_file call targets the path, the rest of the text. */
+    static final String WRITE_TO = "PLEASE WRITE TO ";
 
     private static final ObjectMapper M = new ObjectMapper();
 
@@ -95,10 +98,12 @@ final class FakeOpenAiServer implements AutoCloseable {
         String text = text(last.path("content"));
         if (last.path("role").asText().equals("tool")) return msg.put("content", "tool said: " + text);
         if (text.contains("PLEASE WRITE")) {
+            int to = text.indexOf(WRITE_TO);
+            String path = to >= 0 ? text.substring(to + WRITE_TO.length()).strip() : "out.txt";
             ArrayNode calls = msg.putArray("tool_calls");
             ObjectNode call = calls.addObject().put("id", "call_" + requests.size()).put("type", "function");
             call.putObject("function").put("name", "write_file").put("arguments",
-                    M.createObjectNode().put("path", "out.txt").put("content", WRITTEN).toString());
+                    M.createObjectNode().put("path", path).put("content", WRITTEN).toString());
             return msg;
         }
         if (text.contains("SLOW")) {

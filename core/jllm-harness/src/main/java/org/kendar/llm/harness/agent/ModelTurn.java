@@ -87,7 +87,7 @@ final class ModelTurn {
         }
         try {
             ModelRequest request = new ModelRequest(req.pinned(), run.turnExtra, view.messages(), tools,
-                    config.maxTokens(), null, !config.parallelToolUse(), null, null);
+                    config.maxTokens(), run.wrapUp ? "none" : null, !config.parallelToolUse(), null, null);
             if (run.thinkingOff) request = request.withThinkingLevel(ThinkingLevel.MINIMAL);
             token.onRetry((status, attempt, max, delayMs) -> sink.emit("retry", mapper.createObjectNode()
                     .put("status", status).put("attempt", attempt).put("max", max).put("delayMs", delayMs)
@@ -176,6 +176,21 @@ final class ModelTurn {
         run.carried = "";
         if (persist) sessions.saveMessages(chatId, messages);
 
+        if (run.wrapUp) {
+            // the last turn of a stuck agent: whatever it answered ends the run; a call it made anyway is not run
+            if (!toolUses.isEmpty()) {
+                ObjectNode fix = messages.addObject();
+                fix.put("role", "user");
+                ArrayNode fixed = fix.putArray("content");
+                for (JsonNode use : toolUses) {
+                    fixed.add(ToolResults.of(mapper, use.path("id").asText(),
+                            "Not executed: tool use is off, the run ended as stuck.", true));
+                }
+                if (persist) sessions.saveMessages(chatId, messages);
+            }
+            guards.clear(chatId, run.agentName);
+            return Step.end(new AgentLoop.LoopResult(run.finalText, AgentLoop.Outcome.STUCK));
+        }
         String stop = resp.stopReason();
         if ("pause_turn".equals(stop)) {
             return Step.next(); // server asked us to resume with the assistant content as-is

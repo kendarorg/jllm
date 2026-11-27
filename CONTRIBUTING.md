@@ -34,4 +34,4 @@ refactor(harness)!: remove the compatibility overloads of the tool providers
 ## Building and testing
 
 See the [README](README.md). Tests that need a model or Docker are separate from the default build; the evaluation
-module only builds with the `eval` Maven profile ([jllm-eval](core/jllm-eval/README.md)).
+module only builds with the `eval` Maven profile ([jllm-eval](eval/jllm-eval/README.md)).

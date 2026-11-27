@@ -54,7 +54,7 @@
     </modules>
 
     <properties>
-        <revision>1.3.0-jllm</revision>
+        <revision>1.4.0-jllm</revision>
         <central-publish.skip>false</central-publish.skip>
         <graalvm.version>25.5.5.0.3</graalvm.version>
         <!-- JDBC drivers (MySQL: GPLv2 + FOSS exception; PostgreSQL: BSD): pinned here, never bundled; fetched by scripts/setup (fetch-sql-driver) into .downloaded-libs/ and verified against web/jllm-sql/.../db/drivers/<db>.manifest. SQLite is bundled. -->
@@ -66,6 +66,8 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <spring-boot.version>3.5.0</spring-boot.version>
         <spring-ai.version>1.0.0</spring-ai.version>
+        <!-- 1.21.4+: tries Docker API 1.44 before 1.32; Docker 29 refuses 1.32 (the Spring Boot 3.5.0 BOM gives 1.21.0) -->
+        <testcontainers.version>1.21.4</testcontainers.version>
         <plugins.location>${maven.multiModuleProjectDirectory}/target/plugins</plugins.location>
     </properties>
 
@@ -81,6 +83,14 @@
 
     <dependencyManagement>
         <dependencies>
+            <!-- before spring-boot-dependencies: the first imported BOM wins -->
+            <dependency>
+                <groupId>org.testcontainers</groupId>
+                <artifactId>testcontainers-bom</artifactId>
+                <version>${testcontainers.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
             <dependency>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-dependencies</artifactId>
@@ -145,11 +155,11 @@
     </build>
 
     <profiles>
-        <!-- jllm-eval: real-model evaluation, never part of the default build. Use: mvn -Peval -pl core/jllm-eval -am test -->
+        <!-- jllm-eval: real-model evaluation, never part of the default build. Use: mvn -Peval -pl eval/jllm-eval -am test -->
         <profile>
             <id>eval</id>
             <modules>
-                <module>core/jllm-eval</module>
+                <module>eval/jllm-eval</module>
             </modules>
         </profile>
         <profile>

@@ -17,7 +17,7 @@ Set a key first: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GROK_API_KEY` or `QWEN_
 ## Terminal
 
 ```sh
-java -jar jllm-cli/target/jllm-cli-1.3.0-jllm.jar --provider anthropic --mode edit
+java -jar jllm-cli/target/jllm-cli-1.4.0-jllm.jar --provider anthropic --mode edit
 ```
 
 Flags, startup directories, slash commands and local models: [jllm-cli](../../jllm-cli/README.md).
@@ -38,7 +38,7 @@ scripts/run-web.sh --jllm.provider=anthropic                   # Windows: script
 ## Browser
 
 ```sh
-java -jar jllm-web/target/jllm-web-1.3.0-jllm.jar --provider anthropic
+java -jar jllm-web/target/jllm-web-1.4.0-jllm.jar --provider anthropic
 ```
 
 Open http://localhost:8080. The reference application has password and OpenID Connect sign-in, roles, skills, a flow

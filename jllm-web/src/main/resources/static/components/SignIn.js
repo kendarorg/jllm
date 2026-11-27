@@ -8,6 +8,7 @@ const AUTH_ERRORS = {
   domain_not_allowed: 'The email domain of that account is not allowed.',
   email_not_verified: 'The email of that account is not verified.',
   expired: 'The sign-in took too long or was already used. Try again.',
+  no_role: 'Your account is in no group that gives access here. Ask an administrator.',
 };
 
 /** Sign-in with login and password, with the identity provider, or both, as the server offers. */

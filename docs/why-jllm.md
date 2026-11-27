@@ -45,11 +45,11 @@ in-memory or file defaults, so you can put them on your database and your observ
 - RAG and vector stores are not built in, but they are easy to add: expose your retrieval as a
   [tool](guides/tools.md) (see [extending](guides/extending.md#1-tools)).
 - You want a **Spring Boot starter** or a Quarkus extension. Only the web API starter (`jllm-web-spring-starter`) exists; harness beans are documented as [recipes](getting-started/spring-boot.md), and there is no Quarkus extension.
-- You need **identity-provider role mapping** (groups or claims to roles), multiple OIDC providers, SAML or SCIM.
-  Not implemented yet ([limits](enterprise/roadmap-and-limits.md)).
+- You need multiple OIDC providers, SAML or SCIM. Not implemented ([limits](enterprise/roadmap-and-limits.md)); roles
+  from identity provider groups are ([IdP role mapping](enterprise/idp-role-mapping.md)).
 - You need a **vendor-backed support contract, certifications or an external security audit**. There is none.
 - You need **horizontal scale out of the box**. The library defaults are memory and files, a run lives in one process,
-  and the SQL store of `jllm-web` (SQLite, MySQL, PostgreSQL; the last two experimental) is not a cluster setup:
+  and the SQL store of `jllm-web` (SQLite, MySQL, PostgreSQL) is not a cluster setup:
   see [limits](enterprise/roadmap-and-limits.md) and [SQL starter](../web/jllm-sql-spring-starter/README.md).
 - Provider OAuth logins (subscription accounts instead of API keys) are not shipped.
 

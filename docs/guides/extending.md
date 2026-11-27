@@ -37,7 +37,7 @@ External tools without code: [MCP and REST APIs](mcp.md). Instructions without c
 
 ## Jars to import
 
-All artifacts: group `org.kendar.llm`, version `1.3.0-jllm` (`mvn install` from the root puts them in the local
+All artifacts: group `org.kendar.llm`, version `1.4.0-jllm` (`mvn install` from the root puts them in the local
 repository; JDK 21).
 
 | Artifact | Contains | Import when |
@@ -58,19 +58,19 @@ A plugin jar (loaded from the plugin directory by the CLI and the web app):
 <dependency>
     <groupId>org.kendar.llm</groupId>
     <artifactId>jllm-commons</artifactId>
-    <version>1.3.0-jllm</version>
+    <version>1.4.0-jllm</version>
     <scope>provided</scope>
 </dependency>
 <dependency>
     <groupId>org.kendar.llm</groupId>
     <artifactId>jllm-harness</artifactId>
-    <version>1.3.0-jllm</version>
+    <version>1.4.0-jllm</version>
     <scope>test</scope>
 </dependency>
 <dependency>
     <groupId>org.kendar.llm</groupId>
     <artifactId>jllm-test-support</artifactId>
-    <version>1.3.0-jllm</version>
+    <version>1.4.0-jllm</version>
     <scope>test</scope>
 </dependency>
 ```
@@ -159,6 +159,7 @@ public interface Hook { HookResult run(HookContext ctx) throws Exception; }
 | `PRE_TOOL` | before the permission check | `tool`, `input` | deny, rewrite input, add context to the result |
 | `POST_TOOL` | after the tool ran | `tool`, `input`, `output`, `isError`, `durationMs` | add context to the result |
 | `POST_AGENT` | agent end, also on failure | `agent`, `text` (answer or error), `isError` | observe |
+| `ROLE_CHANGED` | the web sign-in changed a user's role ([IdP role mapping](../enterprise/idp-role-mapping.md)); no chat | `input` (`user`, `from`, `to`, `group`, `reason`), `text` (summary) | observe (audit) |
 | `STOP` | an agent (main or sub-agent) is about to finish; once per attempt; not in plan mode or on cancel | `agent` (`main` or the sub-agent label `"<type> #<n>"`), `text` (final answer), `attempt` (1, 2, ...) | veto with `HookResult.continueWith(message)`: the agent is told the message and keeps working |
 
 ```mermaid
@@ -658,6 +659,7 @@ flowchart LR
     end
     subgraph HC["jllm-harness: optional beans read by the starter (HarnessFactory, jllm-web-commons)"]
         SS["SettingsSource"]
+        SK["SettingsSink"]
         PT["ProjectMcpTrust"]
         HI["HarnessIdentity.tokenStore()"]
     end
@@ -676,10 +678,11 @@ flowchart LR
 | Interface | Module, package | Default (jllm-web) | Holds |
 |---|---|---|---|
 | `UserRepository` | jllm-harness, `...harness.identity` | `FileUserRepository`: `webauth/users/<id>.json` | `User`: id, name, role, email, external id, password hash, per-source credential headers (`env:NAME` only), disabled tools and skills |
-| `RoleRepository` | jllm-harness, `...harness.identity` | `FileRoleRepository`: `webauth/permissions/<role>.json` | `Role`: tool patterns, read-only, approval `ask`/`off`; the fixed `admin` role may be stored (SQL: seeded row) and is never deleted |
+| `RoleRepository` | jllm-harness, `...harness.identity` | `FileRoleRepository`: `webauth/permissions/<role>.json` | `Role`: tool patterns, read-only, approval `ask`/`off`, tool permissions, settings (free JSON per feature, `sandbox` one of them); the fixed `admin` role may be stored (SQL: seeded row) and is never deleted |
 | `SkillRepository` | jllm-harness, `...harness.identity` | `FileSkillRepository`: `webauth/global-skills/`, `webauth/user-skills/<id>/` | global and per-user skills (name, description, content) |
 | `LoginSessionRepository` | jllm-harness, `...harness.identity` | `InMemoryLoginSessionRepository` (a restart signs everybody out) | cookie token → user id, sliding `TTL` of 7 days |
-| `SettingsSource` | jllm-harness, `...harness.settings` | `FileSettingsSource`: `~/.jllm/settings.json`, `<project>/.jllm/settings.json`, `--settings`/`jllm.settings` | `SettingsLayer`s, `GLOBAL` → `PROJECT` → `EXPLICIT`, a later layer wins |
+| `SettingsSource` | jllm-harness, `...harness.settings` | `FileSettingsSource`: `~/.jllm/settings.json`, `<project>/.jllm/settings.json`, `--settings`/`jllm.settings` | `SettingsLayer`s, `GLOBAL` → `PROJECT` → `EXPLICIT` (→ `STORED`), a later layer wins |
+| `SettingsSink` | jllm-harness, `...harness.settings` | `FileSettingsSink`: `webauth/stored-settings.json` (SQL: `SqlSettingsSink`, table `settings_section`) | the settings an admin edits at runtime, one JSON value per top-level section; joined last as the `STORED` layer, so a stored value wins; secrets as `env:NAME` only |
 | `ProjectMcpTrust` | jllm-harness, `...harness.settings` | `FileProjectMcpTrust.user()`: `~/.jllm/trusted-mcp.json` | trust answers for project MCP servers, tied to a SHA-256 of the definition |
 | `TokenStore` | jllm-commons, `...harness.auth` | `FileTokenStore` from the `tokenStore` settings | OAuth tokens per principal ([8](#token-stores)) |
 | `ChatSessionStore`, `SubAgentRunLog`, `StateStore` | jllm-commons, `...harness.session`, `...harness.state` | `FileChatSessionStore`, `FileHistorySubAgentRunLog`, `FileStateStore` under `<base>/<chatId>/.jllm/history` | chats, sub-agent runs, per-chat state ([8](#8-persistence)) |
@@ -727,8 +730,8 @@ public interface SkillRepository {
 
 public interface LoginSessionRepository {
     Duration TTL = Duration.ofDays(7);
-    String create(String userId);              // token: at least 256 random bits
-    Optional<String> find(String token);       // slides the expiry
+    String create(String userId, Instant notAfter); // token: at least 256 random bits; notAfter null = no hard end
+    Optional<String> find(String token);       // slides the expiry, never past notAfter
     void revoke(String token);
     void revokeUser(String userId, String keep);
 }
@@ -737,14 +740,25 @@ public interface LoginSessionRepository {
 public interface SettingsSource {
     List<SettingsLayer> layers();              // global, project, explicit; a missing layer is left out
 }
+
+public interface SettingsSink {               // base class AbstractSettingsSink: snapshot, checks, listeners
+    Optional<JsonNode> get(String section);    // from an in-memory snapshot, a copy
+    Map<String, JsonNode> sections();
+    void put(String section, JsonNode value);  // replaces the section, atomically; then swaps the snapshot
+    boolean remove(String section);
+    void reload();                             // read the store again (another node, a hand edit)
+    void onChange(Consumer<Map<String, JsonNode>> listener);
+    SettingsSource over(SettingsSource base);  // base layers, then STORED
+}
 ```
 
 Wiring:
 - `UserRepository`, `RoleRepository`, `SkillRepository`, `LoginSessionRepository`: beans. The `jllm-web` ones are
   `@ConditionalOnMissingBean` in `FileStoresAutoConfiguration`, ordered after `JllmSqlAutoConfiguration`: supply your
   own beans (or the SQL starter) and they win.
-- `SettingsSource`, `ProjectMcpTrust`: optional beans read by the starter's `JllmWebAutoConfiguration` (`ObjectProvider`); without
-  them the files are used.
+- `SettingsSource`, `SettingsSink`, `ProjectMcpTrust`: optional beans read by the starter's `JllmWebAutoConfiguration`
+  (`ObjectProvider`); without them the files are used (no sink: no stored layer). `jllm-web` supplies a
+  `FileSettingsSink` when no other `SettingsSink` bean exists; the SQL starter supplies `SqlSettingsSink`.
 - `TokenStore`: returned by your `HarnessIdentity.tokenStore()`; null = the store the `tokenStore` settings describe,
   under `HarnessIdentity.tokenDir()`.
 - `HarnessIdentity`, `WebAuthentication`, `ChatAccess` (sign-in, per-user policy, chat ownership) are beans too;

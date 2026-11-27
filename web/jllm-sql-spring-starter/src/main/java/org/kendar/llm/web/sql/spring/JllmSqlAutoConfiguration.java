@@ -12,6 +12,7 @@ import org.kendar.llm.harness.plugin.PluginStorages;
 import org.kendar.llm.harness.session.ChatSessionStore;
 import org.kendar.llm.harness.session.SubAgentRunLog;
 import org.kendar.llm.harness.settings.ProjectMcpTrust;
+import org.kendar.llm.harness.settings.SettingsSink;
 import org.kendar.llm.harness.settings.SettingsSource;
 import org.kendar.llm.harness.state.StateStore;
 import org.kendar.llm.web.sql.SqlConfig;
@@ -100,6 +101,12 @@ public class JllmSqlAutoConfiguration {
     @Bean
     public SettingsSource sqlSettingsSource(SqlStores s) {
         return s.settings();
+    }
+
+    /** The settings an administrator edits at runtime: table {@code settings_section}. */
+    @Bean
+    public SettingsSink sqlSettingsSink(SqlStores s) {
+        return s.settingsSink();
     }
 
     @Bean
