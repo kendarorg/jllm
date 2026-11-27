@@ -11,6 +11,11 @@ Include: affected version or commit, a description, steps to reproduce, and the 
 
 Only the latest release receives security fixes.
 
+## Dependency scan
+
+The latest OWASP dependency-check result is in [docs/OWASP_DC.md](docs/OWASP_DC.md); reviewed suppressions are in
+[owasp-suppressions.xml](owasp-suppressions.xml).
+
 ## Scope
 
 jllm runs a model that can execute tools. The `unsafe` configuration (see `docs/guides/configurations.md`) is for
