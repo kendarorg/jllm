@@ -22,17 +22,30 @@ class ProjectTrustFilterTest {
     private static final Path PROJECT = Path.of("project");
 
     /** Remembers answers in memory, keyed by name and definition. */
-    private static final class MemoryTrust implements ProjectMcpTrust {
+    private static final class MemoryTrust implements FolderTrust {
         final Map<String, Boolean> answers = new HashMap<>();
 
         @Override
         public Boolean lookup(Path projectDir, String server, JsonNode definition) {
-            return answers.get(server + "|" + ProjectMcpTrust.fingerprint(definition));
+            return answers.get(server + "|" + FolderTrust.fingerprint(definition));
         }
 
         @Override
         public void remember(Path projectDir, String server, JsonNode definition, boolean trusted) {
-            answers.put(server + "|" + ProjectMcpTrust.fingerprint(definition), trusted);
+            answers.put(server + "|" + FolderTrust.fingerprint(definition), trusted);
+        }
+
+        @Override
+        public java.util.Optional<Record> record(Path projectDir) {
+            return java.util.Optional.empty();
+        }
+
+        @Override
+        public void trust(Path projectDir, java.util.Set<String> loosenings) {
+        }
+
+        @Override
+        public void approveLoosening(Path projectDir, String key) {
         }
     }
 
@@ -46,7 +59,7 @@ class ProjectTrustFilterTest {
         ObjectNode merged = project.deepCopy();
         List<String> warnings = new ArrayList<>();
 
-        ProjectTrustFilter.apply(merged, project, List.of(), PROJECT, ProjectMcpTrust.Prompt.NONE,
+        ProjectTrustFilter.apply(merged, project, List.of(), PROJECT, FolderTrust.Prompt.NONE,
                 new MemoryTrust(), warnings::add);
 
         assertEquals(0, merged.get("mcpServers").size());
@@ -58,7 +71,7 @@ class ProjectTrustFilterTest {
         ObjectNode project = json("{\"mcpServers\":[{\"name\":\"s\",\"command\":\"node\",\"args\":[\"x.js\"]}]}");
         MemoryTrust trust = new MemoryTrust();
         List<String> asked = new ArrayList<>();
-        ProjectMcpTrust.Prompt yes = (dir, name, line) -> {
+        FolderTrust.Prompt yes = (dir, name, line) -> {
             asked.add(line);
             return true;
         };
@@ -66,7 +79,7 @@ class ProjectTrustFilterTest {
         ObjectNode first = project.deepCopy();
         ProjectTrustFilter.apply(first, project, List.of(), PROJECT, yes, trust, w -> { });
         ObjectNode second = project.deepCopy();
-        ProjectTrustFilter.apply(second, project, List.of(), PROJECT, ProjectMcpTrust.Prompt.NONE, trust, w -> { });
+        ProjectTrustFilter.apply(second, project, List.of(), PROJECT, FolderTrust.Prompt.NONE, trust, w -> { });
 
         assertEquals(1, first.get("mcpServers").size());
         assertEquals(1, second.get("mcpServers").size());
@@ -79,7 +92,7 @@ class ProjectTrustFilterTest {
         ObjectNode user = project.deepCopy();
         ObjectNode merged = project.deepCopy();
 
-        ProjectTrustFilter.apply(merged, project, List.of(user), PROJECT, ProjectMcpTrust.Prompt.NONE,
+        ProjectTrustFilter.apply(merged, project, List.of(user), PROJECT, FolderTrust.Prompt.NONE,
                 new MemoryTrust(), w -> fail(w));
 
         assertEquals(1, merged.get("mcpServers").size());
@@ -106,7 +119,7 @@ class ProjectTrustFilterTest {
                 + "\"oauth\":{\"tokenUrl\":\"http://t\"}},{\"name\":\"plain\",\"baseUrl\":\"http://y\"}]}");
         ObjectNode merged = project.deepCopy();
 
-        ProjectTrustFilter.apply(merged, project, List.of(), PROJECT, ProjectMcpTrust.Prompt.NONE,
+        ProjectTrustFilter.apply(merged, project, List.of(), PROJECT, FolderTrust.Prompt.NONE,
                 new MemoryTrust(), w -> { });
 
         assertEquals(1, merged.get("restApis").size());

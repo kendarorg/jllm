@@ -49,6 +49,12 @@ class MainTest {
     }
 
     private CliSession cli() {
+        cli = new CliSession(home).trusting(project);
+        return cli;
+    }
+
+    /** A session whose project folder was never trusted. */
+    private CliSession untrustedCli() {
         cli = new CliSession(home);
         return cli;
     }
@@ -198,8 +204,109 @@ class MainTest {
         s.await("agent-harness chat ");
         String out = s.end();
         assertFalse(out.contains("[error]"), out);
-        assertTrue(Files.readString(home.resolve(".jllm").resolve("trusted-mcp.json")).contains("local-tool"),
+        assertTrue(Files.readString(home.resolve(".jllm").resolve("trusted.json")).contains("local-tool"),
                 "the answer is remembered");
+    }
+
+    // ---------------------------------------------------------------- folder trust
+
+    /** What must not happen before the folder is trusted: nothing of it is read, started or loaded. */
+    private void projectWithEverything() throws Exception {
+        Path jllm = Files.createDirectories(project.resolve(".jllm"));
+        Files.writeString(jllm.resolve("settings.json"), """
+                {"mcpServers": [{"name": "local-tool", "command": "jllm-no-such-command"}],
+                 "permissions": {"allow": ["Bash(*)"]}}
+                """);
+        Files.writeString(jllm.resolve("SYSTEM.md"), "PROJECT-SYSTEM-PROMPT");
+        Files.writeString(project.resolve("AGENTS.md"), "PROJECT-INSTRUCTIONS");
+    }
+
+    @Test
+    void decliningTrustExitsWithAWarningAndLoadsNothing() throws Throwable {
+        projectWithEverything();
+        CliSession s = untrustedCli().start(args());
+        s.await("is not trusted yet");
+        s.await("Trust this folder? [y/N] ");
+        s.type("n");
+        assertEquals(RunReport.EXIT_FAILED, s.exitCode());
+        String out = s.output();
+        assertTrue(out.contains("not trusted"), out);
+        assertFalse(out.contains("jllm-no-such-command --x"), "no MCP prompt: " + out);
+        assertTrue(server.requests.isEmpty(), "no session started, no model call");
+        assertFalse(Files.exists(project.resolve(".jllm/scratchpad")), "no scratch or history dir was created");
+        assertFalse(Files.exists(project.resolve(".jllm/history")));
+        assertFalse(Files.exists(home.resolve(".jllm").resolve("trusted.json")), "the refusal is not stored");
+        cli.close();
+        // the next start asks again
+        CliSession again = untrustedCli().start(args());
+        again.await("Trust this folder? [y/N] ");
+        again.type("n");
+        assertEquals(RunReport.EXIT_FAILED, again.exitCode());
+    }
+
+    @Test
+    void trustedFolderThenAChangeInJllmAsksAgain() throws Throwable {
+        projectWithEverything();
+        CliSession s = untrustedCli().start(args("--prompt", "hi"));
+        // unattended: refused, nothing read
+        assertEquals(RunReport.EXIT_FAILED, s.exitCode());
+        cli.close();
+        CliSession yes = untrustedCli().start(args());
+        yes.await("Trust this folder? [y/N] ");
+        yes.type("y");
+        yes.await("Use it? [y/N] ");
+        yes.type("n");
+        yes.await("define the MCP server 'local-tool'");
+        yes.await("Run it? [y/N] ");
+        yes.type("n");
+        yes.await("Apply it? [y/N] ");
+        yes.type("n");
+        yes.await("agent-harness chat ");
+        yes.end();
+        cli.close();
+        Files.writeString(project.resolve(".jllm/settings.json"), "{\"changed\": true}");
+        CliSession changed = untrustedCli().start(args());
+        changed.await("changed since you trusted it");
+        changed.type("n");
+        assertEquals(RunReport.EXIT_FAILED, changed.exitCode());
+    }
+
+    @Test
+    void unattendedRunOnAnUntrustedFolderExitsWithAWarning() throws Throwable {
+        projectWithEverything();
+        CliSession s = untrustedCli().start(args("--prompt", "hello"));
+        assertEquals(RunReport.EXIT_FAILED, s.exitCode());
+        assertTrue(s.output().contains("--trust-project"), s.output());
+        assertTrue(server.requests.isEmpty());
+    }
+
+    @Test
+    void trustProjectFlagAndTrustedProjectsLetItRun() throws Throwable {
+        CliSession flag = untrustedCli().start(args("--prompt", "via flag", "--trust-project"));
+        flag.await("echo: via flag");
+        assertEquals(0, flag.exitCode());
+        cli.close();
+        Files.createDirectories(home.resolve(".jllm"));
+        Files.writeString(home.resolve(".jllm/settings.json"),
+                "{\"trustedProjects\": [" + new com.fasterxml.jackson.databind.ObjectMapper()
+                        .writeValueAsString(project.toString()) + "]}");
+        CliSession listed = untrustedCli().start(args("--prompt", "via list"));
+        listed.await("echo: via list");
+        assertEquals(0, listed.exitCode());
+    }
+
+    @Test
+    void unapprovedLooseningInATrustedFolderHasNoEffectUnattended() throws Throwable {
+        Path jllm = Files.createDirectories(project.resolve(".jllm"));
+        Files.writeString(jllm.resolve("settings.json"), "{\"permissions\": {\"allow\": [\"Bash(*)\"]}}");
+        Files.writeString(jllm.resolve("SYSTEM.md"), "PROJECT-SYSTEM-PROMPT");
+        Files.writeString(project.resolve("AGENTS.md"), "PROJECT-INSTRUCTIONS");
+        CliSession s = cli().start(args("--prompt", "hello"));
+        s.await("echo: hello");
+        assertEquals(0, s.exitCode());
+        String sys = systemText(server.agentRequests().get(0));
+        assertFalse(sys.contains("PROJECT-SYSTEM-PROMPT"), "SYSTEM.md is a loosening: not approved, not used");
+        assertTrue(s.output().contains("loosens") || s.output().contains("SYSTEM.md"), s.output());
     }
 
     // ---------------------------------------------------------------- REPL
@@ -429,7 +536,7 @@ class MainTest {
         assertEquals(FakeOpenAiServer.WRITTEN, Files.readString(project.resolve("out.txt")));
 
         JsonNode r = JSON.readTree(result.toFile());
-        assertEquals(List.of("chatId", "outcome", "turns", "durationMs", "usage", "costUsd", "toolCalls", "error"),
+        assertEquals(List.of("chatId", "outcome", "turns", "durationMs", "usage", "costUsd", "toolCalls", "dangerouslySkipPermissions", "denied", "deniedCount", "error"),
                 fieldNames(r));
         assertFalse(r.path("chatId").asText().isEmpty());
         assertEquals("completed", r.path("outcome").asText());
@@ -522,6 +629,36 @@ class MainTest {
         assertTrue(open.output().contains("sandbox none"), open.output());
         assertEquals(FakeOpenAiServer.WRITTEN, Files.readString(outside));
         assertFalse(JSON.readTree(result.toFile()).path("toolCalls").get(0).path("isError").asBoolean(true));
+    }
+
+    @Test
+    void promptRunDeniesWhatWouldAskAndReportsIt() throws Throwable {
+        Path result = tmp.resolve("denied.json");
+        CliSession s = cli().startProcess(args("--prompt", "PLEASE WRITE now", "--json-result", result.toString()));
+        s.exitCode();
+        assertFalse(Files.exists(project.resolve("out.txt")), "an unattended run asks no one: nothing written");
+        assertTrue(s.output().contains("[denied] write_file"), s.output());
+        assertFalse(s.output().contains("Allow?"), s.output());
+        JsonNode r = JSON.readTree(result.toFile());
+        assertEquals(1, r.path("deniedCount").asInt());
+        assertEquals("write_file", r.path("denied").get(0).path("tool").asText());
+        assertEquals("unattended", r.path("denied").get(0).path("reason").asText());
+        assertFalse(r.path("dangerouslySkipPermissions").asBoolean());
+        assertTrue(server.agentRequests().stream().anyMatch(q -> q.toString()
+                .contains("denied: unattended run, no one can approve write_file")), "the model got the denial");
+    }
+
+    @Test
+    void dangerouslySkipPermissionsRunsAToolThatWouldAskAndSaysSo() throws Throwable {
+        Path result = tmp.resolve("skip.json");
+        CliSession s = cli().startProcess(args("--prompt", "PLEASE WRITE now", "--dangerously-skip-permissions",
+                "--json-result", result.toString()));
+        assertEquals(0, s.exitCode(), s.output());
+        assertEquals(FakeOpenAiServer.WRITTEN, Files.readString(project.resolve("out.txt")));
+        assertTrue(s.output().contains("--dangerously-skip-permissions"), "banner: " + s.output());
+        JsonNode r = JSON.readTree(result.toFile());
+        assertTrue(r.path("dangerouslySkipPermissions").asBoolean());
+        assertEquals(0, r.path("deniedCount").asInt());
     }
 
     private static List<String> fieldNames(JsonNode n) {

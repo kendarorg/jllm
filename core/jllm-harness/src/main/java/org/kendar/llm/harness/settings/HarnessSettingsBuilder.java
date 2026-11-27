@@ -40,6 +40,7 @@ public final class HarnessSettingsBuilder {
     private LoopSettings loop;
     private HookSettings hooks;
     private TokenStoreSettings tokenStore;
+    private List<String> trustedProjects;
 
     HarnessSettingsBuilder() {
     }
@@ -69,6 +70,7 @@ public final class HarnessSettingsBuilder {
         loop = s.loop();
         hooks = s.hooks();
         tokenStore = s.tokenStore();
+        trustedProjects = s.trustedProjects();
     }
 
     public HarnessSettingsBuilder mcpServers(List<McpServerSettings> v) { mcpServers = v; return this; }
@@ -95,6 +97,7 @@ public final class HarnessSettingsBuilder {
     public HarnessSettingsBuilder loop(LoopSettings v) { loop = v; return this; }
     public HarnessSettingsBuilder hooks(HookSettings v) { hooks = v; return this; }
     public HarnessSettingsBuilder tokenStore(TokenStoreSettings v) { tokenStore = v; return this; }
+    public HarnessSettingsBuilder trustedProjects(List<String> v) { trustedProjects = v; return this; }
 
     /** Replaces {@code files.externalLinks} (a command line flag; the web host forces none). */
     public HarnessSettingsBuilder externalLinks(ExternalLinks v) {
@@ -106,8 +109,9 @@ public final class HarnessSettingsBuilder {
 
     /** Replaces {@code sandbox.backend} (e.g. by a command line flag). */
     public HarnessSettingsBuilder sandboxBackend(String backend) {
-        if (!"local".equalsIgnoreCase(backend) && !"docker".equalsIgnoreCase(backend)) {
-            throw new IllegalArgumentException("Unknown sandbox backend '" + backend + "' (local or docker)");
+        if (!"local".equalsIgnoreCase(backend) && !"docker".equalsIgnoreCase(backend)
+                && !"shared-local".equalsIgnoreCase(backend)) {
+            throw new IllegalArgumentException("Unknown sandbox backend '" + backend + "' (local, shared-local or docker)");
         }
         SandboxSettings s = currentSandbox();
         sandbox = new SandboxSettings(s.tempDir(), s.timeoutSeconds(), backend.toLowerCase(), s.localFallback(),
@@ -176,7 +180,7 @@ public final class HarnessSettingsBuilder {
     public HarnessSettings build() {
         return new HarnessSettings(mcpServers, restApis, skills, instructionFiles, agents, execution, sandbox, context,
                 fastModel, output, smallModel, permissions, providers, defaultProvider, chatRetentionLimit, plugins,
-                storage, whitelistedEnvVars, toolsWhitelistedEnvVars, files, web, loop, hooks, tokenStore);
+                storage, whitelistedEnvVars, toolsWhitelistedEnvVars, files, web, loop, hooks, tokenStore, trustedProjects);
     }
 
     private HarnessSettingsBuilder docker(DockerSettings d) {

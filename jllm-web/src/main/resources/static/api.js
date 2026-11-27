@@ -3,6 +3,8 @@ export async function api(path, opts = {}) {
   if (!r.ok) {
     let msg = 'HTTP ' + r.status;
     try { msg = (await r.json()).error || msg; } catch (e) { /* not json */ }
+    // the server refuses everything but the password change: the app shows the forced change form
+    if (r.status === 403 && msg === 'password_change_required') window.dispatchEvent(new Event('jllm-password-change-required'));
     const err = new Error(msg);
     err.status = r.status;
     throw err;

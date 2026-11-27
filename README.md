@@ -148,6 +148,14 @@ sandboxes, deny rules and web access limits. Follow
 the [security model](docs/enterprise/security-model.md) for the reasoning.
 
 
+## Configurations
+
+Three ready-made configurations (`runConfigs/`, `configs/` in the release zip): `webSafe` and `cliSafe` for real use
+(random passwords, Docker sandbox, asking before writes and commands), and `unsafe`. **`unsafe` is for development and
+testing only**: no folder trust, a local shell with full host access, default or logged passwords, everything allowed. The
+model can read, change or destroy anything your user can. Never expose it on a network or use it on data you care about.
+The release scripts run the safe configuration by default; `unsafe` must be named. See [Configurations](docs/guides/configurations.md).
+
 ## SQL store
 
 `jllm-web` keeps users, roles, chats, tokens and settings in SQL by default: SQLite in `<jllm.webauth-dir>/jllm.db`
@@ -198,6 +206,10 @@ Next: per-user model credentials (own API key or OAuth login per provider, in de
 - [building-a-coding-agent-from-scratch-course](https://github.com/decodingai-magazine/building-a-coding-agent-from-scratch-course):
   the structure of the harness.
 - [opencode](https://github.com/sst/opencode): the inspiration.
+
+## Security
+
+Report vulnerabilities privately, see [SECURITY.md](SECURITY.md).
 
 ## License
 

@@ -35,3 +35,20 @@ refactor(harness)!: remove the compatibility overloads of the tool providers
 
 See the [README](README.md). Tests that need a model or Docker are separate from the default build; the evaluation
 module only builds with the `eval` Maven profile ([jllm-eval](eval/jllm-eval/README.md)).
+
+## Dependency scan (OWASP dependency-check)
+
+The Maven profile `owasp` is not active by default and there is no CI for it: run it locally.
+
+```
+export NVD_API_KEY=<your key>     # PowerShell: $env:NVD_API_KEY = "<your key>"
+mvn -Powasp verify -DskipTests
+```
+
+- The key comes from the environment variable `NVD_API_KEY` (free, request one at https://nvd.nist.gov/developers/request-an-api-key).
+  Without it the first database download is very slow and can be rate limited.
+- The scan always writes `target/dependency-check-report.json`; `scripts/OwaspReport.java` (JDK 21 source launcher, run
+  by `exec-maven-plugin`) converts it to [docs/OWASP_DC.md](docs/OWASP_DC.md), which is committed.
+- The build fails when a vulnerability has CVSS 7.0 or higher. The Markdown file is written before that check, so it is
+  up to date even when the build fails.
+- Convert a report by hand: `java scripts/OwaspReport.java target/dependency-check-report.json docs/OWASP_DC.md`.

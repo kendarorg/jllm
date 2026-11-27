@@ -11,7 +11,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * The roles and users of {@code release/template/webauth} (admin, poweru, guest; every user on the default password),
+ * The roles and users of {@code release/template/configs/unsafe/webauth} (admin, poweru, guest; every user on the default password),
  * written into a database that has no users and no roles. Without them nobody could sign in.
  */
 public final class SqlSeeder {

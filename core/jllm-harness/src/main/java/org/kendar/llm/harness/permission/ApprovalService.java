@@ -197,6 +197,50 @@ public class ApprovalService {
         }
     }
 
+    private static final java.util.Set<String> CONFIG_FILES = java.util.Set.of("agents.md", "claude.md", "kendar.md",
+            "system.md");
+
+    /**
+     * True when writing {@code path} (relative to {@code workDir}) touches configuration that the host reads or
+     * executes: anything under {@code .jllm} (first segment), anything below a {@code .git} directory, and the
+     * instruction files ({@code AGENTS.md}, {@code CLAUDE.md}, {@code KENDAR.md}, {@code SYSTEM.md}, any directory).
+     * Compared case-insensitively, on the lexical path and on the canonical one (links and short names resolved), so
+     * a link to {@code .git/hooks} does not hide it. A path that leaves the work dir counts as protected too.
+     */
+    public static boolean isProtectedPath(java.nio.file.Path workDir, String path) {
+        if (workDir == null || path == null || path.isBlank()) return false;
+        try {
+            java.nio.file.Path root = workDir.toAbsolutePath().normalize();
+            java.nio.file.Path p = root.resolve(path.strip()).normalize();
+            if (!p.startsWith(root)) { // the jail decides about the path; what is named like configuration still asks
+                return protectedRelative(p.getRoot() == null ? p : p.getRoot().relativize(p), true);
+            }
+            if (protectedRelative(root.relativize(p), false)) return true;
+            java.nio.file.Path q = p;
+            while (q != null && q.startsWith(root) && !java.nio.file.Files.exists(q)) q = q.getParent();
+            if (q == null || !q.startsWith(root)) return false;
+            java.nio.file.Path realRoot = root.toRealPath();
+            java.nio.file.Path real = q.toRealPath();
+            if (!real.startsWith(realRoot)) return true;
+            return protectedRelative(realRoot.relativize(real).resolve(q.relativize(p)), false);
+        } catch (java.nio.file.InvalidPathException | java.io.IOException | SecurityException e) {
+            return false; // the lexical check above already ran
+        }
+    }
+
+    private static boolean protectedRelative(java.nio.file.Path rel, boolean jllmAnywhere) {
+        int i = 0;
+        java.nio.file.Path last = null;
+        for (java.nio.file.Path seg : rel) {
+            String s = seg.toString();
+            if (s.isEmpty()) continue;
+            if ((i++ == 0 || jllmAnywhere) && s.strip().toLowerCase(java.util.Locale.ROOT).equals(".jllm")) return true;
+            if (isGitName(s)) return true;
+            last = seg;
+        }
+        return last != null && CONFIG_FILES.contains(last.toString().strip().toLowerCase(java.util.Locale.ROOT));
+    }
+
     /**
      * A user-typed directory to grant, relative to the work dir ('/'-separated, "." for the root), or null when it is
      * not acceptable: blank, absolute, containing a {@code ..} segment, or inside a {@code .git} directory.

@@ -59,7 +59,7 @@ public final class WorkflowCli {
         }
         Path base = Path.of(dir);
         Workflows w = new Workflows(registry, new RunStore.Files(base.resolve("runs")),
-                new FlowStore.Files(base.resolve("flows")), u -> roles, "admin");
+                new FlowStore.Files(base.resolve("flows")), u -> roles, "admin", null);
         BufferedReader rd = new BufferedReader(new InputStreamReader(in));
         try {
             switch (rest.get(0)) {

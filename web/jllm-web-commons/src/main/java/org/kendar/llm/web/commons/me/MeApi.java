@@ -5,6 +5,7 @@ import org.kendar.llm.harness.identity.LoginSessionRepository;
 import org.kendar.llm.harness.identity.Principal;
 import org.kendar.llm.harness.identity.Role;
 import org.kendar.llm.harness.identity.SkillRepository;
+import org.kendar.llm.harness.settings.InstructionRepository;
 import org.kendar.llm.harness.identity.User;
 import org.kendar.llm.harness.identity.UserRepository;
 import org.kendar.llm.harness.skills.SkillCatalog;
@@ -69,8 +70,8 @@ public class MeApi {
     public void password(Map<String, Object> body, Principal principal, String sessionToken) {
         User u = user(principal);
         if (u.passwordless()) throw new ApiException(409, "This account signs in through the identity provider");
-        String key = "id:" + u.id();
-        long locked = throttle.lockedFor(key);
+        String key = LoginThrottle.USER_PREFIX + u.id();
+        long locked = throttle.begin(key);
         if (locked > 0) throw new ApiException(429, "Too many failed attempts; retry in " + locked + " s");
         String current = Api.text(body, "current");
         String next = Api.text(body, "next");
@@ -78,6 +79,7 @@ public class MeApi {
             throttle.failure(key);
             throw new ApiException(401, "Current password is wrong");
         }
+        throttle.success(key);
         String invalid = invalidPassword(u.id(), next);
         if (invalid != null) throw new ApiException(400, invalid);
         users.setPassword(u.id(), PasswordHasher.hash(next));
@@ -126,7 +128,7 @@ public class MeApi {
         if (skill == null) skill = new SimpleTool("skill", "", null, "Skills", ToolKind.READ_ONLY, (c, i) -> "");
         HarnessTool tool = skill;
         return permissions.role(u.role())
-                .map(r -> Permissions.policyOf(r, u, null).allows(tool)).orElse(false);
+                .map(r -> Permissions.policyOf(r, u, null, InstructionRepository.NONE).allows(tool)).orElse(false);
     }
 
     private Set<String> sharedNames() {

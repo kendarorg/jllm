@@ -30,7 +30,7 @@ class OwnershipTest {
     private Workflows wf(Registry reg) {
         Map<String, Set<String>> roles = Map.of("root", Set.of("admin"), "ann", Set.of("user"), "bob", Set.of("user"));
         return new Workflows(reg, new RunStore.Files(dir.resolve("runs")), new FlowStore.Files(dir.resolve("flows")),
-                u -> roles.getOrDefault(u, Set.of()), "admin");
+                u -> roles.getOrDefault(u, Set.of()), "admin", null);
     }
 
     @Test
@@ -127,5 +127,40 @@ class OwnershipTest {
         ByteArrayOutputStream bo = new ByteArrayOutputStream();
         cli.run(args, new ByteArrayInputStream(stdin.getBytes()), new PrintStream(bo));
         return bo.toString();
+    }
+
+    private Workflows wfUnattended(Registry reg) {
+        Map<String, Set<String>> roles = Map.of("root", Set.of("admin"), "ann", Set.of("user"), "nina", Set.of("night"));
+        return new Workflows(reg, new RunStore.Files(dir.resolve("runs")), new FlowStore.Files(dir.resolve("flows")),
+                u -> roles.getOrDefault(u, Set.of()), "admin", r -> r.contains("night"));
+    }
+
+    private static final String UNATTENDED = "{'name':'nightly','unattended':true,'start':'e','steps':{'e':{'type':'finish','result':{'r':'ok'}}}}";
+
+    @Test
+    void onlyAdminsAndRolesWithTheFlagCanSaveOrRunAnUnattendedFlow() {
+        var w = wfUnattended(new Registry());
+        var e = assertThrows(FlowException.class, () -> w.save("ann", FlowLibrary.PERSONAL, flow(UNATTENDED)));
+        assertEquals(FlowException.Kind.PERMISSION, e.kind());
+        assertTrue(w.validate("ann", FlowLibrary.PERSONAL, flow(UNATTENDED)).stream().anyMatch(p -> p.contains("unattended")));
+        w.save("nina", FlowLibrary.PERSONAL, flow(UNATTENDED));
+        w.save("root", FlowLibrary.PERSONAL, flow(UNATTENDED));
+        assertEquals("ok", w.start("nina", "nightly", null, null).result().path("r").asText());
+        w.save("root", FlowLibrary.GLOBAL, flow(UNATTENDED.replace("nightly", "shared-night")));
+        assertEquals("ok", w.start("ann", "shared-night", null, null).result().path("r").asText(),
+                "a global flow was saved by an administrator: anyone it is shared with may run it");
+        assertTrue(w.mayOwnUnattended("root"));
+        assertFalse(w.mayOwnUnattended("ann"));
+    }
+
+    @Test
+    void aPersonalUnattendedFlowStopsRunningWhenItsOwnerLosesTheRole() {
+        java.util.concurrent.atomic.AtomicBoolean flag = new java.util.concurrent.atomic.AtomicBoolean(true);
+        Map<String, Set<String>> roles = Map.of("ann", Set.of("night"));
+        var w = new Workflows(new Registry(), new RunStore.Files(dir.resolve("runs")), new FlowStore.Files(dir.resolve("flows")),
+                u -> roles.getOrDefault(u, Set.of()), "admin", r -> flag.get());
+        w.save("ann", FlowLibrary.PERSONAL, flow(UNATTENDED));
+        flag.set(false);
+        assertThrows(FlowException.class, () -> w.start("ann", "nightly", null, null));
     }
 }

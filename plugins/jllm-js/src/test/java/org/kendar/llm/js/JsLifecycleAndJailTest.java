@@ -112,7 +112,7 @@ class JsLifecycleAndJailTest {
 
     @Test
     void theClockStandsStillWhileAToolCallIsRunning() {
-        try (JsSandbox box = JsTest.box("auto")) {
+        try (JsSandbox box = JsTest.box(JsTest.anyEngine())) {
             var lib = new ToolLibrary().source(List.of(tool("slow", "G", ToolKind.READ_ONLY, (c, i) -> "")));
 
             JsResult r = box.run("tools.slow({}); return 'done';", 1, lib, (n, a) -> {
@@ -131,7 +131,7 @@ class JsLifecycleAndJailTest {
 
     @Test
     void aCancelledScriptThatKeepsRunningIsKilledAfterTheGracePeriod() {
-        try (JsSandbox box = JsTest.box("auto", "statementLimit", "9000000000000000", "gracefulSeconds", "1")) {
+        try (JsSandbox box = JsTest.box(JsTest.anyEngine(), "statementLimit", "9000000000000000", "gracefulSeconds", "1")) {
             AtomicBoolean cancelled = new AtomicBoolean();
             new Thread(() -> {
                 try {
@@ -154,7 +154,7 @@ class JsLifecycleAndJailTest {
 
     @Test
     void aKillRequestStopsTheScriptAtOnceWithoutTheGracePeriod() {
-        try (JsSandbox box = JsTest.box("auto", "statementLimit", "9000000000000000", "gracefulSeconds", "60")) {
+        try (JsSandbox box = JsTest.box(JsTest.anyEngine(), "statementLimit", "9000000000000000", "gracefulSeconds", "60")) {
             AtomicBoolean cancelled = new AtomicBoolean();
             AtomicBoolean kill = new AtomicBoolean();
             new Thread(() -> {

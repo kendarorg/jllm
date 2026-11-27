@@ -206,4 +206,11 @@ class RendererTest {
     void argSummaryStripsEscapes() {
         assertEquals("ls", Renderer.argSummary(node().put("command", "\u001b[31mls")));
     }
+
+    @Test
+    void spoofingCharactersAreStripped() {
+        String bidi = "rm ‮gnp.txt‬ ⁦x⁩ a​b‏c‎";
+        assertEquals("rm gnp.txt x abc", Renderer.clean(bidi));
+        assertEquals("plain text with é", Renderer.clean("plain text with é"));
+    }
 }

@@ -74,7 +74,7 @@ public final class HarnessSettingsLoader {
      *                   loaded unchanged whatever is found
      */
     public static HarnessSettings loadLayered(SettingsSource source, Path projectDir, Function<String, String> env,
-                                              ProjectMcpTrust.Prompt prompt, ProjectMcpTrust trust,
+                                              FolderTrust.Prompt prompt, FolderTrust trust,
                                               Consumer<String> warn, ContentWarnings contents) {
         ObjectMapper mapper = mapper(warn);
         JsonNode merged = null;
@@ -110,7 +110,7 @@ public final class HarnessSettingsLoader {
             }
             if (projectTree != null) {
                 ProjectTrustFilter.apply((ObjectNode) merged, projectTree, otherTrees, projectDir,
-                        prompt == null ? ProjectMcpTrust.Prompt.NONE : prompt, trust, warn);
+                        prompt == null ? FolderTrust.Prompt.NONE : prompt, trust, warn);
             }
             return mapper.treeToValue(expand(merged, env), HarnessSettings.class);
         } catch (IOException e) {

@@ -34,14 +34,18 @@ public final class Workflows {
     private final Registry registry;
     private final Function<String, Set<String>> rolesOf;
     private final String adminRole;
+    private final java.util.function.Predicate<Set<String>> mayRunUnattended;
     private final FlowLibrary library = new StoreLibrary();
 
     /**
      * @param rolesOf   the roles of a user, from the host
      * @param adminRole the role that may manage global flows
+     * @param mayRunUnattended whether a user holding these roles may own an unattended flow (administrators always
+     *                  may); null: every user may (single user)
      */
     public Workflows(Registry registry, RunStore runs, FlowStore flows, Function<String, Set<String>> rolesOf,
-                     String adminRole) {
+                     String adminRole, java.util.function.Predicate<Set<String>> mayRunUnattended) {
+        this.mayRunUnattended = mayRunUnattended;
         this.registry = registry;
         this.flows = flows;
         this.rolesOf = rolesOf;
@@ -61,6 +65,18 @@ public final class Workflows {
                     : flows.get(PERSONAL, user, name);
         }
     }
+
+    /** Whether the user may own a flow marked {@code "unattended": true}: an administrator, or a role with the flag. */
+    public boolean mayOwnUnattended(String user) {
+        return mayRunUnattended == null || isAdmin(user) || mayRunUnattended.test(rolesOf.apply(user));
+    }
+
+    private static boolean unattended(FlowDef f) {
+        return f.doc().path("unattended").asBoolean(false);
+    }
+
+    private static final String UNATTENDED_DENIED = "Only administrators and users whose role allows unattended runs may "
+            + "own an unattended flow";
 
     public boolean isAdmin(String user) {
         return rolesOf.apply(user).contains(adminRole);
@@ -117,6 +133,9 @@ public final class Workflows {
         if (FlowLibrary.GLOBAL.equals(scope) && !isAdmin(user)) {
             throw new FlowException(FlowException.Kind.PERMISSION, "Only administrators manage global flows");
         }
+        if (unattended(flow) && !mayOwnUnattended(user)) {
+            throw new FlowException(FlowException.Kind.PERMISSION, UNATTENDED_DENIED);
+        }
         ObjectNode doc = flow.doc().deepCopy();
         doc.put("scope", scope);
         FlowDef f = FlowDef.parse(doc.toString());
@@ -133,6 +152,7 @@ public final class Workflows {
         doc.put("scope", scope);
         List<String> problems = problems(user, scope, FlowDef.parse(doc.toString()));
         if (FlowLibrary.GLOBAL.equals(scope) && !isAdmin(user)) problems.add(0, "Only administrators manage global flows");
+        if (unattended(flow) && !mayOwnUnattended(user)) problems.add(0, UNATTENDED_DENIED);
         return problems;
     }
 
@@ -202,12 +222,23 @@ public final class Workflows {
     // ---- runs: always the starter's
 
     public FlowEngine.RunResult start(String user, String name, String scope, JsonNode input) {
-        return engine.run(resolve(user, name, scope), input, user);
+        return engine.run(runnable(user, resolve(user, name, scope)), input, user);
+    }
+
+    /**
+     * A flow marked unattended runs only for an owner who may have one (checked again here: the role may have lost the
+     * flag since the flow was saved). A global flow was saved by an administrator; a personal one belongs to the user.
+     */
+    private FlowDef runnable(String user, FlowDef flow) {
+        if (unattended(flow) && FlowLibrary.PERSONAL.equals(flow.scope()) && !mayOwnUnattended(user)) {
+            throw new FlowException(FlowException.Kind.PERMISSION, UNATTENDED_DENIED);
+        }
+        return flow;
     }
 
     /** Stores a new run without walking it; {@link #proceed} walks it. Returns the run id. */
     public String prepare(String user, String name, String scope, JsonNode input) {
-        return engine.prepare(resolve(user, name, scope), input, user, Map.of()).runId;
+        return engine.prepare(runnable(user, resolve(user, name, scope)), input, user, Map.of()).runId;
     }
 
     /** Records the answer of a waiting run without walking it; {@link #proceed} walks it. */

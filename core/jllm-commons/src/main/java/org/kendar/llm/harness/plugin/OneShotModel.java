@@ -16,9 +16,13 @@ public interface OneShotModel {
      * @param approved  tools the user already allowed for this chat, so a call to them needs no question
      * @param tools     tools the task may use: null = those of the agent; empty = none (one plain completion);
      *                  {@code ["*"]} = every tool the user's role allows; otherwise those names, still limited by the role
+     * @param unattended nobody can approve anything in this task: a tool call that would ask is denied, the model gets
+     *                  the denial as the tool result and the task goes on (otherwise the task stops with an
+     *                  {@link ApprovalRequiredException})
+     * @param onDenied  receives the tool of each call denied in an unattended task (for the flow journal); may be null
      */
     record Call(String agent, String system, String user, String principal, String title, Set<String> approved,
-                List<String> tools) {
+                List<String> tools, boolean unattended, java.util.function.Consumer<String> onDenied) {
     }
 
     /** Tool calls of the agent needed an approval and the task could not ask, so it stopped without running them. */

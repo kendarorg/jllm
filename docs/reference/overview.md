@@ -167,7 +167,7 @@ Run them from any front end with `/flows`, `/flow-start`, `/flow-resume`, `/flow
 command line with `WorkflowCli` (`list`, `start`, `resume`, `history`, `cancel`; no chat needed); or from the `jllm-web`
 Flows screen (graph designer with server-side validation, personal and global flows) and Runs screen (history, cancel,
 open questions, a badge with the waiting count). Enable both plugins under `plugins` in the settings file. A sample
-flow, `develop-app` (plan, implement, review loop, test loop), is in [runConfig/flows](../../runConfig/flows) and seeded as a
+flow, `develop-app` (plan, implement, review loop, test loop), is in [runConfigs/unsafe/flows](../../runConfigs/unsafe/flows) and seeded as a
 global flow by `jllm.flows-seed-dir` ([jllm-web](../../jllm-web/README.md#sample-global-flows)).
 
 Not yet: the `who` label of a question (operator, customer) is shown but not enforced; the run's owner answers every

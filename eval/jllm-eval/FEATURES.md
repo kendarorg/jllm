@@ -124,7 +124,7 @@ Every event has a per-chat `seq` (deltas: 0). Buffer: 2000 events, cleared at ea
 
 ### 1.12 Hooks and verify-on-stop
 - **Entry**: `Hooks`, `Hook`, `HookResult` (`allow`, `deny`, `modifyInput`, `addContext`, `continueWith`), builder `hook(event, h)`, `beforeAgent`, `afterAgent`, `beforeLlmCall`, `afterLlmCall`, `beforeToolCall`, `afterToolCall`; settings `hooks.stop[]` -> `CommandStopHook`.
-- **Config**: `loop.verify.maxReentries` (3); `hooks.stop[]` fields `command`, `timeoutSeconds` (600), `agents`, `onlyIfChanged` (true), `maxOutputChars` (8000); project-file hooks run only after trust (`FileProjectMcpTrust`, `~/.jllm/trusted-mcp.json`).
+- **Config**: `loop.verify.maxReentries` (3); `hooks.stop[]` fields `command`, `timeoutSeconds` (600), `agents`, `onlyIfChanged` (true), `maxOutputChars` (8000); project-file hooks run only after trust (`FileFolderTrust`, `~/.jllm/trusted.json`).
 - **Signals**: `Denied by a hook: <reason>`; rewritten input is the one in `POST_TOOL` and executed; first denial stops the chain; `POST_LLM` carries `durationMs`, `usage`; `PRE_LLM` deny -> `error`, nothing appended; `STOP` veto appends "The stop check failed. Fix the problem and finish again. If it cannot be fixed with what you have, stop and say what is missing; do not invent files or content." + message, emits `verify_failed{agent, attempt}`; after `maxReentries` or the same message twice -> `run_finished.outcome=unverified`, `stuck{pattern:"verify_repeat"}`; STOP not fired in plan mode or on cancel; hook exceptions logged and skipped.
 - **Failure modes**: (1) model declares done again without fixing, same message twice; (2) model edits the test to satisfy the stop command; (3) model argues with the hook text instead of fixing it.
 

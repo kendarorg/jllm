@@ -31,16 +31,34 @@ public class ApiInterceptor implements HandlerInterceptor {
     /** The chat id variable of a chat handler pattern (the pattern the framework matched, never the request URI). */
     private static final Pattern CHAT_PATTERN = Pattern.compile("^/api/chat/\\{([^}/:]+)[}:]");
 
+    private static final Set<String> SAFE_METHODS = Set.of("GET", "HEAD", "OPTIONS");
+
     private final boolean enforceOnLoopback;
     private final boolean boundToLoopback;
+    private final String publicOrigin;
 
     /**
      * @param enforceOnLoopback also hold back default-password users whose request comes from the loopback address
      * @param boundToLoopback   the server listens on a loopback address only; if not, the loopback exemption is off,
      *                          since a proxy, tunnel or sidecar on the host makes remote callers look local
+     * @param publicUrl         {@code jllm.web.public-url} (may be null): its origin is also accepted as the origin of a
+     *                          state-changing request, for a proxy that rewrites the {@code Host} header
      */
     public ApiInterceptor(Gate gate, WebAuthentication authentication, ObjectMapper mapper,
-                          boolean enforceOnLoopback, boolean boundToLoopback) {
+                          boolean enforceOnLoopback, boolean boundToLoopback, String publicUrl) {
+        String origin = null;
+        if (publicUrl != null && !publicUrl.isBlank()) {
+            try {
+                java.net.URI u = java.net.URI.create(publicUrl.strip());
+                if (u.getScheme() != null && u.getAuthority() != null) {
+                    origin = u.getScheme().toLowerCase(java.util.Locale.ROOT) + "://"
+                            + u.getAuthority().toLowerCase(java.util.Locale.ROOT);
+                }
+            } catch (IllegalArgumentException e) {
+                // an unusable public URL adds no accepted origin
+            }
+        }
+        this.publicOrigin = origin;
         this.boundToLoopback = boundToLoopback;
         this.gate = gate;
         this.authentication = authentication;
@@ -52,21 +70,45 @@ public class ApiInterceptor implements HandlerInterceptor {
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler)
             throws IOException {
         String path = path(request);
+        if (!SAFE_METHODS.contains(request.getMethod()) && crossSite(request)) {
+            return Verdicts.apply(new Gate.Decision(403, "Cross-site request refused"), response, mapper);
+        }
         Principal user = null;
         if (!gate.isOpen(path)) {
             user = authentication.current(Requests.cookies(request)).orElse(null);
             if (user != null) request.setAttribute(Principal.ATTR, user);
         }
         Gate.Decision decision = gate.decide(path, user);
-        if (decision.allowed() && !gate.isOpen(path)) decision = decideChat(request, user);
-        if (decision.allowed() && !gate.isOpen(path)) decision = decideChatParameter(request, user);
+        // before any chat or admin decision: a user who must change the password learns nothing else
         if (decision.allowed() && mustChangePassword(path, user, request)) {
             response.setStatus(403);
             response.setContentType("application/json");
             response.getWriter().write(mapper.writeValueAsString(Map.of("error", "password_change_required")));
             return false;
         }
+        if (decision.allowed() && !gate.isOpen(path)) decision = decideChat(request, user);
+        if (decision.allowed() && !gate.isOpen(path)) decision = decideChatParameter(request, user);
         return Verdicts.apply(decision, response, mapper);
+    }
+
+    /**
+     * Backstop to the {@code SameSite=Strict} session cookie, for a state-changing request: a browser says where it
+     * comes from. {@code Sec-Fetch-Site} other than {@code same-origin} / {@code none}, or an {@code Origin} that is
+     * neither this host nor the public URL, is refused. A request with neither header (a script, curl) is not a
+     * browser's cross-site request and passes: it carries no ambient cookie of someone else.
+     */
+    boolean crossSite(HttpServletRequest request) {
+        String site = request.getHeader("Sec-Fetch-Site");
+        if (site != null && !site.equalsIgnoreCase("same-origin") && !site.equalsIgnoreCase("none")) return true;
+        String origin = request.getHeader("Origin");
+        if (origin == null) return false;
+        String o = origin.strip().toLowerCase(java.util.Locale.ROOT);
+        if (o.equals(publicOrigin)) return false;
+        int scheme = o.indexOf("://");
+        if (scheme < 0) return true; // "null" and anything that is not an origin
+        String authority = o.substring(scheme + 3);
+        String host = request.getHeader("Host");
+        return host == null || !authority.equals(host.strip().toLowerCase(java.util.Locale.ROOT));
     }
 
     /** The request path without the context path; a URI outside the context path stays unclassifiable (not open). */
@@ -103,7 +145,7 @@ public class ApiInterceptor implements HandlerInterceptor {
     }
 
     private boolean mustChangePassword(String path, Principal user, HttpServletRequest request) {
-        if (!(user instanceof User u) || !u.usesDefaultPassword()) return false;
+        if (!(user instanceof User u) || !u.mustChangePassword()) return false;
         if (PASSWORD_CHANGE_PATHS.contains(path) || path.startsWith("/api/auth/")) return false;
         return enforceOnLoopback || !boundToLoopback || !loopback(request);
     }

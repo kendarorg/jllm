@@ -9,6 +9,7 @@ import java.util.function.Function;
 /**
  * The one place that decides which runner a front end gets: {@code sandbox.backend=local} is the
  * {@link LocalSandboxExecutor} over the layout (no isolation, for testing and trusted single-user use),
+ * {@code sandbox.backend=shared-local} is the {@link SharedLocalSandbox} (minimal environment, bwrap on Linux),
  * {@code sandbox.backend=docker} is the {@link RemoteExecSandboxExecutor} (standard or hardened profile, scope chat or
  * user, from the settings and the optional per-user policy). The CLI and the web both use it.
  *
@@ -71,6 +72,9 @@ public final class SandboxFactory {
      */
     public SandboxExecutor create(HarnessSettings settings, HarnessConfig config, Layout layout,
                                   RemoteExecSandboxExecutor.Kind kind) {
+        if (settings.sharedLocalSandbox()) {
+            return new SharedLocalSandbox(layout, c -> false, null);
+        }
         if (!settings.dockerSandbox()) {
             return confinePaths ? new LocalSandboxExecutor(layout) : LocalSandboxExecutor.unconfined(layout);
         }

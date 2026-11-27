@@ -31,7 +31,7 @@ class CliActionsTest {
                 {"name":"greet","start":"h","steps":{"h":{"type":"action","action":"hello","next":"e"},
                  "e":{"type":"finish","result":{"g":"{{steps.h.greeting}}"}}}}""";
         var w = new Workflows(ActionProvider.load(getClass().getClassLoader()), new RunStore.Files(dir.resolve("runs")),
-                new FlowStore.Files(flows), u -> java.util.Set.of(), "admin");
+                new FlowStore.Files(flows), u -> java.util.Set.of(), "admin", null);
         w.save("ann", FlowLibrary.PERSONAL, FlowDef.parse(flow));
         cli.run(new String[]{"--dir", dir.toString(), "--user", "ann", "start", "greet", "{\"who\":\"Ann\"}"},
                 new ByteArrayInputStream(new byte[0]), new PrintStream(out));

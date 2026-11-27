@@ -1,6 +1,7 @@
 package org.kendar.llm.web.spring;
 
 import jakarta.servlet.http.HttpServletRequest;
+import org.kendar.llm.web.commons.ClientAddress;
 import org.kendar.llm.web.commons.auth.OidcApi;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -14,9 +15,11 @@ import java.util.Map;
 public class OidcController {
 
     private final OidcApi oidc;
+    private final ClientAddress addresses;
 
-    public OidcController(OidcApi oidc) {
+    public OidcController(OidcApi oidc, ClientAddress addresses) {
         this.oidc = oidc;
+        this.addresses = addresses;
     }
 
     @GetMapping("/api/auth/config")
@@ -26,7 +29,7 @@ public class OidcController {
 
     @GetMapping(OidcApi.LOGIN)
     public ResponseEntity<Void> login(HttpServletRequest request) {
-        return Responses.entity(oidc.login(request.getRemoteAddr(), request.isSecure()));
+        return Responses.entity(oidc.login(Requests.clientAddress(request, addresses), request.isSecure()));
     }
 
     @GetMapping(OidcApi.CALLBACK)
@@ -34,7 +37,8 @@ public class OidcController {
                                          @RequestParam(value = "state", required = false) String state,
                                          @RequestParam(value = "error", required = false) String error,
                                          HttpServletRequest request) {
-        return Responses.entity(oidc.callback(code, state, error, Requests.cookies(request), request.getRemoteAddr(),
+        return Responses.entity(oidc.callback(code, state, error, Requests.cookies(request),
+                Requests.clientAddress(request, addresses),
                 request.isSecure()));
     }
 }

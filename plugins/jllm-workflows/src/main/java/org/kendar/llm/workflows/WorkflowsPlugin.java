@@ -42,7 +42,8 @@ public final class WorkflowsPlugin implements HarnessPlugin {
             try {
                 return services.lookup(OneShotModel.class)
                         .orElseThrow(() -> new IllegalStateException("The host offers no model for flows"))
-                        .complete(new OneShotModel.Call(c.agent(), c.system(), c.user(), c.owner(), c.title(), c.approved(), c.tools()));
+                        .complete(new OneShotModel.Call(c.agent(), c.system(), c.user(), c.owner(), c.title(), c.approved(), c.tools(),
+                                c.unattended(), c.onDenied()));
             } catch (OneShotModel.ApprovalRequiredException e) { // the engine asks the user, or fails an unattended flow
                 throw new Registry.ApprovalNeededException(e.getMessage(), e.tools());
             }
@@ -53,7 +54,9 @@ public final class WorkflowsPlugin implements HarnessPlugin {
         var storage = services.lookup(PluginStorages.class).map(s -> s.forPlugin(ID));
         RunStore runs = storage.<RunStore>map(PluginStores.Runs::new).orElseGet(() -> new RunStore.Files(dir.resolve("runs")));
         FlowStore flows = storage.<FlowStore>map(PluginStores.Flows::new).orElseGet(() -> new FlowStore.Files(dir.resolve("flows")));
-        WorkflowApiImpl api = WorkflowApiImpl.create(registry, runs, flows, admin);
+        WorkflowApiImpl api = WorkflowApiImpl.create(registry, runs, flows, admin,
+                services.lookup(org.kendar.llm.harness.workflows.UnattendedRoles.class)
+                        .<java.util.function.Predicate<Set<String>>>map(u -> u::allowed).orElse(null));
         services.publish(WorkflowApi.class, api);
 
         FlowCommands c = new FlowCommands(api, user, roles);

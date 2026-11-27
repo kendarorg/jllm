@@ -209,7 +209,10 @@ public final class HarnessTestSupport {
         private java.util.Collection<HarnessTool> builtinFileTools = List.of();
         private org.kendar.llm.harness.instructions.ScopedInstructions scopedInstructions;
         private org.kendar.llm.harness.agent.StuckJudge stuckJudge;
+        private List<String> documentExtensions = List.of();
+        private org.kendar.llm.harness.agent.RunPolicy runPolicy = org.kendar.llm.harness.agent.RunPolicy.NORMAL;
         private boolean unconfined;
+        private LocalSandboxExecutor customSandbox;
 
         public Rig(Path baseDir) {
             this(baseDir, HarnessMetrics.noop());
@@ -245,6 +248,13 @@ public final class HarnessTestSupport {
             return this;
         }
 
+        /** Uses {@code runner} instead of the default local runner; rebuilds the loop. */
+        public Rig sandbox(LocalSandboxExecutor runner) {
+            customSandbox = runner;
+            wire();
+            return this;
+        }
+
         /** Changes the config and rebuilds every component that captured it. */
         public Rig configure(UnaryOperator<HarnessConfig> change) {
             config = change.apply(config);
@@ -254,7 +264,7 @@ public final class HarnessTestSupport {
 
         private void wire() {
             approvals = new ApprovalService(config.approvalTimeoutSeconds());
-            sandbox = unconfined ? LocalSandboxExecutor.unconfined(org.kendar.llm.harness.sandbox.DirLayout.of(config))
+            sandbox = customSandbox != null ? customSandbox : unconfined ? LocalSandboxExecutor.unconfined(org.kendar.llm.harness.sandbox.DirLayout.of(config))
                     : LocalSandboxExecutor.of(config);
             contextManager = new ContextManager(config, model, approvals, MAPPER, metrics);
             if (config.contextStrategy() == ContextStrategyKind.MNEMONIC) {
@@ -282,7 +292,21 @@ public final class HarnessTestSupport {
             when(registry.all()).thenAnswer(i -> new ArrayList<>(registered));
             return new AgentLoop(new AgentLoop.Deps(config, client, context, selector, gate, approvals, sessions,
                     sandbox, registry, subAgentTool, null, runLog, MAPPER, metrics, "", hooks, classifier, identity,
-                    null, builtinFileTools, scopedInstructions, null, null, stuckJudge));
+                    null, builtinFileTools, scopedInstructions, null, null, stuckJudge, runPolicy, () -> documentExtensions));
+        }
+
+        /** The extensions a document reader handles (for {@code output.taintDocuments}); rebuilds the loop. */
+        public Rig documentExtensions(List<String> extensions) {
+            documentExtensions = extensions;
+            wire();
+            return this;
+        }
+
+        /** The process level run switches (unattended, skip permissions); rebuilds the loop. */
+        public Rig runPolicy(org.kendar.llm.harness.agent.RunPolicy policy) {
+            runPolicy = policy;
+            wire();
+            return this;
         }
 
         /** The confirming model of stuck detections ({@code loop.stuck.confirm}); rebuilds the loop. */

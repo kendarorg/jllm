@@ -22,7 +22,7 @@ class OAuthSettingsTest {
 
     private Path home;
     private Path project;
-    private ProjectMcpTrust trust;
+    private FolderTrust trust;
     private final List<String> warnings = new ArrayList<>();
 
     @BeforeEach
@@ -30,7 +30,7 @@ class OAuthSettingsTest {
         home = tmp.resolve("home");
         project = tmp.resolve("proj");
         System.setProperty("jllm.home", home.toString());
-        trust = new FileProjectMcpTrust(home.resolve(".jllm/trusted-mcp.json"));
+        trust = new FileFolderTrust(home.resolve(".jllm/trusted-mcp.json"));
     }
 
     @AfterEach
@@ -43,7 +43,7 @@ class OAuthSettingsTest {
         Files.writeString(f, s);
     }
 
-    private HarnessSettings load(ProjectMcpTrust.Prompt prompt) {
+    private HarnessSettings load(FolderTrust.Prompt prompt) {
         return HarnessSettingsLoader.loadLayered(new FileSettingsSource(null, project), project, Map.of("CRM_SECRET", "s3")::get, prompt, trust,
                 warnings::add,
                 new org.kendar.llm.harness.safety.ContentWarnings());
@@ -57,7 +57,7 @@ class OAuthSettingsTest {
     @Test
     void oauthBlockIsReadWithItsDefaults() throws Exception {
         write(home.resolve(".jllm/settings.json"), API.formatted("${CRM_SECRET}"));
-        RestApiSettings.OAuth o = load(ProjectMcpTrust.Prompt.NONE).restApis().get(0).oauth();
+        RestApiSettings.OAuth o = load(FolderTrust.Prompt.NONE).restApis().get(0).oauth();
         assertEquals("authorization_code", o.effectiveFlow());
         assertEquals("s3", o.clientSecret());
         assertTrue(o.effectivePerUser());
@@ -69,12 +69,12 @@ class OAuthSettingsTest {
     @Test
     void projectOauthNeedsTrustAndIsRememberedOnce() throws Exception {
         write(project.resolve(".jllm/settings.json"), API.formatted("${CRM_SECRET}"));
-        assertTrue(load(ProjectMcpTrust.Prompt.NONE).restApis().isEmpty());
+        assertTrue(load(FolderTrust.Prompt.NONE).restApis().isEmpty());
         assertTrue(warnings.stream().anyMatch(w -> w.contains("crm") && w.contains("oauth")), warnings.toString());
 
         AtomicInteger asked = new AtomicInteger();
         List<String> shown = new ArrayList<>();
-        ProjectMcpTrust.Prompt yes = (dir, name, line) -> {
+        FolderTrust.Prompt yes = (dir, name, line) -> {
             asked.incrementAndGet();
             shown.add(name + " " + line);
             return true;
@@ -90,7 +90,7 @@ class OAuthSettingsTest {
     void sameOauthApiInTheUserSettingsNeedsNoTrust() throws Exception {
         write(home.resolve(".jllm/settings.json"), API.formatted("${CRM_SECRET}"));
         write(project.resolve(".jllm/settings.json"), API.formatted("${CRM_SECRET}"));
-        assertEquals(1, load(ProjectMcpTrust.Prompt.NONE).restApis().size());
+        assertEquals(1, load(FolderTrust.Prompt.NONE).restApis().size());
     }
 
     @Test
@@ -105,13 +105,13 @@ class OAuthSettingsTest {
     void projectTokenStoreIsIgnored() throws Exception {
         write(home.resolve(".jllm/settings.json"), "{\"tokenStore\":{\"type\":\"file\"}}");
         write(project.resolve(".jllm/settings.json"), "{\"tokenStore\":{\"type\":\"native\",\"dir\":\"/tmp/x\",\"encrypt\":false}}");
-        HarnessSettings s = load(ProjectMcpTrust.Prompt.NONE);
+        HarnessSettings s = load(FolderTrust.Prompt.NONE);
         assertEquals("file", s.tokenStore().type());
         assertNull(s.tokenStore().dir());
         assertTrue(warnings.stream().anyMatch(w -> w.contains("tokenStore")), warnings.toString());
 
         Files.delete(home.resolve(".jllm/settings.json"));
-        assertNull(load(ProjectMcpTrust.Prompt.NONE).tokenStore());
+        assertNull(load(FolderTrust.Prompt.NONE).tokenStore());
     }
 
     @Test

@@ -13,11 +13,11 @@ import java.util.Locale;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/** The sample flow {@code runConfig/flows/develop-app.json}, with a scripted model and a real test command. */
+/** The sample flow {@code runConfigs/unsafe/flows/develop-app.json}, with a scripted model and a real test command. */
 class DevelopAppFlowTest {
 
     private static final boolean WINDOWS = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
-    private static final Path FLOW = Path.of("..", "..", "runConfig", "flows", "develop-app.json");
+    private static final Path FLOW = Path.of("..", "..", "runConfigs", "unsafe", "flows", "develop-app.json");
 
     @TempDir
     Path project;

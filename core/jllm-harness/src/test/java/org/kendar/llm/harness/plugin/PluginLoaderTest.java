@@ -134,7 +134,7 @@ class PluginLoaderTest {
             System.setProperty("jllm.home", dir.toString());
             var s = HarnessSettingsLoader.loadLayered(new org.kendar.llm.harness.settings.FileSettingsSource(f2, null), null,
                     k -> null, null,
-                    new org.kendar.llm.harness.settings.FileProjectMcpTrust(dir.resolve("trust.json")), w -> { },
+                    new org.kendar.llm.harness.settings.FileFolderTrust(dir.resolve("trust.json")), w -> { },
                 new org.kendar.llm.harness.safety.ContentWarnings());
             System.clearProperty("jllm.home");
             assertTrue(s.plugins().get("a").get("enabled").asBoolean());

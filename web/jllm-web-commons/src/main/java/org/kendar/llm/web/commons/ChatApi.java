@@ -204,7 +204,11 @@ public class ChatApi {
     public Map<String, Object> mode(String id, Map<String, String> body) {
         known(id);
         PermissionMode mode = PermissionMode.parse(body.get("mode"));
-        sessions.setMode(id, mode);
+        try {
+            sessions.setMode(id, mode);
+        } catch (ChatSessionService.ModeNotAllowedException e) {
+            throw new ApiException(403, e.getMessage());
+        }
         return Map.of("mode", mode.name());
     }
 

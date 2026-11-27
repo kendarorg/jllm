@@ -88,6 +88,9 @@ final class Renderer {
             case "steer_applied" -> out.accept(color(DIM, "[applied] " + clean(d.path("text").asText())));
             case "instructions_loaded" -> out.accept(color(DIM, "[instructions] " + clean(d.path("file").asText())));
             case "content_warning" -> contentWarning(d);
+            case "permission_denied" -> out.accept(color(YELLOW, "[denied] " + clean(d.path("tool").asText()) + ": "
+                    + ("tainted".equals(d.path("reason").asText()) ? "flagged output rejected, no one can approve using it"
+                    : "unattended run, no one can approve it")));
             default -> { }
         }
     }
@@ -217,6 +220,15 @@ final class Renderer {
      * (newlines and tabs stay; a CR is kept only before a newline), so output cannot move the cursor, retitle the
      * window, hide text or forge the prompt.
      */
+    /**
+     * Characters that reorder or hide text: zero-width and direction marks (U+200B-200F), the bidi embeddings and
+     * overrides (U+202A-202E) and the bidi isolates (U+2066-2069). A command or path written with them reads
+     * differently from what runs.
+     */
+    static boolean spoofing(char c) {
+        return (c >= 0x200B && c <= 0x200F) || (c >= 0x202A && c <= 0x202E) || (c >= 0x2066 && c <= 0x2069);
+    }
+
     static String clean(String s) {
         if (s == null || s.isEmpty()) return s == null ? "" : s;
         String t = ESCAPES.matcher(s).replaceAll("");
@@ -227,6 +239,8 @@ final class Renderer {
             else if (c == '\r') {
                 if (i + 1 < t.length() && t.charAt(i + 1) == '\n') b.append(c);
             } else if (c < 0x20 || c == 0x7f || (c >= 0x80 && c <= 0x9f)) {
+                continue;
+            } else if (spoofing(c)) {
                 continue;
             } else b.append(c);
         }

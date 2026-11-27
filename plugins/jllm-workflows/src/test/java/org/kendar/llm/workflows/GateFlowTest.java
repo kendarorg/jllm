@@ -192,7 +192,7 @@ class GateFlowTest {
         assertNotEquals(REVIEW, noWith);
         hasProblem(check(noWith), "gate needs a 'with' object");
         Workflows w = new Workflows(builtins().action("review", c -> null), new RunStore.Memory(),
-                new FlowStore.Memory(), u -> java.util.Set.of(), "admin");
+                new FlowStore.Memory(), u -> java.util.Set.of(), "admin", null);
         assertThrows(FlowException.class, () -> w.save("u", FlowLibrary.PERSONAL,
                 flow(REVIEW.replace("'type':'boolean'", "'type':'colour'"))));
     }

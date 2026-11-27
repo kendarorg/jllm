@@ -50,7 +50,7 @@ public final class SqlTokenStore implements TokenStore {
             try {
                 db.run(tx -> tx.update("UPDATE oauth_tokens SET payload = ?, version = version + 1"
                                 + " WHERE principal_id = ? AND name = ? AND version = ?",
-                        encode(token.get()), p, name, row.get().version()));
+                        encode(token.get(), p, name), p, name, row.get().version()));
             } catch (RuntimeException e) { // boundary: resealing is best effort
                 log.warn("Cannot reseal token {} of {}: {}", name, p, e.toString());
             }
@@ -61,7 +61,7 @@ public final class SqlTokenStore implements TokenStore {
     @Override
     public void put(String principalId, String name, OAuthToken token) {
         String p = key(principalId);
-        String payload = encode(token);
+        String payload = encode(token, p, name);
         db.run(tx -> {
             if (tx.update("UPDATE oauth_tokens SET payload = ?, version = version + 1"
                     + " WHERE principal_id = ? AND name = ?", payload, p, name) == 0) {
@@ -98,7 +98,7 @@ public final class SqlTokenStore implements TokenStore {
                 if (next == null) return true;
                 try {
                     tx.update("INSERT INTO oauth_tokens (principal_id, name, payload, version) VALUES (?, ?, ?, 1)",
-                            p, name, encode(next));
+                            p, name, encode(next, p, name));
                     return true;
                 } catch (RuntimeException e) {
                     if (Tx.isDuplicate(e)) return false; // another writer inserted first
@@ -114,7 +114,7 @@ public final class SqlTokenStore implements TokenStore {
             }
             return tx.update("UPDATE oauth_tokens SET payload = ?, version = version + 1"
                             + " WHERE principal_id = ? AND name = ? AND version = ?",
-                    encode(next), p, name, row.get().version()) > 0;
+                    encode(next, p, name), p, name, row.get().version()) > 0;
         });
     }
 
@@ -137,7 +137,8 @@ public final class SqlTokenStore implements TokenStore {
                 rs -> new Row(rs.getString(1), rs.getLong(2)), principal, name);
     }
 
-    private String encode(OAuthToken t) {
+    /** The sealed form is bound to the row: user id and token name are associated data. */
+    private String encode(OAuthToken t, String principal, String name) {
         try {
             ObjectNode n = MAPPER.createObjectNode();
             n.put("access", t.access());
@@ -147,7 +148,7 @@ public final class SqlTokenStore implements TokenStore {
             t.extra().forEach(extra::put);
             String json = MAPPER.writeValueAsString(n);
             if (cipher == null) return MAPPER.writeValueAsString(MAPPER.createObjectNode().set("token", n));
-            TokenCipher.Sealed s = cipher.encrypt(json);
+            TokenCipher.Sealed s = cipher.encrypt(json, TokenCipher.context(principal, name));
             ObjectNode out = MAPPER.createObjectNode();
             out.putObject("sealed").put("kid", s.kid()).put("nonce", s.nonce()).put("data", s.data());
             return MAPPER.writeValueAsString(out);
@@ -181,7 +182,7 @@ public final class SqlTokenStore implements TokenStore {
                 }
                 JsonNode s = root.get("sealed");
                 n = MAPPER.readTree(cipher.decrypt(new TokenCipher.Sealed(s.path("kid").asText(),
-                        s.path("nonce").asText(), s.path("data").asText())));
+                        s.path("nonce").asText(), s.path("data").asText()), TokenCipher.context(principal, name)));
             } else {
                 throw new IllegalArgumentException("unknown payload");
             }

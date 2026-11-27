@@ -1,7 +1,7 @@
 # jllm setup: unzips the distribution that sits next to this script, asks which GraalJS edition to use for run_js and
 # downloads it (Maven Central, SHA-256 verified) into the unzipped lib-ext\. Works on Windows PowerShell and PowerShell 7.
 # Layout: next to this script jllm-<version>.zip; after setup, jllm-<version>/ holds the jars, run-*.sh/.cmd, plugins/,
-# settings/, webauth/ and lib-ext/ (filled with the chosen GraalJS edition; manifests/ lists the pinned jars).
+# configs/ (unsafe, webSafe, cliSafe) and lib-ext/ (filled with the chosen GraalJS edition; manifests/ lists the pinned jars).
 # Usage: .\setup.ps1 [-Zip FILE] [-Dir DIR] [-Edition community|commercial] [-AcceptLicense] [-Repo URL]
 # Without a terminal, give -Edition (and -AcceptLicense for commercial).
 param(

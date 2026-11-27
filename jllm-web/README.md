@@ -9,7 +9,7 @@ Vue 3 chat UI. The Spring layer is a thin adapter; all agent logic lives in the 
 
 ```sh
 mvn -pl jllm-web -am package
-java -jar jllm-web/target/jllm-web-1.4.0-jllm.jar --provider anthropic --jllm.webauth-dir=runConfig/webauth
+java -jar jllm-web/target/jllm-web-1.4.0-jllm.jar --provider anthropic --jllm.webauth-dir=runConfigs/unsafe/webauth
 ```
 
 Then open <http://localhost:8080>. The UI is plain static files in `src/main/resources/static`: Vue 3 as an ES module
@@ -33,8 +33,8 @@ The file tools never follow a symlink or junction that leaves a chat's work dir:
 | `jllm.max-tokens` | 32000 | output limit of one response |
 | `jllm.context-tokens` | harness default (100000) | context window; wins over the settings file |
 | `jllm.max-turns` | harness default (40) | model calls per user turn |
-| `jllm.workdir` | current directory | project directory the agent works in |
-| `jllm.settings` (flag `--settings`) | none | merged over `~/.jllm/settings.json` and `<workdir>/.jllm/settings.json`; harness [settings file](../docs/reference/usage.md#5-settings-file) (MCP, REST, skills, agents) |
+| `jllm.chats-dir` | `chats` (current directory) | folder of the chat directories, where the users' commands run. Startup fails when the webauth folder, the SQLite file, the configuration folder, the plugin folder or the flows seed folder is inside it (canonical paths) |
+| `jllm.config-dir` | `<webauth-dir>/config` | `jllm.store=file`: the folder of the JSON configuration files (see [Virtual configuration](#virtual-configuration)). With SQL the configuration is in the database |
 | `jllm.context-strategy` | `compaction` | `compaction`, `mnemonic` or `scope`; wins over the settings file |
 | `jllm.small-model` | `false` | append the small-model rules to the system prompt |
 | `jllm.sandbox` | | ignored on the web: the sandbox kind is per role (see below). Still read by the CLI |
@@ -43,14 +43,15 @@ The file tools never follow a symlink or junction that leaves a chat's work dir:
 | `jllm.docker-profile` | `standard` | not used for web roles: the role's kind decides (`docker-isolated` is `hardened`, `docker-open` is `standard`) |
 | `jllm.docker-remote` | `false` | flag `--docker-remote`: docker on another machine; each chat's workspace is uploaded to its container and backed up under `<X>/<chatId>/.jllm/` ([SANDBOX](../docs/guides/sandbox.md#remote-docker)) |
 | `jllm.docker-remote-host` | from `DOCKER_HOST` | address where the remote host's published ports are reached |
-| `jllm.system-prompt-file` (flag `--system-prompt-file`) | none | file appended to the system prompt |
-| `jllm.system-prompt-replace` (flag `--system-prompt-replace`) | none | file that replaces the built-in system prompt |
-| `jllm.system-prompt` | none | text appended to the built-in system prompt; `SYSTEM.md` (replace) and `APPEND_SYSTEM.md` in `~/.jllm/` and `<workdir>/.jllm/` are also read, see [USAGE](../docs/reference/usage.md#system-prompt-files) |
+| `jllm.system-prompt` | none | text appended to the built-in system prompt, after the stored system prompt and the global instructions (see [Virtual configuration](#virtual-configuration)). No `SYSTEM.md` or `APPEND_SYSTEM.md` file is read |
 | `jllm.search-api-key` | `BRAVE_API_KEY` env var | Brave key for `web_search` |
 | `jllm.pricing.input-per-million`, `output-per-million`, `cache-read-per-million`, `cache-write-per-million` | 0 | USD per million tokens, for the cost estimate |
 | `jllm.web.public-url` | none | the externally visible base URL (`https://jllm.example.com`); OAuth logins redirect to `<public-url>/oauth/callback`. Required when a per-user OAuth source uses the authorization code flow |
+| `jllm.web.allow-missing-bwrap` | `false` | On Linux, `shared-local` (backend or any role) needs a working `bwrap`; without it the server refuses to start. `true`: log an error and start anyway; roles of kind `shared-local` then get no sandbox and their tool calls error |
 | `jllm.web.use-real-password` | `false` | `true`: at startup every user still on the default password gets a random 24-character one. The admin password is logged once at WARN; other users are only logged as generated, an admin resets them. Never regenerated afterwards. Users linked to an identity provider are skipped |
-| `jllm.web.allow-unencrypted-tokens` | `false` in the code; **`true` in the shipped `application.properties`** (so the server starts without `JLLM_TOKEN_KEY`; remove that line, or set the key, for shared or exposed installs) | Without `JLLM_TOKEN_KEY` the users' OAuth tokens are stored in clear (file and SQL stores). That starts with a loud WARN naming the variable when the server is local-only; it is refused (the server does not start) when `jllm.web.use-real-password=true` or `server.address` is not loopback (unset, `0.0.0.0` and `::` are not). `true` accepts clear-text tokens anyway, still with the WARN |
+| `jllm.web.allow-unencrypted-tokens` | `false`; **not set in the shipped properties**, which are local-only (`server.address=127.0.0.1`) | Without `JLLM_TOKEN_KEY` the users' OAuth tokens are stored in clear (file and SQL stores): a loud WARN while the server is local-only, a refusal to start when `jllm.web.use-real-password=true` or `server.address` is not loopback. `true` accepts clear text anyway; do not ship it. Encrypted tokens are bound to user id and source (AES-GCM associated data) |
+| `jllm.web.trusted-proxies` | none | reverse proxies whose `X-Forwarded-For` the sign-in throttle believes |
+| `jllm.web.session-max-age-days` | `30` | absolute session lifetime |
 | `jllm.web.enforce-password-change-on-loopback` | `false` | A user on the default password can only change it, sign in or out: every other `/api` call answers `403 password_change_required`. Requests from the loopback address are exempt unless this is `true`, a forwarding header (`X-Forwarded-For`, `Forwarded`, `X-Real-IP`) is present, or `server.address` is not a loopback address (unset, `0.0.0.0` and `::` count as non-loopback). A reverse proxy, tunnel or sidecar on the same host that sends no forwarding header makes remote requests look local: set this to `true` there |
 | `jllm.web.content-security-policy` | built-in | `Content-Security-Policy` value for every response. Blank: `default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'` (`unsafe-eval`: Vue compiles its templates in the browser; `unsafe-inline` styles: `style=""` attributes). `off`: no CSP header. Any other text replaces the policy. `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer` are always sent, unless a handler already set them |
 | `jllm.store`, `jllm.sql.url`, `.user`, `.password`, `.pool`, `.seed`, `.driver-dir` | `sql` with the SQL starter, else `file` | where users, roles, chats, tokens and settings live; see [SQL store](#sql-store). `jllm.webauth-dir` (default `webauth`) is the file store folder and the default place of the SQLite file |
@@ -58,13 +59,41 @@ The file tools never follow a symlink or junction that leaves a chat's work dir:
 | `jllm.plugins.<id>.enabled`, `jllm.plugins.<id>.settings.*` | none | per-plugin switch and settings; win over the `plugins` section of the settings file |
 | env `JLLM_UPLOAD_MAX_FILE_SIZE`, `JLLM_UPLOAD_MAX_REQUEST_SIZE` | 100MB, 200MB | multipart upload limits |
 
+## Virtual configuration
+
+The web application reads no configuration from a working or chat directory. Everything comes from a `ConfigProvider`
+that is either the SQL one (`jllm.store=sql`, tables `settings_layer`, `instructions`, `agents`, `skills`, `plugin_docs`) or
+the file one (`jllm.store=file`, JSON files under `jllm.config-dir`, `RemoteFileConfigProvider`). Without one of them the server does not start.
+
+| What | Where | Edited by |
+|---|---|---|
+| settings (MCP servers, plugins, `web.*`, ...) | the settings document | administrators, `PUT /api/admin/config/settings` |
+| system prompt (`replace`, `append`), global, role and user instructions | `instructions` | administrators, `/api/admin/config/instructions/{system\|global\|role\|user}/{name}?owner=` |
+| sub-agents, inline prompt | `agents` | administrators, `/api/admin/config/agents/{name}` |
+| skills | `skills` | administrators (global), users (own) |
+
+A setting that names a file is refused when loaded and in the admin API: `promptFile` of an agent, the `path` of a skill,
+`instructionFiles`. Stdio MCP servers are dropped on the web as before; the MCP servers come only from the settings.
+There is no folder trust on the web: no project folder exists and the chat directories are never a source.
+
+Instructions of a role or a user are added to the system prompt of their chats. The instruction files a chat directory may hold
+(`AGENTS.md`, `CLAUDE.md`, `KENDAR.md`) are off by default; an administrator can enable them per role with the role setting
+`scoped-instructions` set to `true` (`PUT /api/admin/roles/{role}/settings/scoped-instructions`), and then they reach the model
+labelled as content of the user, not as administrator instructions.
+
+`jllm-web --import-config <dir>` imports a file configuration once into the provider of the store in use and exits: `settings.json`
+(agent prompt files and skill paths read and stored inline, `instructionFiles` stored as global instructions), `SYSTEM.md`,
+`APPEND_SYSTEM.md`, and the instruction files `AGENTS.md`, `CLAUDE.md`, `KENDAR.md`. Existing entries of the same name are replaced.
+
 Also set: `server.port=8080` and `spring.mvc.async.request-timeout=-1` (SSE streams must not time out).
 
-The sandbox, history and scratch directories are the same as in the CLI (`.jllm/` under the project directory).
+The sandbox, history and scratch directories are the same as in the CLI, under each chat directory of `jllm.chats-dir`.
 The sandbox is set **per role** by an administrator (Administration, Roles, Sandbox): `none` (the default: no file tools and no `bash`;
-each attempt is a tool error the model sees, the server keeps running), `local` (processes on the server, no isolation:
-trusted users only), `docker-isolated` (hardened container: no network unless granted, resource limits) or `docker-open`
-(standard container with network). Scope (chat or user) and, for isolated, network are per role; image and the rest come from `jllm.docker-*`.
+each attempt is a tool error the model sees, the server keeps running), `shared-local` (processes on the server in the chat
+directory with a minimal environment: `PATH`, `LANG`, `HOME` = chat dir; confined with `bwrap` on Linux, no network unless the role sets
+`network`; **not confined on Windows and macOS**, testing only; on Linux without a working `bwrap` the role gets no sandbox), `docker-isolated` (hardened container: no network unless granted, resource limits) or `docker-open`
+(standard container with network). Plain `local` is rejected. Scope (chat or user) and, for isolated or shared-local, network are per role; a docker role may set
+`localFallback` (default false, admin-only): when docker is unavailable the chat may continue in a shared-local sandbox, never as a host shell; image and the rest come from `jllm.docker-*`.
 `jllm.sandbox` is ignored on the web (a warning is logged). A chat without a user, or a role that cannot be read, is `none`. Sign-in is a
 simple reference implementation (below); bind the server to localhost or put it behind your own HTTPS proxy.
 
@@ -75,8 +104,8 @@ This module is a reference implementation of the multi-user mechanism of
 [starter](../web/jllm-web-spring-starter/README.md) stay generic and know none of what follows.
 
 With `jllm.store=file` (or no SQL starter) everything lives under one folder (property `jllm.webauth-dir`, default `webauth`, relative to the start folder).
-The sample is `runConfig/webauth/`, which the IDE run configurations in `.run/` pass explicitly; they start in
-`runConfig/tmp/` (ignored by git). Files are read on each
+The sample is `runConfigs/unsafe/webauth/`, which the IDE run configurations in `.run/` pass explicitly; they start in
+`runConfigs/unsafe/tmp/` (ignored by git). Files are read on each
 use, so changes (by hand or from the UI) apply without a restart.
 
 | Path | Content |
@@ -87,13 +116,26 @@ use, so changes (by hand or from the UI) apply without a restart.
 | `webauth/user-skills/<id>/<name>.md` | a user's own skills |
 
 ### Sign-in
-- Login and password. A user file without `password` has the **default password: the login itself** (`admin` /
-  `admin`). The UI shows a banner until the user picks their own.
-- Stored passwords are `pbkdf2$<iterations>$<salt>$<hash>` (PBKDF2WithHmacSHA256, 210000 iterations, random salt).
+- Login and password. A user file without `password` (the seeded demo users) has the **default password: the login
+  itself**; the UI shows a banner until the user picks their own. Users made or reset in Administration never get it: an
+  admin gives a password (8+ characters, not the login), or leaves it empty and a random one-time password is generated,
+  shown once (`temporaryPassword`), and must be changed at the first sign-in (`403 password_change_required` until then).
+- Stored passwords are `pbkdf2$<iterations>$<salt>$<hash>` (PBKDF2WithHmacSHA256, 210000 iterations, random salt;
+  a stored count outside 1..10 000 000 matches nothing). Comparison is constant-time, the default-password path costs one
+  PBKDF2 like the others. A one-time password is the same hash behind `temp$`.
 - The cookie `jllm_session` (HttpOnly, SameSite=Strict, Secure on HTTPS) holds a random session token; sessions are
-  in memory (7 days, sliding), so a restart signs everybody out. A deleted user is signed out at once.
-- Five failed attempts for a login or an address lock it for 30 seconds (429). Unknown login and wrong password give
-  the same answer.
+  in memory (7 days sliding, and at most `jllm.web.session-max-age-days`, default 30, from sign-in whatever the use), so a
+  restart signs everybody out. A deleted user is signed out at once.
+- **Throttle**: the check and the count are one atomic step. Three failed attempts lock a login for 30 minutes (429);
+  an address is locked for 10 minutes after 100 attempts in that window. Unknown login and wrong password give the same
+  answer. At most 10 000 keys are kept (oldest dropped); a restart clears every lock. An admin lifts a lock with
+  `POST /api/admin/users/{id}/unlock` (Unlock button in Administration; `lockedFor` in the user list). Resetting a password
+  unlocks too. A locked admin can be unlocked by another admin or by restarting the server.
+- **Behind a reverse proxy** every caller has the proxy's address unless `jllm.web.trusted-proxies` lists the proxy
+  (addresses or CIDRs, comma separated): then `X-Forwarded-For` is read from the right, skipping trusted proxies. Without it the header is ignored.
+- **CSRF backstop** (besides SameSite=Strict): a POST/PUT/DELETE with `Sec-Fetch-Site` other than `same-origin`/`none`,
+  or an `Origin` that is neither the request's `Host` nor the origin of `jllm.web.public-url`, answers 403. Requests without
+  these headers (scripts, curl) pass.
 
 ### Sign-in with OpenID Connect
 
@@ -125,7 +167,9 @@ jllm.auth.oidc.default-role=user                       # required (and must exis
 - A user with an `externalId` and no password cannot use `/api/login`, has no default password, and the page
   hides password changes for them.
 - Failures go to `/?authError=<code>` (`denied`, `invalid_token`, `unknown_user`, `domain_not_allowed`,
-  `email_not_verified`, `expired`, `no_role`). Five refused callbacks lock an address for 30 seconds.
+  `email_not_verified`, `expired`, `no_role`). An address is limited like the password sign-in (100 attempts per 10 minutes).
+- A pre-created user is linked by a verified email only if their role is not `admin` and not `unattended`: an administrator links
+  those (set the `externalId`). Set `jllm.auth.oidc.allowed-domains` so only your domains can sign in or be provisioned.
 - **Role mapping** (off by default): the groups of the ID token pick the role at each sign-in. Each role lists its
   groups in its `idp` setting (`{"groups": ["engineering", "team-*"], "priority": 10}`, Roles tab > *Sign-in
   mapping*); the global options are in the *Role mapping* tab, with a preview, or in properties:
@@ -153,7 +197,18 @@ jllm.auth.oidc.default-role=user                       # required (and must exis
 - `tools`: tool-name patterns, `*` matching any run of characters: `"read_file"`, `"mcp__docs__*"` (a whole MCP
   server, also tools it adds later), `"billing__*"` (a REST API), `["*"]` (everything).
 - `readOnly`: optional; `true` keeps only read-only tools. `approval`: optional; `"off"` turns approval prompts off,
-  `"ask"` (default) uses the harness policy. A role without a valid file gets no tools.
+  `"ask"` (default) uses the harness policy, `"always"` asks like `ask` and no mode (`auto`, `edit`) waives a question.
+- Role settings `allowed-modes` (array of `default`, `plan`, `edit`, `auto`; default all): the modes the role's users may
+  select. `POST /api/chat/{id}/mode` and `/plan`, `/edit`, `/auto`, `/mode` answer 403 / an error for another one, and a
+  run never uses a mode outside the list (it falls back to the first allowed of default, plan, edit, auto).
+- Role setting `unattended` (`true`, set by an administrator only like every role setting): nobody answers the role's
+  permission questions. Every call that would ask is denied automatically, the model gets
+  `denied: unattended run, no one can approve <tool>`; `allow` entries of `toolPermissions` still run. Flows marked
+  `"unattended": true` can be saved and run only by administrators and by users of such a role. Flagged tool output is
+  rejected in an unattended chat; elsewhere the user chooses as it is, cleaned or reject in the approval dialog.
+- The web has no equivalent of the CLI `--dangerously-skip-permissions`: no property, role field or API.
+- The approval dialog strips zero-width and bidi control characters (U+200B-200F, U+202A-202E, U+2066-2069) from titles
+  and previews. A role without a valid file gets no tools.
 - `admin` is fixed: it always has every tool; only its `approval` (default `ask`), `toolPermissions` and settings (`sandbox` included) can be changed, and it cannot be deleted or recreated. At least
   one admin user always remains, and an admin cannot delete their own account.
 - One role per user. Shipped: `guest` (`run_js` and the web tools), `reader` (`run_js` and read-only file tools), `poweru` (`run_js`, `bash`, file and web tools), `admin`. A role lists `run_js`, `bash`, both or neither.
@@ -255,7 +310,7 @@ Chat endpoints are under `/api/chat`; the other tables below list their own path
 | `POST /api/me/skills`, `PUT /api/me/skills/{name}`, `DELETE /api/me/skills/{name}` | `{name, description, content}` | own skills; 409 name taken, 413 too large, 403 not own |
 | `GET/POST /api/admin/users`, `PUT/DELETE /api/admin/users/{id}` | `{id, name, role, password?}` | admin only (403 otherwise); rows have `roleManagedByIdp` |
 | `POST /api/admin/users/{id}/password` | `{password?}` | set, or reset to the default when absent |
-| `GET/POST /api/admin/roles`, `PUT/DELETE /api/admin/roles/{name}` | `{name, tools, readOnly, approval, toolPermissions?, settings?: {<feature>: JSON}, sandbox?: {kind: none\|local\|docker-isolated\|docker-open, scope?, network?}}` | `admin` 403; delete 409 while held; absent `settings` keeps them, `sandbox` replaces that key; 400 invalid (`sandbox` and `idp` are checked) |
+| `GET/POST /api/admin/roles`, `PUT/DELETE /api/admin/roles/{name}` | `{name, tools, readOnly, approval, toolPermissions?, settings?: {<feature>: JSON}, sandbox?: {kind: none\|shared-local\|docker-isolated\|docker-open, scope?, network?, localFallback?}}` | `admin` 403; delete 409 while held; absent `settings` keeps them, `sandbox` replaces that key; 400 invalid (`sandbox` and `idp` are checked) |
 | `GET /api/admin/roles/{name}/settings`, `PUT/DELETE /api/admin/roles/{name}/settings/{feature}` | any JSON (PUT) | the settings map; 404 unknown role or feature, 400 invalid key or value |
 | `GET/PUT/DELETE /api/admin/auth/role-mapping` | `{enabled?, claim?, onNoMatch?, allowAdmin?, maxAge?}` (PUT; absent keys kept) | the role mapping options in force plus `stored`, `editable`, `defaultRole`, `properties`; DELETE drops the stored ones; 400 invalid |
 | `POST /api/admin/auth/role-mapping/preview` | `{groups: [..] or "a, b"}` | the role those groups give and why (`role`, `matches`, `outcome`); works while the mapping is off |
@@ -341,7 +396,7 @@ no SQL starter. With `jllm-sql-spring-starter` on the class path (the release sh
 default; another store supplies its own `UserRepository`, `RoleRepository`, `SkillRepository` and `LoginSessionRepository` beans. The harness settings layers come from a
 `SettingsSource` bean (default: the settings files), the settings an administrator stores at runtime from a
 `SettingsSink` bean (default: `webauth/stored-settings.json`; SQL: table `settings_section`; a stored value wins, see
-[usage §5](../docs/reference/usage.md#5-settings-file)) and the project trust answers from a `ProjectMcpTrust` bean;
+[usage §5](../docs/reference/usage.md#5-settings-file));
 a `TokenStore` bean (passed through `HarnessIdentity.tokenStore()`) can replace the OAuth token files. Chat history
 (`ChatSessionStore`, `SubAgentRunLog`, `MnemonicStore`, `StateStore`) is optional beans too; default: files under each
 chat's history root.
@@ -358,7 +413,7 @@ cover the SQL store and the switch.
 
 ## Sample global flows
 
-`jllm.flows-seed-dir` names a folder of flow files (`--jllm.flows-seed-dir=$PROJECT_DIR$/runConfig/flows` in the sample
+`jllm.flows-seed-dir` names a folder of flow files (`--jllm.flows-seed-dir=$PROJECT_DIR$/runConfigs/unsafe/flows` in the sample
 run configurations; it holds `develop-app`: plan, implement, review loop, test loop). At startup `SampleFlows` adds each
 `*.json` to the global flows of the `jllm-workflows` plugin when no flow of that name exists; nothing is overwritten.
 Not set: nothing happens. The flows plugin ships no flows.

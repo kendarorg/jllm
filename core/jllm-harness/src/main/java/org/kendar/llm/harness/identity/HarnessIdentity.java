@@ -37,6 +37,16 @@ public interface HarnessIdentity {
         return id -> RoleSandbox.NONE;
     }
 
+    /** Whether a user holding these roles may own an unattended flow (a role with {@code unattended: true}). */
+    default boolean mayRunUnattended(java.util.Set<String> roles) {
+        return false;
+    }
+
+    /** Whether any role has the {@code shared-local} sandbox: the host then refuses to start without a working one. */
+    default boolean usesSharedLocal() {
+        return false;
+    }
+
     /** The principal of a user id; null when unknown. */
     Function<String, HarnessPrincipal> principals();
 

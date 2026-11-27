@@ -270,6 +270,51 @@ class AuthTest {
         }
     }
 
+    @Test
+    void mcpOAuthDiscoveryRefusesPlainHttpOutsideLoopback() {
+        var login = new McpOAuthLogin("srv", "http://mcp.example.com/mcp", http, MAPPER);
+        OAuthException e = assertThrows(OAuthException.class, login::discover);
+        assertTrue(e.getMessage().contains("MCP server URL must use https"), e.getMessage());
+    }
+
+    @Test
+    void mcpOAuthDiscoveryRefusesAnAuthorizationServerOverPlainHttp() throws Exception {
+        try (FakeOAuthServer s = new FakeOAuthServer()) {
+            s.resourceAuthorizationServer = "http://idp.example.com";
+            OAuthException e = assertThrows(OAuthException.class,
+                    () -> new McpOAuthLogin("srv", s.base() + "/mcp", http, MAPPER).discover());
+            assertTrue(e.getMessage().contains("authorization server must use https"), e.getMessage());
+        }
+    }
+
+    @Test
+    void mcpOAuthDiscoveryRefusesMetadataOfAnotherIssuer() throws Exception {
+        try (FakeOAuthServer s = new FakeOAuthServer()) {
+            s.metadataIssuer = "https://evil.example.com";
+            OAuthException e = assertThrows(OAuthException.class,
+                    () -> new McpOAuthLogin("srv", s.base() + "/mcp", http, MAPPER).discover());
+            assertTrue(e.getMessage().contains("another issuer"), e.getMessage());
+        }
+    }
+
+    @Test
+    void mcpOAuthDiscoveryRefusesEndpointsOverPlainHttp() throws Exception {
+        try (FakeOAuthServer s = new FakeOAuthServer()) {
+            s.metadataTokenEndpoint = "http://evil.example.com/token";
+            OAuthException e = assertThrows(OAuthException.class,
+                    () -> new McpOAuthLogin("srv", s.base() + "/mcp", http, MAPPER).discover());
+            assertTrue(e.getMessage().contains("token_endpoint must use https"), e.getMessage());
+        }
+    }
+
+    @Test
+    void mcpOAuthDiscoveryIgnoresATrailingSlashOfTheIssuer() throws Exception {
+        try (FakeOAuthServer s = new FakeOAuthServer()) {
+            s.metadataIssuer = s.base() + "/";
+            assertEquals(s.base() + "/token", new McpOAuthLogin("srv", s.base() + "/mcp", http, MAPPER).discover().tokenEndpoint());
+        }
+    }
+
     private void get(String url) throws Exception {
         http.send(HttpRequest.newBuilder(URI.create(url)).GET().build(), HttpResponse.BodyHandlers.ofString());
     }

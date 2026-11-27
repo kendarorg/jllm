@@ -38,7 +38,7 @@ class RealPasswordInitializerTest {
 
     private static JllmProperties props(Boolean useRealPassword) {
         return new JllmProperties(null, null, null, null, null, null, null, null, null, null, null, null, null, null,
-                null, null, null, null, null, null, null, null, null, null, new JllmProperties.Web(null, useRealPassword, null, null));
+                null, null, null, null, null, null, null, new JllmProperties.Web(null, useRealPassword, null, null, null, null, null));
     }
 
     private String logged() {
@@ -69,7 +69,7 @@ class RealPasswordInitializerTest {
         java.util.regex.Matcher m = java.util.regex.Pattern.compile("administrator 'admin': ([A-Za-z0-9]+)").matcher(log);
         assertTrue(m.find(), log);
         String adminPassword = m.group(1);
-        assertEquals(RealPasswordInitializer.LENGTH, adminPassword.length());
+        assertEquals(org.kendar.llm.web.commons.auth.PasswordHasher.GENERATED_LENGTH, adminPassword.length());
         assertTrue(PasswordHasher.verify("admin", adminPassword, admin.password()));
         assertFalse(PasswordHasher.verify("admin", "admin", admin.password()));
 

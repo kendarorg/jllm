@@ -123,6 +123,34 @@ class DefaultPasswordEnforcementTest {
     }
 
     @Test
+    void oneTimePasswordBlocksEveryActionIncludingWritesStreamsAndAdminCalls() throws Exception {
+        WebauthFixture f = new WebauthFixture(dir);
+        MockMvc strict = f.mvc(true, true);
+        String temp = WebauthFixture.json(f.send(f.signIn("admin"), "POST", "/api/admin/users",
+                Map.of("id", "tess", "role", "admin")).andExpect(status().isCreated())).path("temporaryPassword").asText();
+        Cookie c = f.signIn("tess", temp);
+        String json = "application/json";
+        for (var req : new org.springframework.test.web.servlet.RequestBuilder[]{
+                get("/api/chat").cookie(c),
+                post("/api/chat").cookie(c).contentType(json).content("{}"),
+                get("/api/chat/any/events").cookie(c),
+                post("/api/chat/any/messages").cookie(c).contentType(json).content("{}"),
+                post("/api/chat/any/approvals/a1").cookie(c).contentType(json).content("{}"),
+                org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete("/api/chat/any").cookie(c),
+                get("/api/admin/users").cookie(c),
+                post("/api/admin/users").cookie(c).contentType(json).content("{\"id\":\"z\",\"role\":\"reader\"}"),
+                org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/me/tools").cookie(c)
+                        .contentType(json).content("{}")}) {
+            assertRequired(strict.perform(req));
+        }
+        // the three allowed: session info, password change, sign-out
+        strict.perform(get("/api/me").cookie(c)).andExpect(status().isOk());
+        strict.perform(post("/api/me/password").cookie(c).contentType(json)
+                .content("{\"current\":\"wrong\",\"next\":\"a-long-new-password\"}")).andExpect(status().isUnauthorized());
+        strict.perform(post("/api/logout").cookie(c)).andExpect(status().isNoContent());
+    }
+
+    @Test
     void usersWithAPasswordAreNeverHeldBack() throws Exception {
         WebauthFixture f = new WebauthFixture(dir);
         Cookie c = f.signIn("rita");

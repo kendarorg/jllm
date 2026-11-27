@@ -135,17 +135,15 @@ class PluginAvailabilityTest {
     }
 
     @Test
-    void autoWithoutAnIsolateFallsBackToConstrained() {
+    void theDefaultEngineIsTheIsolateAndNeverFallsBackSilently() {
+        assertEquals(JsSettings.EngineChoice.ISOLATED, JsSettings.defaults().engine());
         GraalProbe.Result real = GraalProbe.probe();
         GraalProbe.Result noIsolate = new GraalProbe.Result(true, true, true, real.sandboxLimits(), false, "none",
                 real.implementation(), real.version(), real.edition());
-        JsProfiles.Selection sel = JsProfiles.select(JsTest.settingsFor("auto"), noIsolate);
+        JsProfiles.Selection sel = JsProfiles.select(JsSettings.defaults(), noIsolate);
 
-        try {
-            assertEquals("constrained", sel.profile().name());
-        } finally {
-            sel.profile().close();
-        }
+        assertNull(sel.profile(), "no isolate, no run_js: fail closed");
+        assertTrue(sel.reason().contains("run_js is disabled"), sel.reason());
     }
 
     @Test
@@ -160,15 +158,74 @@ class PluginAvailabilityTest {
     }
 
     @Test
-    void autoPicksTheIsolateWhenTheProbeVerifiedOne() {
+    void theDefaultPicksTheIsolateWhenTheProbeVerifiedOne() {
         org.junit.jupiter.api.Assumptions.assumeTrue(JsTest.isolateAvailable(), "no isolate on this platform");
-        JsProfiles.Selection sel = JsProfiles.select(JsTest.settingsFor("auto"), GraalProbe.probe());
+        JsProfiles.Selection sel = JsProfiles.select(JsSettings.defaults(), GraalProbe.probe());
 
         try {
             assertEquals("isolated", sel.profile().name());
         } finally {
             sel.profile().close();
         }
+    }
+
+    @Test
+    void constrainedWarnsThatItIsNoBoundary() {
+        Logger js = (Logger) LoggerFactory.getLogger("org.kendar.llm.js");
+        ListAppender<ILoggingEvent> seen = new ListAppender<>();
+        Level was = js.getLevel();
+        js.setLevel(Level.WARN);
+        seen.start();
+        js.addAppender(seen);
+        JsProfiles.Selection sel = JsProfiles.select(JsTest.settingsFor("constrained"), GraalProbe.probe());
+        try {
+            js.detachAppender(seen);
+            js.setLevel(was);
+            assertTrue(seen.list.stream().anyMatch(e -> e.getLevel() == Level.WARN
+                    && e.getFormattedMessage().contains("not a security boundary")), seen.list.toString());
+        } finally {
+            sel.profile().close();
+        }
+    }
+
+    private static GraalProbe.Result probeOf(GraalEdition edition, boolean isolate, String note) {
+        return new GraalProbe.Result(true, true, true, true, isolate, note, "impl", "25.5", edition);
+    }
+
+    @Test
+    void theMissingIsolateMessageNamesTheArtifactOfTheEdition() {
+        String community = JsProfiles.noIsolate(probeOf(GraalEdition.COMMUNITY, false,
+                "No native isolate library is available for the requested language(s) [js]."));
+        String oracle = JsProfiles.noIsolate(probeOf(GraalEdition.ORACLE, false, ""));
+        String unknown = JsProfiles.noIsolate(probeOf(GraalEdition.UNKNOWN, false, ""));
+
+        assertTrue(community.contains("js-isolate-community") && !community.contains("(type pom; Oracle"), community);
+        assertTrue(community.contains("No native isolate library"), community);
+        assertTrue(oracle.contains("org.graalvm.polyglot:js-isolate (type pom; Oracle") && !oracle.contains("-community"),
+                oracle);
+        assertTrue(unknown.contains("js-isolate-community") && unknown.contains("org.graalvm.polyglot:js-isolate "), unknown);
+        for (String m : List.of(community, oracle, unknown)) assertTrue(m.contains("constrained"), m);
+    }
+
+    @Test
+    void bothEditionsSelectTheIsolateWhenOneWasVerified() {
+        org.junit.jupiter.api.Assumptions.assumeTrue(JsTest.isolateAvailable(), "no isolate on this platform");
+        for (GraalEdition e : List.of(GraalEdition.COMMUNITY, GraalEdition.ORACLE)) {
+            JsProfiles.Selection sel = JsProfiles.select(JsSettings.defaults(), probeOf(e, true, ""));
+            try {
+                assertEquals("isolated", sel.profile().name(), e.name());
+            } finally {
+                sel.profile().close();
+            }
+        }
+    }
+
+    @Test
+    void theEditionIsReadFromTheImplementationNameOfTheEngine() {
+        assertEquals(GraalEdition.COMMUNITY, GraalEdition.detect(null, "GraalVM CE Isolated", null));
+        assertEquals(GraalEdition.COMMUNITY, GraalEdition.detect(null, "GraalVM CE JVM", null));
+        assertEquals(GraalEdition.ORACLE, GraalEdition.detect(null, "Oracle GraalVM Isolated", null));
+        assertEquals(GraalEdition.UNKNOWN, GraalEdition.detect(null, "something", null));
     }
 
     @Test

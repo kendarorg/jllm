@@ -153,7 +153,9 @@ A task is a prompt with slots and an enforced answer shape. Tasks live in the `t
 - If the agent lists tools, the task runs in the real agent loop once, with that agent's tools and permissions. A tool
   call that needs approval stops the task and the engine asks the run's owner (single select: allow or refuse, one
   question per tool, counted in the step's question limit). On allow the task runs again with that tool allowed for the
-  run; on refuse the step fails with a PERMISSION error. In an `unattended` flow nothing is asked and the step fails.
+  run; on refuse the step fails with a PERMISSION error. In an `unattended` flow nothing is asked: the call is denied, the
+  agent gets `denied: unattended run, no one can approve <tool>` as the tool result and the step goes on (journal
+  entry `denied` per call).
 - Tasks of one run share one chat, owned by the starting user and titled `flow: NAME RUNID`.
 
 ### Tools and questions of a task
@@ -372,7 +374,7 @@ overrides) and returns `{command, exitCode, timedOut, durationMs, tail}` as the 
 
 The command runs as the user of the jllm process, with no sandbox: only use it in flows whose authors you trust.
 
-The sample flow `runConfig/flows/develop-app.json` uses both: the review task answers `{approved, issues}` and a gate
+The sample flow `runConfigs/unsafe/flows/develop-app.json` uses both: the review task answers `{approved, issues}` and a gate
 reads `approved`; after the test task, `runtests` runs `input.testCommand` in `input.projectDir`, a gate reads
 `exitCode`, and `fixtests` gets the real output tail. The flow reaches `done` only after a real exit code 0.
 
@@ -625,8 +627,15 @@ and the parent's handler runs.
 ## 10. Unattended flows
 
 `"unattended": true` marks a flow nobody can answer. It is refused at save time if it uses an `ask` step, a `user`
-chooser or an action or chooser declared as asking. A tool approval in an unattended flow is not asked: the step fails
-with a PERMISSION error.
+chooser or an action or chooser declared as asking. A tool approval in an unattended flow is not asked and does not fail
+the flow: the tool call is denied, the agent receives `denied: unattended run, no one can approve <tool>` as the tool
+result so it can adapt, and each denial is recorded in the flow journal (kind `denied`, with the tool). The step fails
+only if the agent cannot finish without the tool. Tool output that looks like instructions to the assistant is rejected
+the same way. Permissions the role or settings `allow` still run. The clarification rule ("ask" becomes "proceed") is
+unchanged: it concerns the task, not a permission.
+
+Only administrators and users whose role has the `unattended` setting can save or run an unattended personal flow
+(checked at save and again at run); a global flow is saved by an administrator.
 
 ## 11. Limits
 

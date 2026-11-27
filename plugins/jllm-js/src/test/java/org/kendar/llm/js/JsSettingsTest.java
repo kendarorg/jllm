@@ -26,7 +26,7 @@ class JsSettingsTest {
         assertEquals(300, d.maxWallSeconds());
         assertEquals(200, d.maxInnerCalls());
         assertEquals(4, d.maxConcurrentRuns());
-        assertEquals(JsSettings.EngineChoice.AUTO, d.engine());
+        assertEquals(JsSettings.EngineChoice.ISOLATED, d.engine());
         assertEquals(JsSettings.Policy.ISOLATED, d.policy());
         assertEquals(256L * 1024 * 1024, d.maxHeapMemory());
         assertEquals(1024L * 1024 * 1024, d.maxIsolateMemory());
@@ -80,7 +80,8 @@ class JsSettingsTest {
     void theErrorListsTheAllowedEngineValues() {
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> parse("{\"engine\":\"x\"}"));
 
-        assertTrue(e.getMessage().contains("auto") && e.getMessage().contains("constrained")
-                && e.getMessage().contains("isolated"), e.getMessage());
+        assertTrue(e.getMessage().contains("constrained") && e.getMessage().contains("isolated")
+                && !e.getMessage().contains("auto"), e.getMessage());
+        assertThrows(IllegalArgumentException.class, () -> parse("{\"engine\":\"auto\"}"));
     }
 }

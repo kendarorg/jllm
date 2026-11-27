@@ -168,7 +168,7 @@ restore yourself.
 
 | Key | Default | Effect |
 |---|---|---|
-| `web.blockLocalHost` | `false` (the web release template sets `true`) | `web_fetch` and `web_download` refuse loopback, link-local (169.254.169.254), private, any-local, shared `100.64.0.0/10`, benchmark, reserved, multicast, broadcast, IPv6 `fc00::/7` and `fec0::/10`, and IPv6 forms carrying one of these IPv4 addresses (mapped, NAT64, 6to4, Teredo); checked on the first URL and every redirect |
+| `web.blockLocalHost` | `true` (`false` to reach local services) | `web_fetch` and `web_download` refuse loopback, link-local (169.254.169.254), private, any-local, shared `100.64.0.0/10`, benchmark, reserved, multicast, broadcast, IPv6 `fc00::/7` and `fec0::/10`, and IPv6 forms carrying one of these IPv4 addresses (mapped, NAT64, 6to4, Teredo); checked on the first URL and every redirect |
 | `web.blockExtraAddresses` | `[]` | more refused entries: IP, CIDR, host, `*.suffix` |
 
 With any block active a name that cannot be resolved is refused, and the checked addresses are pinned for the
@@ -179,13 +179,13 @@ ask separately. To remove web access, add `deny` rules or leave the tools out of
 ### Sandbox
 
 The sandbox is set **per role**, in Administration, Roles, Sandbox. The default is `none`: no file tools and no `bash`,
-and every attempt fails with an error the model sees. `local` runs `bash` on the server as the JVM user with no limits:
+and every attempt fails with an error the model sees. plain `local` is rejected for roles; `shared-local` runs `bash` on the server with a minimal environment, confined with `bwrap` on Linux only (no confinement on Windows and macOS):
 for trusted users only. For shared use give roles `docker-isolated` (hardened container) or `docker-open` (standard
 container). `jllm.sandbox` is ignored on the web.
 
 | Setting | Note |
 |---|---|
-| role kind | `none` (default), `local`, `docker-isolated` (hardened profile: no network, limits; for temporary or untrusted users) or `docker-open` (standard profile: docker's default network) |
+| role kind | `none` (default), `shared-local`, `docker-isolated` (hardened profile: no network, limits; for temporary or untrusted users) or `docker-open` (standard profile: docker's default network) |
 | role network | `docker-isolated` only: `none` (default) or `default`; `docker-open` ignores it |
 | role scope | `chat` (default) or `user`; `user` shares one container across a user's chats, so untrusted chats use `chat` |
 | `jllm.docker-image`, `sandbox.docker.*` | defaults of the containers: image, memory, cpus, clean-up |
@@ -271,7 +271,7 @@ jllm.max-turns=40
 - [ ] `JLLM_TOKEN_KEY` set (same on all instances) and stored apart from backups; `allow-unencrypted-tokens` not set.
 - [ ] No default passwords: `use-real-password=true` or OIDC only; admin password taken from the log and the log protected.
 - [ ] `enforce-password-change-on-loopback=true` when anything forwards traffic without a forwarding header.
-- [ ] No role has `approval: "off"`; roles that need files or `bash` have a docker sandbox, no role is `local` on a shared host, the rest stay `none`; `auto-provision` default role is least privilege.
+- [ ] No role has `approval: "off"`; roles that need files or `bash` have a docker sandbox, no role is `shared-local` on a shared Windows or macOS host, the rest stay `none`; `auto-provision` default role is least privilege.
 - [ ] `web.blockLocalHost=true` and `blockExtraAddresses` for internal hosts.
 - [ ] Docker sandboxes (daemon) for the roles that need them; remote daemon over https or SSH tunnel with `allowInsecure=false`; JVM runs unprivileged.
 - [ ] `permissions.deny` rules; visibility lists on every MCP/REST source.

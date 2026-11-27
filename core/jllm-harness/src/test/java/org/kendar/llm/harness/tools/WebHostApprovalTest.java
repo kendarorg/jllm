@@ -222,7 +222,10 @@ class WebHostApprovalTest {
         ScriptedModel model = new ScriptedModel().enqueue(
                 toolUse("t1", "web_fetch", "{\"url\":\"" + ip + "/plain\"}"),
                 toolUse("t2", "web_fetch", "{\"url\":\"" + ip + "/plain\"}"), text("ok"));
-        AgentHarness h = new AgentHarnessBuilder().modelClient(model).config(config).build();
+        AgentHarness h = new AgentHarnessBuilder().modelClient(model).config(config)
+                .settings(org.kendar.llm.harness.settings.HarnessSettings.builder()
+                        .web(new org.kendar.llm.harness.settings.WebLimits(null, false, null)).build()) // the server is on loopback
+                .build();
         String chat = h.sessions().create(null).chatId();
 
         List<AgentEvent> events = run(h, chat, true);
@@ -239,7 +242,10 @@ class WebHostApprovalTest {
         ScriptedModel model = new ScriptedModel().enqueue(
                 toolUse("t1", "web_fetch", "{\"url\":\"" + ip + "/plain\"}"),
                 toolUse("t2", "web_fetch", "{\"url\":\"" + ip + "/plain\"}"), text("ok"));
-        AgentHarness h = new AgentHarnessBuilder().modelClient(model).config(config).build();
+        AgentHarness h = new AgentHarnessBuilder().modelClient(model).config(config)
+                .settings(org.kendar.llm.harness.settings.HarnessSettings.builder()
+                        .web(new org.kendar.llm.harness.settings.WebLimits(null, false, null)).build()) // the server is on loopback
+                .build();
 
         List<AgentEvent> events = run(h, h.sessions().create(null).chatId(), false);
 

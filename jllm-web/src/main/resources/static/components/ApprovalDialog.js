@@ -1,6 +1,11 @@
 import {computed, nextTick, onMounted, onUnmounted, ref, watch} from '../vendor/vue.esm-browser.prod.js';
 import {resolveApproval, store, toast} from '../store.js';
 
+// Characters that reorder or hide text (zero-width and direction marks, bidi embeddings, overrides and isolates):
+// a command or path written with them reads differently from what runs. Never shown in an approval.
+const SPOOFING = /[\u200B-\u200F\u202A-\u202E\u2066-\u2069]/g;
+export const stripSpoofing = t => String(t ?? '').replace(SPOOFING, '');
+
 export default {
   setup() {
     const a = computed(() => store.approvals[0] || null);
@@ -12,7 +17,8 @@ export default {
       if (v) nextTick(() => approveBtn.value && approveBtn.value.focus());
     }, { immediate: true });
 
-    const diffLines = computed(() => String(a.value?.preview || '').split('\n').map(l => ({
+    const title = computed(() => stripSpoofing(a.value?.title) || 'Approval required');
+    const diffLines = computed(() => stripSpoofing(a.value?.preview).split('\n').map(l => ({
       text: l || ' ',
       cls: l.startsWith('+ ') ? 'add' : l.startsWith('- ') ? 'del' : l.startsWith('--- ') ? 'hdr' : '',
     })));
@@ -45,20 +51,21 @@ export default {
     const onEsc = e => { if (e.key === 'Escape' && a.value) reject(); };
     onMounted(() => document.addEventListener('keydown', onEsc));
     onUnmounted(() => document.removeEventListener('keydown', onEsc));
-    return { a, edited, approveBtn, diffLines, approve, approveDir, otherDir, reject, error };
+    const useCleaned = () => answer(a.value, true, 'cleaned', false, false);
+    return { stripSpoofing, a, title, useCleaned, edited, approveBtn, diffLines, approve, approveDir, otherDir, reject, error };
   },
   template: `
   <div class="overlay" :class="{ show: a }" role="dialog" aria-modal="true" aria-labelledby="dlg-title">
     <div v-if="a" class="dialog">
-      <h2 id="dlg-title">{{ a.title || 'Approval required' }}</h2>
+      <h2 id="dlg-title">{{ title }}</h2>
       <div class="dialog-body">
         <div v-if="a.type === 'context'" class="two-col">
-          <div><h3>Current (old)</h3><pre>{{ a.preview }}</pre></div>
+          <div><h3>Current (old)</h3><pre>{{ stripSpoofing(a.preview) }}</pre></div>
           <div><h3>Proposed (new) — editable</h3>
             <textarea v-model="edited" aria-label="Proposed replacement context"></textarea></div>
         </div>
         <div v-else-if="a.type === 'continue'">
-          <p>{{ a.preview }}</p>
+          <p>{{ stripSpoofing(a.preview) }}</p>
           <label>Turns to allow <input type="number" min="1" v-model="edited" aria-label="Turns to allow"></label>
         </div>
         <div v-else class="diff"><div v-for="(l, i) in diffLines" :key="i" :class="l.cls">{{ l.text }}</div></div>
@@ -70,8 +77,9 @@ export default {
         <button class="btn-sm" v-if="a.writeDir && otherDir.trim()" @click="approveDir(true)">Allow writes in {{ otherDir.trim() }}/</button>
         <button class="btn-sm" v-if="a.writeDir" @click="approveDir(false)">Allow writes in {{ a.writeDir }}/ and subfolders</button>
         <button class="btn-sm" v-if="a.type === 'tool'" @click="approve(true)">Allow for this chat</button>
+        <button class="btn-sm" v-if="a.type === 'tainted'" @click="useCleaned">Use cleaned (instruction-like lines removed)</button>
         <button class="btn-sm" v-if="a.type === 'host'" @click="approve(true)">Allow {{ a.host }} and subdomains for this chat</button>
-        <button class="btn-primary" ref="approveBtn" @click="approve(false)">{{ a.type === 'host' ? 'Allow once' : a.type === 'insecure_cert' ? 'Continue anyway (this call)' : 'Approve' }}</button>
+        <button class="btn-primary" ref="approveBtn" @click="approve(false)">{{ a.type === 'host' ? 'Allow once' : a.type === 'insecure_cert' ? 'Continue anyway (this call)' : a.type === 'tainted' ? 'Use as it is' : 'Approve' }}</button>
       </div>
     </div>
   </div>

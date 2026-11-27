@@ -60,7 +60,8 @@ public final class AgentOneShotModel implements OneShotModel {
             }
             String prompt = system == null || system.isBlank() ? user : system + "\n\n" + user;
             Set<String> approved = call.approved() == null ? Set.of() : call.approved();
-            return l.runAgentTask(chat(call.principal(), call.title()), prompt, def, false, approved);
+            return l.runAgentTask(chat(call.principal(), call.title()), prompt, def, call.unattended(), approved,
+                    call.onDenied());
         }
         ModelClient client = def != null && def.model() != null ? def.model() : model;
         String prompt = def == null || def.prompt() == null || def.prompt().isBlank() ? ""

@@ -21,7 +21,7 @@ class SettingsLayersSecurityTest {
 
     private Path home;
     private Path project;
-    private ProjectMcpTrust trust;
+    private FolderTrust trust;
     private final List<String> warnings = new ArrayList<>();
 
     @BeforeEach
@@ -29,7 +29,7 @@ class SettingsLayersSecurityTest {
         home = tmp.resolve("home");
         project = tmp.resolve("proj");
         System.setProperty("jllm.home", home.toString());
-        trust = new FileProjectMcpTrust(home.resolve(".jllm/trusted-mcp.json"));
+        trust = new FileFolderTrust(home.resolve(".jllm/trusted-mcp.json"));
     }
 
     @AfterEach
@@ -42,7 +42,7 @@ class SettingsLayersSecurityTest {
         Files.writeString(f, s);
     }
 
-    private HarnessSettings load(ProjectMcpTrust.Prompt prompt) {
+    private HarnessSettings load(FolderTrust.Prompt prompt) {
         return HarnessSettingsLoader.loadLayered(new FileSettingsSource(null, project), project, k -> null, prompt, trust, warnings::add,
                 new org.kendar.llm.harness.safety.ContentWarnings());
     }
@@ -51,7 +51,7 @@ class SettingsLayersSecurityTest {
     void denyListsAreUnited() throws Exception {
         write(home.resolve(".jllm/settings.json"), "{\"permissions\":{\"deny\":[\"bash(rm)\"],\"allow\":[\"a\"]}}");
         write(project.resolve(".jllm/settings.json"), "{\"permissions\":{\"deny\":[\"web_fetch\"],\"allow\":[]}}");
-        HarnessSettings s = load(ProjectMcpTrust.Prompt.NONE);
+        HarnessSettings s = load(FolderTrust.Prompt.NONE);
         assertEquals(List.of("bash(rm)", "web_fetch"), s.permissions().deny());
         assertEquals(List.of(), s.permissions().allow(), "other arrays are still replaced");
     }
@@ -62,7 +62,7 @@ class SettingsLayersSecurityTest {
         for (String bad : new String[]{"null", "[1,2]", "\"text\"", ""}) {
             write(project.resolve(".jllm/settings.json"), bad);
             warnings.clear();
-            HarnessSettings s = load(ProjectMcpTrust.Prompt.NONE);
+            HarnessSettings s = load(FolderTrust.Prompt.NONE);
             assertTrue(s.isSmallModel(), bad);
             assertEquals(List.of("x"), s.permissions().deny(), bad);
             assertTrue(warnings.stream().anyMatch(w -> w.contains("ignored")), bad + " " + warnings);
@@ -72,7 +72,7 @@ class SettingsLayersSecurityTest {
     @Test
     void unknownPropertiesAreReported() throws Exception {
         write(project.resolve(".jllm/settings.json"), "{\"smallModle\":true,\"context\":{\"maxToken\":5}}");
-        load(ProjectMcpTrust.Prompt.NONE);
+        load(FolderTrust.Prompt.NONE);
         assertTrue(warnings.contains("Unknown setting 'smallModle' at /smallModle (ignored)"), warnings.toString());
         assertTrue(warnings.contains("Unknown setting 'maxToken' at /context/maxToken (ignored)"), warnings.toString());
         warnings.clear();
@@ -89,7 +89,7 @@ class SettingsLayersSecurityTest {
     @Test
     void projectStdioServerIsSkippedWithoutAPrompt() throws Exception {
         write(project.resolve(".jllm/settings.json"), STDIO);
-        HarnessSettings s = load(ProjectMcpTrust.Prompt.NONE);
+        HarnessSettings s = load(FolderTrust.Prompt.NONE);
         assertEquals(List.of("web"), s.mcpServers().stream().map(McpServerSettings::name).toList());
         assertTrue(warnings.stream().anyMatch(w -> w.contains("'evil'")), warnings.toString());
     }
@@ -107,11 +107,11 @@ class SettingsLayersSecurityTest {
         assertEquals(2, s.mcpServers().size());
         assertEquals(List.of("evil: sh -c x"), lines);
         // remembered: no prompt needed any more (also where no one can be asked)
-        assertEquals(2, load(ProjectMcpTrust.Prompt.NONE).mcpServers().size());
+        assertEquals(2, load(FolderTrust.Prompt.NONE).mcpServers().size());
         assertEquals(1, asked.get());
         // a changed definition asks again
         write(project.resolve(".jllm/settings.json"), STDIO.replace("\"x\"", "\"y\""));
-        assertEquals(1, load(ProjectMcpTrust.Prompt.NONE).mcpServers().size());
+        assertEquals(1, load(FolderTrust.Prompt.NONE).mcpServers().size());
         assertEquals(1, load((d, n, l) -> false).mcpServers().size());
         assertEquals(1, load((d, n, l) -> { throw new AssertionError("refusal is remembered"); }).mcpServers().size());
     }
@@ -124,7 +124,7 @@ class SettingsLayersSecurityTest {
         Path explicit = tmp.resolve("explicit.json");
         write(explicit, STDIO);
         write(project.resolve(".jllm/settings.json"), "{}");
-        assertEquals(2, HarnessSettingsLoader.loadLayered(new FileSettingsSource(explicit, project), project, k -> null, ProjectMcpTrust.Prompt.NONE, trust,
+        assertEquals(2, HarnessSettingsLoader.loadLayered(new FileSettingsSource(explicit, project), project, k -> null, FolderTrust.Prompt.NONE, trust,
                 warnings::add,
                 new org.kendar.llm.harness.safety.ContentWarnings()).mcpServers().size());
     }

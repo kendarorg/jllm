@@ -69,6 +69,7 @@ public class OidcApi {
     private final RoleMappingSettings mapping;
     private final Permissions permissions;
     private final Consumer<HookContext> hooks;
+    private final Duration sessionMaxAge;
     private final Clock clock;
     private final Map<String, Pending> pending = new ConcurrentHashMap<>();
 
@@ -76,16 +77,12 @@ public class OidcApi {
      * @param mapping     the role mapping options
      * @param permissions the roles, whose {@code idp} settings the mapping reads
      * @param hooks       where role changes are raised ({@link HookContext#roleChanged})
+     * @param sessionMaxAge absolute lifetime of a session; the role mapping's {@code maxAge}, when shorter, wins
      */
     public OidcApi(OidcProperties props, OidcClient client, UserRepository users,
                    LoginSessionRepository sessions, LoginThrottle throttle, RoleMappingSettings mapping,
-                   Permissions permissions, Consumer<HookContext> hooks) {
-        this(props, client, users, sessions, throttle, mapping, permissions, hooks, Clock.systemUTC());
-    }
-
-    public OidcApi(OidcProperties props, OidcClient client, UserRepository users,
-                   LoginSessionRepository sessions, LoginThrottle throttle, RoleMappingSettings mapping,
-                   Permissions permissions, Consumer<HookContext> hooks, Clock clock) {
+                   Permissions permissions, Consumer<HookContext> hooks, Duration sessionMaxAge, Clock clock) {
+        this.sessionMaxAge = sessionMaxAge;
         this.props = props;
         this.client = client;
         this.users = users;
@@ -142,7 +139,7 @@ public class OidcApi {
                                 boolean secure) {
         if (!props.oidcEnabled()) return Reply.empty(404);
         String key = key(remoteAddress);
-        if (throttle.lockedFor(key) > 0) return failure("denied", secure);
+        if (throttle.begin(key) > 0) return failure("denied", secure);
         purge();
         Pending p = state == null ? null : pending.remove(state); // single use, whatever follows
         try {
@@ -158,18 +155,21 @@ public class OidcApi {
             OidcClient.Identity id = client.exchange(code, p.verifier(), p.nonce(),
                     options.enabled() ? options.claim() : null);
             User user;
-            Instant notAfter = null;
+            Instant notAfter = clock.instant().plus(sessionMaxAge);
             if (options.enabled()) {
                 RoleMapper.Decision d = decide(options, id);
                 user = mapRole(resolve(id, d, options), d, options);
-                if (options.maxAge() != null) notAfter = clock.instant().plus(options.maxAge());
+                if (options.maxAge() != null && options.maxAge().compareTo(sessionMaxAge) < 0) {
+                    notAfter = clock.instant().plus(options.maxAge());
+                }
             } else {
                 user = resolve(id, null, options);
             }
             throttle.success(key);
             String token = sessions.create(user.id(), notAfter);
             return Reply.empty(302).header("Location", "/")
-                    .cookie(AuthApi.sessionCookie(token, LoginSessionRepository.TTL.toSeconds(), secure))
+                    .cookie(AuthApi.sessionCookie(token, Math.min(LoginSessionRepository.TTL.toSeconds(),
+                            Duration.between(clock.instant(), notAfter).toSeconds()), secure))
                     .cookie(bindingCookie("", 0, secure));
         } catch (OidcException e) {
             throttle.failure(key);
@@ -276,7 +276,13 @@ public class OidcApi {
         List<User> byEmail = users.findByEmail(email);
         if (!byEmail.isEmpty()) {
             if (byEmail.size() == 1 && !byEmail.get(0).external()) {
-                return users.setExternalId(byEmail.get(0).id(), externalKey);
+                User target = byEmail.get(0);
+                if (privileged(target)) {
+                    // an identity provider account with the right email must not take over an administrator
+                    throw new OidcException("unknown_user", "Privileged account " + target.id()
+                            + " is not linked by email: an administrator links it");
+                }
+                return users.setExternalId(target.id(), externalKey);
             }
             throw new OidcException("unknown_user", "Email matches no single unlinked user");
         }
@@ -289,6 +295,11 @@ public class OidcApi {
         User created = provision(id, email, externalKey, role);
         roleChanged(created.id(), null, role, d.group(), d.matched() ? "provisioned" : "provisioned_default");
         return created;
+    }
+
+    /** The accounts that are never linked to an identity provider account by their email: admins, unattended roles. */
+    private boolean privileged(User user) {
+        return user.admin() || permissions.role(user.role()).map(r -> r.unattended()).orElse(false);
     }
 
     private User provision(OidcClient.Identity id, String email, String externalKey, String role)

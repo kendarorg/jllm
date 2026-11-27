@@ -63,6 +63,15 @@ final class ApprovalPrompter {
                 boolean stop = v.toLowerCase().startsWith("n");
                 resolver.resolve(chatId, id, !stop, v.isEmpty() ? null : v, false, false);
             }
+            case "tainted" -> {
+                ask.accept("Use the flagged output? [y=as it is (still marked as data)/c=cleaned, instruction-like lines "
+                        + "removed/N=reject] ");
+                String t = answer();
+                if (t == null) return;
+                String v = t.equals(LineCommands.EOF) ? "" : t.strip().toLowerCase();
+                boolean cleaned = v.startsWith("c");
+                resolver.resolve(chatId, id, cleaned || v.startsWith("y"), cleaned ? "cleaned" : null, false, false);
+            }
             case "stuck" -> yesNo(chatId, id, "Let the agent continue? [y/N] ");
             case "insecure_cert" -> yesNo(chatId, id,
                     "Continue without checking the certificate of " + host + " (this call only)? [y/N] ");

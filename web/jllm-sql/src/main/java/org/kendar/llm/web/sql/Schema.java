@@ -26,7 +26,9 @@ final class Schema {
     static final List<Step> STEPS = List.of(
             new Step(2, "settings columns of roles and users", Schema::settingsColumns),
             new Step(3, "settings_section table (the stored settings)", Schema::settingsSections),
-            new Step(4, "not_after column of login_sessions (hard end of a sign-in)", Schema::sessionNotAfter));
+            new Step(4, "not_after column of login_sessions (hard end of a sign-in)", Schema::sessionNotAfter),
+            new Step(5, "instructions and agents tables, mcp_trust dropped (virtual configuration)",
+                    Schema::virtualConfiguration));
 
     /** The version {@code schema.sql} creates: that of the last step. */
     static final int VERSION = STEPS.get(STEPS.size() - 1).version();
@@ -111,6 +113,22 @@ final class Schema {
     private static void sessionNotAfter(Database db) {
         if (columnExists(db, "login_sessions", "not_after")) return;
         db.run(tx -> tx.update("ALTER TABLE login_sessions ADD COLUMN not_after BIGINT"));
+    }
+
+    /**
+     * Version 5: {@code instructions} and {@code agents} (the virtual configuration, {@link SqlConfigProvider}); the
+     * {@code mcp_trust} table goes: the web host has no project folder to trust. Statements are those of
+     * {@code schema.sql}.
+     */
+    private static void virtualConfiguration(Database db) {
+        for (String table : List.of("instructions", "agents")) {
+            if (columnExists(db, table, "name")) continue;
+            String create = statements(read(db.dialect())).stream()
+                    .filter(s -> s.matches("(?s)CREATE TABLE (IF NOT EXISTS )?" + table + " .*")).findFirst()
+                    .orElseThrow(() -> new IllegalStateException("No " + table + " in the schema of " + db.dialect()));
+            db.run(tx -> tx.update(create));
+        }
+        db.run(tx -> tx.update("DROP TABLE IF EXISTS mcp_trust"));
     }
 
     private static boolean columnExists(Database db, String table, String column) {

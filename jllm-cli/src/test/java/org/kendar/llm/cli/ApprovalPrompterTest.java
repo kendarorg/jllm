@@ -132,4 +132,13 @@ class ApprovalPrompterTest {
         String shown = said.get(0);
         assertTrue(shown.contains("link/secret.txt -> " + elsewhere.resolve("secret.txt").toRealPath()), shown);
     }
+
+    @Test
+    void flaggedOutputIsUsedAsItIsCleanedOrRejected() throws Exception {
+        prompter("y").prompt("c", req("tainted"));
+        prompter("c").prompt("c", req("tainted"));
+        prompter("").prompt("c", req("tainted"));
+        assertEquals(List.of("c|a1|true|null|false|false", "c|a1|true|cleaned|false|false",
+                "c|a1|false|null|false|false"), resolved);
+    }
 }

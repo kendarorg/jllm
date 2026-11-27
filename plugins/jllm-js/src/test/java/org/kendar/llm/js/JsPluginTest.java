@@ -26,7 +26,10 @@ class JsPluginTest {
     Path base;
 
     private AgentHarness harness(ScriptedModel model) {
-        return new AgentHarnessBuilder().modelClient(model).config(config(base)).plugin(new JsPlugin()).build();
+        return new AgentHarnessBuilder().modelClient(model).config(config(base)).plugin(new JsPlugin())
+                .settings(org.kendar.llm.harness.settings.HarnessSettings.builder()
+                        .web(new org.kendar.llm.harness.settings.WebLimits(null, false, null)).build())
+                .build();
     }
 
     /** A model response calling run_js; built directly because the test helper turns single quotes into double ones. */

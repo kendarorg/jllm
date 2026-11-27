@@ -1,6 +1,8 @@
 package org.kendar.llm.harness.sandbox;
 
+import org.kendar.llm.harness.HarnessConfig;
 import org.kendar.llm.harness.sandbox.RemoteExecSandboxExecutor.Kind;
+import org.kendar.llm.harness.util.BoundedBody;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -91,9 +93,18 @@ final class WorkspaceBackups {
      */
     Backup backup(DaemonClient client, String containerName, DockerEndpoint ep, Placement p) {
         try {
-            DaemonClient.Response r = client.call("GET", "/backup", null, null, null, TRANSFER_TIMEOUT);
-            if (r.status() != 200) return new Backup(false, "Backup failed: " + r.status() + " " + r.text());
             long quota = p.docker().cleanup().maxWorkspaceBytes();
+            // the archive is read into memory: never more than the quota (plus archive overhead), nor than the default
+            long cap = quota > 0 ? Math.min(quota, Integer.MAX_VALUE - 1024 * 1024L) + 1024 * 1024
+                    : HarnessConfig.Cleanup.DEFAULT_MAX_WORKSPACE_BYTES;
+            DaemonClient.Response r;
+            try {
+                r = client.call("GET", "/backup", null, null, null, TRANSFER_TIMEOUT, cap);
+            } catch (BoundedBody.TooLargeException e) {
+                return new Backup(false, "Backup refused: the workspace of " + containerName + " is over the limit of "
+                        + cap / 1024 + " KB.");
+            }
+            if (r.status() != 200) return new Backup(false, "Backup failed: " + r.status() + " " + r.text());
             if (quota > 0) {
                 long size = WorkspaceArchive.totalBytes(r.body());
                 if (size > quota) {
@@ -109,7 +120,7 @@ final class WorkspaceBackups {
             Path f = tarball(owner);
             Files.createDirectories(f.getParent());
             Path tmp = Files.createTempFile(f.getParent(), "backup", ".tmp");
-            Files.write(tmp, r.body());
+            Files.write(tmp, WorkspaceArchive.withoutHostProtected(r.body()));
             Files.move(tmp, f, StandardCopyOption.REPLACE_EXISTING);
             String image = commit(ep, containerName, owner);
             long now = System.currentTimeMillis();

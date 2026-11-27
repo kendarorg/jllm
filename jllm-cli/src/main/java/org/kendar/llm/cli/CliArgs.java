@@ -12,9 +12,14 @@ final class CliArgs {
             + "[--settings FILE] [--context-strategy compaction|mnemonic|scope] [--max-tokens TOKENS] [--small-model] "
             + "[--resume prompt|no|CHAT_ID] "
             + "[--sandbox local|docker|none] [--docker-image IMAGE] [--sandbox-scope chat|user] [--sandbox-profile standard|hardened] "
-            + "[--docker-remote] [--docker-remote-host ADDRESS] [--sandbox-clean] [--sandbox-clean-all] "
+            + "[--docker-remote] [--trust-project] [--dangerously-skip-permissions] [--docker-remote-host ADDRESS] [--sandbox-clean] [--sandbox-clean-all] "
             + "[--external-links none|read|readwrite] "
             + "[--pricing.input-per-million=USD] [--pricing.output-per-million=USD] [--pricing.cache-read-per-million=USD] [--pricing.cache-write-per-million=USD] [--plugin-dir DIR] [--plugins.ID.enabled=true|false] [--plugins.ID.settings.KEY=VALUE]"
+            + "\n--trust-project: trust the working folder without asking (unattended runs; loosening project settings still need approval)."
+            + "\n--dangerously-skip-permissions: every permission question is answered yes, also with --prompt and for writes to "
+            + ".jllm, .git and instruction files; explicit deny rules still deny. Does not trust the folder or change the sandbox."
+            + "\nA --prompt run, piped input or a CI environment is unattended: every permission question is denied instead "
+            + "(allow rules still run)."
             + "\n--sandbox none: no path jail (the tools reach any path), only with --mode auto; for a disposable container."
             + "\n--prompt exit codes: 0 completed; 1 failed or refused; 2 stuck; 3 max_turns, truncated or unverified;"
             + " 4 cancelled or --timeout; 64 usage error. --json-result FILE is written also on failure.";
@@ -53,6 +58,12 @@ final class CliArgs {
      *
      * @throws IllegalArgumentException when they are given without it, or the timeout is not valid
      */
+    /** Whether {@code --dangerously-skip-permissions} is given (and not {@code =false}). */
+    static boolean skipPermissions(Map<String, String> a) {
+        return a.containsKey("dangerously-skip-permissions")
+                && !"false".equalsIgnoreCase(a.get("dangerously-skip-permissions"));
+    }
+
     static void checkHeadless(Map<String, String> a) {
         if (!a.containsKey("prompt") && (a.containsKey("timeout") || a.containsKey("json-result"))) {
             throw new IllegalArgumentException("--timeout and --json-result need --prompt");
@@ -86,7 +97,7 @@ final class CliArgs {
             if (k.equals("-h") || k.equals("--help")) {
                 m.put("help", "");
             } else if (k.equals("--small-model") || k.equals("--sandbox-clean") || k.equals("--sandbox-clean-all")
-                    || k.equals("--docker-remote")) {
+                    || k.equals("--docker-remote") || k.equals("--trust-project") || k.equals("--dangerously-skip-permissions")) {
                 m.put(k.substring(2), "");
             } else if (k.startsWith("--") && i + 1 < argv.length) {
                 m.put(k.substring(2), argv[++i]);

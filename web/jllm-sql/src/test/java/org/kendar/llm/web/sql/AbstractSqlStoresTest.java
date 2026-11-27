@@ -139,7 +139,7 @@ abstract class AbstractSqlStoresTest {
     void roleSandboxIsStoredAndDefaultsToNone() {
         var r = s.roles();
         r.save(new Role("box", List.of("*"), false, "ask", Map.of(),
-                Map.of("sandbox", org.kendar.llm.harness.identity.RoleSandbox.of("docker-isolated", "user", "none").toJson())));
+                Map.of("sandbox", org.kendar.llm.harness.identity.RoleSandbox.of("docker-isolated", "user", "none", false).toJson())));
         var sb = r.find("box").orElseThrow().sandbox();
         assertEquals(org.kendar.llm.harness.sandbox.SandboxKind.DOCKER_ISOLATED, sb.kind());
         assertEquals("hardened", sb.profile());
@@ -154,7 +154,7 @@ abstract class AbstractSqlStoresTest {
     void roleSettingsRoundTripKeepsUnknownKeys() throws Exception {
         var r = s.roles();
         Map<String, JsonNode> settings = new LinkedHashMap<>();
-        settings.put("sandbox", org.kendar.llm.harness.identity.RoleSandbox.of("docker-open", "chat", null).toJson());
+        settings.put("sandbox", org.kendar.llm.harness.identity.RoleSandbox.of("docker-open", "chat", null, false).toJson());
         settings.put("future-feature", MAPPER.readTree("{\"a\":[1,{\"b\":true}],\"c\":\"x\"}"));
         r.save(new Role("feat", List.of("*"), false, "ask", Map.of(), settings));
         Role got = r.find("feat").orElseThrow();
@@ -193,12 +193,12 @@ abstract class AbstractSqlStoresTest {
         assertTrue(s.roles().find("dev").orElseThrow().settings().isEmpty());
         assertEquals("dev", s.users().find("bob").orElseThrow().role());
         s.roles().save(new Role("dev", List.of("*"), false, "ask", Map.of(),
-                Map.of("sandbox", org.kendar.llm.harness.identity.RoleSandbox.of("local", null, null).toJson())));
-        assertEquals(org.kendar.llm.harness.sandbox.SandboxKind.LOCAL, s.roles().find("dev").orElseThrow().sandbox().kind());
+                Map.of("sandbox", org.kendar.llm.harness.identity.RoleSandbox.of("shared-local", null, null, false).toJson())));
+        assertEquals(org.kendar.llm.harness.sandbox.SandboxKind.SHARED_LOCAL, s.roles().find("dev").orElseThrow().sandbox().kind());
         s.close();
         s = SqlStores.open(config(), null); // reopening a migrated database changes nothing
         assertEquals(Schema.VERSION, Schema.version(s.database()));
-        assertEquals(org.kendar.llm.harness.sandbox.SandboxKind.LOCAL, s.roles().find("dev").orElseThrow().sandbox().kind());
+        assertEquals(org.kendar.llm.harness.sandbox.SandboxKind.SHARED_LOCAL, s.roles().find("dev").orElseThrow().sandbox().kind());
     }
 
     @Test
@@ -377,6 +377,24 @@ abstract class AbstractSqlStoresTest {
     }
 
     @Test
+    void aSealedTokenCopiedToAnotherUserOrSourceIsNotReadable() {
+        OAuthToken t = new OAuthToken("acc", "ref", 123, Map.of());
+        var sealed = new SqlTokenStore(s.database(), new TokenCipher(new byte[32], null));
+        sealed.put("alice", "mcp:a", t);
+        sealed.put("bob", "mcp:a", new OAuthToken("bobs", "ref", 1, Map.of()));
+        String payload = s.database().tx(tx -> tx.one("SELECT payload FROM oauth_tokens WHERE principal_id = ?",
+                rs -> rs.getString(1), "alice").orElseThrow());
+        // alice's sealed value moved into bob's row, and into another source name of alice
+        s.database().run(tx -> tx.update("UPDATE oauth_tokens SET payload = ? WHERE principal_id = ?", payload, "bob"));
+        s.database().run(tx -> tx.update("INSERT INTO oauth_tokens (principal_id, name, payload, version) VALUES (?, ?, ?, 1)",
+                "alice", "mcp:other", payload));
+
+        assertEquals(t, sealed.get("alice", "mcp:a").orElseThrow(), "in place it still decrypts");
+        assertTrue(sealed.get("bob", "mcp:a").isEmpty(), "another user's row: the user id is bound");
+        assertTrue(sealed.get("alice", "mcp:other").isEmpty(), "another source: the source is bound");
+    }
+
+    @Test
     void tokenCompareAndPut() {
         var store = s.tokens();
         OAuthToken a = new OAuthToken("a", "r1", 1, Map.of());
@@ -514,20 +532,6 @@ abstract class AbstractSqlStoresTest {
     }
 
     @Test
-    void mcpTrustBoundToDefinition() throws Exception {
-        var t = s.mcpTrust();
-        JsonNode def = MAPPER.readTree("{\"command\":\"x\"}");
-        Path proj = tmp.resolve("proj");
-        assertNull(t.lookup(proj, "srv", def));
-        t.remember(proj, "srv", def, true);
-        assertEquals(Boolean.TRUE, t.lookup(proj, "srv", def));
-        assertNull(t.lookup(proj, "srv", MAPPER.readTree("{\"command\":\"y\"}")));
-        assertNull(t.lookup(tmp.resolve("other"), "srv", def));
-        t.remember(proj, "srv", def, false);
-        assertEquals(Boolean.FALSE, t.lookup(proj, "srv", def));
-    }
-
-    @Test
     void chatListFiltersByOwnerInTheQuery() throws InterruptedException {
         var chats = s.chats();
         chats.save(ChatSessionData.create("a1", "agent", "A1", "alice"));
@@ -603,6 +607,83 @@ abstract class AbstractSqlStoresTest {
             throw new IllegalStateException("boom");
         }));
         assertFalse(s.users().exists("t"));
+    }
+
+    @Test
+    void instructionsAreKeptPerScopeAndOwner() {
+        var in = s.instructions();
+        in.write(org.kendar.llm.harness.settings.InstructionRepository.Scope.SYSTEM, "", "replace", "You are X.");
+        in.write(org.kendar.llm.harness.settings.InstructionRepository.Scope.SYSTEM, "", "append", "Be kind.");
+        in.write(org.kendar.llm.harness.settings.InstructionRepository.Scope.GLOBAL, "", "AGENTS.md", "Rule.");
+        in.write(org.kendar.llm.harness.settings.InstructionRepository.Scope.ROLE, "dev", "style", "Short.");
+        in.write(org.kendar.llm.harness.settings.InstructionRepository.Scope.USER, "ann", "me", "Ann.");
+        assertEquals("You are X.", in.systemPromptReplace().orElseThrow());
+        assertEquals("Be kind.", in.systemPromptAppend());
+        assertEquals("Instructions from AGENTS.md:\nRule.", in.renderGlobal());
+        assertTrue(in.renderFor("dev", "ann").contains("Short."));
+        assertEquals("", in.renderFor("ops", "bob"));
+        in.write(org.kendar.llm.harness.settings.InstructionRepository.Scope.GLOBAL, "", "AGENTS.md", "Rule two.");
+        assertEquals(1, in.list(org.kendar.llm.harness.settings.InstructionRepository.Scope.GLOBAL, "").size());
+        assertEquals("Rule two.", in.find(org.kendar.llm.harness.settings.InstructionRepository.Scope.GLOBAL, "", "AGENTS.md")
+                .orElseThrow().content());
+        assertThrows(IllegalArgumentException.class, () -> in.write(
+                org.kendar.llm.harness.settings.InstructionRepository.Scope.GLOBAL, "x", "a", "b"));
+        assertTrue(in.delete(org.kendar.llm.harness.settings.InstructionRepository.Scope.GLOBAL, "", "AGENTS.md"));
+        assertFalse(in.delete(org.kendar.llm.harness.settings.InstructionRepository.Scope.GLOBAL, "", "AGENTS.md"));
+        in.deleteOwned(org.kendar.llm.harness.settings.InstructionRepository.Scope.ROLE, "dev");
+        assertTrue(in.list(org.kendar.llm.harness.settings.InstructionRepository.Scope.ROLE, "dev").isEmpty());
+        assertEquals(1, in.list(org.kendar.llm.harness.settings.InstructionRepository.Scope.USER, "ann").size());
+    }
+
+    @Test
+    void agentsAreKeptInlineOnly() {
+        var agents = s.agents();
+        var a = new org.kendar.llm.harness.settings.AgentSettings("reviewer", "Reviews", List.of("read_file"), "Review it.",
+                null, true, null, true, null, 0.5, null);
+        agents.write(a);
+        assertEquals(List.of("reviewer"), agents.all().stream().map(org.kendar.llm.harness.settings.AgentSettings::name).toList());
+        var got = agents.find("reviewer").orElseThrow();
+        assertEquals("Review it.", got.prompt());
+        assertEquals(List.of("read_file"), got.tools());
+        assertEquals(0.5, got.temperature());
+        assertThrows(IllegalArgumentException.class, () -> agents.write(new org.kendar.llm.harness.settings.AgentSettings(
+                "bad", null, null, null, "/etc/passwd", null, null, null, null, null, null)));
+        assertTrue(agents.find("bad").isEmpty());
+        assertTrue(agents.delete("reviewer"));
+        assertTrue(agents.all().isEmpty());
+    }
+
+    @Test
+    void theConfigProviderRefusesSettingsThatNameFiles() throws Exception {
+        var provider = s.config();
+        provider.putSettings(MAPPER.readTree("{\"smallModel\":true}"));
+        assertTrue(provider.settingsDocument().path("smallModel").asBoolean());
+        assertThrows(IllegalArgumentException.class, () -> provider.putSettings(
+                MAPPER.readTree("{\"agents\":[{\"name\":\"a\",\"promptFile\":\"p.md\"}]}")));
+        assertThrows(IllegalArgumentException.class, () -> provider.putSettings(
+                MAPPER.readTree("{\"skills\":[{\"name\":\"a\",\"path\":\"s.md\"}]}")));
+        assertThrows(IllegalArgumentException.class, () -> provider.putSettings(MAPPER.readTree("{\"instructionFiles\":[]}")));
+        assertTrue(provider.settingsDocument().path("smallModel").asBoolean(), "a refused document changes nothing");
+        assertSame(s.skills(), provider.skills());
+        assertNotNull(provider.pluginStorages());
+    }
+
+    @Test
+    void versionFourDatabaseGetsTheVirtualConfigurationAndLosesMcpTrust() {
+        s.database().run(tx -> {
+            tx.update("DROP TABLE instructions");
+            tx.update("DROP TABLE agents");
+            tx.update("CREATE TABLE mcp_trust (project_key VARCHAR(100) NOT NULL)"); // what an older server left
+            tx.update("DELETE FROM schema_version");
+            tx.update("INSERT INTO schema_version (version) VALUES (4)");
+        });
+        s.close();
+        s = SqlStores.open(config(), null);
+        assertEquals(Schema.VERSION, Schema.version(s.database()));
+        s.instructions().write(org.kendar.llm.harness.settings.InstructionRepository.Scope.GLOBAL, "", "a", "b");
+        assertEquals("b", s.instructions().find(org.kendar.llm.harness.settings.InstructionRepository.Scope.GLOBAL, "", "a")
+                .orElseThrow().content());
+        assertThrows(RuntimeException.class, () -> s.database().tx(tx -> tx.query("SELECT 1 FROM mcp_trust", rs -> 1)));
     }
 
     static final class MutableClock extends Clock {

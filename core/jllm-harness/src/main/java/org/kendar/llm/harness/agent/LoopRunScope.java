@@ -30,20 +30,20 @@ final class LoopRunScope implements RunScope {
     private final PermissionMode mode;
     private final EventSink sink;
     private final BooleanSupplier cancelled;
-    private final boolean interactive;
+    private final RunAttendance attendance;
     private final String label;
     private final RunBudget budget;
     volatile Map<String, HarnessTool> byName = Map.of();
     volatile String intent = "";
 
     LoopRunScope(ToolExecutor executor, PermissionMode mode, EventSink sink, BooleanSupplier cancelled,
-                 boolean interactive, String label, RunBudget budget) {
+                 RunAttendance attendance, String label, RunBudget budget) {
         this.executor = executor;
         this.deps = executor.deps;
         this.mode = mode;
         this.sink = sink;
         this.cancelled = cancelled;
-        this.interactive = interactive;
+        this.attendance = attendance;
         this.label = label;
         this.budget = budget;
     }
@@ -113,7 +113,7 @@ final class LoopRunScope implements RunScope {
             }
             boolean free = deps.builtinFileTools().contains(tool);
             ToolExecutor.Authz az = executor.authorize(tool, name, check.input(), inner, mode, sink, cancelled,
-                    interactive, intent, label, free);
+                    attendance, intent, label, free);
             if (az.denial() != null) {
                 throw new ToolCatalog.ToolCallException(az.denial());
             }
@@ -122,7 +122,7 @@ final class LoopRunScope implements RunScope {
                 executor.guards.markChanged(ctx.chatId(), label);
             }
             try {
-                r = executor.runTool(tool, az.input(), inner.withToolUseId(id), id, true);
+                r = executor.runTool(tool, az.input(), inner.withToolUseId(id), id, true, null);
             } catch (SandboxUnavailableException e) {
                 throw new ToolCatalog.ToolCallException(e.getMessage());
             }

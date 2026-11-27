@@ -21,6 +21,7 @@ next to whichever runner is chosen.
 | Runner | Selected by | Isolation |
 |---|---|---|
 | `LocalSandboxExecutor` | `sandbox.backend: local` (default) | none: commands run as the JVM user. For testing and trusted single-user use only |
+| `SharedLocalSandbox` | `sandbox.backend: shared-local` | minimal environment; `bwrap` confinement on Linux, none on Windows and macOS ([details](#sharedlocalsandbox-confined-processes-on-the-host)) |
 | `RemoteExecSandboxExecutor` | `sandbox.backend: docker` | container, `standard` or `hardened` [profile](#profiles) |
 
 `<X>` is the project directory given to the web application. `sandbox.tempDir` defaults to
@@ -38,7 +39,7 @@ the defaults of the containers.
 | Kind | Runner | What the role's users get |
 |---|---|---|
 | `none` (default) | `DisabledSandboxExecutor` | nothing: every file tool and `bash` fails with an error that the model sees |
-| `local` | `LocalSandboxExecutor` | files in the chat directory and `bash` on the server as the server user; **no isolation**, trusted users only |
+| `shared-local` | `SharedLocalSandbox` | files in the chat directory and `bash` on the server with a minimal environment, confined with `bwrap` on Linux (no network unless the role grants it); **not confined on Windows and macOS**, testing only. Plain `local` is not a role kind: it is rejected |
 | `docker-isolated` | `RemoteExecSandboxExecutor`, `hardened` profile | a container with no network unless the role grants it, and resource limits; files and `bash` inside it |
 | `docker-open` | `RemoteExecSandboxExecutor`, `standard` profile | a container with docker's default network; files and `bash` inside it |
 
@@ -126,14 +127,53 @@ jailed. A warning is logged at the first command.
 
 **The local runner is for testing and trusted single-user use only.**
 
+A command on the host (no Docker) therefore sees the whole filesystem and the process environment, not just the work
+directory; command grants are remembered per chat and a prefix grant covers plain arguments, see
+[Permissions on the host shell](#permissions-on-the-host-shell).
+
 - **Plan mode is advisory**, as in Claude Code: the file tools refuse to write outside the scratch directory, but a shell
   command can still write anywhere. There is no OS-level enforcement and no refusal of shell in plan mode. A real
   read-only plan mode needs the container runner.
 - The web does not refuse shell on the local runner. An admin who runs the web on it accepts that `bash` runs on the host
   as the server user; the admin UI says so. Use `RemoteExecSandboxExecutor` for anything real.
 
-The command inherits the whole environment of the harness process (API keys included) unless the settings key
-`whitelistedEnvVars` narrows it, see [USAGE](../reference/usage.md#5-settings-file).
+The command inherits only `PATH`, `HOME`, `LANG` and `TERM` of the harness process (plus what Windows cannot start
+without) unless the settings key `whitelistedEnvVars` names more, see [USAGE](../reference/usage.md#5-settings-file).
+Names matching `JLLM_*`, `*API_KEY*`, `*SECRET*`, `*PASSWORD*` or `*KEY*` (any case) never pass, even when whitelisted.
+The same applies to `toolsWhitelistedEnvVars` (MCP stdio servers). There is no "all" value.
+
+## `SharedLocalSandbox`: confined processes on the host
+
+Selected by `sandbox.backend: shared-local` and by the role kind `shared-local` in the web. For several users on one
+machine without docker. It extends the local runner with:
+
+- **Environment:** empty except `PATH` and `LANG`; `HOME` is the chat directory, `TMPDIR` the chat's scratch directory.
+  `whitelistedEnvVars` does not apply. Never a secret.
+- **Linux confinement (`bwrap`):** every command runs in bubblewrap: the chat and scratch directories read-write; `/usr`,
+  `/bin`, `/lib*` and a few `/etc` files read-only (no `/etc/passwd`); private `/tmp`, `/proc` and `/dev`;
+  `--die-with-parent`, `--new-session`; `--unshare-net` unless the role grants network (`network` is `default`, or
+  `true`). Nothing else of the host is visible: not the web base directory, `webauth/`, the database or other chats.
+- **Limits:** CPU time, memory and processes through `systemd-run --user --scope` and `prlimit` when present (defaults
+  120 s, 2 GiB, 256), the command timeout, and the output cap (last 50 KB kept, spill log capped by
+  `sandbox.outputLogMaxBytes`). Without either tool a warning says that only the timeout and the cap apply.
+- **Fails closed on Linux:** `bwrap` is probed at startup. Missing or not working (for example user namespaces
+  disabled): the CLI backend refuses to start, and so does the web when `shared-local` is the backend or any role uses
+  it (the message names `bwrap`). Install `bubblewrap` to fix it. With `jllm.web.allow-missing-bwrap=true` (default
+  `false`) the web instead logs an error and starts: roles of kind `shared-local` get no sandbox and their tool calls
+  error. A role given `shared-local` later, with the property off, gets the same tool errors until `bwrap` works.
+- **Taint:** shell output counts as outside content when the sandbox has network access (the role grants it, or the
+  system is unconfined), so a later side effect asks. A plain host shell is not tracked.
+- **Windows and macOS:** no confinement exists. A warning is logged at startup and only the environment, HOME, TMPDIR
+  and the limits that exist there (timeout, output cap, `ulimit -t` on macOS) apply. Testing use only.
+
+### Permissions on the host shell
+
+The path guard on shell commands (`..` segments that leave the work dir are refused, message `Command refused: it names
+the path ...`) is a guard rail: only paths written with `..` are blocked, not absolute paths, variables or scripts.
+Approving a command once stores nothing; only "allow for this chat" (`a`) stores a grant for the command, and a prefix
+grant covers the prefix plus plain arguments, never operators or substitutions. Unattended runs (`--prompt`, piped
+input, CI, or a role with `unattended`) deny every command that would ask, see the
+[usage reference](../reference/usage.md#permissions-taint-and-unattended-runs).
 
 ## `RemoteExecSandboxExecutor`: a long-running container
 
@@ -173,8 +213,8 @@ Settings file (unset keys keep the defaults):
 
 | Key | Default | Effect |
 |---|---|---|
-| `sandbox.backend` | `local` | CLI and library: `local` (no isolation) or `docker` (the container runner). The web ignores it: the kind is per role |
-| `sandbox.localFallback` | `true` | allow running locally, without isolation, when docker is unavailable (asked per chat, see [Docker missing](#docker-missing)); `false` returns an error |
+| `sandbox.backend` | `local` | CLI and library: `local` (no isolation), `shared-local` or `docker` (the container runner). The web ignores it: the kind is per role |
+| `sandbox.localFallback` | `false` | allow continuing in a `shared-local` sandbox (never on the plain host) when docker is unavailable (asked per chat, see [Docker missing](#docker-missing)). Web: set per role by an administrator (`sandbox.localFallback` in the role), not by this key |
 | `sandbox.docker.binary` | `docker` | CLI to call |
 | `sandbox.docker.image` | `python:3.12-slim` | image of the container |
 | `sandbox.docker.profile` | `standard` | `standard` or `hardened` ([Profiles](#profiles)) |
@@ -296,15 +336,17 @@ into `HarnessConfig.Docker`.
 - Labels: `jllm=1`, `jllm.kind=cli|web`, `jllm.owner=<container key>`, `jllm.config=<hash of image, profile, limits and
   daemon script>`.
 - Sub-agents share the chat's container; each has its own scratch directory.
-- The daemon script is written to `~/.jllm/sandbox-agent/<version>/` and mounted read-only at `/agent`.
+- The daemon script is passed in the `JLLM_AGENT_B64` environment variable of the container; no host directory is mounted for it.
 
 ### Docker missing
 
-The agent does not silently run on the host and does not just fail: it asks you ("Docker is unavailable: run without
-isolation?", an approval dialog in the CLI and the web UI). If you agree, that chat uses the host directories and plain
-processes from then on (through the local runner) and each tool result says so; if you decline, the tool returns the
-error. The question is not asked when `sandbox.localFallback` is `false` or the run is not interactive: the tool then
-fails with the error.
+By default (`sandbox.localFallback: false`) a tool call fails with the error and nothing runs on the host. When the
+fallback is on (CLI: the setting; web: the role's `localFallback`, set by an administrator) the agent asks ("Docker is
+unavailable: use the shared-local sandbox?", an approval dialog in the CLI and the web UI). If you agree, that chat uses
+the host directories and a [`SharedLocalSandbox`](#sharedlocalsandbox-confined-processes-on-the-host) from then on (minimal
+environment, bwrap-confined on Linux; never a plain host shell) and each tool result says so. If you decline, or the
+shared-local sandbox cannot start (Linux without a working `bwrap`), the tool returns the error. The question is not
+asked when the fallback is off or the run is not interactive.
 
 ### Remote docker
 
@@ -352,6 +394,26 @@ What changes:
 
 The daemon's `GET /backup` (zip of the workspace) and `POST /setup` (zip to extract, overwriting; names that leave the
 workspace are refused) do the transfer.
+
+### The project directory in the CLI: what stays read-only
+
+The CLI mounts the project read-write at `/workspace`. After that mount, these parts are mounted read-only
+(`--mount type=bind,...,readonly`), so a command in the container cannot make the host execute code or change its
+configuration; git (add, commit, branch, checkout, merge, stash) keeps working:
+
+- `.git/hooks` and `.git/config`, and the same for every submodule git dir under `.git/modules` (enumerated when the
+  container is created);
+- `.jllm`, with `.jllm/scratchpad` read-write on top of it (`.jllm/history` is written by the host only).
+
+A directory missing on the host is covered by a read-only `--tmpfs`, so the container cannot create one that the host
+would read next time. A mount point cannot be renamed or removed from inside, so `git config`, `git remote add` and
+upstream tracking writes (they rename `config.lock`) fail in the container; run them on the host. A worktree (`.git` is
+a file pointing outside the project) is not mounted and git does not work in the container.
+
+As a second line, before and after each command the CLI compares `.git/config`, `.git/hooks/**`, the submodule
+equivalents and `.jllm/**` (without `scratchpad`, `history`, `checkpoints`); a difference is restored and reported as a
+warning. When files come back from a container to the host (remote docker backup, web backup), `.jllm/**` and `.git/**`
+are skipped.
 
 ### Security
 
@@ -518,8 +580,9 @@ network of its own. It runs in an embedded GraalJS engine and its only view of t
 | `constrained` | GraalJS in the JVM, constrained sandbox policy, heap shared with the host | engine limits where the runtime has them, else a statement limit and a memory watchdog |
 | `isolated` / `untrusted` | GraalJS in a native isolate with its own heap (Linux amd64/aarch64, macOS aarch64, Windows amd64) | the engine: isolate memory, heap, CPU time, stack frames, AST depth |
 
-- `engine: auto` picks the isolate when the runtime has one, else `constrained`. `isolated` never downgrades silently:
-  without an isolate the tool is disabled with a reason. The web application defaults to the `untrusted` policy.
+- `engine: isolated` is the default and never downgrades: without an isolate (jar of the platform missing: GraalJS throws
+  `IllegalArgumentException: No native isolate library is available for the requested language(s) [js]`) the tool is disabled
+  with a reason naming the artifact of the edition. `constrained` must be asked for by name and is no boundary.
 - No `require`, `fetch`, `Java`, processes, threads or environment. A fresh context per run; nothing survives it.
 - File tools called from a script use a jail of their own, taken from the layout: the chat work dir (web), or the agent's
   scratchpad (CLI, also with the container runner through `ScratchJailBackend`). `fileJail: false` gives scripts the
@@ -534,6 +597,14 @@ network of its own. It runs in an embedded GraalJS engine and its only view of t
 It does not remove `bash`: a role that has `bash` still has the host (local runner) or the container. A role with `run_js`
 and no `bash` never touches the host shell, whatever the runner is: that is the no-host profile, for untrusted input where
 the model only needs to scrape or transform data. The host shell is a way out of the JS sandbox's guarantees.
+
+## Container networks
+
+Containers of the standard profile (and hardened ones granted a network) each get a bridge network of their own, named
+like the container: one per chat (`chat` scope) or one per user (`user` scope), created before the container and removed
+with it. Containers of different users or chats cannot reach each other; the default Docker bridge is never used. Hardened
+containers without a network keep `--network none`. `sandbox.docker.cleanup.maxWorkspaceBytes` defaults to 1 GiB (`0` = no
+limit, but a backup download is still capped at 1 GiB); daemon answers are size-capped.
 
 ## Which one to use
 

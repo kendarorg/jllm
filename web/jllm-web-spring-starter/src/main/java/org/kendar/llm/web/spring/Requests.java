@@ -29,6 +29,13 @@ final class Requests {
         };
     }
 
+    /** The caller's address for the sign-in throttle: {@code X-Forwarded-For} only behind a trusted proxy. */
+    static String clientAddress(HttpServletRequest request, org.kendar.llm.web.commons.ClientAddress addresses) {
+        java.util.Enumeration<String> h = request.getHeaders("X-Forwarded-For");
+        String joined = h == null ? null : String.join(",", java.util.Collections.list(h));
+        return addresses.of(request.getRemoteAddr(), joined);
+    }
+
     /** The user the {@code /api/**} gate stored, if it did. */
     static Principal principal(HttpServletRequest request) {
         return request.getAttribute(Principal.ATTR) instanceof Principal p ? p : null;

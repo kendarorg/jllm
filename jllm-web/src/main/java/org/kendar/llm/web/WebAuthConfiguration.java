@@ -16,7 +16,10 @@ import org.kendar.llm.web.commons.me.MeApi;
 import org.kendar.llm.web.commons.auth.OidcProperties;
 import org.kendar.llm.web.commons.auth.RoleMappingProperties;
 import org.kendar.llm.web.commons.auth.RoleMappingSettings;
+import org.kendar.llm.harness.settings.ConfigProvider;
 import org.kendar.llm.harness.settings.SettingsSink;
+import org.kendar.llm.harness.settings.VirtualConfigProvider;
+import org.kendar.llm.web.commons.admin.ConfigAdminApi;
 import org.kendar.llm.web.commons.JllmProperties;
 import org.kendar.llm.web.commons.auth.LoginThrottle;
 import org.kendar.llm.harness.identity.LoginSessionRepository;
@@ -49,8 +52,19 @@ public class WebAuthConfiguration {
     }
 
     @Bean
-    public Permissions permissions(RoleRepository roles) {
-        return new Permissions(roles);
+    public Permissions permissions(RoleRepository roles, ObjectProvider<ConfigProvider> config) {
+        ConfigProvider c = config.getIfAvailable();
+        return new Permissions(roles).instructions(c == null ? null : c.instructions());
+    }
+
+    /** The administration of the virtual configuration (settings, instructions, agents); only with such a provider. */
+    @Bean
+    public ConfigAdminApi configAdminApi(ObjectProvider<ConfigProvider> config) {
+        ConfigProvider c = config.getIfAvailable();
+        if (!(c instanceof VirtualConfigProvider v)) {
+            throw new IllegalStateException("The web host needs a virtual configuration provider (SQL or server-only files)");
+        }
+        return new ConfigAdminApi(v);
     }
 
     /** Random passwords instead of the default ones when {@code jllm.web.use-real-password=true}. */
@@ -98,14 +112,16 @@ public class WebAuthConfiguration {
     @Bean
     public OidcApi oidcApi(OidcProperties auth, OidcClient client, UserRepository users,
                            LoginSessionRepository sessions, LoginThrottle throttle, RoleMappingSettings roleMapping,
-                           Permissions permissions, AgentHarness harness) {
-        return new OidcApi(auth, client, users, sessions, throttle, roleMapping, permissions, harness::runHooks);
+                           Permissions permissions, AgentHarness harness, JllmProperties jllm) {
+        return new OidcApi(auth, client, users, sessions, throttle, roleMapping, permissions, harness::runHooks,
+                jllm.sessionMaxAge(), java.time.Clock.systemUTC());
     }
 
     @Bean
     public AuthApi authApi(UserRepository users, CookieAuthentication authentication, LoginSessionRepository sessions,
-                           LoginThrottle throttle, OidcProperties auth) {
-        return new AuthApi(users, authentication, sessions, throttle, auth);
+                           LoginThrottle throttle, OidcProperties auth, JllmProperties jllm) {
+        return new AuthApi(users, authentication, sessions, throttle, auth, jllm.sessionMaxAge(),
+                java.time.Clock.systemUTC());
     }
 
     @Bean
@@ -118,8 +134,8 @@ public class WebAuthConfiguration {
     @Bean
     public AdminApi adminApi(UserRepository users, Permissions permissions, SkillRepository skills,
                              LoginSessionRepository sessions, AgentHarness harness, ToolCatalogView catalog,
-                             RoleMappingSettings roleMapping) {
-        return new AdminApi(users, permissions, skills, sessions, harness, catalog, roleMapping);
+                             RoleMappingSettings roleMapping, LoginThrottle throttle) {
+        return new AdminApi(users, permissions, skills, sessions, harness, catalog, roleMapping, throttle);
     }
 
     /** Both the {@code WebAuthentication} and the {@code ChatAccess} of the web API. */
@@ -148,6 +164,16 @@ public class WebAuthConfiguration {
             @Override
             public Function<String, org.kendar.llm.harness.identity.RoleSandbox> sandboxes() {
                 return sandboxes;
+            }
+
+            @Override
+            public boolean mayRunUnattended(java.util.Set<String> roles) {
+                return permissions.mayRunUnattended(roles);
+            }
+
+            @Override
+            public boolean usesSharedLocal() {
+                return permissions.usesSharedLocal();
             }
 
             @Override

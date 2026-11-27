@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds target/release/jllm-<version>.zip: cli + web + plugins + settings + users + runners + an empty lib-ext, and
+# Builds target/release/jllm-<version>.zip: cli + web + plugins + configs (unsafe, webSafe, cliSafe) + runners + an empty lib-ext, and
 # copies setup.sh / setup.ps1 (release/setup) next to the zip as separate release files.
 # Usage: release/release.sh [--build] [--tests] [--out DIR]
 # No GraalJS jar is shipped: lib-ext/manifests/ holds the manifests of both editions (resolved with release/graaljs) and
@@ -58,6 +58,10 @@ plugins=(target/plugins/*.jar)
 [ ${#plugins[@]} -ge 5 ] || { echo "expected 5 plugin jars in target/plugins, found ${#plugins[@]}" >&2; exit 1; }
 cp "${plugins[@]}" "$stage/plugins/"
 cp -r release/template/. "$stage/"
+# safe configurations: the same folders the runners use (runConfigs), without tmp; unsafe comes from the template
+for c in webSafe cliSafe; do
+  mkdir -p "$stage/configs/$c"; cp -r "runConfigs/$c/." "$stage/configs/$c/"; rm -rf "$stage/configs/$c/tmp"
+done
 # SQL store: the starter and its jars go to lib-ext/sql (fetch-graaljs empties lib-ext/*.jar, not lib-ext/sql); the JDBC
 # drivers (MySQL GPL, PostgreSQL BSD) are never shipped: fetch-sql-driver downloads them into lib-ext and checks the manifests
 sqlstarter="web/jllm-sql-spring-starter/target"

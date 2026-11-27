@@ -84,6 +84,20 @@ class McpHttpClientTest {
     }
 
     @Test
+    void aResponseOverTheCapFailsTheCallInsteadOfFillingTheHeap() throws Exception {
+        McpHttpClient client = new McpHttpClient(http, MAPPER, url, Map.of());
+        assertEquals(1, client.listTools().size());
+        // 33 MB of SSE comments: over the cap, refused from the declared length or cut off while it arrives
+        String comment = ":" + "x".repeat(1024 * 1024) + "\n";
+        callSse = comment.repeat(33) + "data: {\"jsonrpc\":\"2.0\",\"id\":%ID%,\"result\":{}}\n\n";
+
+        IOException e = assertThrows(IOException.class, () -> client.callTool("echo", null));
+        assertTrue(e.getMessage().contains("answered more than"), e.getMessage());
+        assertTrue(McpHttpClient.MAX_RESPONSE_BYTES <= 64L * 1024 * 1024);
+        assertEquals(1, initializes.get(), "a too large answer is not a lost session: no second initialize");
+    }
+
+    @Test
     void expiredSessionIsInitializedAgainOnce() throws Exception {
         McpHttpClient client = new McpHttpClient(http, MAPPER, url, Map.of());
         assertEquals(1, client.listTools().size());

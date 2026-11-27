@@ -263,7 +263,7 @@ Logging in: `/login api:crm` (loopback redirect on the command line, the device 
 `/logout api:crm` removes the token.
 
 A project's own `.jllm/settings.json` can send a user's token to any host with an `oauth` block: such an API is asked
-about once, like a project stdio MCP server, and remembered in `~/.jllm/trusted-mcp.json` as `oauth:api:<name>`. Not
+about once, like a project stdio MCP server, and remembered in `~/.jllm/trusted.json` as `oauth:api:<name>`. Not
 trusted (or no one to ask): the API is skipped with a warning.
 
 ### Login required

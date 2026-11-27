@@ -660,7 +660,6 @@ flowchart LR
     subgraph HC["jllm-harness: optional beans read by the starter (HarnessFactory, jllm-web-commons)"]
         SS["SettingsSource"]
         SK["SettingsSink"]
-        PT["ProjectMcpTrust"]
         HI["HarnessIdentity.tokenStore()"]
     end
     subgraph WEB["jllm-web (jllm.store=file)"]
@@ -681,9 +680,10 @@ flowchart LR
 | `RoleRepository` | jllm-harness, `...harness.identity` | `FileRoleRepository`: `webauth/permissions/<role>.json` | `Role`: tool patterns, read-only, approval `ask`/`off`, tool permissions, settings (free JSON per feature, `sandbox` one of them); the fixed `admin` role may be stored (SQL: seeded row) and is never deleted |
 | `SkillRepository` | jllm-harness, `...harness.identity` | `FileSkillRepository`: `webauth/global-skills/`, `webauth/user-skills/<id>/` | global and per-user skills (name, description, content) |
 | `LoginSessionRepository` | jllm-harness, `...harness.identity` | `InMemoryLoginSessionRepository` (a restart signs everybody out) | cookie token → user id, sliding `TTL` of 7 days |
-| `SettingsSource` | jllm-harness, `...harness.settings` | `FileSettingsSource`: `~/.jllm/settings.json`, `<project>/.jllm/settings.json`, `--settings`/`jllm.settings` | `SettingsLayer`s, `GLOBAL` → `PROJECT` → `EXPLICIT` (→ `STORED`), a later layer wins |
+| `ConfigProvider` | jllm-harness, `...harness.settings` | web: `SqlConfigProvider` (SQL store) or `RemoteFileConfigProvider` (`jllm.store=file`, JSON files under `jllm.config-dir`); CLI: `FileConfigProvider` (folder-trust gated) | where a harness gets its settings layers, instructions (`InstructionRepository`), agents (`AgentRepository`, inline prompts), skills and plugin storage. The web host accepts only a `VirtualConfigProvider` (SQL or server-only files) and refuses settings that name files (`promptFile`, skill `path`, `instructionFiles`) |
+| `SettingsSource` | jllm-harness, `...harness.settings` | CLI: `FileSettingsSource`: `~/.jllm/settings.json`, `<project>/.jllm/settings.json`, `--settings`. Web: the provider's | `SettingsLayer`s, `GLOBAL` → `PROJECT` → `EXPLICIT` (→ `STORED`), a later layer wins |
 | `SettingsSink` | jllm-harness, `...harness.settings` | `FileSettingsSink`: `webauth/stored-settings.json` (SQL: `SqlSettingsSink`, table `settings_section`) | the settings an admin edits at runtime, one JSON value per top-level section; joined last as the `STORED` layer, so a stored value wins; secrets as `env:NAME` only |
-| `ProjectMcpTrust` | jllm-harness, `...harness.settings` | `FileProjectMcpTrust.user()`: `~/.jllm/trusted-mcp.json` | trust answers for project MCP servers, tied to a SHA-256 of the definition |
+| `FolderTrust` | jllm-harness, `...harness.settings` | `FileFolderTrust.user()`: `~/.jllm/trusted.json` (CLI only; the web host has no project folder) | trust of project folders (SHA-256 of `.jllm/`, approved loosenings) and of single project MCP servers/hooks, tied to a SHA-256 of the definition |
 | `TokenStore` | jllm-commons, `...harness.auth` | `FileTokenStore` from the `tokenStore` settings | OAuth tokens per principal ([8](#token-stores)) |
 | `ChatSessionStore`, `SubAgentRunLog`, `StateStore` | jllm-commons, `...harness.session`, `...harness.state` | `FileChatSessionStore`, `FileHistorySubAgentRunLog`, `FileStateStore` under `<base>/<chatId>/.jllm/history` | chats, sub-agent runs, per-chat state ([8](#8-persistence)) |
 | `MnemonicStore` | jllm-harness, `...harness.context.mnemonic` | `FileMnemonicStore` under the same root | mnemonic decisions per chat and agent |
@@ -756,7 +756,7 @@ Wiring:
 - `UserRepository`, `RoleRepository`, `SkillRepository`, `LoginSessionRepository`: beans. The `jllm-web` ones are
   `@ConditionalOnMissingBean` in `FileStoresAutoConfiguration`, ordered after `JllmSqlAutoConfiguration`: supply your
   own beans (or the SQL starter) and they win.
-- `SettingsSource`, `SettingsSink`, `ProjectMcpTrust`: optional beans read by the starter's `JllmWebAutoConfiguration`
+- `SettingsSource`, `SettingsSink`: optional beans read by the starter's `JllmWebAutoConfiguration`
   (`ObjectProvider`); without them the files are used (no sink: no stored layer). `jllm-web` supplies a
   `FileSettingsSink` when no other `SettingsSink` bean exists; the SQL starter supplies `SqlSettingsSink`.
 - `TokenStore`: returned by your `HarnessIdentity.tokenStore()`; null = the store the `tokenStore` settings describe,

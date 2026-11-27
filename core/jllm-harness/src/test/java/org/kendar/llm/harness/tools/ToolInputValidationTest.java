@@ -91,7 +91,7 @@ class ToolInputValidationTest {
     @Test
     void everyBuiltInToolSchemaCompilesAndRejectsAnEmptyCallWhenItHasRequiredFields() throws Exception {
         AgentHarness h = new AgentHarnessBuilder().modelClient(new ScriptedModel()).config(config(base)).build();
-        var factory = com.networknt.schema.JsonSchemaFactory.getInstance(com.networknt.schema.SpecVersion.VersionFlag.V7);
+        var factory = com.networknt.schema.SchemaRegistry.withDialect(com.networknt.schema.dialect.Dialects.getDraft7());
         int checked = 0;
         for (HarnessTool t : h.tools().all()) {
             assertDoesNotThrow(() -> factory.getSchema(t.inputSchema()), "schema of " + t.name());

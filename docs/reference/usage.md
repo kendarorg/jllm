@@ -163,11 +163,11 @@ ignored.
 | `execution.maxParallel` | default `1`: one model call in flight, sub-agents run depth-first. `N`: at most N model calls and N chat runs at once (chat runs need `serializeRuns`); `N != 1` lets read-only sub-agents run in parallel. `-1`: unlimited |
 | `execution.useContextStack` | default `true`: a sub-agent continues the parent's request prefix (same system prompt and tool list, role text and task as a message), so a prefix-caching server reuses the parent's KV cache and the parent's cache is intact when the sub-agent returns. Tool restrictions of the agent type are enforced when a call is made (a refused call returns "Tool unavailable for agent"). `false`: the sub-agent builds its own system text and filtered tool list |
 | `chatRetentionLimit` | default unlimited: keep at most this many saved chats, deleting the oldest at startup (never the opened one) |
-| `whitelistedEnvVars` | default `["*"]` (all): the environment variables of the harness process that a shell command (`bash`, local sandbox) inherits. Patterns use `*` for any run of characters, case-insensitive: `"PATH"`, `"*key*test"`, `"JAVA_*"`; `[]` passes none. A docker backend ignores it: its container has its own environment. On Windows `cmd` adds a few variables itself (`COMSPEC`, `PATHEXT`, `PROMPT`, `SystemRoot`) |
-| `toolsWhitelistedEnvVars` | default `["*"]`: the same for the processes of tools, i.e. MCP stdio servers; the `env` of a server in the settings is always added on top. The model keys (`<PROVIDER>_API_KEY`), `BRAVE_API_KEY` and the `${ENV_VAR}` of the settings file are read by the harness itself and are not affected |
+| `whitelistedEnvVars` | default `["PATH","HOME","LANG","TERM"]`: the environment variables of the harness process that a shell command (`bash`, local sandbox) inherits. Names matching `JLLM_*`, `*API_KEY*`, `*SECRET*`, `*PASSWORD*`, `*KEY*` never pass, even when listed; there is no all value. Patterns use `*` for any run of characters, case-insensitive: `"PATH"`, `"*key*test"`, `"JAVA_*"`; `[]` passes none. A docker backend ignores it: its container has its own environment. On Windows `cmd` adds a few variables itself (`COMSPEC`, `PATHEXT`, `PROMPT`, `SystemRoot`) |
+| `toolsWhitelistedEnvVars` | default `["PATH","HOME","LANG","TERM"]`: the same (secrets stripped too) for the processes of tools, i.e. MCP stdio servers; the `env` of a server in the settings is always added on top. The model keys (`<PROVIDER>_API_KEY`), `BRAVE_API_KEY` and the `${ENV_VAR}` of the settings file are read by the harness itself and are not affected |
 | `smallModel` | default `false`: append the small-model rules (`prompts/small-model.md`) to the system prompt; `--small-model` sets it |
 | `sandbox.tempDir`, `sandbox.timeoutSeconds` | scratch root; default shell timeout (the tool caps it at 600 s) |
-| `sandbox.backend`, `sandbox.localFallback`, `sandbox.docker.*` | CLI and library: `local` (default) or `docker` (the web chooses the sandbox per role, see [Sandboxes](../guides/sandbox.md#the-web-a-sandbox-per-role)); fall back to local when docker is missing (default `true`); `binary`, `image`, `profile` (`standard` or `hardened`), `scope` (`chat` or `user`), `memory`, `cpus`, `pidsLimit`, `user`, `network` (hardened: `none` or `default`), `cleanup` (idle policy), `remote`, `remoteHost` (docker on another machine; `https://` prefix = TLS), `allowInsecure` (default `true`: plain http to a non-loopback host is allowed with a WARN; `false` refuses it, recommended for shared deployments), `trustStore`, `trustStorePassword` (https only). See [SANDBOX](../guides/sandbox.md). CLI and web: `--sandbox`, `--docker-image`, `--sandbox-profile`, `--sandbox-scope`, `--docker-remote`, `--docker-remote-host` |
+| `sandbox.backend`, `sandbox.localFallback`, `sandbox.docker.*` | CLI and library: `local` (default), `shared-local` (minimal environment, bwrap on Linux) or `docker` (the web chooses the sandbox per role, see [Sandboxes](../guides/sandbox.md#the-web-a-sandbox-per-role)); fall back to a shared-local sandbox when docker is missing (default `false`); `binary`, `image`, `profile` (`standard` or `hardened`), `scope` (`chat` or `user`), `memory`, `cpus`, `pidsLimit`, `user`, `network` (hardened: `none` or `default`), `cleanup` (idle policy), `remote`, `remoteHost` (docker on another machine; `https://` prefix = TLS), `allowInsecure` (default `true`: plain http to a non-loopback host is allowed with a WARN; `false` refuses it, recommended for shared deployments), `trustStore`, `trustStorePassword` (https only). See [SANDBOX](../guides/sandbox.md). CLI and web: `--sandbox`, `--docker-image`, `--sandbox-profile`, `--sandbox-scope`, `--docker-remote`, `--docker-remote-host` |
 | `sandbox.shell` | local backend: shell of the `bash` tool (`cmd`, `powershell`, `pwsh`, `bash`, `zsh`, `sh` or a path); default the OS one (`cmd` on Windows, `zsh` on macOS, `bash` elsewhere). See [SANDBOX](../guides/sandbox.md) |
 | `sandbox.outputLogMaxBytes` | default `51200`: cap of the spill log written when a `bash` output exceeds the kept 50 KB tail; `0` = unlimited. A capped log ends with `[log truncated at N bytes]` and the tool result says `log (itself truncated)` |
 | `instructionFiles` | default `["KENDAR.md", "AGENTS.md", "CLAUDE.md"]`, in that order, relative to the directory the harness runs in; `~` is the user home. Missing files are skipped, and so is a file with the same content as one already read (e.g. `CLAUDE.md` a symlink to `AGENTS.md`). A list in any settings layer replaces the default completely; `[]` loads none. A project with only `AGENTS.md` or only `CLAUDE.md` gets it with no configuration. See [SKILLS §2](../guides/skills.md#2-instruction-files) |
@@ -427,8 +427,63 @@ directory, with the same environment rules as `bash`:
 - `agents`: `main` (default), a sub-agent type (`general`) or label (`general #2`), or `*`.
 - `timeoutSeconds` default 600.
 - A hook from the project's `.jllm/settings.json` runs only after the user trusted it (asked once by the CLI,
-  remembered per project and definition in `~/.jllm/trusted-mcp.json`; the web front end cannot ask and uses only
+  remembered per project and definition in `~/.jllm/trusted.json`; the web front end cannot ask and uses only
   an answer given earlier).
+
+### Folder trust (CLI)
+
+Nothing from a project folder takes effect until the folder is trusted. At startup, before `.jllm/` is read and before
+MCP servers, hooks or git start, the CLI checks `~/.jllm/trusted.json`: the folder (canonical path) is trusted when its
+record holds the SHA-256 of the `.jllm/` content (sorted relative paths and bytes, symbolic links not followed;
+`scratchpad`, `history` and `checkpoints` are left out). Otherwise it asks; a changed `.jllm/` asks again. **Declining
+exits the CLI with a warning and stores nothing: an unapproved folder asks on every start.** Instruction files
+(`AGENTS.md`, `CLAUDE.md`, `KENDAR.md`) are therefore loaded only from trusted folders.
+
+With `--prompt`, piped input or a `CI` environment variable nobody can answer: an untrusted folder exits with a warning
+unless `--trust-project` is given or the global settings list it (`"trustedProjects": ["/path/to/project"]`, user
+settings and `--settings` only; a project file cannot set it).
+
+Even in a trusted folder, project settings that loosen the user's own apply only once approved for the folder (shown as
+a diff, kept in the trust record, asked again when `.jllm/` changes; unattended runs drop them): `permissions.allow`
+(added rules), `permissions.ask` (removed rules), `sandbox.*`, `output.taintGating`, `output.sanitize`, `web.*`,
+`whitelistedEnvVars`, `toolsWhitelistedEnvVars` and `.jllm/SYSTEM.md`. Tightening applies silently.
+
+In every permission mode, including `auto`, file tools writing to `.jllm/**`, `.git/**`, `AGENTS.md`, `CLAUDE.md`,
+`KENDAR.md` or `SYSTEM.md` ask first; with nobody to answer they are denied.
+
+### Permissions, taint and unattended runs
+
+- **Unattended runs.** A CLI run is unattended when nobody can answer: `--prompt`, piped input (data waiting on stdin) or
+  a `CI` environment variable (not `false`/`0`). Every permission question is then denied automatically: nothing is
+  asked and nothing becomes allowed. `allow` rules (settings `permissions.allow`, stored grants) still run, because they
+  were decided in advance; `ask`, anything the gate would ask and an "ask" from the auto-mode classifier are denied.
+  The model gets `denied: unattended run, no one can approve <tool>` as the tool result, so it can adapt; the run
+  prints `[denied] <tool>` and `--json-result` lists each one (`denied`, `deniedCount`). To let an unattended run do
+  more, add `allow` rules or use the bypass below. Unattended on an untrusted folder exits with a warning.
+- **`--dangerously-skip-permissions`** (CLI only; the web has no such switch, property or API). Every permission question
+  that would ask is answered yes, with `--prompt` and interactively alike, including writes to `.jllm/**`, `.git/**` and
+  instruction files and every shell command. Explicit `deny` rules (settings, global config) and hook denials still
+  deny. It does not trust the folder (that stays `--trust-project` or the prompt) and changes neither taint handling nor
+  the sandbox backend. A warning banner is printed at startup and `--json-result` has `"dangerouslySkipPermissions": true`.
+- **Command grants.** Approving a shell command once stores nothing: the same command asks again. Only answering `a`
+  (allow for this chat) stores a grant, for that command text (blanks outside quotes normalised) and for the tool.
+  A grant of a command prefix (`git status`) covers that prefix followed by plain arguments (`git status --short`), never
+  a command with `;`, `&`, `|`, `` ` ``, `$`, redirections, newlines or parentheses.
+- **Shell path guard.** A shell command that names a path with a `..` segment leaving the work dir is refused with
+  `Command refused: it names the path ...`. Only paths written with `..` are checked: variables, scripts and absolute
+  paths are not, so the host shell is not confined by this. Use a sandbox (Docker, `shared-local`) for confinement.
+  Without Docker (`sandbox.backend: local`) the shell runs as the CLI user: it sees the whole filesystem and the
+  environment of the process (minus names matching `JLLM_*`, `*KEY*`, `*SECRET*`, `*PASSWORD*`).
+- **Taint.** Outside content (web, MCP, REST, sub-agents) taints the chat: later side effects ask, even in `auto`.
+  Shell output taints it too when the sandbox has network access (a container with network, `shared-local` with the
+  network granted or unconfined); a plain local shell is not tracked. `output.taintDocuments: true` makes the text a
+  document reader extracted (`read_file` on a pdf, docx...) taint as well (default false).
+- **Flagged output.** Tool output that looks like instructions to the assistant is not passed on silently: an attended run
+  asks `y` (as it is, still marked as data), `c` (cleaned, the instruction-like lines removed) or `n` (reject); an
+  unattended run rejects it and reports `[denied]` with the reason `tainted`.
+- **Spoofing characters.** Zero-width and direction marks (U+200B-200F), bidi embeddings and overrides (U+202A-202E) and
+  isolates (U+2066-2069) are stripped from everything the terminal shows, so a command or path cannot read differently
+  from what runs.
 
 ### Steering a running chat
 

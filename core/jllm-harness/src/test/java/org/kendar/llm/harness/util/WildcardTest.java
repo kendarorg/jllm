@@ -59,17 +59,17 @@ class WildcardTest {
     void whitelistFiltersAnEnvironmentMap() {
         Map<String, String> env = new LinkedHashMap<>(Map.of("PATH", "p", "HOME", "h", "MY_API_KEY", "k", "TOKEN_TEST", "t"));
 
-        EnvWhitelist.apply(env, List.of("PATH", "*key"));
+        EnvWhitelist.apply(env, List.of("PATH", "*key", "TOKEN*"));
 
-        assertEquals(Map.of("PATH", "p", "MY_API_KEY", "k"), env);
+        assertEquals(Map.of("PATH", "p", "TOKEN_TEST", "t"), env, "a whitelisted secret name is still stripped");
 
         Map<String, String> all = new LinkedHashMap<>(Map.of("A", "1", "B", "2"));
-        EnvWhitelist.apply(all, EnvWhitelist.ALL);
+        EnvWhitelist.apply(all, List.of("*"));
         assertEquals(2, all.size());
 
         Map<String, String> none = new LinkedHashMap<>(Map.of("A", "1"));
         EnvWhitelist.apply(none, List.of());
         assertTrue(none.isEmpty());
-        assertEquals(EnvWhitelist.ALL, EnvWhitelist.orAll(null));
+        assertEquals(EnvWhitelist.defaults(), EnvWhitelist.orDefault(null));
     }
 }

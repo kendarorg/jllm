@@ -14,7 +14,9 @@ import org.slf4j.LoggerFactory;
 import org.kendar.llm.harness.auth.TokenKeyGuard;
 import org.kendar.llm.harness.auth.TokenStore;
 import org.kendar.llm.harness.settings.FileSettingsSink;
+import org.kendar.llm.harness.settings.ConfigProvider;
 import org.kendar.llm.harness.settings.SettingsSink;
+import org.kendar.llm.web.config.RemoteFileConfigProvider;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -107,6 +109,19 @@ public class FileStoresAutoConfiguration {
     @ConditionalOnMissingBean(SettingsSink.class)
     public SettingsSink settingsSink(@Value("${jllm.webauth-dir:webauth}") String webauthDir) {
         return new FileSettingsSink(root(webauthDir).resolve("stored-settings.json"));
+    }
+
+    /**
+     * {@code jllm.config-dir} (default {@code <webauth>/config}): the configuration as JSON files, kept apart from
+     * the chats ({@code jllm.chats-dir}). The skills are those of the skill store.
+     */
+    @Bean
+    @ConditionalOnMissingBean(ConfigProvider.class)
+    public ConfigProvider configProvider(@Value("${jllm.webauth-dir:webauth}") String webauthDir,
+                                         @Value("${jllm.config-dir:}") String configDir, ObjectMapper mapper,
+                                         SkillRepository skills) {
+        Path dir = configDir == null || configDir.isBlank() ? root(webauthDir).resolve("config") : root(configDir);
+        return new RemoteFileConfigProvider(dir, mapper, skills);
     }
 
     /** Sign-in sessions in memory. */

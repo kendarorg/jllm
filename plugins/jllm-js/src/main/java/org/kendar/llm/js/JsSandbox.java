@@ -294,7 +294,7 @@ public final class JsSandbox implements AutoCloseable {
         try {
             if (bridge == null) throw new IllegalStateException("No tools are available");
             env.put("value", bridge.invoke(args[0].asString(), args[1].asString()));
-        } catch (Throwable t) { // boundary: script boundary: any failure is the error of the script
+        } catch (RuntimeException t) { // boundary: a failed tool is the error of the script; Errors (OOM, stack) are not swallowed
             String m = t.getMessage();
             env.put("error", m == null || m.isBlank() ? t.getClass().getSimpleName() : m);
         } finally {

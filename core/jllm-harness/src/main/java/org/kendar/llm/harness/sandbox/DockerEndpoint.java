@@ -128,12 +128,23 @@ final class DockerEndpoint {
         }
     }
 
+    /** Removes the container and the network made for it ({@link #ensureNetwork}); either may already be gone. */
     void removeContainer(String name) {
         try {
             run("rm", "-f", "-v", name);
+            run("network", "rm", name);
         } catch (IOException ignored) {
             // already gone
         }
+    }
+
+    /**
+     * A bridge network of its own for the container {@code name} (same name): standard-profile containers have the
+     * network, and on the default bridge every container of every user could reach every other one.
+     */
+    void ensureNetwork(String name, String owner) throws IOException {
+        if (run("network", "inspect", name).exitCode() == 0) return;
+        docker("network", "create", "--label", "jllm=1", "--label", "jllm.owner=" + owner, name);
     }
 
     void removeVolume(String name) {

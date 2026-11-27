@@ -30,7 +30,7 @@ final class RealHttpApp {
         return p.toString().replace(File.separatorChar, '/');
     }
 
-    /** SQL store, shared {@code <home>/jllm.db}, own workdir (the history root lock of a workdir lives until the process ends). */
+    /** SQL store, shared {@code <home>/jllm.db}, own chats dir (the history root lock of a workdir lives until the process ends). */
     static ConfigurableApplicationContext start(Path home, String work, String... extra) {
         return start(home, work, null, extra);
     }
@@ -38,7 +38,7 @@ final class RealHttpApp {
     /** As above, with environment variables ({@code JLLM_TOKEN_KEY}) read from {@code env} instead of the process. */
     static ConfigurableApplicationContext start(Path home, String work, Function<String, String> env, String... extra) {
         List<String> args = new ArrayList<>(List.of("--server.port=0", "--server.address=127.0.0.1", "--jllm.provider=ollama",
-                "--jllm.workdir=" + slashes(home.resolve(work)),
+                "--jllm.chats-dir=" + slashes(home.resolve(work)),
                 "--jllm.sql.url=jdbc:sqlite:" + slashes(home.resolve("jllm.db")), "--spring.main.banner-mode=off"));
         args.addAll(List.of(extra));
         if (args.stream().noneMatch(a -> a.startsWith("--jllm.store="))) args.add("--jllm.store=sql"); // a repeated flag would be a list

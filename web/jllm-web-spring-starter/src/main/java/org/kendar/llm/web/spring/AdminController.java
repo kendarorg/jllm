@@ -44,9 +44,13 @@ public class AdminController {
     }
 
     @PostMapping("/users/{id}/password")
-    public ResponseEntity<Void> setPassword(@PathVariable String id, @RequestBody(required = false) Map<String, Object> body) {
-        admin.setPassword(id, body);
-        return Responses.noContent();
+    public Map<String, Object> setPassword(@PathVariable String id, @RequestBody(required = false) Map<String, Object> body) {
+        return admin.setPassword(id, body);
+    }
+
+    @PostMapping("/users/{id}/unlock")
+    public Map<String, Object> unlockUser(@PathVariable String id) {
+        return admin.unlockUser(id);
     }
 
     @DeleteMapping("/users/{id}")

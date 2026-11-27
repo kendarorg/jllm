@@ -56,12 +56,12 @@ public final class McpStdioClient implements McpClient {
     private volatile boolean started;
 
     /**
-     * @param inheritedEnv patterns of the variables of this process the server inherits ({@code null}: all); the
+     * @param inheritedEnv patterns of the variables of this process the server inherits ({@code null}: the defaults); the
      *                     server's own {@code env} is added on top
      */
     public McpStdioClient(ObjectMapper mapper, String name, String executable, List<String> args,
                           Map<String, String> env, List<String> inheritedEnv) {
-        this.inheritedEnv = org.kendar.llm.harness.util.EnvWhitelist.orAll(inheritedEnv);
+        this.inheritedEnv = org.kendar.llm.harness.util.EnvWhitelist.orDefault(inheritedEnv);
         this.mapper = mapper;
         this.name = name;
         this.command = new ArrayList<>();

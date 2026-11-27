@@ -1,0 +1,12 @@
+{
+  "web": { "blockLocalHost": true },
+  "sandbox": { "backend": "docker", "localFallback": false },
+  "permissions": {
+    "deny": ["write_file(.*\.env)", "bash(rm -rf .*)"]
+  },
+  "plugins": {
+    "js":   { "enabled": true },
+    "pdf":  { "enabled": true },
+    "docs": { "enabled": true }
+  }
+}

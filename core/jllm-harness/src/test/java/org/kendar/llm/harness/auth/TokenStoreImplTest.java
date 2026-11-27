@@ -68,9 +68,10 @@ class TokenStoreImplTest {
 
         Path f = s.fileOf(null);
         ObjectNode env = (ObjectNode) MAPPER.readTree(f.toFile());
-        byte[] data = Base64.getDecoder().decode(env.get("data").asText());
+        ObjectNode entry = (ObjectNode) env.get("entries").get("api:crm");
+        byte[] data = Base64.getDecoder().decode(entry.get("data").asText());
         data[0] ^= 1;
-        env.put("data", Base64.getEncoder().encodeToString(data));
+        entry.put("data", Base64.getEncoder().encodeToString(data));
         Files.writeString(f, env.toString());
         assertTrue(s.get(null, "api:crm").isEmpty());
         s.put(null, "api:crm", new OAuthToken("again", null, 0, null)); // the user logs in again
@@ -85,7 +86,7 @@ class TokenStoreImplTest {
         TokenCipher rotated = cipher(newKey, oldKey);
         FileTokenStore s = new FileTokenStore(tmp, rotated);
         assertEquals("a", s.get(null, "api:crm").orElseThrow().access());
-        assertEquals(rotated.keyId(), MAPPER.readTree(s.fileOf(null).toFile()).get("kid").asText());
+        assertEquals(rotated.keyId(), MAPPER.readTree(s.fileOf(null).toFile()).get("entries").get("api:crm").get("kid").asText());
         assertEquals("a", new FileTokenStore(tmp, cipher(newKey, null)).get(null, "api:crm").orElseThrow().access());
     }
 

@@ -36,6 +36,7 @@ Pick the path that matches your role.
 | [Governance and audit](enterprise/governance-and-audit.md) | approvals, hooks, events, ports |
 | [Observability](enterprise/observability.md) | metrics, tracing, cost (Micrometer and OTel recipes) |
 | [Sandboxes](guides/sandbox.md) | local, Docker, daemon, remote |
+| [Configurations](guides/configurations.md) | unsafe, webSafe, cliSafe: what each one allows |
 
 ## Reference and contributing
 

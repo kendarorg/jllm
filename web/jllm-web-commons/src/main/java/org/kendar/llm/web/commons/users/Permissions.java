@@ -6,6 +6,7 @@ import org.kendar.llm.harness.identity.RoleSandbox;
 import org.kendar.llm.harness.identity.UserRepository;
 import org.kendar.llm.harness.identity.RoleRepository;
 import org.kendar.llm.harness.identity.SkillRepository;
+import org.kendar.llm.harness.settings.InstructionRepository;
 import org.kendar.llm.harness.auth.UserPolicy;
 import org.kendar.llm.harness.auth.UserPolicyResolver;
 import org.kendar.llm.harness.auth.UserSkill;
@@ -30,9 +31,21 @@ public final class Permissions {
     private static final UserPolicy NOTHING = UserPolicy.NONE;
 
     private final RoleRepository roles;
+    private volatile InstructionRepository instructions = InstructionRepository.NONE;
 
     public Permissions(RoleRepository roles) {
         this.roles = roles;
+    }
+
+    /** The role and user instructions the policies carry (none unless given). */
+    public InstructionRepository instructionRepository() {
+        return instructions;
+    }
+
+    /** The role and user instructions the policies carry into the system prompt of the chats (default: none). */
+    public Permissions instructions(InstructionRepository instructions) {
+        this.instructions = instructions == null ? InstructionRepository.NONE : instructions;
+        return this;
     }
 
     public static boolean validName(String role) {
@@ -82,6 +95,16 @@ public final class Permissions {
         return users.find(userId).flatMap(u -> role(u.role())).map(Role::sandbox).orElse(RoleSandbox.NONE);
     }
 
+    /** Whether one of the roles has {@code unattended: true}. */
+    public boolean mayRunUnattended(Set<String> roleNames) {
+        return roleNames != null && roleNames.stream().anyMatch(n -> role(n).map(Role::unattended).orElse(false));
+    }
+
+    /** Whether any role has the shared-local sandbox. */
+    public boolean usesSharedLocal() {
+        return roles().stream().anyMatch(r -> r.sandbox().kind() == org.kendar.llm.harness.sandbox.SandboxKind.SHARED_LOCAL);
+    }
+
     /** The policy of a role, or empty when the role has no valid record. */
     public Optional<UserPolicy> forRole(String role) {
         return role(role).map(Role::policy);
@@ -106,12 +129,12 @@ public final class Permissions {
             Optional<Role> role = role(roleName);
             if (role.isEmpty()) return NOTHING;
             if (user.isEmpty()) return role.get().policy();
-            return policyOf(role.get(), user.get(), skills);
+            return policyOf(role.get(), user.get(), skills, instructions);
         };
     }
 
     /** The role's policy narrowed by the user's settings, with the user's skills (global first, then own). */
-    public static UserPolicy policyOf(Role role, User user, SkillRepository skills) {
+    public static UserPolicy policyOf(Role role, User user, SkillRepository skills, InstructionRepository instructions) {
         List<String> disabledTools = user.disabledTools();
         Set<String> disabledSkills = new HashSet<>(user.disabledSkills());
         Predicate<HarnessTool> filter = t -> role.allows(t) && !Wildcard.matchesAny(disabledTools, t.name());
@@ -132,6 +155,9 @@ public final class Permissions {
             }
         }
         return new UserPolicy(filter, approvals, extra, name -> !disabledSkills.contains(name),
-                role.toolPermissions().isEmpty() ? null : role::permissionOf);
+                role.toolPermissions().isEmpty() ? null : role::permissionOf,
+                () -> instructions.renderFor(role.name(), user.id()),
+                role.scopedInstructions() ? UserPolicy.Scoped.USER_CONTENT : UserPolicy.Scoped.OFF, role.allowedModes(),
+                role.unattended(), role.alwaysAsk());
     }
 }

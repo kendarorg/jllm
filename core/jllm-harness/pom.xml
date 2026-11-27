@@ -26,8 +26,8 @@
     </scm>
 
     <properties>
-        <!-- tests tagged "slow" (stress tests) are skipped; run them with: mvn test -DexcludedGroups=none -Dgroups=slow -->
-        <excludedGroups>slow</excludedGroups>
+        <!-- tests tagged "slow" (stress) or "docker" (needs a docker daemon) are skipped; run them with: mvn test -DexcludedGroups=none -Dgroups=slow|docker -->
+        <excludedGroups>slow,docker</excludedGroups>
     </properties>
 
     <dependencies>
@@ -68,7 +68,7 @@
         <dependency>
             <groupId>com.networknt</groupId>
             <artifactId>json-schema-validator</artifactId>
-            <version>1.0.66</version>
+            <version>2.0.8</version>
         </dependency>
 
         <dependency>

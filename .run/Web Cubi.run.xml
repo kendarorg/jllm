@@ -3,8 +3,8 @@
     <option name="INCLUDE_PROVIDED_SCOPE" value="true" />
     <option name="MAIN_CLASS_NAME" value="org.kendar.llm.web.JllmWebApplication" />
     <module name="jllm-web" />
-    <option name="PROGRAM_PARAMETERS" value="--jllm.webauth-dir=$PROJECT_DIR$/runConfig/webauth --jllm.context-strategy=compaction --jllm.small-model=true --jllm.provider=llamacpp --jllm.model=qwen-local --jllm.base-url=http://192.168.1.96:17001/v1 --jllm.api-key=none --jllm.context-tokens=120000 --jllm.plugin-dir=$PROJECT_DIR$/target/plugins --jllm.plugins.pdf.enabled=true --jllm.plugins.docs.enabled=true --jllm.plugins.js.enabled=true --jllm.flows-seed-dir=$PROJECT_DIR$/runConfig/flows --jllm.plugins.jllm-workflows.enabled=true --jllm.plugins.jllm-workflow-web.enabled=true" />
-    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/runConfig/tmp" />
+    <option name="PROGRAM_PARAMETERS" value="--jllm.webauth-dir=$PROJECT_DIR$/runConfigs/unsafe/webauth --jllm.context-strategy=compaction --jllm.small-model=true --jllm.provider=llamacpp --jllm.model=qwen-local --jllm.base-url=http://192.168.1.96:17001/v1 --jllm.api-key=none --jllm.context-tokens=120000 --jllm.plugin-dir=$PROJECT_DIR$/target/plugins --jllm.plugins.pdf.enabled=true --jllm.plugins.docs.enabled=true --jllm.plugins.js.enabled=true --jllm.flows-seed-dir=$PROJECT_DIR$/runConfigs/unsafe/flows --jllm.plugins.jllm-workflows.enabled=true --jllm.plugins.jllm-workflow-web.enabled=true" />
+    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/runConfigs/unsafe/tmp" />
     <method v="2">
       <option name="Make" enabled="true" />
     </method>
