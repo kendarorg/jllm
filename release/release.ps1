@@ -5,13 +5,15 @@
 # the user runs setup.sh / setup.ps1, which unzips the distribution, asks the edition and fetches it with fetch-graaljs.
 # The build fails if a front-end jar contains GraalJS or if a resolved pom declares a licence other than UPL, MIT,
 # Apache, BSD, Unicode/ICU (the Oracle terms are only recorded in the manifest, never accepted here).
-# Without -Build it asks whether to build (mvn clean install, with tests); the default is no: package the existing jars.
-param([switch]$Build, [string]$Out)
+# Without -Build it asks whether to build (mvn clean install); the default is no: package the existing jars.
+# When building it asks whether to run the tests (default yes; -Tests answers yes). JaCoCo is never run (no agent, no report module).
+param([switch]$Build, [switch]$Tests, [string]$Out)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 if (-not $Out) { $Out = Join-Path $root 'target\release' }
 Set-Location $root
-if (-not $Build) { $Build = (Read-Host 'Build with mvn clean install (tests included)? [y/N]') -match '^(y|yes)$' }
+if (-not $Build) { $Build = (Read-Host 'Build with mvn clean install? [y/N]') -match '^(y|yes)$' }
+if ($Build -and -not $Tests) { $Tests = -not ((Read-Host 'Run the tests? [Y/n]') -match '^(n|no)$') }
 if ($Build) {
   # true for a JDK 21+ directory (cmd runs it: java prints its version on stderr, which PowerShell 5.1 treats as an error)
   function Test-Jdk([string]$dir) {
@@ -40,7 +42,9 @@ if ($Build) {
   if (-not $env:JAVA_HOME) { throw 'JDK 21+ not found: set JAVA_HOME to a JDK 21' }
   Write-Host "using JDK $env:JAVA_HOME"
   if (Test-Path target\plugins) { Remove-Item -Recurse -Force target\plugins }
-  mvn -B clean install
+  $mvnArgs = @('-B', '-Djacoco.skip=true', '-pl', '!jacoco', 'clean', 'install')
+  if (-not $Tests) { $mvnArgs += '-DskipTests' }
+  mvn @mvnArgs
   if ($LASTEXITCODE -ne 0) { throw 'maven build failed' }
 }
 $version = ([regex]::Match((Get-Content pom.xml -Raw), '<revision>(.*?)</revision>')).Groups[1].Value

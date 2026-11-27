@@ -1,18 +1,20 @@
 #!/usr/bin/env bash
 # Builds target/release/jllm-<version>.zip: cli + web + plugins + settings + users + runners + an empty lib-ext, and
 # copies setup.sh / setup.ps1 (release/setup) next to the zip as separate release files.
-# Usage: release/release.sh [--build] [--out DIR]
+# Usage: release/release.sh [--build] [--tests] [--out DIR]
 # No GraalJS jar is shipped: lib-ext/manifests/ holds the manifests of both editions (resolved with release/graaljs) and
 # the user runs setup.sh / setup.ps1, which unzips the distribution, asks the edition and fetches it with fetch-graaljs.
 # The build fails if a front-end jar contains GraalJS or if a resolved pom declares a licence other than UPL, MIT,
 # Apache, BSD, Unicode/ICU (the Oracle terms are only recorded in the manifest, never accepted here).
-# Without --build it asks whether to build (mvn clean install, with tests); the default is no: package the existing jars.
+# Without --build it asks whether to build (mvn clean install); the default is no: package the existing jars.
+# When building it asks whether to run the tests (default yes; --tests answers yes). JaCoCo is never run (no agent, no report module).
 set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)  # this script lives in <root>/release
-out="$root/target/release"; build=0
+out="$root/target/release"; build=0; tests=0
 while [ $# -gt 0 ]; do
   case $1 in
     --build) build=1;;
+    --tests) tests=1;;
     --out) out=$2; shift;;
     *) echo "unknown argument $1" >&2; exit 2;;
   esac
@@ -20,8 +22,12 @@ while [ $# -gt 0 ]; do
 done
 cd "$root"
 if [ "$build" = 0 ]; then
-  read -r -p "Build with mvn clean install (tests included)? [y/N] " ans || ans=""
+  read -r -p "Build with mvn clean install? [y/N] " ans || ans=""
   case $ans in [yY]|[yY][eE][sS]) build=1;; esac
+fi
+if [ "$build" = 1 ] && [ "$tests" = 0 ]; then
+  read -r -p "Run the tests? [Y/n] " ans || ans="n"
+  case $ans in [nN]|[nN][oO]) ;; *) tests=1;; esac
 fi
 if [ "$build" = 1 ]; then
   is_jdk() { [ -x "$1/bin/java" ] && "$1/bin/java" -version 2>&1 | grep -qE 'version "(2[1-9]|[3-9][0-9])'; }
@@ -38,7 +44,9 @@ if [ "$build" = 1 ]; then
   fi
   echo "using JDK $JAVA_HOME"
   rm -rf target/plugins
-  mvn -B clean install
+  mvn_args=(-B -Djacoco.skip=true -pl '!jacoco' clean install)
+  [ "$tests" = 1 ] || mvn_args+=(-DskipTests)
+  mvn "${mvn_args[@]}"
 fi
 version=$(sed -n 's:.*<revision>\(.*\)</revision>.*:\1:p' pom.xml | head -1)
 name="jllm-$version"; stage="$out/$name"
