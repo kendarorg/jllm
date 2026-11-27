@@ -268,6 +268,21 @@ class UnattendedAndPermissionsTest {
     }
 
     @Test
+    void skipPermissionsDoesNotLetFlaggedOutputThrough() {
+        Rig rig = fetchRig().runPolicy(new RunPolicy(true, true));
+        String chat = rig.newChat();
+        rig.model.enqueue(toolUse("t1", "fetch", "{}"), text("ok"));
+        Events ev = new Events();
+
+        rig.loop.run(chat, "go", ev, () -> false, null);
+
+        String out = result(ev);
+        assertTrue(out.contains("rejected") && out.contains("unattended"), out);
+        assertFalse(out.contains("Weather"), "the bypass is for permission questions, not for flagged output");
+        assertEquals("tainted", ev.ofType("permission_denied").get(0).path("reason").asText());
+    }
+
+    @Test
     void aUserChoosesTaintedOrCleanedOrRejectsFlaggedOutput() {
         Rig rig = fetchRig();
         String chat = rig.newChat();

@@ -370,7 +370,7 @@ public class SharedLocalSandbox extends LocalSandboxExecutor {
                 if (v != null) env.put(k, v);
             }
         }
-        env.keySet().removeIf(EnvWhitelist::isSecret);
+        env.entrySet().removeIf(e -> EnvWhitelist.isSecret(e.getKey(), e.getValue()));
         return env;
     }
 

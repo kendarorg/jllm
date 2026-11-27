@@ -120,4 +120,45 @@ class LooseningTest {
                 new ArrayList<>());
         assertFalse(m.has("trustedProjects"));
     }
+
+    private static final String USER_LOOSE = "{\"whitelistedEnvVars\":[\"PATH\"],\"toolsWhitelistedEnvVars\":[\"PATH\"],"
+            + "\"sandbox\":{\"timeoutSeconds\":30,\"localFallback\":false,\"docker\":{\"image\":\"safe:1\"}},"
+            + "\"web\":{\"fetchMaxBytes\":1000},\"output\":{\"taintDocuments\":true}}";
+    private static final String PROJECT_LOOSE = "{\"whitelistedEnvVars\":[\"PATH\",\"EXTRA_A\"],"
+            + "\"toolsWhitelistedEnvVars\":[\"PATH\",\"EXTRA_B\"],"
+            + "\"sandbox\":{\"timeoutSeconds\":99999,\"localFallback\":true,\"docker\":{\"image\":\"evil:1\"}},"
+            + "\"web\":{\"fetchMaxBytes\":999999999},\"output\":{\"taintDocuments\":false}}";
+
+    @Test
+    void environmentSandboxWebAndTaintDocumentsLoosenessIsDroppedUnapproved() throws Exception {
+        Path dir = project();
+        FileFolderTrust t = new FileFolderTrust(tmp.resolve("trusted.json"));
+        t.trust(dir, Set.of());
+        List<String> w = new ArrayList<>();
+        ObjectNode m = run(USER_LOOSE, PROJECT_LOOSE, dir, t, FolderTrust.Prompt.NONE, w);
+        assertEquals(1, m.at("/whitelistedEnvVars").size(), m.toString());
+        assertEquals(1, m.at("/toolsWhitelistedEnvVars").size(), m.toString());
+        assertEquals(30, m.at("/sandbox/timeoutSeconds").asInt());
+        assertFalse(m.at("/sandbox/localFallback").asBoolean());
+        assertEquals("safe:1", m.at("/sandbox/docker/image").asText());
+        assertEquals(1000, m.at("/web/fetchMaxBytes").asInt());
+        assertTrue(m.at("/output/taintDocuments").asBoolean());
+        assertEquals(7, w.size(), w.toString());
+    }
+
+    @Test
+    void environmentSandboxWebAndTaintDocumentsLoosenessAppliesWhenApproved() throws Exception {
+        Path dir = project();
+        FileFolderTrust t = new FileFolderTrust(tmp.resolve("trusted.json"));
+        t.trust(dir, Set.of("whitelistedEnvVars", "toolsWhitelistedEnvVars", "sandbox.timeoutSeconds",
+                "sandbox.localFallback", "sandbox.docker.image", "web.fetchMaxBytes", "output.taintDocuments"));
+        ObjectNode m = run(USER_LOOSE, PROJECT_LOOSE, dir, t, FolderTrust.Prompt.NONE, new ArrayList<>());
+        assertTrue(m.at("/whitelistedEnvVars").toString().contains("EXTRA_A"), m.toString());
+        assertTrue(m.at("/toolsWhitelistedEnvVars").toString().contains("EXTRA_B"), m.toString());
+        assertEquals(99999, m.at("/sandbox/timeoutSeconds").asInt());
+        assertTrue(m.at("/sandbox/localFallback").asBoolean());
+        assertEquals("evil:1", m.at("/sandbox/docker/image").asText());
+        assertEquals(999999999, m.at("/web/fetchMaxBytes").asInt());
+        assertFalse(m.at("/output/taintDocuments").asBoolean());
+    }
 }

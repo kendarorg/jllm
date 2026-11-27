@@ -295,6 +295,134 @@ class MainTest {
         assertEquals(0, listed.exitCode());
     }
 
+    /** A project whose MCP server, when started, writes {@code started} next to the project; and the instruction files. */
+    private Path projectThatLeavesTracesWhenStarted() throws Exception {
+        Path src = tmp.resolve("Marker.java");
+        Files.writeString(src, "public class Marker { public static void main(String[] a) throws Exception {"
+                + " java.nio.file.Files.writeString(java.nio.file.Path.of(a[0]), \"started\"); } }");
+        Path java = Path.of(System.getProperty("java.home"), "bin", "java");
+        Path jllm = Files.createDirectories(project.resolve(".jllm"));
+        var servers = JSON.createObjectNode().putArray("mcpServers").addObject().put("name", "tracer")
+                .put("command", java.toString());
+        servers.putArray("args").add(src.toString()).add(tmp.resolve("started").toString());
+        Files.writeString(jllm.resolve("settings.json"), JSON.createObjectNode().set("mcpServers",
+                JSON.createArrayNode().add(servers)).toString());
+        return tmp.resolve("started");
+    }
+
+    @Test
+    void nothingOfAnUntrustedFolderStartsBeforeTheAnswerNorAfterARefusal() throws Throwable {
+        Path started = projectThatLeavesTracesWhenStarted();
+        CliSession s = untrustedCli().start(args());
+        s.await("Trust this folder? [y/N] ");
+        Thread.sleep(3000); // a server started before the answer would have left its mark by now
+        assertFalse(Files.exists(started), "no MCP server starts while the folder is undecided");
+        s.type("n");
+        assertEquals(RunReport.EXIT_FAILED, s.exitCode());
+        assertFalse(s.output().contains("tracer"), "the server was not even asked about: " + s.output());
+        cli.close();
+        CliSession unattended = untrustedCli().start(args("--prompt", "hi"));
+        assertEquals(RunReport.EXIT_FAILED, unattended.exitCode());
+        Thread.sleep(3000);
+        assertFalse(Files.exists(started), "no MCP server starts in a refused unattended run");
+    }
+
+    @Test
+    void aTrustedFolderStartsItsApprovedMcpServer() throws Throwable {
+        Path started = projectThatLeavesTracesWhenStarted();
+        CliSession s = cli().start(args());
+        s.await("define the MCP server 'tracer'");
+        s.await("Run it? [y/N] ");
+        s.type("y");
+        long end = System.currentTimeMillis() + 30_000;
+        while (!Files.exists(started) && System.currentTimeMillis() < end) Thread.sleep(100);
+        assertTrue(Files.exists(started), "the probe works: an approved server does start:\n" + s.output());
+        s.end();
+    }
+
+    private static final String[] INSTRUCTION_FILES = {"AGENTS.md", "CLAUDE.md", "KENDAR.md"};
+
+    /** Instruction files in the project, listed by absolute path in the user's settings. */
+    private void instructionFilesInTheProject() throws Exception {
+        var names = JSON.createArrayNode();
+        for (String f : INSTRUCTION_FILES) {
+            Files.writeString(project.resolve(f), "MARK-" + f.replace(".md", "") + "-TEXT");
+            names.add(project.resolve(f).toString());
+        }
+        Files.createDirectories(home.resolve(".jllm"));
+        Files.writeString(home.resolve(".jllm/settings.json"),
+                JSON.createObjectNode().set("instructionFiles", names).toString());
+    }
+
+    @Test
+    void instructionFilesOfADeclinedFolderAreNeverReadIntoAPrompt() throws Throwable {
+        instructionFilesInTheProject();
+        CliSession s = untrustedCli().start(args());
+        s.await("Trust this folder? [y/N] ");
+        s.type("n");
+        assertEquals(RunReport.EXIT_FAILED, s.exitCode());
+        assertTrue(server.requests.isEmpty(), "no model call, so no prompt");
+        for (String f : INSTRUCTION_FILES) {
+            assertFalse(s.output().contains("MARK-" + f.replace(".md", "")), f + " leaked: " + s.output());
+        }
+        cli.close();
+        CliSession unattended = untrustedCli().start(args("--prompt", "hello"));
+        assertEquals(RunReport.EXIT_FAILED, unattended.exitCode());
+        assertTrue(server.requests.isEmpty());
+    }
+
+    @Test
+    void instructionFilesOfATrustedFolderReachThePrompt() throws Throwable {
+        instructionFilesInTheProject();
+        CliSession s = cli().start(args("--prompt", "hello"));
+        s.await("echo: hello");
+        assertEquals(0, s.exitCode());
+        String sys = systemText(server.agentRequests().get(0));
+        for (String f : INSTRUCTION_FILES) {
+            assertTrue(sys.contains("MARK-" + f.replace(".md", "") + "-TEXT"), f + " in the prompt: " + sys);
+        }
+    }
+
+    @Test
+    void skipPermissionsDoesNotTrustAnUntrustedFolder() throws Throwable {
+        projectWithEverything();
+        CliSession headless = untrustedCli().start(args("--prompt", "PLEASE WRITE now", "--dangerously-skip-permissions"));
+        assertEquals(RunReport.EXIT_FAILED, headless.exitCode());
+        assertTrue(headless.output().contains("--trust-project"), headless.output());
+        assertTrue(server.requests.isEmpty());
+        assertFalse(Files.exists(project.resolve("out.txt")));
+        cli.close();
+        CliSession attended = untrustedCli().start(args("--dangerously-skip-permissions"));
+        attended.await("Trust this folder? [y/N] ");
+        attended.type("n");
+        assertEquals(RunReport.EXIT_FAILED, attended.exitCode());
+        assertTrue(server.requests.isEmpty());
+    }
+
+    @Test
+    void skipPermissionsDoesNotChangeTheSandboxBackend() throws Throwable {
+        CliSession plain = cli().start(args("--prompt", "one"));
+        plain.await("echo: one");
+        String plainBanner = bannerOf(plain.output());
+        assertEquals(0, plain.exitCode());
+        cli.close();
+        CliSession skipping = cli().start(args("--prompt", "two", "--dangerously-skip-permissions"));
+        skipping.await("echo: two");
+        assertEquals(0, skipping.exitCode());
+        assertEquals(plainBanner, bannerOf(skipping.output()), "same sandbox with the bypass");
+        assertFalse(plainBanner.contains("in a container"), plainBanner);
+        cli.close();
+        CliSession docker = cli().start(args("--prompt", "three", "--sandbox", "docker",
+                "--dangerously-skip-permissions"));
+        docker.await("echo: three");
+        assertTrue(bannerOf(docker.output()).contains("in a container"), "the flag of the backend still decides");
+    }
+
+    private static String bannerOf(String output) {
+        return output.lines().filter(l -> l.startsWith("project dir:"))
+                .map(l -> l.replaceFirst("project dir: \\S+", "")).findFirst().orElse("");
+    }
+
     @Test
     void unapprovedLooseningInATrustedFolderHasNoEffectUnattended() throws Throwable {
         Path jllm = Files.createDirectories(project.resolve(".jllm"));

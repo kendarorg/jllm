@@ -180,4 +180,37 @@ class LoginThrottleTest {
         assertEquals(0, small.begin("id:c"));
         assertEquals(1, small.size(), "everything had expired but the new one");
     }
+
+    @Test
+    void aLockIsNeverEvictedToMakeRoom() {
+        LoginThrottle small = new LoginThrottle(clock, 3);
+        for (int i = 0; i < 3; i++) {
+            assertEquals(0, small.begin("id:victim"));
+            small.failure("id:victim");
+        }
+        assertTrue(small.lockedFor("id:victim") > 0);
+        for (String k : new String[]{"id:a", "id:b", "id:c", "id:d", "id:e"}) {
+            assertEquals(0, small.begin(k), "unlocked keys are evicted instead: " + k);
+        }
+        assertTrue(small.lockedFor("id:victim") > 0, "the lock survived the flood");
+        assertTrue(small.begin("id:victim") > 0);
+    }
+
+    @Test
+    void aTableFullOfLocksRefusesNewKeysUntilOneExpires() {
+        LoginThrottle small = new LoginThrottle(clock, 2);
+        for (String k : new String[]{"id:a", "id:b"}) {
+            for (int i = 0; i < 3; i++) {
+                assertEquals(0, small.begin(k));
+                small.failure(k);
+            }
+        }
+        long wait = small.begin("id:new");
+        assertTrue(wait > 0, "refused: no slot without evicting a lock");
+        assertEquals(2, small.size());
+        assertTrue(small.lockedFor("id:a") > 0 && small.lockedFor("id:b") > 0);
+
+        clock.advance(LoginThrottle.USER_LOCK.plusSeconds(1));
+        assertEquals(0, small.begin("id:new"), "a slot is free once the locks have expired");
+    }
 }

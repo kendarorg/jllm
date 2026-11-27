@@ -12,10 +12,13 @@ public class ShellAgentTools implements HarnessToolSet {
 
     private final SandboxExecutor sandbox;
     private final HarnessConfig config;
+    private final AddressPolicy addresses;
 
-    public ShellAgentTools(SandboxExecutor sandbox, HarnessConfig config) {
+    /** @param addresses the SSRF guard ({@code web.blockLocalHost}, {@code web.blockExtraAddresses}), applied to the command lines of a sandbox with network access */
+    public ShellAgentTools(SandboxExecutor sandbox, HarnessConfig config, AddressPolicy addresses) {
         this.sandbox = sandbox;
         this.config = config;
+        this.addresses = addresses;
     }
 
     /** The shell syntax lives here, not in the system prompt: a chat without the tool hears nothing about a shell. */
@@ -36,6 +39,10 @@ public class ShellAgentTools implements HarnessToolSet {
             int secs = in.path("timeout_seconds").asInt(config.sandbox().timeoutSeconds());
             Duration timeout = Duration.ofSeconds(Math.clamp(secs, 1, 600));
             String command = in.path("command").asText();
+            if (addresses.blocksAnything() && sandbox.networkAccess(ctx.chatId())) {
+                String refused = ShellAddresses.blocked(command, addresses);
+                if (refused != null) return refused;
+            }
             ExecutionResult r = sandbox.execute(ctx.chatId(), ctx.scratchDir(), ctx.readOnlyWork(), command, timeout);
             StringBuilder sb = new StringBuilder();
             sb.append("exit code: ").append(r.exitCode());

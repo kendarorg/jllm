@@ -20,8 +20,10 @@ import java.util.Map;
  * up, {@link #success} forgets a login. The count of an address is never refunded by a success, so valid sign-ins of
  * an attacker's own account do not buy extra guesses. The attempts of a key expire when its window has passed.
  *
- * <p>In memory, and bounded: at most {@link #MAX_ENTRIES} keys; when full, the expired ones go first, then the oldest.
- * A restart clears every lock.
+ * <p>In memory, and bounded: at most {@link #MAX_ENTRIES} keys; when full, the expired ones go first, then the oldest
+ * unlocked ones. A lock is never evicted to make room: when every key is locked, an attempt for a new key is refused
+ * (for as long as the earliest lock lasts) rather than letting a flood of keys wash a lock out. A restart clears every
+ * lock.
  */
 public final class LoginThrottle {
 
@@ -82,8 +84,7 @@ public final class LoginThrottle {
             return 1;
         }
         State next = s == null ? new State(1, now.plus(window(key)), null) : new State(s.attempts() + 1, s.windowEnds(), null);
-        put(key, next, now);
-        return 0;
+        return put(key, next, now);
     }
 
     /** The attempt of {@link #begin} was wrong: when the attempts of the key are used up, it is locked. */
@@ -151,20 +152,25 @@ public final class LoginThrottle {
         return Math.max(1, Duration.between(now, until).toSeconds());
     }
 
-    private void put(String key, State s, Instant now) {
+    /** @return 0 when stored; else the seconds until a lock ends and a slot frees (the table is full of locks) */
+    private long put(String key, State s, Instant now) {
+        boolean known = states.containsKey(key);
         states.remove(key); // re-inserted last: the oldest keys are first
-        if (states.size() >= maxEntries) {
+        if (!known && states.size() >= maxEntries) {
             for (Iterator<State> it = states.values().iterator(); it.hasNext(); ) {
                 State e = it.next();
                 Instant end = e.lockedUntil() != null ? e.lockedUntil() : e.windowEnds();
                 if (!now.isBefore(end)) it.remove();
             }
-            Iterator<String> oldest = states.keySet().iterator();
-            while (states.size() >= maxEntries && oldest.hasNext()) {
-                oldest.next();
-                oldest.remove();
+            for (Iterator<State> it = states.values().iterator(); it.hasNext() && states.size() >= maxEntries; ) {
+                if (it.next().lockedUntil() == null) it.remove(); // never a lock
+            }
+            if (states.size() >= maxEntries) {
+                Instant first = states.values().stream().map(State::lockedUntil).min(Instant::compareTo).orElse(now);
+                return seconds(now, first);
             }
         }
         states.put(key, s);
+        return 0;
     }
 }

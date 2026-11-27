@@ -47,7 +47,7 @@ class BashTruncationTest {
         Files.writeString(gen, "public class Gen { public static void main(String[] a) {\n"
                 + "for (int i = 1; i <= 100000; i++) System.out.println(String.format(\"line-%06d \", i) + \"x\".repeat(40));\n"
                 + "System.exit(7); } }\n");
-        var bash = new ShellAgentTools(sandbox, config(base)).tools().get(0);
+        var bash = new ShellAgentTools(sandbox, config(base), org.kendar.llm.harness.tools.AddressPolicy.OPEN).tools().get(0);
         Path scratch = Files.createDirectories(base.resolve("scratch"));
         ToolContext ctx = new ToolContext("c1", sandbox.workDir("c1"), scratch, false, "t1");
         String java = Path.of(System.getProperty("java.home"), "bin", "java").toString().replace("\\", "/");

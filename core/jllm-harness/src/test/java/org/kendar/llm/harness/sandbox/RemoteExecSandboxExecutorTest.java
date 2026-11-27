@@ -122,6 +122,61 @@ class RemoteExecSandboxExecutorTest {
     }
 
     @Test
+    void cliContainerMountsTheProtectedPartsOfTheProjectReadOnlyAfterTheProjectMount() throws Exception {
+        Path project = Files.createDirectories(tmp.resolve("project"));
+        Files.createDirectories(project.resolve(".git/hooks"));
+        Files.writeString(project.resolve(".git/config"), "[core]");
+        Files.createDirectories(project.resolve(".jllm/scratchpad"));
+        cli(project).execute("c1", "true", Duration.ofSeconds(30));
+        List<String> create = docker.first("create");
+        String projectMount = DockerHosts.mountSource(project) + ":" + RemoteExecSandboxExecutor.WORKSPACE;
+        int at = create.indexOf(projectMount);
+        assertTrue(at > 0, projectMount + " in " + create);
+        assertEquals("-v", create.get(at - 1));
+        for (String dst : List.of("/workspace/.git/hooks", "/workspace/.git/config", "/workspace/.jllm")) {
+            int m = -1;
+            for (int i = 0; i < create.size(); i++) {
+                if (create.get(i).startsWith("type=bind,") && create.get(i).contains(",dst=" + dst + ",readonly")) m = i;
+            }
+            assertTrue(m > at, dst + " read-only mount after the project mount: " + create);
+            assertEquals("--mount", create.get(m - 1));
+        }
+        assertTrue(create.stream().anyMatch(a -> a.contains(",dst=/workspace/.jllm/scratchpad")
+                && !a.endsWith("readonly")), "scratchpad stays writable: " + create);
+    }
+
+    @Test
+    void aCliCommandThatChangesProtectedProjectFilesIsUndoneAndWarnedAbout() throws Exception {
+        Path project = Files.createDirectories(tmp.resolve("project"));
+        Path hook = Files.createDirectories(project.resolve(".git/hooks")).resolve("pre-commit");
+        Files.writeString(hook, "original");
+        Files.writeString(project.resolve(".git/config"), "[core]");
+        List<String> warnings = new CopyOnWriteArrayList<>();
+        RemoteExecSandboxExecutor box = cli(project).onWarning(warnings::add);
+        String target = hook.toAbsolutePath().toString().replace('\\', '/');
+        ExecutionResult r = box.execute("c1", "echo evil > '" + target + "'", Duration.ofSeconds(30));
+        assertEquals(0, r.exitCode(), r.stderr());
+        assertEquals("original", Files.readString(hook), "restored");
+        assertTrue(warnings.stream().anyMatch(w -> w.contains("protected project files") && w.contains("pre-commit")),
+                warnings.toString());
+    }
+
+    @Test
+    void theDefaultFallbackRunnerIsTheSharedLocalSandboxNeverThePlainHost() throws Exception {
+        allowFallback(true);
+        RemoteExecSandboxExecutor box = cli(Files.createDirectories(tmp.resolve("project")));
+        boolean linux = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("linux");
+        if (!box.allowLocalFallback("c1")) {
+            assertTrue(linux, "only a Linux without a working bwrap refuses");
+            assertFalse(box.localFallbackActive("c1"));
+            return;
+        }
+        var f = RemoteExecSandboxExecutor.class.getDeclaredField("local");
+        f.setAccessible(true);
+        assertInstanceOf(SharedLocalSandbox.class, f.get(box));
+    }
+
+    @Test
     void cliContainerIsReusedAndRecreatedWhenTheConfigChanges() throws Exception {
         Path project = Files.createDirectories(tmp.resolve("project"));
         cli(project).execute("c1", "true", Duration.ofSeconds(30));
@@ -405,6 +460,66 @@ class RemoteExecSandboxExecutorTest {
         ExecutionResult r = web(base).execute("chat-1", "cat keep.txt", Duration.ofSeconds(30));
         assertEquals("kept", r.stdout().strip());
         assertEquals(2, docker.count("create"));
+    }
+
+    private static byte[] zipOf(String... namesAndContents) throws IOException {
+        var out = new java.io.ByteArrayOutputStream();
+        try (var z = new java.util.zip.ZipOutputStream(out)) {
+            for (int i = 0; i < namesAndContents.length; i += 2) {
+                z.putNextEntry(new java.util.zip.ZipEntry(namesAndContents[i]));
+                z.write(namesAndContents[i + 1].getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                z.closeEntry();
+            }
+        }
+        return out.toByteArray();
+    }
+
+    private static List<String> entriesOf(byte[] zip) throws IOException {
+        List<String> names = new ArrayList<>();
+        try (var z = new java.util.zip.ZipInputStream(new java.io.ByteArrayInputStream(zip))) {
+            for (var e = z.getNextEntry(); e != null; e = z.getNextEntry()) names.add(e.getName());
+        }
+        return names;
+    }
+
+    @Test
+    void unpackNeverWritesGitOrJllmContentToTheHost() throws Exception {
+        byte[] zip = zipOf("ok.txt", "ok", ".git/hooks/pre-commit", "evil", ".git/config", "evil", ".git/", "",
+                ".jllm/settings.json", "evil", "sub/.git/x", "kept", WorkspaceArchive.EXEC_MANIFEST,
+                ".git/hooks/pre-commit\nok.txt");
+        Path dst = tmp.resolve("dst");
+        assertEquals(2, WorkspaceArchive.unpack(zip, dst));
+        assertTrue(Files.isRegularFile(dst.resolve("ok.txt")));
+        assertFalse(Files.exists(dst.resolve(".git")), "no .git comes back");
+        assertFalse(Files.exists(dst.resolve(".jllm")));
+        assertTrue(Files.isRegularFile(dst.resolve("sub/.git/x")), "only the project's own .git is protected");
+    }
+
+    @Test
+    void withoutHostProtectedDropsGitAndJllmEntriesAndTrimsTheManifest() throws Exception {
+        byte[] zip = zipOf("ok.txt", "ok", ".git/hooks/pre-commit", "evil", ".git/", "", ".jllm/a", "evil",
+                WorkspaceArchive.EXEC_MANIFEST, ".git/hooks/pre-commit\nok.txt\n.jllm/a");
+        byte[] clean = WorkspaceArchive.withoutHostProtected(zip);
+        assertEquals(List.of("ok.txt", WorkspaceArchive.EXEC_MANIFEST), entriesOf(clean));
+        try (var z = new java.util.zip.ZipInputStream(new java.io.ByteArrayInputStream(clean))) {
+            z.getNextEntry();
+            z.getNextEntry();
+            assertEquals("ok.txt", new String(z.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8));
+        }
+    }
+
+    @Test
+    void webBackupKeepsNoGitOrJllmContent() throws Exception {
+        remoteConfig();
+        Path base = Files.createDirectories(tmp.resolve("web"));
+        RemoteExecSandboxExecutor box = web(base);
+        box.execute("chat-1", "mkdir -p .git/hooks .jllm && echo x > .git/hooks/pre-commit && echo y > .jllm/s.json"
+                + " && echo kept > keep.txt", Duration.ofSeconds(30));
+        box.close();
+        byte[] zip = Files.readAllBytes(base.resolve("chat-1/.jllm/workspace-backup.zip"));
+        List<String> names = entriesOf(zip);
+        assertTrue(names.contains("keep.txt"), names.toString());
+        assertTrue(names.stream().noneMatch(n -> n.startsWith(".git/") || n.startsWith(".jllm/")), names.toString());
     }
 
     @Test
