@@ -6,7 +6,7 @@ import java.util.Set;
 public final class OidcException extends Exception {
 
     public static final Set<String> CODES = Set.of("denied", "invalid_token", "unknown_user", "domain_not_allowed",
-            "email_not_verified", "expired");
+            "email_not_verified", "expired", "no_role");
 
     private final String code;
 

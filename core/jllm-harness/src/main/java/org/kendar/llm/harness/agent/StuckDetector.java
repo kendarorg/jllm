@@ -90,6 +90,11 @@ final class StuckDetector {
         return detections;
     }
 
+    /** A confirming model judged the detection to be progress: it does not count toward stopping. */
+    void dismiss() {
+        detections = Math.max(0, detections - 1);
+    }
+
     /** Forgets the steps seen (after a nudge or when the user lets the agent go on). */
     void reset() {
         steps.clear();
@@ -115,6 +120,8 @@ final class StuckDetector {
             JsonNode r = byId.get(id);
             String out = r == null ? "" : text(r.path("content"));
             boolean error = r != null && r.path("is_error").asBoolean(false);
+            // a status check that returns the same result while waiting is not a loop; its failures still count
+            if (!error && cfg.polling().contains(use.path("name").asText())) continue;
             boolean malformed = error && MALFORMED.stream().anyMatch(out::startsWith);
             calls.add(new Call(use.path("name").asText(), hash(canonical(use.path("input"))), error, hash(out),
                     malformed));

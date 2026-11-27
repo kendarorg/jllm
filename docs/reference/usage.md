@@ -96,6 +96,20 @@ a missing explicit file is an error. Objects are merged key by key; arrays (`mcp
 `instructionFiles`, ...) and scalars of a later file replace the earlier value. Keep API keys in the global file.
 `${ENV_VAR}` is expanded after merging. `permissions.deny` is the exception: the union of every layer. The project file cannot set `tokenStore` nor name a literal client secret. Embedding: `HarnessSettingsLoader.loadLayered(source, projectDir, env, prompt, trust, warn, contentWarnings)` with a `SettingsSource` (`FileSettingsSource`).
 
+**Stored settings (web).** The settings an administrator edits at runtime (global options such as the role mapping,
+later the providers and the docker host) are kept by a `SettingsSink`, one JSON value per top-level section:
+`webauth/stored-settings.json` with `jllm.store=file`, table `settings_section` with SQL. A write replaces one section
+whole and is atomic (files: temporary file then move; SQL: one transaction); a section the server does not know is kept
+as it is. Precedence: a stored value wins over the initial value from the settings files and the properties. In the
+harness settings the sections are a fourth layer, `STORED`, after the explicit file and merged like the others (objects
+per key, arrays and scalars replaced, `permissions.deny` united); the harness takes it when it is built. An option read
+from its section directly takes the stored section when there is one, else its property. Readers see a write at once
+(the sink swaps an in-memory snapshot after the store has it; what a running chat holds does not change). Secrets are
+never stored as plain values: a secret field holds an `env:NAME` reference, read from the environment where it is used.
+A section whose name starts with `web.` (such as `web.roleMapping`, the [role mapping](../enterprise/idp-role-mapping.md)
+options) belongs to the web server: it is left out of the `STORED` layer, so the harness never reads it nor reports it
+as an unknown setting.
+
 Every key is optional. `${ENV_VAR}` is expanded in every string; a missing variable fails the load. Unknown keys are
 ignored.
 
@@ -129,7 +143,8 @@ ignored.
                  "scope": {"offloadChars": 20000, "overflowOffloadChars": 2000, "previewChars": 1500,
                            "safetyPercent": 2, "reserveCap": 0}},
   "output":     {"toolMaxChars": 30000, "eventMaxChars": 2000, "validation": "lenient"},
-  "loop":       {"stuck": {"enabled": true, "repeat": 3, "alternationCycles": 3, "malformed": 3},
+  "loop":       {"stuck": {"enabled": true, "repeat": 3, "alternationCycles": 3, "malformed": 3,
+                           "polling": [], "wrapUp": true, "confirm": false},
                  "verify": {"maxReentries": 3}, "innerCallsPerTurn": 10},
   "hooks":      {"stop": [{"command": "mvn -q test", "timeoutSeconds": 600, "agents": ["main"],
                            "onlyIfChanged": true, "maxOutputChars": 8000}]},
@@ -161,8 +176,8 @@ ignored.
 | `files.scopedInstructions` | default `true`: when a file tool (`read_file`, `write_file`, `edit_file`, `ls`, `glob`, `grep`, `grep_code`) works on a path inside the work dir, the files with the `instructionFiles` names found in each directory from the work dir down to that path are added to the conversation, once per chat. See [SKILLS §3](../guides/skills.md#3-directory-scoped-instruction-files). `false` turns it off |
 | `files.scopedInstructionsDepth` | default `8`: directory levels below the work dir looked at for scoped instruction files; deeper directories are ignored |
 | `web.fetchMaxBytes` | default `5242880` (5 MB): largest response body `web_fetch` reads; `<= 0` = default |
-| `web.blockLocalHost` | default `false`: `true` makes `web_fetch` and `web_download` refuse loopback, link-local (cloud metadata), site-local, any-local and IPv6 unique-local addresses, redirects included. See [tools §6](../guides/tools.md#6-output-limits) |
-| `web.blockExtraAddresses` | default `[]`: further IPs, CIDRs, host names or `*.suffix` to refuse. DNS rebinding between the check and the connection is not covered |
+| `web.blockLocalHost` | default `false`: `true` makes `web_fetch` and `web_download` refuse loopback, link-local (cloud metadata), private, shared (100.64.0.0/10), reserved, multicast and IPv6 unique-local addresses (also inside IPv6 forms carrying an IPv4), redirects included. See [tools §6](../guides/tools.md#6-output-limits) |
+| `web.blockExtraAddresses` | default `[]`: further IPs, CIDRs, host names or `*.suffix` to refuse. With any block active an unresolvable name is refused and the checked address is the one connected to |
 | `context.noiseCommands` | default `true`: after a run, shell commands that add no information (`mkdir`, `rm`, `cd`, ...) are replaced in the context by a stub, see [INTERNALS §9](internals.md#noise-commands). `false` turns it off |
 | `context.todos` | default `true`: offer `todo_write` and `todo_read` with every context strategy (`false` hides them, except with `scope`), plus a short system-prompt section about them. The list is saved per chat and agent in the `StateStore` (`<history>/<chat>/state/todos-<agent>.json` in the CLI and web), so it survives a resume. The `scope` strategy always offers them, whatever this setting, and also shows the list in every request ([CACHES §5](caches.md#5-scope-strategy)) |
 | `context.deferCompactionOnThinkingOverflow` | Anthropic extended thinking, default `false`. Compaction rewrites history, which voids the signed thinking blocks (API 400 "Invalid `signature` in `thinking` block"). `false`: finished turns lose their thinking blocks; if compaction fires in the middle of a tool loop, thinking is switched off for the rest of that turn. `true`: compaction is skipped while the turn in progress holds thinking blocks, so thinking stays on but the prompt can exceed the budget until the turn ends. **This can incur increased charges** (larger prompts, and a rewrite after the turn invalidates the prompt cache) |
@@ -170,7 +185,7 @@ ignored.
 | `output.toolMaxChars` | tool output kept in the context; the rest is cut with `[truncated N chars]` (the head is kept, the tail for `bash`) |
 | `output.eventMaxChars` | tool output carried by the `tool_result` event to the front end |
 | `output.validation` | check of tool-call arguments against the tool schema: `off`, `lenient` (default, repairs `"5"` for 5 and `null` for optional fields) or `strict`; `/validation` overrides it per chat, see [TOOLS §5](../guides/tools.md#5-one-tool-call) |
-| `loop.stuck.*` | stuck detection, see [Stuck detection](#stuck-detection). `enabled` (default `true`), `repeat` (3: the same calls with the same results, or the same failing call, in a row), `alternationCycles` (3: A-B-A-B), `malformed` (3: responses whose calls cannot run: unknown tool, invalid arguments, cut off) |
+| `loop.stuck.*` | stuck detection, see [Stuck detection](#stuck-detection). `enabled` (default `true`), `repeat` (3: the same calls with the same results, or the same failing call, in a row), `alternationCycles` (3: A-B-A-B), `malformed` (3: responses whose calls cannot run: unknown tool, invalid arguments, cut off), `polling` (tools whose successful calls are not counted), `wrapUp` (default `true`: a stuck run gets a last turn without tools), `confirm` (default `false`: the fast model confirms a detection first) |
 | `loop.verify.maxReentries` | default `3`: how many times a `STOP` hook may send the agent back to work before the run ends `unverified` |
 | `loop.innerCallsPerTurn` | default `10`: how many tool calls made from inside a `run_js` script count as one model turn against `maxTurns`; zero or less turns the counting off. See [JS limits](../guides/js.md#limits) |
 | `plugins.js.*` | `run_js` plugin: `enabled` and `settings` (`engine`, `policy`, `statementLimit`, `maxTimeoutSeconds`, `maxWallSeconds`, `gracefulSeconds`, `maxInnerCalls` (default `200`), `maxConcurrentRuns`, `maxHeapMemory`, `maxIsolateMemory`, `maxStackFrames`); defaults and meaning in [the JS guide](../guides/js.md#limits) |
@@ -366,9 +381,27 @@ edit followed by a test run is not a loop unless the edit is identical each time
 
 - First time: a note is added after the tool results ("stop repeating it, try a different approach or explain what
   blocks you") and a `stuck` event with `action: "nudge"` is sent.
-- Second time in the same run: the CLI and the web UI ask (`approval_request` of type `stuck`): continue, or stop.
-  A sub-agent stops at once and its `task` result has status `stuck`.
-- A run that stops this way ends with `run_finished {outcome: "stuck"}`.
+- Second time in the same run: the CLI and the web UI ask (`approval_request` of type `stuck`): continue
+  (`action: "continue"`), or stop. A headless run and a sub-agent do not ask.
+- Stop: with `wrapUp` on (the default) the agent gets one more turn with tool use off (`tool_choice: none`) and the
+  note "Tool use is now off. Answer with what you have: what you did, what you found, and what is still missing"
+  (`action: "wrap_up"`). Its answer is the run's answer; a call it makes anyway is answered "Not executed" and not
+  run. With `wrapUp: false` the run ends at once (`action: "stop"`).
+- A run that stops this way ends with `run_finished {outcome: "stuck"}`; a sub-agent's `task` result has status
+  `stuck` and carries the wrap-up answer.
+
+Polling. A status check that returns the same result while a job runs is the same step each time, and three of
+them in a row would be a loop. List such tools in `polling`: their successful calls are left out of the comparison
+(a step made only of them is not recorded). A failing call of a polling tool still counts, so the same error three
+times is still `same_error`. The turn limit still bounds an agent that polls forever.
+
+Confirmation. With `confirm: true` and a fast model configured (`fastModel`), every detection is first shown to the
+fast model: the detector's sentence and the last 12 messages of the run (text, tool calls and results, each clipped
+to 400 characters). When it answers `progress`, the detection is dropped and does not count toward the stop
+(`action: "dismissed"`, with its `reason`); otherwise, or on a timeout (20 s), an error or an unclear answer, the
+detection stands. The model only sees what the detector flagged, never every step. Tool results reach it and are
+untrusted: a result written to look like progress can keep an agent going until the turn limit, never past it.
+Without a fast model `confirm` has no effect.
 
 `loop.stuck.enabled: false` turns it off: only the turn limit stops a looping agent.
 
@@ -494,7 +527,7 @@ only holds the default SQLite file).
 | `jllm.sql.driver-dir` | folder of the MySQL/PostgreSQL driver jar; default `lib-ext`, then `.downloaded-libs/<db>/<version>` |
 | `JLLM_TOKEN_KEY` (environment) | encrypts stored OAuth tokens; unset = in clear |
 
-MySQL and PostgreSQL are experimental until run against a real server and their drivers are not bundled: run
+MySQL and PostgreSQL drivers are not bundled: run
 `scripts/setup` (checkout) or `setup` / `fetch-sql-driver` (release); see the
 [starter README](../../web/jllm-sql-spring-starter/README.md). Plain JDBC: no JPA, Hibernate or Spring Data.
 

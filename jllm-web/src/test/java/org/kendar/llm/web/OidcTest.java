@@ -17,6 +17,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.kendar.llm.harness.hooks.HookContext;
 import org.kendar.llm.web.commons.auth.AuthApi;
 import org.kendar.llm.web.commons.auth.CookieAuthentication;
 import org.kendar.llm.web.commons.auth.OidcClient;
@@ -36,10 +37,8 @@ import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
-import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.LinkedHashMap;
@@ -70,26 +69,9 @@ class OidcTest {
     private volatile JWKSet jwks;
     private volatile int tokenStatus = 200;
     private WebauthFixture f;
-    private MutableClock clock;
-
-    static final class MutableClock extends Clock {
-        volatile Instant now = Instant.now();
-
-        @Override
-        public java.time.ZoneId getZone() {
-            return ZoneOffset.UTC;
-        }
-
-        @Override
-        public Clock withZone(java.time.ZoneId zone) {
-            return this;
-        }
-
-        @Override
-        public Instant instant() {
-            return now;
-        }
-    }
+    private WebauthFixture.MutableClock clock;
+    /** What the sign-in raised to the hooks. */
+    private final List<HookContext> events = new ArrayList<>();
 
     @BeforeEach
     void start() throws Exception {
@@ -116,7 +98,7 @@ class OidcTest {
         });
         server.start();
         f = new WebauthFixture(dir);
-        clock = new MutableClock();
+        clock = f.clock;
     }
 
     @AfterEach
@@ -143,7 +125,8 @@ class OidcTest {
         UnaryOperator<String> env = n -> "IDP_SECRET".equals(n) ? SECRET : null;
         OidcClient client = new OidcClient(p, "http://127.0.0.1:8080", env, WebauthFixture.MAPPER,
                 java.net.http.HttpClient.newHttpClient(), clock);
-        OidcApi c = new OidcApi(p, client, f.users, f.sessions, f.throttle, clock);
+        OidcApi c = new OidcApi(p, client, f.users, f.sessions, f.throttle, f.roleMapping, f.permissions, events::add,
+                clock);
         CookieAuthentication auth = new CookieAuthentication(f.users, f.sessions);
         return MockMvcBuilders.standaloneSetup(new OidcController(c),
                 new AuthController(new AuthApi(f.users, auth, f.sessions, f.throttle, p)))
@@ -474,5 +457,261 @@ class OidcTest {
                 "env:S", null, null, false, null));
         OidcClient c = new OidcClient(p, "https://j", n -> "x", WebauthFixture.MAPPER);
         assertTrue(assertThrows(java.io.IOException.class, c::discover).getMessage().contains("https"));
+    }
+
+    // ---- role mapping
+
+    /** Signs in with extra claims; the callback's answer. */
+    private MockHttpServletResponse signInWith(MockMvc mvc, String sub, String email,
+                                               UnaryOperator<JWTClaimsSet.Builder> extra) throws Exception {
+        Started s = begin(mvc);
+        idToken = sign(extra.apply(claims(s.nonce(), sub, email)).build());
+        return callback(mvc, s.state(), s.binding());
+    }
+
+    private MockHttpServletResponse signInWithGroups(MockMvc mvc, String sub, String email, Object groups)
+            throws Exception {
+        return signInWith(mvc, sub, email, b -> b.claim("groups", groups));
+    }
+
+    /** The user of the session the answer opened. */
+    private String userOf(MockHttpServletResponse r) {
+        assertNull(error(r), r.getHeader("Location"));
+        Cookie c = r.getCookie(CookieAuthentication.COOKIE);
+        assertNotNull(c);
+        return f.sessions.find(c.getValue()).orElseThrow();
+    }
+
+    private void mapping(String json) throws Exception {
+        f.roleMapping.put(WebauthFixture.MAPPER.readTree(json));
+    }
+
+    private void idp(String role, String json) throws Exception {
+        org.kendar.llm.harness.identity.Role r = f.permissions.role(role).orElseThrow();
+        f.permissions.save(r.withSetting("idp", WebauthFixture.MAPPER.readTree(json)));
+    }
+
+    private String roleOf(String user) {
+        return f.users.find(user).orElseThrow().role();
+    }
+
+    /** rita (no password of her own) linked to {@code sub-r} with the mapping off; the events cleared. */
+    private MockMvc ritaLinked(boolean provision) throws Exception {
+        f.users.setEmail("rita", "rita@example.com");
+        MockMvc mvc = mvc(props("both", provision, List.of()));
+        assertEquals("rita", signInAs(mvc, "sub-r", "rita@example.com"));
+        assertTrue(f.users.find("rita").orElseThrow().passwordless());
+        events.clear();
+        return mvc;
+    }
+
+    @Test
+    void mappingOffChangesNothing() throws Exception {
+        idp("guest", "{\"groups\":[\"eng\"],\"priority\":1}");
+        MockMvc mvc = ritaLinked(true);
+        f.users.setRole("rita", "guest");
+        assertEquals("rita", userOf(signInWithGroups(mvc, "sub-r", "rita@example.com", List.of("staff"))));
+        assertEquals("guest", roleOf("rita")); // not reset to the default role
+        assertEquals("ann", userOf(signInWithGroups(mvc, "s1", "ann@example.com", List.of("eng"))));
+        assertEquals("reader", roleOf("ann")); // the default role: the idp setting is inert
+        assertTrue(events.isEmpty());
+        // nor is the session limited
+        mapping("{\"maxAge\":\"1h\"}");
+        String token = signInWithGroups(mvc, "sub-r", "rita@example.com", List.of())
+                .getCookie(CookieAuthentication.COOKIE).getValue();
+        clock.now = clock.now.plus(Duration.ofHours(2));
+        assertEquals("rita", f.sessions.find(token).orElseThrow());
+    }
+
+    @Test
+    void provisioningUsesTheMappedRoleAndRaisesTheEvent() throws Exception {
+        mapping("{\"enabled\":true}");
+        idp("guest", "{\"groups\":[\"team-*\"],\"priority\":5}");
+        MockMvc mvc = mvc(props("oidc", true, List.of()));
+        assertEquals("ann", userOf(signInWithGroups(mvc, "s1", "ann@example.com", List.of("other", "team-a"))));
+        assertEquals("guest", roleOf("ann"));
+        assertEquals(1, events.size());
+        HookContext e = events.get(0);
+        assertEquals(org.kendar.llm.harness.hooks.HookEvent.ROLE_CHANGED, e.event());
+        assertEquals("ann", e.input().path("user").asText());
+        assertTrue(e.input().path("from").isNull());
+        assertEquals("guest", e.input().path("to").asText());
+        assertEquals("team-a", e.input().path("group").asText());
+        // no match: the default role
+        assertEquals("bob", userOf(signInWithGroups(mvc, "s2", "bob@example.com", List.of("nothing"))));
+        assertEquals("reader", roleOf("bob"));
+    }
+
+    @Test
+    void existingUserIsPromotedAndDemotedWithAnAuditEvent() throws Exception {
+        MockMvc mvc = ritaLinked(false);
+        mapping("{\"enabled\":true,\"onNoMatch\":\"keep\"}");
+        idp("guest", "{\"groups\":[\"eng\"],\"priority\":10}");
+        idp("reader", "{\"groups\":[\"staff\"],\"priority\":20}");
+        userOf(signInWithGroups(mvc, "sub-r", "rita@example.com", List.of("staff")));
+        assertEquals("reader", roleOf("rita"));
+        assertTrue(events.isEmpty()); // no change, no event
+        userOf(signInWithGroups(mvc, "sub-r", "rita@example.com", List.of("staff", "eng")));
+        assertEquals("guest", roleOf("rita")); // the lower priority wins
+        assertEquals(1, events.size());
+        assertEquals("reader", events.get(0).input().path("from").asText());
+        assertEquals("guest", events.get(0).input().path("to").asText());
+        assertEquals("eng", events.get(0).input().path("group").asText());
+        userOf(signInWithGroups(mvc, "sub-r", "rita@example.com", List.of("staff")));
+        assertEquals("reader", roleOf("rita"));
+        assertEquals(2, events.size());
+    }
+
+    @Test
+    void noMatchFollowsOnNoMatch() throws Exception {
+        MockMvc mvc = ritaLinked(true);
+        idp("reader", "{\"groups\":[\"staff\"]}");
+        f.users.setRole("rita", "guest"); // set by an admin
+
+        mapping("{\"enabled\":true,\"onNoMatch\":\"keep\"}");
+        userOf(signInWithGroups(mvc, "sub-r", "rita@example.com", List.of("nothing")));
+        assertEquals("guest", roleOf("rita")); // the admin-set role survives without a match
+        userOf(signInWithGroups(mvc, "sub-r", "rita@example.com", List.of("staff")));
+        assertEquals("reader", roleOf("rita")); // and is overwritten by a match
+
+        f.users.setRole("rita", "guest");
+        mapping("{\"onNoMatch\":\"default\"}");
+        userOf(signInWithGroups(mvc, "sub-r", "rita@example.com", List.of("nothing")));
+        assertEquals("reader", roleOf("rita")); // overwritten by the default role
+
+        f.users.setRole("rita", "guest");
+        mapping("{\"onNoMatch\":\"refuse\"}");
+        MockHttpServletResponse r = signInWithGroups(mvc, "sub-r", "rita@example.com", List.of("nothing"));
+        assertEquals("no_role", error(r));
+        Cookie none = r.getCookie(CookieAuthentication.COOKIE);
+        assertTrue(none == null || none.getValue().isEmpty());
+        assertEquals("guest", roleOf("rita"));
+        // a new user is not created
+        assertEquals("no_role", error(signInWithGroups(mvc, "s9", "zed@example.com", List.of("nothing"))));
+        assertTrue(f.users.find("zed").isEmpty());
+    }
+
+    @Test
+    void adminNeedsAllowAdminAndTheLastAdminIsKept() throws Exception {
+        MockMvc mvc = ritaLinked(false);
+        idp("admin", "{\"groups\":[\"ops\"],\"priority\":1}");
+        idp("guest", "{\"groups\":[\"ops\"],\"priority\":50}");
+        mapping("{\"enabled\":true,\"onNoMatch\":\"keep\"}");
+        userOf(signInWithGroups(mvc, "sub-r", "rita@example.com", List.of("ops")));
+        assertEquals("guest", roleOf("rita")); // admin skipped, the next match wins
+
+        mapping("{\"allowAdmin\":true}");
+        userOf(signInWithGroups(mvc, "sub-r", "rita@example.com", List.of("ops")));
+        assertEquals("admin", roleOf("rita"));
+
+        f.users.setRole("admin", "reader"); // rita is now the only admin
+        mapping("{\"onNoMatch\":\"default\"}");
+        userOf(signInWithGroups(mvc, "sub-r", "rita@example.com", List.of()));
+        assertEquals("admin", roleOf("rita")); // not demoted
+    }
+
+    @Test
+    void linkedUserWithAPasswordIsMappedOnProviderSignInOnly() throws Exception {
+        String pass = "A-long-pass-phrase-1";
+        f.users.setPassword("rita", org.kendar.llm.web.commons.auth.PasswordHasher.hash(pass));
+        f.users.setEmail("rita", "rita@example.com");
+        idp("guest", "{\"groups\":[\"eng\"]}");
+        mapping("{\"enabled\":true,\"onNoMatch\":\"refuse\"}");
+        MockMvc mvc = mvc(props("both", false, List.of()));
+        assertEquals("rita", userOf(signInWithGroups(mvc, "sub-r", "rita@example.com", List.of("eng"))));
+        assertFalse(f.users.find("rita").orElseThrow().passwordless());
+        assertEquals("guest", roleOf("rita")); // mapped, password or not
+        assertEquals(1, events.size());
+        assertEquals("reader", events.get(0).input().path("from").asText());
+
+        f.users.setRole("rita", "reader"); // set by an admin
+        events.clear();
+        f.signIn("rita", pass); // a password sign-in never runs the mapping
+        assertEquals("reader", roleOf("rita"));
+        assertTrue(events.isEmpty());
+
+        // a provider sign-in without a match is refused, password or not
+        assertEquals("no_role", error(signInWithGroups(mvc, "sub-r", "rita@example.com", List.of())));
+        assertEquals("reader", roleOf("rita"));
+    }
+
+    @Test
+    void lastAdminWithAPasswordIsNotDemotedThroughTheProvider() throws Exception {
+        String pass = "A-long-pass-phrase-1";
+        f.users.setPassword("admin", org.kendar.llm.web.commons.auth.PasswordHasher.hash(pass));
+        f.users.setEmail("admin", "admin@example.com");
+        idp("guest", "{\"groups\":[\"eng\"]}");
+        mapping("{\"enabled\":true}");
+        MockMvc mvc = mvc(props("both", false, List.of()));
+        assertEquals("admin", userOf(signInWithGroups(mvc, "sub-a", "admin@example.com", List.of("eng"))));
+        assertEquals("admin", roleOf("admin")); // the last admin keeps the role
+        assertTrue(events.isEmpty());
+        f.signIn("admin", pass);
+        assertEquals("admin", roleOf("admin"));
+    }
+
+    @Test
+    void unusableClaimsApplyOnNoMatch() throws Exception {
+        MockMvc mvc = ritaLinked(false);
+        idp("guest", "{\"groups\":[\"eng\"]}");
+        mapping("{\"enabled\":true,\"onNoMatch\":\"refuse\"}");
+        // missing
+        assertEquals("no_role", error(signInWith(mvc, "sub-r", "rita@example.com", b -> b)));
+        // oversized: more than 200 groups, or a group over 256 characters, even with a matching one
+        List<String> many = new ArrayList<>(List.of("eng"));
+        for (int i = 0; i < 200; i++) many.add("g" + i);
+        assertEquals("no_role", error(signInWithGroups(mvc, "sub-r", "rita@example.com", many)));
+        assertEquals("no_role", error(signInWithGroups(mvc, "sub-r", "rita@example.com",
+                List.of("eng", "x".repeat(257)))));
+        // Entra ID overage: no groups, a pointer to Graph that is never followed
+        assertEquals("no_role", error(signInWith(mvc, "sub-r", "rita@example.com", b -> b
+                .claim("_claim_names", Map.of("groups", "src1"))
+                .claim("_claim_sources", Map.of("src1", Map.of("endpoint", "https://graph.example/x"))))));
+        assertEquals("reader", roleOf("rita"));
+        // a usable claim still works
+        userOf(signInWithGroups(mvc, "sub-r", "rita@example.com", List.of("eng")));
+        assertEquals("guest", roleOf("rita"));
+    }
+
+    @Test
+    void claimFromAnotherIssuerIsRefused() throws Exception {
+        MockMvc mvc = ritaLinked(false);
+        idp("guest", "{\"groups\":[\"eng\"]}");
+        mapping("{\"enabled\":true}");
+        assertEquals("invalid_token", error(signInWith(mvc, "sub-r", "rita@example.com",
+                b -> b.issuer("http://evil").claim("groups", List.of("eng")))));
+        assertEquals("reader", roleOf("rita"));
+        assertTrue(events.isEmpty());
+    }
+
+    @Test
+    void stringAndDottedClaims() throws Exception {
+        MockMvc mvc = ritaLinked(false);
+        idp("guest", "{\"groups\":[\"eng\"]}");
+        mapping("{\"enabled\":true,\"onNoMatch\":\"default\"}");
+        userOf(signInWithGroups(mvc, "sub-r", "rita@example.com", "staff, eng"));
+        assertEquals("guest", roleOf("rita"));
+        mapping("{\"claim\":\"realm_access.roles\"}");
+        userOf(signInWithGroups(mvc, "sub-r", "rita@example.com", List.of("eng"))); // groups no longer read
+        assertEquals("reader", roleOf("rita"));
+        userOf(signInWith(mvc, "sub-r", "rita@example.com",
+                b -> b.claim("realm_access", Map.of("roles", List.of("eng")))));
+        assertEquals("guest", roleOf("rita"));
+    }
+
+    @Test
+    void maxAgeForcesANewSignIn() throws Exception {
+        MockMvc mvc = ritaLinked(false);
+        mapping("{\"enabled\":true,\"onNoMatch\":\"keep\",\"maxAge\":\"1h\"}");
+        MockHttpServletResponse r = signInWithGroups(mvc, "sub-r", "rita@example.com", List.of());
+        String token = r.getCookie(CookieAuthentication.COOKIE).getValue();
+        clock.now = clock.now.plus(Duration.ofMinutes(50));
+        assertEquals("rita", f.sessions.find(token).orElseThrow()); // used: it slides, but not past the hour
+        clock.now = clock.now.plus(Duration.ofMinutes(11));
+        assertTrue(f.sessions.find(token).isEmpty());
+        // a password sign-in has no such limit
+        Cookie local = f.signIn("gus");
+        clock.now = clock.now.plus(Duration.ofHours(5));
+        assertEquals("gus", f.sessions.find(local.getValue()).orElseThrow());
     }
 }

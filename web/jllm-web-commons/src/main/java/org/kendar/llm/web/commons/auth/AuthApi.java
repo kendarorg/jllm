@@ -71,7 +71,7 @@ public class AuthApi {
         }
         throttle.success(idKey);
         throttle.success(addressKey);
-        String token = sessions.create(user.get().id());
+        String token = sessions.create(user.get().id(), null);
         return Reply.status(200, visible(user.get()))
                 .cookie(sessionCookie(token, LoginSessionRepository.TTL.toSeconds(), secure));
     }

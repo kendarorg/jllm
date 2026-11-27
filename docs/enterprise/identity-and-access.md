@@ -23,10 +23,13 @@ A chat a user may not see answers 404, as if it did not exist.
 - **Password** sign-in with a sliding session cookie; the user's other sessions are revoked on a password change;
   five failed attempts lock a login or address for 30 s, and an unknown login and a wrong password give the same answer.
 - **OpenID Connect**: authorization code with PKCE against one provider (Entra, Keycloak, Okta, Google, ...). Optional
-  `allowed-domains`, linking by verified email, optional auto-provisioning with a fixed default role. Modes
+  `allowed-domains`, linking by verified email, optional auto-provisioning with a default role. Modes
   `password`, `oidc` or `both`. Setup: [jllm-web](../../jllm-web/README.md#sign-in-with-openid-connect).
+- **Role mapping** (off by default): the groups of the ID token pick the role at each sign-in, through an `idp` setting
+  on each role (groups, priority); never the admin role unless allowed, never the last admin demoted; a password sign-in never changes the role. A broker
+  (Keycloak) in front of a SAML provider works the same way. See [IdP role mapping](idp-role-mapping.md).
 - **Roles** are files listing tool patterns (`read_file`, `mcp__docs__*`, `billing__*`), an optional `readOnly` flag,
-  an `approval` setting, optional per-tool `toolPermissions` (allow, ask, deny) and a `sandbox` (`none` by default, `local`, `docker-isolated`, `docker-open`: where the role's users get files and a shell, see [Sandboxes](../guides/sandbox.md#the-web-a-sandbox-per-role)). One role per user, which must exist (SQL: foreign key `users.role` -> `roles`; files: checked in code). A role held by users cannot be deleted (409 naming them). `admin` always has every tool: only its approval, tool permissions and sandbox can change, and it cannot be removed.
+  an `approval` setting, optional per-tool `toolPermissions` (allow, ask, deny) and settings, free JSON per feature, among them a `sandbox` (`none` by default, `local`, `docker-isolated`, `docker-open`: where the role's users get files and a shell, see [Sandboxes](../guides/sandbox.md#the-web-a-sandbox-per-role)). One role per user, which must exist (SQL: foreign key `users.role` -> `roles`; files: checked in code). A role held by users cannot be deleted (409 naming them). `admin` always has every tool: only its approval, tool permissions and settings can change, and it cannot be removed.
 - **Narrowing, never widening**: a user can switch off tools and skills their role allows, but cannot add any.
 - **Own skills** per user, bounded in size and count.
 
@@ -40,10 +43,11 @@ A chat a user may not see answers 404, as if it did not exist.
 
 ## Not there yet
 
-- One OIDC provider, and no group or claim to role mapping: the provider never changes a role, so an administrator
-  assigns roles ([limits](roadmap-and-limits.md)).
+- One OIDC provider. Group to role mapping is evaluated at sign-in only: a group removed at the provider applies at
+  the next sign-in (bound it with `role-mapping.max-age`); no SCIM, no back-channel logout ([limits](roadmap-and-limits.md)).
 - Model credentials are global today; per-user model keys and OAuth are [in development](roadmap-and-limits.md#planned-per-user-model-credentials).
-- No SAML or SCIM. Put an OIDC bridge (Keycloak, Entra, Okta) in front of a SAML provider.
+- No SAML or SCIM. Put an OIDC bridge (Keycloak, Entra, Okta) in front of a SAML provider; its groups reach the
+  [role mapping](idp-role-mapping.md) when the bridge puts them in the ID token.
 - Users, roles, skills and sessions are stored in SQL (`jllm-sql-spring-starter`: SQLite, MySQL, PostgreSQL), as files
   (`jllm.store=file`) or in memory (sessions in file mode). The repository interfaces are in `jllm-harness`, so another
   implementation does not touch the controllers or the harness ([SQL starter](../../web/jllm-sql-spring-starter/README.md)).

@@ -122,4 +122,21 @@ class SettingsOverridesTest {
                 () -> SettingsOverrides.applyToSettings(args("external-links", "write"), HarnessSettings.empty()));
         assertTrue(CliArgs.USAGE.contains("--external-links none|read|readwrite"));
     }
+
+    @Test
+    void sandboxNoneIsTheLocalBackendAndNeedsAutoMode() {
+        assertTrue(SettingsOverrides.unconfined(args("sandbox", "none", "mode", "auto")));
+        assertTrue(SettingsOverrides.unconfined(args("sandbox", "NONE", "mode", "bypass")));
+        assertFalse(SettingsOverrides.unconfined(args("sandbox", "local", "mode", "edit")));
+        assertFalse(SettingsOverrides.unconfined(Map.of()));
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                () -> SettingsOverrides.unconfined(args("sandbox", "none")));
+        assertTrue(e.getMessage().contains("--mode auto"), e.getMessage());
+        assertThrows(IllegalArgumentException.class,
+                () -> SettingsOverrides.unconfined(args("sandbox", "none", "mode", "edit")));
+        HarnessSettings s = SettingsOverrides.applyToSettings(args("sandbox", "none", "mode", "auto"),
+                HarnessSettings.empty());
+        assertFalse(s.dockerSandbox());
+        assertEquals("local", s.sandbox().backend());
+    }
 }

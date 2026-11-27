@@ -7,5 +7,5 @@ $gver = ([regex]::Match((Get-Content (Join-Path $root 'pom.xml') -Raw), '<graalv
 if (-not (Test-Path (Join-Path $root ".downloaded-libs\graal\$gver\repo"))) { throw "GraalJS $gver is not set up: run scripts\setup.ps1" }
 Set-Location $root
 $goals = if ($args.Count -gt 0) { $args } else { @('test') }
-& mvn -Peval -pl core/jllm-eval -am @goals
+& mvn -Peval -pl eval/jllm-eval -am @goals
 exit $LASTEXITCODE

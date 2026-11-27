@@ -1,11 +1,16 @@
 package org.kendar.llm.web.commons.auth;
 
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.kendar.llm.harness.hooks.HookContext;
 import org.kendar.llm.harness.identity.LoginSessionRepository;
+import org.kendar.llm.harness.identity.UnknownRoleException;
 import org.kendar.llm.harness.identity.User;
 import org.kendar.llm.harness.identity.UserRepository;
 import org.kendar.llm.web.commons.CookieOut;
 import org.kendar.llm.web.commons.Cookies;
 import org.kendar.llm.web.commons.Reply;
+import org.kendar.llm.web.commons.users.Permissions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -22,6 +27,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 
 /**
  * Sign-in through an OpenID Connect identity provider (authorization code flow with PKCE), ending in the same session
@@ -33,6 +39,13 @@ import java.util.concurrent.ConcurrentHashMap;
  * </ul>
  * The state is single-use, expires after 10 minutes and is bound to the browser by a cookie. A failure redirects to
  * {@code /?authError=<code>} with a code of {@link OidcException#CODES}; nothing the provider said is repeated.
+ * <p>
+ * With the role mapping enabled ({@link RoleMappingSettings}) the groups of the verified ID token pick the role of the
+ * user at every sign-in through the provider ({@link RoleMapper}): a new user is created with it, an existing user
+ * gets it, whether or not the user also has a password. A password sign-in never runs the mapping, so the break-glass
+ * admin keeps its role as long as it signs in with its password. The last admin is never demoted. Each change is
+ * logged and raised as
+ * {@link org.kendar.llm.harness.hooks.HookEvent#ROLE_CHANGED}. With the mapping off no claim is read and no role set.
  */
 public class OidcApi {
 
@@ -53,21 +66,34 @@ public class OidcApi {
     private final UserRepository users;
     private final LoginSessionRepository sessions;
     private final LoginThrottle throttle;
+    private final RoleMappingSettings mapping;
+    private final Permissions permissions;
+    private final Consumer<HookContext> hooks;
     private final Clock clock;
     private final Map<String, Pending> pending = new ConcurrentHashMap<>();
 
+    /**
+     * @param mapping     the role mapping options
+     * @param permissions the roles, whose {@code idp} settings the mapping reads
+     * @param hooks       where role changes are raised ({@link HookContext#roleChanged})
+     */
     public OidcApi(OidcProperties props, OidcClient client, UserRepository users,
-                   LoginSessionRepository sessions, LoginThrottle throttle) {
-        this(props, client, users, sessions, throttle, Clock.systemUTC());
+                   LoginSessionRepository sessions, LoginThrottle throttle, RoleMappingSettings mapping,
+                   Permissions permissions, Consumer<HookContext> hooks) {
+        this(props, client, users, sessions, throttle, mapping, permissions, hooks, Clock.systemUTC());
     }
 
     public OidcApi(OidcProperties props, OidcClient client, UserRepository users,
-                   LoginSessionRepository sessions, LoginThrottle throttle, Clock clock) {
+                   LoginSessionRepository sessions, LoginThrottle throttle, RoleMappingSettings mapping,
+                   Permissions permissions, Consumer<HookContext> hooks, Clock clock) {
         this.props = props;
         this.client = client;
         this.users = users;
         this.sessions = sessions;
         this.throttle = throttle;
+        this.mapping = mapping;
+        this.permissions = permissions;
+        this.hooks = hooks;
         this.clock = clock;
     }
 
@@ -128,9 +154,20 @@ public class OidcApi {
             }
             if (error != null) throw new OidcException("denied", "The provider refused: " + error.length() + " chars");
             if (code == null || code.isBlank()) throw new OidcException("denied", "No code");
-            User user = resolve(client.exchange(code, p.verifier(), p.nonce()));
+            RoleMappingOptions options = mapping.current();
+            OidcClient.Identity id = client.exchange(code, p.verifier(), p.nonce(),
+                    options.enabled() ? options.claim() : null);
+            User user;
+            Instant notAfter = null;
+            if (options.enabled()) {
+                RoleMapper.Decision d = decide(options, id);
+                user = mapRole(resolve(id, d, options), d, options);
+                if (options.maxAge() != null) notAfter = clock.instant().plus(options.maxAge());
+            } else {
+                user = resolve(id, null, options);
+            }
             throttle.success(key);
-            String token = sessions.create(user.id());
+            String token = sessions.create(user.id(), notAfter);
             return Reply.empty(302).header("Location", "/")
                     .cookie(AuthApi.sessionCookie(token, LoginSessionRepository.TTL.toSeconds(), secure))
                     .cookie(bindingCookie("", 0, secure));
@@ -141,9 +178,90 @@ public class OidcApi {
         }
     }
 
+    // ---- role mapping
+
+    /** The role the groups give; the groups are logged when they cannot be used. */
+    private RoleMapper.Decision decide(RoleMappingOptions options, OidcClient.Identity id) {
+        OidcClient.Groups g = id.groups();
+        switch (g.status()) {
+            case PRESENT, NOT_READ -> {
+            }
+            case OVERAGE -> log.warn("OIDC claim truncated: the token of {} has _claim_names/_claim_sources instead of "
+                    + "'{}' (Entra ID group overage); groups are not fetched, onNoMatch applies", id.subject(),
+                    options.claim());
+            case MISSING -> log.warn("OIDC claim '{}' missing from the ID token of {}; claims seen: {}", options.claim(),
+                    id.subject(), g.claimKeys());
+            case OVERSIZED -> log.warn("OIDC claim '{}' of {} has over {} groups or a group over {} characters: not used",
+                    options.claim(), id.subject(), OidcClient.MAX_GROUPS, OidcClient.MAX_GROUP_LENGTH);
+            case INVALID -> log.warn("OIDC claim '{}' of {} is neither a string array nor a string: not used",
+                    options.claim(), id.subject());
+        }
+        RoleMapper.Decision d = RoleMapper.decide(options, permissions.roles(), g.values());
+        d.notes().forEach(n -> log.warn("Role mapping: {}", n));
+        d.matches().stream().filter(m -> m.skipped() != null).forEach(m -> log.warn(
+                "Role mapping: role {} matched group {} of {} but was ignored: {}", m.role(), m.group(), id.subject(),
+                m.skipped()));
+        return d;
+    }
+
+    /** Applies the decision to the user who signed in through the provider, with or without a password. */
+    private User mapRole(User user, RoleMapper.Decision d, RoleMappingOptions options) throws OidcException {
+        String target = d.role();
+        if (target == null) {
+            switch (options.onNoMatch()) {
+                case KEEP -> {
+                    return user;
+                }
+                case REFUSE -> throw new OidcException("no_role", "No role matches the groups of " + user.id());
+                case DEFAULT -> {
+                    target = mapping.defaultRole();
+                    if (target == null) {
+                        log.warn("Role mapping: no match for {} and no default role: role {} kept", user.id(),
+                                user.role());
+                        return user;
+                    }
+                }
+            }
+        }
+        if (target.equals(user.role())) return user;
+        if (user.admin() && users.all().stream().filter(User::admin).count() <= 1) {
+            log.warn("Role mapping: {} is the last admin and keeps the admin role (the mapping gave {})", user.id(),
+                    target);
+            return user;
+        }
+        User updated;
+        try {
+            updated = users.setRole(user.id(), target);
+        } catch (UnknownRoleException e) {
+            log.warn("Role mapping: role {} for {} does not exist: role {} kept", target, user.id(), user.role());
+            return user;
+        }
+        roleChanged(user.id(), user.role(), target, d.group(), d.matched() ? "matched" : "no_match");
+        return updated;
+    }
+
+    /** Logs the change and raises it to the hooks (an audit trail). */
+    private void roleChanged(String user, String from, String to, String group, String reason) {
+        log.info("Role mapping: role of {} changed from {} to {} (group {}, {})", user, from, to, group, reason);
+        ObjectNode change = JsonNodeFactory.instance.objectNode();
+        change.put("user", user);
+        change.put("from", from);
+        change.put("to", to);
+        change.put("group", group);
+        change.put("reason", reason);
+        try {
+            hooks.accept(HookContext.roleChanged(change, "Role of " + user + " changed from " + from + " to " + to
+                    + " by the identity provider mapping"));
+        } catch (RuntimeException e) { // boundary: an audit hook never breaks a sign-in
+            log.warn("Role change hook failed: {}", e.toString());
+        }
+    }
+
     // ---- user resolution
 
-    private User resolve(OidcClient.Identity id) throws OidcException {
+    /** @param d the role mapping decision; null when the mapping is off */
+    private User resolve(OidcClient.Identity id, RoleMapper.Decision d, RoleMappingOptions options)
+            throws OidcException {
         var linked = users.findByExternal(id.issuer(), id.subject());
         if (linked.isPresent()) return linked.get();
         String email = id.email();
@@ -162,11 +280,19 @@ public class OidcApi {
             }
             throw new OidcException("unknown_user", "Email matches no single unlinked user");
         }
-        if (props.oidc().provisioning()) return provision(id, email, externalKey);
-        throw new OidcException("unknown_user", "No user for the account");
+        if (!props.oidc().provisioning()) throw new OidcException("unknown_user", "No user for the account");
+        if (d == null) return provision(id, email, externalKey, props.oidc().defaultRole());
+        if (!d.matched() && options.onNoMatch() == RoleMappingOptions.OnNoMatch.REFUSE) {
+            throw new OidcException("no_role", "No role matches the groups of a new account");
+        }
+        String role = d.matched() ? d.role() : props.oidc().defaultRole();
+        User created = provision(id, email, externalKey, role);
+        roleChanged(created.id(), null, role, d.group(), d.matched() ? "provisioned" : "provisioned_default");
+        return created;
     }
 
-    private User provision(OidcClient.Identity id, String email, String externalKey) throws OidcException {
+    private User provision(OidcClient.Identity id, String email, String externalKey, String role)
+            throws OidcException {
         String base = sanitize(email.substring(0, Math.max(0, email.lastIndexOf('@'))));
         String name = id.name() == null || id.name().isBlank() ? null : id.name().strip();
         for (int n = 1; n < 1000; n++) {
@@ -174,8 +300,7 @@ public class OidcApi {
             String candidate = base.substring(0, Math.min(base.length(), 64 - suffix.length())) + suffix;
             if (users.exists(candidate)) continue;
             try {
-                return users.createExternal(candidate, name == null ? candidate : name, props.oidc().defaultRole(),
-                        email, externalKey);
+                return users.createExternal(candidate, name == null ? candidate : name, role, email, externalKey);
             } catch (IllegalStateException taken) {
                 // created meanwhile: try the next id
             }

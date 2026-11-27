@@ -39,7 +39,7 @@ What is still missing (more in [FUTURE](../enterprise/roadmap-and-limits.md)):
 * Flows: question routing by `who` is a label only, not enforced ([WORKFLOW](../guides/workflow.md#12-runs-history-and-resume))
 * Authentication & authorization on the web UI: `jllm-web` is a reference front end meant for localhost or a trusted
   network. Sign-in is password or one OpenID Connect provider ([setup](../../jllm-web/README.md#sign-in-with-openid-connect)); no
-  other providers, no IdP role mapping. Do not expose it publicly without a reverse proxy or TLS.
+  other providers; IdP group to role mapping is optional ([IdP role mapping](../enterprise/idp-role-mapping.md)). Do not expose it publicly without a reverse proxy or TLS.
 
 ## The idea
 
@@ -186,11 +186,11 @@ budget, large tool results offloaded to disk, pinned first message, a `todo_writ
 ```sh
 # terminal
 mvn -pl jllm-cli -am package
-java -jar jllm-cli/target/jllm-cli-1.3.0-jllm.jar --provider anthropic --mode edit
+java -jar jllm-cli/target/jllm-cli-1.4.0-jllm.jar --provider anthropic --mode edit
 
 # browser, http://localhost:8080
 mvn -pl jllm-web -am package
-java -jar jllm-web/target/jllm-web-1.3.0-jllm.jar --provider anthropic
+java -jar jllm-web/target/jllm-web-1.4.0-jllm.jar --provider anthropic
 ```
 
 Set `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`, `GROK_API_KEY`, `QWEN_API_KEY`) first. Embedding the library is shown above and in the

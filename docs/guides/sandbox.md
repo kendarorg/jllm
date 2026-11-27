@@ -52,9 +52,10 @@ Docker kinds also take the container scope (`chat` or `user`) and, for `docker-i
   failing lookup and a kind without a runner all resolve to `none`. The answer is cached for two seconds.
 - **docker needs docker only when used.** Building the container runner does not touch docker, and the orphan sweep at
   start skips a missing docker. A role set to docker on a host without it affects only its own chats.
-- **Where it is stored.** `roles.settings` (free-text JSON, SQL) or the `sandbox` object of the role file:
-  `{"sandbox": {"kind": "docker-isolated", "scope": "user", "network": "none"}}`. An admin changes it in
-  Administration, Roles, Sandbox, or with `PUT /api/admin/roles/{name}`.
+- **Where it is stored.** The `sandbox` key of the role settings: `roles.settings` (SQL) or the `sandbox` object of
+  the role file: `{"sandbox": {"kind": "docker-isolated", "scope": "user", "network": "none"}}`. An admin changes it in
+  Administration, Roles, Sandbox, with `PUT /api/admin/roles/{name}` or `PUT /api/admin/roles/{name}/settings/sandbox`
+  (an invalid value is refused with 400).
 - **`run_js`** does not depend on the kind: it runs in the server's engine. Only the file calls a script makes follow the
   sandbox: refused for `none`, the chat directory for `local`, the container for the docker kinds.
 - **Files tab.** For a role without a sandbox the file explorer answers 403.
@@ -197,7 +198,7 @@ Command line, winning over the settings file. The CLI and the web application ta
 
 | Flag | Meaning |
 |---|---|
-| `--sandbox local\|docker` | backend |
+| `--sandbox local\|docker\|none` | backend; `none` (CLI only, `--mode auto` only): the local runner without the file and shell path jail, for use inside a benchmark container that is itself the sandbox |
 | `--docker-image IMAGE` | image |
 | `--sandbox-profile standard\|hardened` | profile |
 | `--sandbox-scope chat\|user` | scope; fixed for the session |

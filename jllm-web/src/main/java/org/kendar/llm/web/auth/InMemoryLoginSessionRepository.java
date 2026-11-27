@@ -14,7 +14,7 @@ public final class InMemoryLoginSessionRepository implements LoginSessionReposit
 
     private static final SecureRandom RANDOM = new SecureRandom();
 
-    private record Session(String userId, Instant expiresAt) {
+    private record Session(String userId, Instant expiresAt, Instant notAfter) {
     }
 
     private final Map<String, Session> sessions = new ConcurrentHashMap<>();
@@ -29,11 +29,11 @@ public final class InMemoryLoginSessionRepository implements LoginSessionReposit
     }
 
     @Override
-    public String create(String userId) {
+    public String create(String userId, Instant notAfter) {
         byte[] b = new byte[32];
         RANDOM.nextBytes(b);
         String token = Base64.getUrlEncoder().withoutPadding().encodeToString(b);
-        sessions.put(token, new Session(userId, clock.instant().plus(TTL)));
+        sessions.put(token, new Session(userId, clock.instant().plus(TTL), notAfter));
         return token;
     }
 
@@ -43,11 +43,11 @@ public final class InMemoryLoginSessionRepository implements LoginSessionReposit
         Session s = sessions.get(token);
         if (s == null) return Optional.empty();
         Instant now = clock.instant();
-        if (now.isAfter(s.expiresAt())) {
+        if (now.isAfter(s.expiresAt()) || (s.notAfter() != null && now.isAfter(s.notAfter()))) {
             sessions.remove(token);
             return Optional.empty();
         }
-        sessions.put(token, new Session(s.userId(), now.plus(TTL)));
+        sessions.put(token, new Session(s.userId(), now.plus(TTL), s.notAfter()));
         return Optional.of(s.userId());
     }
 

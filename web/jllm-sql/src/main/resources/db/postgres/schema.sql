@@ -61,7 +61,8 @@ CREATE TABLE skills (
 CREATE TABLE login_sessions (
     token_hash TEXT PRIMARY KEY,
     user_id    TEXT NOT NULL,
-    expires_at BIGINT NOT NULL
+    expires_at BIGINT NOT NULL,
+    not_after  BIGINT
 );
 CREATE INDEX idx_sessions_user ON login_sessions(user_id);
 CREATE INDEX idx_sessions_expires ON login_sessions(expires_at);
@@ -76,6 +77,10 @@ CREATE TABLE settings_layer (
     kind   TEXT PRIMARY KEY,
     origin TEXT NOT NULL,
     doc    TEXT NOT NULL
+);
+CREATE TABLE settings_section (
+    name TEXT PRIMARY KEY,
+    doc  TEXT NOT NULL
 );
 CREATE TABLE mcp_trust (
     project_key TEXT NOT NULL,
@@ -144,6 +149,5 @@ CREATE TABLE plugin_docs (
     doc        TEXT NOT NULL,
     PRIMARY KEY (plugin_id, owner, collection, doc_id)
 );
--- Records the schema version; nothing reads it.
+-- The schema version (Schema.VERSION), written by the code; upgrades run the missing steps.
 CREATE TABLE schema_version (version INTEGER NOT NULL PRIMARY KEY);
-INSERT INTO schema_version (version) VALUES (1);

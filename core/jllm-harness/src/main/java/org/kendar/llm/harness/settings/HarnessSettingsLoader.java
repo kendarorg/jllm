@@ -59,7 +59,7 @@ public final class HarnessSettingsLoader {
     }
 
     /**
-     * The layers of {@code source} merged: global, then project, then explicit; later wins, objects merged per key,
+     * The layers of {@code source} merged: global, then project, then explicit, then stored ({@link SettingsSink}); later wins, objects merged per key,
      * other values (including arrays) replaced, except {@code permissions.deny}: the union of every layer (a later
      * layer can only add denials). A layer whose root is not a JSON object is ignored with a warning. Stdio MCP
      * servers, stop hooks and OAuth blocks that only the project layer defines count only when trusted, see

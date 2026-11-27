@@ -48,12 +48,34 @@
         <dependency>
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>
-            <!-- BSD, not bundled either. Tests only (PostgresOptionalTest); at run time DriverLoader finds it in lib-ext / .downloaded-libs -->
+            <!-- BSD, not bundled either. Tests only (PostgresContainerStoresTest); at run time DriverLoader finds it in lib-ext / .downloaded-libs -->
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <!-- docker endpoint choice for Testcontainers (DOCKER_HOST, localhost:2375, unix socket) -->
+            <groupId>org.kendar.llm</groupId>
+            <artifactId>jllm-test-support</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>mysql</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>

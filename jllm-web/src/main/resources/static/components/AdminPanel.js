@@ -2,13 +2,17 @@ import {computed, onMounted, reactive, ref} from '../vendor/vue.esm-browser.prod
 import {api, del, post, put} from '../api.js';
 import {toast} from '../store.js';
 import RoleEditor from './RoleEditor.js';
+import RoleMappingPanel from './RoleMappingPanel.js';
 
-const TABS = [['users', 'Users'], ['roles', 'Roles']];
+const TABS = [['users', 'Users'], ['roles', 'Roles'], ['mapping', 'Role mapping']];
 const enc = encodeURIComponent;
 
-/** Administration: users, roles (with everything they can be granted). Admins only (skills live in the Skills screen). */
+/**
+ * Administration: users, roles (with everything they can be granted), identity provider role mapping. Admins only
+ * (skills live in the Skills screen).
+ */
 export default {
-  components: {RoleEditor},
+  components: {RoleEditor, RoleMappingPanel},
   props: {me: {type: Object, required: true}},
   setup(props) {
     const tab = ref('users');
@@ -20,6 +24,8 @@ export default {
     const loadUsers = guard(async () => { users.value = await api('/api/admin/users'); });
     const loadRoles = guard(async () => { roles.value = await api('/api/admin/roles'); });
     const loadCatalog = guard(async () => { catalog.value = await api('/api/admin/catalog'); });
+    const mappingEnabled = ref(false);
+    const loadMapping = guard(async () => { mappingEnabled.value = (await api('/api/admin/auth/role-mapping')).enabled; });
 
     // users
     const nu = reactive({id: '', name: '', role: '', password: ''});
@@ -87,7 +93,7 @@ export default {
     function select(t) {
       tab.value = t;
       if (t === 'users') { loadUsers(); loadRoles(); }
-      if (t === 'roles') { loadRoles(); loadCatalog(); }
+      if (t === 'roles') { loadRoles(); loadCatalog(); loadMapping(); }
     }
     function onKey(e) {
       const i = TABS.findIndex(t => t[0] === tab.value);
@@ -100,7 +106,7 @@ export default {
 
     return {TABS, tab, select, onKey, users, roles, catalog, nu, createUser, setRole, rename, setEmail,
       pwFor, pwValue, setPassword, removeUser, lastAdmin, current, newRole, selectedRole, pick, createRole, saveRole,
-      deleteRole};
+      deleteRole, mappingEnabled, loadMapping};
   },
   template: `
   <section class="panel" aria-label="Administration">
@@ -124,6 +130,8 @@ export default {
                           :title="lastAdmin(u) ? 'The last admin keeps the admin role' : ''" :aria-label="'Role of ' + u.id">
                     <option v-for="r in roles" :key="r.name" :value="r.name">{{ r.name }}</option>
                   </select>
+                  <span v-if="u.roleManagedByIdp" class="badge"
+                        title="Set from the identity provider groups at each sign-in: a change here is overwritten at the next sign-in">managed by IdP</span>
                 </td>
                 <td><span v-if="u.source === 'oidc'" class="badge">OIDC</span><span v-else-if="u.defaultPassword" class="badge warn">default</span><span v-else class="badge">password</span></td>
                 <td>{{ u.ownSkills }}
@@ -187,10 +195,14 @@ export default {
         </aside>
         <div class="role-main">
           <RoleEditor v-if="selectedRole && catalog" :role="selectedRole" :catalog="catalog"
-                      @save="saveRole" @delete="deleteRole" />
+                      :mapping-enabled="mappingEnabled" @save="saveRole" @delete="deleteRole" />
           <p v-else-if="selectedRole" class="spinner"></p>
           <p v-else class="empty">Select a role.</p>
         </div>
+      </div>
+
+      <div v-if="tab === 'mapping'" role="tabpanel">
+        <RoleMappingPanel @changed="loadMapping" />
       </div>
     </div>
   </section>

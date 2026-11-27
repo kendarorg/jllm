@@ -28,6 +28,9 @@ public final class Database implements AutoCloseable {
         if (dialect == Dialect.SQLITE) {
             h.addDataSourceProperty("foreign_keys", "true");
             h.addDataSourceProperty("busy_timeout", "10000");
+            // a transaction takes the write lock when it begins: one that reads then writes (insert after a check)
+            // would otherwise fail at once with SQLITE_BUSY when another connection writes, the busy timeout unused
+            h.addDataSourceProperty("transaction_mode", "IMMEDIATE");
             if (!config.jdbcUrl().contains(":memory:")) h.addDataSourceProperty("journal_mode", "WAL");
             // a memory database exists only in its connection: never recycle it
             h.setMaxLifetime(0);

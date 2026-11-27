@@ -118,6 +118,9 @@ sequenceDiagram
   closes the pipe, which ends a well-behaved server.
 - A `check` starts a separate process and stops it again.
 - A server that writes requests of its own (sampling, roots) gets no answer; its messages are ignored.
+- **CLI only.** The web host ignores stdio servers, with a warning in the log for each one: the process would run on
+  the host as the server's user, outside any sandbox, shared by every user with no identity on its calls. On the web
+  use a streamable-HTTP server (with `oauth` and `perUser` when each user needs their own identity).
 
 Not supported: resources, prompts, sampling, server notifications.
 

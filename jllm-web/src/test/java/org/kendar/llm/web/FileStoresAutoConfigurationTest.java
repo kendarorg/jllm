@@ -76,6 +76,25 @@ class FileStoresAutoConfigurationTest {
     }
 
     @Test
+    void settingsSinkFollowsTheStore() {
+        runner(FileStoresAutoConfiguration.class).withPropertyValues("jllm.store=file",
+                "jllm.webauth-dir=" + slashes(dir)).run(c -> {
+            assertNull(c.getStartupFailure());
+            var sink = assertInstanceOf(org.kendar.llm.harness.settings.FileSettingsSink.class,
+                    c.getBean(org.kendar.llm.harness.settings.SettingsSink.class));
+            assertEquals(dir.resolve("stored-settings.json").toAbsolutePath().normalize(), sink.file());
+        });
+        runner(JllmSqlAutoConfiguration.class, FileStoresAutoConfiguration.class)
+                .withPropertyValues("jllm.sql.url=jdbc:sqlite:" + slashes(dir.resolve("x.db")))
+                .run(c -> {
+                    assertNull(c.getStartupFailure());
+                    assertInstanceOf(org.kendar.llm.web.sql.SqlSettingsSink.class,
+                            c.getBean(org.kendar.llm.harness.settings.SettingsSink.class));
+                    assertEquals(1, c.getBeansOfType(org.kendar.llm.harness.settings.SettingsSink.class).size());
+                });
+    }
+
+    @Test
     void anApplicationUserRepositoryReplacesTheFileOne() {
         UserRepository own = Mockito.mock(UserRepository.class);
         runner(FileStoresAutoConfiguration.class).withBean(UserRepository.class, () -> own).run(c ->

@@ -25,6 +25,7 @@ harness. A run that cannot ask is refused, never auto-approved.
 | `POST_TOOL` | add context, record the result, flag errors |
 | `POST_LLM` | audit trail of model output; `durationMs` and `usage` for tracing |
 | `STOP` | verify before the agent may finish (run tests, an LLM judge) |
+| `ROLE_CHANGED` | audit trail of role changes made at sign-in by the [IdP role mapping](idp-role-mapping.md) (`user`, `from`, `to`, `group`) |
 
 ```java
 builder.beforeToolCall(ctx -> policy.allows(ctx.tool(), ctx.input())

@@ -6,9 +6,10 @@ import org.kendar.llm.harness.llm.Usage;
 /**
  * What a hook sees. Fields that do not apply to the event are null.
  *
- * @param text    USER_PROMPT: the message; STOP: the final answer
+ * @param text    USER_PROMPT: the message; STOP: the final answer; ROLE_CHANGED: a one-line summary
  * @param tool    PRE_TOOL, POST_TOOL: tool name
- * @param input   PRE_TOOL, POST_TOOL: tool input
+ * @param input   PRE_TOOL, POST_TOOL: tool input; ROLE_CHANGED: the change ({@code user}, {@code from}, {@code to},
+ *                {@code group}, {@code reason})
  * @param output  POST_TOOL: tool output
  * @param isError POST_TOOL, POST_LLM, POST_AGENT: the tool, call or agent failed
  * @param agent   PRE_LLM, POST_LLM, PRE_AGENT, POST_AGENT: {@value #MAIN} or the sub-agent type name; STOP:
@@ -73,5 +74,10 @@ public record HookContext(HookEvent event, String chatId, String text, String to
      */
     public static HookContext stop(String chatId, String agent, String text, int attempt) {
         return new HookContext(HookEvent.STOP, chatId, text, null, null, null, false, agent, 0L, null, null, attempt);
+    }
+
+    /** ROLE_CHANGED: no chat; {@code input} is the change, {@code text} a one-line summary. */
+    public static HookContext roleChanged(JsonNode change, String summary) {
+        return new HookContext(HookEvent.ROLE_CHANGED, null, summary, null, change, null, false, null, 0L, null, null, 0);
     }
 }

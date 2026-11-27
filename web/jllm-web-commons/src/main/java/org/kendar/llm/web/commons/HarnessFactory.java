@@ -27,6 +27,7 @@ import org.kendar.llm.harness.settings.HarnessConfigMapper;
 import org.kendar.llm.harness.settings.HarnessSettings;
 import org.kendar.llm.harness.settings.HarnessSettingsLoader;
 import org.kendar.llm.harness.settings.ProjectMcpTrust;
+import org.kendar.llm.harness.settings.SettingsSink;
 import org.kendar.llm.harness.settings.SettingsSource;
 import org.kendar.llm.harness.state.FileStateStore;
 import org.kendar.llm.harness.state.StateStore;
@@ -58,6 +59,8 @@ public final class HarnessFactory {
 
     /**
      * @param settingsSource where the settings layers are read (null: global, project and the settings file)
+     * @param settingsSink   the settings an administrator stored at runtime: their sections join the layers last, so a
+     *                       stored value wins (null: none). Read when the harness is built
      * @param projectTrust   where the trust answers are remembered (null: a file)
      * @param sessionStore   the chats (null: files under each chat's history root)
      * @param pluginStorages the plugins' storage (null: files)
@@ -65,6 +68,7 @@ public final class HarnessFactory {
     public static AgentHarness harness(JllmProperties p, ModelClient modelClient, HarnessPricing pricing,
                                        ObjectMapper mapper, HarnessIdentity identity,
                                        SettingsSource settingsSource,
+                                       SettingsSink settingsSink,
                                        ProjectMcpTrust projectTrust,
                                        ChatSessionStore sessionStore,
                                        SubAgentRunLog subAgentRunLog,
@@ -79,6 +83,7 @@ public final class HarnessFactory {
         // answers are remembered with a ProjectMcpTrust bean.
         SettingsSource source = settingsSource != null ? settingsSource
                 : new FileSettingsSource(settingsFile == null ? null : Path.of(settingsFile), projectDir);
+        if (settingsSink != null) source = settingsSink.over(source);
         // suspicious content in the loaded files: logged, and listed to the users by /api/content-warnings
         var contentWarnings = new org.kendar.llm.harness.safety.ContentWarnings();
         HarnessSettings settings = HarnessSettingsLoader.loadLayered(source, projectDir, System::getenv,
@@ -95,7 +100,7 @@ public final class HarnessFactory {
                                 : null),
                 JllmProperties.blankToNull(p.systemPrompt()));
         // same precedence as the CLI: the property wins over the settings file
-        var b = withoutExternalLinks(settings).toBuilder();
+        var b = withoutStdioMcpServers(withoutExternalLinks(settings)).toBuilder();
         if (p.contextTokens() != null && p.contextTokens() > 0) b.maxTokens(p.contextTokens());
         if (JllmProperties.blankToNull(p.contextStrategy()) != null) b.contextStrategy(p.contextStrategy());
         if (Boolean.TRUE.equals(p.smallModel())) b.smallModel(true);
@@ -227,6 +232,28 @@ public final class HarnessFactory {
                     + "directory (it always uses none)", f.externalLinks().settingValue());
         }
         return settings.toBuilder().externalLinks(ExternalLinks.NONE).build();
+    }
+
+    /**
+     * The settings without the stdio MCP servers: the web host never starts one. A stdio server is a child process of
+     * the JVM, running on the host as the server's user outside any sandbox, and shared by every user with no identity
+     * on its calls. One WARN per server dropped; streamable-HTTP servers are kept.
+     */
+    public static HarnessSettings withoutStdioMcpServers(HarnessSettings settings) {
+        var servers = settings.mcpServers();
+        if (servers == null || servers.stream().noneMatch(org.kendar.llm.harness.settings.McpServerSettings::isStdio)) {
+            return settings;
+        }
+        var kept = new java.util.ArrayList<org.kendar.llm.harness.settings.McpServerSettings>();
+        for (var m : servers) {
+            if (m.isStdio()) {
+                LOG.warn("MCP server '{}' is ignored: the web host does not start stdio MCP servers (they would run on "
+                        + "the host as the server's user, shared by every user); use a streamable-HTTP server", m.name());
+            } else {
+                kept.add(m);
+            }
+        }
+        return settings.toBuilder().mcpServers(java.util.List.copyOf(kept)).build();
     }
 
     /**

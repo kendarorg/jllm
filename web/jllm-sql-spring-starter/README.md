@@ -30,14 +30,15 @@ There is no dialect property. The scheme of `jllm.sql.url` selects it:
 |---|---|---|
 | none (default) | SQLite file `jllm.db` in `jllm.webauth-dir` when that is set, else `data/jllm.db` | bundled |
 | `jdbc:sqlite:<file>` | SQLite | bundled |
-| `jdbc:mysql:...` (`jdbc:mariadb:` is rejected) | MySQL 8+, **experimental** until run against a real server | fetched, GPL |
-| `jdbc:postgresql:...` | PostgreSQL, **experimental** until run against a real server | fetched, BSD |
+| `jdbc:mysql:...` (`jdbc:mariadb:` is rejected) | MySQL 8+ | fetched, GPL |
+| `jdbc:postgresql:...` | PostgreSQL | fetched, BSD |
 
 Any other scheme is rejected at startup. Properties: `jllm.sql.url`, `jllm.sql.user`, `jllm.sql.password` (use
 `${ENV}`), `jllm.sql.pool` (SQLite 1, others 10), `jllm.sql.seed` (default true), `jllm.sql.driver-dir`.
 
 Schema: `db/<dialect>/schema.sql`, applied at startup when the `users` table is missing (MySQL `GET_LOCK` and
-PostgreSQL advisory lock around the creation; the SQLite script is idempotent). `schema_version` records the schema version; there is no migration runner, changing the schema means deleting the database; the one exception is `roles.settings` and `users.settings` (free-text JSON, nullable, holding the role's sandbox and later settings), added by `ALTER TABLE` at startup to a database created before them. All three dialects have the same tables
+PostgreSQL advisory lock around the creation; the SQLite script is idempotent). The script creates the latest version, and the code writes it to `schema_version`. An older database is migrated at startup: the steps above its version run in order under the same lock, each idempotent (version 2 adds `roles.settings` and `users.settings`, nullable JSON: the role's settings map, keyed by feature, and the user's settings; version 3 adds `settings_section(name, doc)`, the settings an administrator stores at runtime, one row per section, read by `SqlSettingsSink`; version 4 adds `login_sessions.not_after`, the hard end of a sign-in set by
+`jllm.auth.oidc.role-mapping.max-age`). A database newer than the server is refused. All three dialects have the same tables
 (`DialectTest`). `users.role` is a NOT NULL foreign key to `roles(name)` (`ON DELETE RESTRICT`): the `admin` role has a
 seeded row, a user needs an existing role, and deleting a role in use throws `RoleInUseException` (the admin API answers
 409 naming the users, with the files store too). Not done: per-message chat rows (`messages` is one text per chat; `SqlStoresTest.largeChatSaveTiming` logs the cost of
@@ -85,5 +86,8 @@ database created before them must be deleted.
 `JllmSqlAutoConfigurationTest` (every store type; `jllm.store=file`; url; seeding; invalid key), `jllm-sql`: `SqlStoresTest`,
 `DialectTest`, `DriverLoaderTest`, `FetchSqlDriverScriptTest` (the fetch script), `SqlSeederTest`; `jllm-web`: `FileStoresAutoConfigurationTest`, `SqlBootTest` (the starter is a test
 dependency of `jllm-web`; `src/test/resources/application.properties` keeps the other tests on files).
-`MysqlOptionalTest` and `PostgresOptionalTest` run only with `JLLM_TEST_MYSQL_URL|USER|PASSWORD` or
-`JLLM_TEST_PG_URL|USER|PASSWORD` set (an empty disposable database); skipped otherwise, no Docker is started.
+The store checks are shared (`AbstractSqlStoresTest`) and run on SQLite (`SqlStoresTest`), PostgreSQL
+(`PostgresContainerStoresTest`) and MySQL (`MysqlContainerStoresTest`); the last two start the database with Testcontainers
+(a new database per test) and are skipped when no docker daemon answers. The daemon is looked for in this order:
+`DOCKER_HOST`, `tcp://localhost:2375`, the unix socket `/var/run/docker.sock` (Linux and macOS); the choice lives in
+`jllm-test-support` (`DockerEndpoints`, `LocalhostTcpDockerStrategy`).

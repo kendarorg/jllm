@@ -116,7 +116,8 @@ final class LoopAssembler {
                 new PermissionGate(s.approvalPolicy(), s.tools().permissionRules()), approvals, sessions, s.box(),
                 registry, subAgentTool, requestToolGroup, s.subAgentRunLog(), mapper, s.metrics(), prompt, s.hooks(),
                 fast == null ? null : new ToolClassifier(fast, mapper), s.identity(), todoTools,
-                s.tools().fileTools(), scopedInstructions, inputValidator(s), noisePruner));
+                s.tools().fileTools(), scopedInstructions, inputValidator(s), noisePruner,
+                fast == null ? null : new StuckJudge(fast, mapper)));
         ref[0] = loop;
         stopHooks(s, loop);
         AgentService service = new AgentService(loop, sessions, approvals, mapper, config, maxParallel);

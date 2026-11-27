@@ -6,6 +6,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.HarnessConfig;
+import org.kendar.llm.harness.HarnessTestSupport;
 import org.kendar.llm.harness.HarnessTestSupport.Events;
 import org.kendar.llm.harness.HarnessTestSupport.Rig;
 import org.kendar.llm.harness.llm.ModelResponse;
@@ -21,7 +22,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.kendar.llm.harness.HarnessTestSupport.*;
 
-/** The loop notices an agent that repeats itself: nudge first, then ask (interactive) or stop. */
+/** The loop notices an agent that repeats itself: nudge first, then ask (interactive) or wrap up and stop. */
 class StuckDetectionTest {
 
     @TempDir
@@ -72,17 +73,19 @@ class StuckDetectionTest {
     }
 
     @Test
-    void theSameCallThreeTimesIsNudgedThenStoppedWhenTheUserSaysNo() {
+    void theSameCallThreeTimesIsNudgedThenWrappedUpWhenTheUserSaysNo() {
         for (int i = 0; i < 6; i++) rig.model.enqueue(call("t", "{'a':1,'b':2}"));
-        rig.model.enqueue(text("never reached"));
+        rig.model.enqueue(text("what I have"));
         Events ev = answering(false);
 
         AgentLoop.Outcome outcome = rig.loop.run(chatId, "go", ev, () -> false, null);
 
         assertEquals(AgentLoop.Outcome.STUCK, outcome);
-        assertEquals(List.of("nudge", "stop"), actions(ev));
+        assertEquals(List.of("nudge", "wrap_up"), actions(ev));
         assertEquals("repeat", ev.ofType("stuck").get(0).path("pattern").asText());
-        assertEquals(6, rig.model.requests.size());
+        // the wrap-up turn is one more request, and its answer is the run's answer
+        assertEquals(7, rig.model.requests.size());
+        assertEquals("what I have", ev.ofType("text").get(ev.ofType("text").size() - 1).path("text").asText());
         ArrayNode log = rig.sessions.messages(rig.sessions.get(chatId));
         assertPaired(log);
         // the nudge is a text block after the tool results of the third call
@@ -171,8 +174,106 @@ class StuckDetectionTest {
     }
 
     @Test
+    void theWrapUpTurnHasToolUseOffAndACallMadeAnywayIsNotRun() {
+        List<String> choices = new ArrayList<>();
+        AtomicInteger n = new AtomicInteger();
+        rig.model.handler = r -> {
+            choices.add(r.toolChoice());
+            return n.incrementAndGet() <= 6 ? call("t", "{}") : call("t", "{'late':true}");
+        };
+        Events ev = answering(false);
+
+        assertEquals(AgentLoop.Outcome.STUCK, rig.loop.run(chatId, "go", ev, () -> false, null));
+        assertEquals(7, choices.size());
+        assertNull(choices.get(5));
+        assertEquals("none", choices.get(6));
+        ArrayNode log = rig.sessions.messages(rig.sessions.get(chatId));
+        assertPaired(log);
+        JsonNode last = log.get(log.size() - 1).path("content").get(0);
+        assertTrue(last.path("content").asText().startsWith("Not executed: tool use is off"), last.toString());
+        // the wrap-up note follows the results of the step that was detected
+        assertTrue(log.toString().contains("[harness: loop detected again]"));
+    }
+
+    @Test
+    void withoutWrapUpTheRunStopsAtOnce() {
+        rig.configure(c -> c.withLoop(new HarnessConfig.Loop(
+                new HarnessConfig.Stuck(true, 3, 3, 3, Set.of(), false, false), null, 10)));
+        for (int i = 0; i < 6; i++) rig.model.enqueue(call("t", "{}"));
+        rig.model.enqueue(text("never reached"));
+        Events ev = answering(false);
+
+        assertEquals(AgentLoop.Outcome.STUCK, rig.loop.run(chatId, "go", ev, () -> false, null));
+        assertEquals(List.of("nudge", "stop"), actions(ev));
+        assertEquals(6, rig.model.requests.size());
+    }
+
+    @Test
+    void successfulPollingCallsAreNotCounted() {
+        rig.configure(c -> c.withLoop(new HarnessConfig.Loop(
+                new HarnessConfig.Stuck(true, 3, 3, 3, Set.of("t"), true, false), null, 10)));
+        // the same status check six times, then a work step and the check again: no loop
+        for (int i = 0; i < 6; i++) rig.model.enqueue(call("t", "{}"));
+        for (int i = 0; i < 3; i++) rig.model.enqueue(call("u", "{}"), call("t", "{}"));
+        rig.model.enqueue(text("ok"));
+        Events ev = answering(false);
+
+        AgentLoop.Outcome outcome = rig.loop.run(chatId, "go", ev, () -> false, null);
+
+        // u-u-u with t in between is still the same step three times: the polling tool is transparent
+        assertEquals(List.of("nudge"), actions(ev));
+        assertEquals(AgentLoop.Outcome.COMPLETED, outcome);
+    }
+
+    @Test
+    void aFailingPollingCallStillCounts() {
+        rig.register(tool("poll", "G", ToolKind.READ_ONLY, (c, in) -> { throw new IllegalStateException("down"); }));
+        rig.configure(c -> c.withLoop(new HarnessConfig.Loop(
+                new HarnessConfig.Stuck(true, 3, 3, 3, Set.of("poll"), true, false), null, 10)));
+        for (int i = 0; i < 3; i++) rig.model.enqueue(call("poll", "{}"));
+        rig.model.enqueue(text("ok"));
+        Events ev = answering(false);
+        rig.loop.run(chatId, "go", ev, () -> false, null);
+        assertEquals(List.of("nudge"), actions(ev));
+    }
+
+    @Test
+    void theConfirmingModelCanDismissADetection() {
+        HarnessTestSupport.ScriptedModel fast = new HarnessTestSupport.ScriptedModel();
+        fast.simpleReplies.add("{\"verdict\":\"progress\",\"reason\":\"waiting on a build\"}");
+        fast.simpleReplies.add("{\"verdict\":\"stuck\",\"reason\":\"same thing\"}");
+        rig.configure(c -> c.withLoop(new HarnessConfig.Loop(
+                new HarnessConfig.Stuck(true, 3, 3, 3, Set.of(), true, true), null, 10)));
+        rig.stuckJudge(new StuckJudge(fast, MAPPER));
+        for (int i = 0; i < 6; i++) rig.model.enqueue(call("t", "{}"));
+        rig.model.enqueue(text("ok"));
+        Events ev = answering(false);
+
+        assertEquals(AgentLoop.Outcome.COMPLETED, rig.loop.run(chatId, "go", ev, () -> false, null));
+        // first detection dismissed (does not count), second is the first real one: a nudge
+        assertEquals(List.of("dismissed", "nudge"), actions(ev));
+        assertEquals("waiting on a build", ev.ofType("stuck").get(0).path("reason").asText());
+        assertTrue(fast.simpleUserPrompts.get(0).contains("call t"), fast.simpleUserPrompts.get(0));
+    }
+
+    @Test
+    void anUnusableConfirmationLeavesTheDetectionStanding() {
+        HarnessTestSupport.ScriptedModel fast = new HarnessTestSupport.ScriptedModel();
+        fast.simpleReplies.add("I think it is fine");
+        rig.configure(c -> c.withLoop(new HarnessConfig.Loop(
+                new HarnessConfig.Stuck(true, 3, 3, 3, Set.of(), true, true), null, 10)));
+        rig.stuckJudge(new StuckJudge(fast, MAPPER));
+        for (int i = 0; i < 3; i++) rig.model.enqueue(call("t", "{}"));
+        rig.model.enqueue(text("ok"));
+        Events ev = answering(false);
+        rig.loop.run(chatId, "go", ev, () -> false, null);
+        assertEquals(List.of("nudge"), actions(ev));
+    }
+
+    @Test
     void disabledDetectionKeepsTodaysBehaviour() {
-        rig.configure(c -> c.withLoop(new HarnessConfig.Loop(new HarnessConfig.Stuck(false, 3, 3, 3), null, 10)));
+        rig.configure(c -> c.withLoop(new HarnessConfig.Loop(
+                new HarnessConfig.Stuck(false, 3, 3, 3, Set.of(), true, false), null, 10)));
         for (int i = 0; i < 7; i++) rig.model.enqueue(call("t", "{}"));
         rig.model.enqueue(text("ok"));
         Events ev = answering(false);
@@ -181,13 +282,14 @@ class StuckDetectionTest {
     }
 
     @Test
-    void aStuckSubAgentReportsStatusStuckToTheParent() {
+    void aStuckSubAgentWrapsUpAndReportsStatusStuckToTheParent() {
         for (int i = 0; i < 6; i++) rig.model.enqueue(call("t", "{}"));
-        rig.model.enqueue(text("never reached"));
+        rig.model.enqueue(text("partial findings"));
         SubAgentIncompleteException e = assertThrows(SubAgentIncompleteException.class,
                 () -> rig.subAgent(chatId, null, "look around", null));
         assertEquals("stuck", e.status());
-        assertEquals(6, rig.model.requests.size());
+        assertEquals(7, rig.model.requests.size());
+        assertTrue(String.valueOf(e.partial()).contains("partial findings"), String.valueOf(e.partial()));
     }
 
     @Test

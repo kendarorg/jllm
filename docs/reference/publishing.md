@@ -27,6 +27,6 @@ Same flow as the-protocol-master. Namespace `org.kendar.llm` is verified on http
 
 ### Notes
 * The `deploy` profile adds source, javadoc, flatten, GPG and central-publishing plugins.
-* `jllm-web` (Spring Boot app), `jllm-cli`, `core/jllm-eval` and `jacoco` are excluded via `maven.deploy.skip` + `central-publish.skip`.
+* `jllm-web` (Spring Boot app), `jllm-cli`, `eval/jllm-eval` and `jacoco` are excluded via `maven.deploy.skip` + `central-publish.skip`.
 * Exclude another module by setting the same two properties in its pom.
 * Moving GPG keys between machines: `gpg --export-secret-keys --armor`, `gpg --import`; delete the exports afterwards.

@@ -1,17 +1,21 @@
 import {reactive, watch} from '../vendor/vue.esm-browser.prod.js';
 import ToolPicker from './ToolPicker.js';
 
-/** Edits one role: sandbox, read-only flag, approval, granted tools / MCP servers / REST APIs. The admin role's tools are fixed. */
+/**
+ * Edits one role: sandbox, read-only flag, approval, sign-in mapping (identity provider groups), granted tools / MCP
+ * servers / REST APIs. The admin role's tools are fixed.
+ */
 export default {
   components: {ToolPicker},
   props: {
     role: {type: Object, required: true},     // {name, tools, readOnly, approval, sandbox, fixed, users}
     catalog: {type: Object, required: true},
+    mappingEnabled: {type: Boolean, default: false},   // whether the identity provider role mapping is on
   },
   emits: ['save', 'delete'],
   setup(props, {emit}) {
     const form = reactive({tools: [], readOnly: false, approval: 'ask', perms: [], dirty: false,
-      sandbox: {kind: 'none', scope: '', network: ''}});
+      sandbox: {kind: 'none', scope: '', network: ''}, idpGroups: '', idpPriority: 100});
     watch(() => props.role, r => {
       form.tools = [...r.tools];
       form.readOnly = r.readOnly;
@@ -19,14 +23,24 @@ export default {
       const sb = r.sandbox || {};
       form.sandbox = {kind: sb.kind || 'none', scope: sb.scope || '', network: sb.network || ''};
       form.perms = Object.entries(r.toolPermissions || {}).map(([pattern, decision]) => ({pattern, decision}));
+      const idp = (r.settings || {}).idp || {};
+      form.idpGroups = (idp.groups || []).join('\n');
+      form.idpPriority = idp.priority ?? 100;
       form.dirty = false;
     }, {immediate: true});
     const touch = () => { form.dirty = true; };
     const onTools = v => { form.tools = v; touch(); };
     const addPerm = () => { form.perms.push({pattern: '', decision: 'allow'}); touch(); };
     const removePerm = i => { form.perms.splice(i, 1); touch(); };
+    const idpSettings = () => {
+      const settings = {...(props.role.settings || {})};
+      const groups = form.idpGroups.split(/[\n,]+/).map(g => g.trim()).filter(g => g);
+      if (groups.length) settings.idp = {groups, priority: Number.isInteger(form.idpPriority) ? form.idpPriority : 100};
+      else delete settings.idp;
+      return settings;
+    };
     const save = () => emit('save', {
-      tools: form.tools, readOnly: form.readOnly, approval: form.approval,
+      tools: form.tools, readOnly: form.readOnly, approval: form.approval, settings: idpSettings(),
       sandbox: {kind: form.sandbox.kind, scope: form.sandbox.scope || null, network: form.sandbox.network || null},
       toolPermissions: Object.fromEntries(form.perms.filter(p => p.pattern.trim()).map(p => [p.pattern.trim(), p.decision])),
     });
@@ -84,6 +98,26 @@ export default {
       </div>
       <p v-if="form.sandbox.kind === 'local'" class="banner banner-error">Local runs shell commands on the server as the
         server user. Anyone with this role can read and change anything that user can.</p>
+    </fieldset>
+    <fieldset class="role-idp">
+      <legend>Sign-in mapping</legend>
+      <p class="muted">Identity provider groups that give this role at sign-in, one per line (<code>*</code> = any
+        text, case-sensitive). When several roles match, the lowest priority wins, ties by role name.</p>
+      <p v-if="!mappingEnabled" class="banner banner-info">Role mapping is disabled (Role mapping tab): these groups are
+        kept but inactive.</p>
+      <p v-if="role.fixed" class="banner banner-info">The admin role is only given by a group when the role mapping
+        allows admin.</p>
+      <div class="form-row">
+        <div class="field">
+          <label for="role-idp-groups">Groups</label>
+          <textarea id="role-idp-groups" rows="3" v-model="form.idpGroups" placeholder="engineering&#10;team-*"
+                    @input="touch"></textarea>
+        </div>
+        <div class="field-sm">
+          <label for="role-idp-priority">Priority</label>
+          <input id="role-idp-priority" type="number" step="1" v-model.number="form.idpPriority" @input="touch" />
+        </div>
+      </div>
     </fieldset>
     <fieldset class="tool-permissions">
       <legend>Tool permissions</legend>

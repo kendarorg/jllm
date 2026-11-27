@@ -13,6 +13,7 @@ import org.kendar.llm.harness.plugin.WebPluginHost;
 import org.kendar.llm.harness.session.ChatSessionStore;
 import org.kendar.llm.harness.session.SubAgentRunLog;
 import org.kendar.llm.harness.settings.ProjectMcpTrust;
+import org.kendar.llm.harness.settings.SettingsSink;
 import org.kendar.llm.harness.settings.SettingsSource;
 import org.kendar.llm.harness.state.StateStore;
 import org.kendar.llm.web.commons.ChatApi;
@@ -26,6 +27,7 @@ import org.kendar.llm.web.commons.admin.AdminApi;
 import org.kendar.llm.web.commons.auth.AuthApi;
 import org.kendar.llm.web.commons.auth.OidcApi;
 import org.kendar.llm.web.commons.auth.OidcProperties;
+import org.kendar.llm.web.commons.auth.RoleMappingProperties;
 import org.kendar.llm.web.commons.me.MeApi;
 import org.kendar.llm.web.commons.plugins.PluginApi;
 import org.springframework.beans.factory.ObjectProvider;
@@ -60,6 +62,13 @@ public class JllmWebAutoConfiguration {
         return Binder.get(env).bind("jllm.auth", OidcProperties.class).orElseGet(() -> new OidcProperties(null, null));
     }
 
+    /** {@code jllm.auth.oidc.role-mapping.*}: the initial values of the role mapping options. */
+    @Bean
+    public RoleMappingProperties roleMappingProperties(Environment env) {
+        return Binder.get(env).bind("jllm.auth.oidc.role-mapping", RoleMappingProperties.class)
+                .orElse(RoleMappingProperties.NONE);
+    }
+
     // ── harness ───────────────────────────────────────────────────────────────
 
     @Bean
@@ -78,13 +87,15 @@ public class JllmWebAutoConfiguration {
     }
 
     /**
-     * The harness. A bean of the application for the settings source, the project trust, the chat, sub-agent, mnemonic
+     * The harness. A bean of the application for the settings source, the stored settings ({@link SettingsSink}: their
+     * sections join the layers last), the project trust, the chat, sub-agent, mnemonic
      * and state stores and the plugin storage replaces the file-based default.
      */
     @Bean
     public AgentHarness agentHarness(JllmProperties p, ModelClient modelClient, HarnessPricing pricing,
                                      ObjectMapper mapper, HarnessIdentity identity,
                                      ObjectProvider<SettingsSource> settingsSource,
+                                     ObjectProvider<SettingsSink> settingsSink,
                                      ObjectProvider<ProjectMcpTrust> projectTrust,
                                      ObjectProvider<ChatSessionStore> sessionStore,
                                      ObjectProvider<SubAgentRunLog> subAgentRunLog,
@@ -93,6 +104,7 @@ public class JllmWebAutoConfiguration {
                                      ServiceRegistry services,
                                      ObjectProvider<PluginStorages> pluginStorages) {
         return HarnessFactory.harness(p, modelClient, pricing, mapper, identity, settingsSource.getIfAvailable(),
+                settingsSink.getIfAvailable(),
                 projectTrust.getIfAvailable(), sessionStore.getIfAvailable(), subAgentRunLog.getIfAvailable(),
                 mnemonicStore.getIfAvailable(), stateStore.getIfAvailable(), services, pluginStorages.getIfAvailable());
     }

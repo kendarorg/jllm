@@ -79,14 +79,14 @@ Legend: 🟢 yes, 🔴 no, uncoloured partial or unknown. Verification date: 202
 
 ## Where jllm is weaker
 
-- **Maturity and community.** The other projects have between about 10k and 266k GitHub stars and release several versions a week or month; Claude Code is at 2.1.330, OpenCode at 2.4.0, Hermes Agent at 0.23.3. jllm is a small project (`1.3.0-jllm`) with no comparable user base, third-party extensions or public issue history.
+- **Maturity and community.** The other projects have between about 10k and 266k GitHub stars and release several versions a week or month; Claude Code is at 2.1.330, OpenCode at 2.4.0, Hermes Agent at 0.23.3. jllm is a small project (`1.4.0-jllm`) with no comparable user base, third-party extensions or public issue history.
 - **Editor integration.** OpenCode, Qwen Code and Claude Code ship IDE integrations (ACP, VS Code, JetBrains); Hermes Agent has an ACP server. jllm has a terminal chat, a web chat and a Java API, but no editor plugin.
 - **Model coverage.** No image input, no native Gemini, Bedrock or Vertex client, no model registry with capabilities, and no provider subscription login (only the `OAuthLogin` SPI). Pi, OpenCode, Qwen Code and Hermes Agent cover 30 to 43 or more providers; Pi, OpenCode and Hermes Agent also offer subscription logins.
 - **Interfaces.** The terminal chat is line-based, not a full-screen UI. There is no stdio JSON or RPC mode (jllm-web offers REST and SSE), no messaging gateway, no browser automation, no LSP feedback and no scheduled tasks.
 - **Session features.** No fork or tree, no cross-session memory, and `/undo` restores only changes made by `write_file` and `edit_file`, not shell changes. Custom commands need a Java plugin; there are no markdown prompt templates.
-- **Benchmarks.** mini-swe-agent reports above 74% on SWE-bench Verified. jllm has an evaluation module (`core/jllm-eval`) but publishes no benchmark scores.
+- **Benchmarks.** mini-swe-agent reports above 74% on SWE-bench Verified. jllm has an evaluation module (`eval/jllm-eval`) but publishes no benchmark scores.
 - **Hosted options.** Claude Code has cloud sessions and managed settings, OpenCode an enterprise console. jllm is self-hosted only, and its web application is a reference front end without TLS termination.
-- **Isolation defaults.** The default sandbox has no isolation; Docker is opt-in, and MCP stdio servers run as the JVM user. The file-tool path jail has a residual race on Windows ([tools guide](../guides/tools.md#2-path-jail)).
+- **Isolation defaults.** The default sandbox has no isolation; Docker is opt-in, and on the CLI MCP stdio servers run as the JVM user (the web ignores them). The file-tool path jail has a residual race on Windows ([tools guide](../guides/tools.md#2-path-jail)).
 - **Runtime requirements.** `run_js` needs GraalJS fetched separately; it is not in the jars ([JS guide](../guides/js.md)).
 - **Unverified competitor cells.** Where this document says `unknown` for a competitor, the feature may exist; the docs read did not show it.
 
@@ -369,7 +369,7 @@ Basis: OpenHands (All Hands AI; GitHub organisation `OpenHands`) from its README
 | Aspect | OpenHands (open source) | jllm |
 | --- | --- | --- |
 | *Language and embedding* | *Python SDK (`software-agent-sdk`) and an Agent Server with REST/WebSocket API; agents run locally or in Docker or Kubernetes workspaces.* | *Java 21 library, ports for stores, sandbox, approvals, metrics; REST and SSE through jllm-web.* |
-| Architecture | Append-only event log that is the agent's memory and the hook for observers (SDK architecture docs); conversation state and condensation events are events. Replay and resume mechanics: unknown (page did not say). | Per-chat sessions in a store (files, or SQL: SQLite; MySQL and PostgreSQL experimental); SSE event stream to the browser. |
+| Architecture | Append-only event log that is the agent's memory and the hook for observers (SDK architecture docs); conversation state and condensation events are events. Replay and resume mechanics: unknown (page did not say). | Per-chat sessions in a store (files, or SQL: SQLite, MySQL, PostgreSQL); SSE event stream to the browser. |
 | *Sandbox* | *Docker sandbox for the Agent Server, or one container per conversation; also runnable with no sandbox.* | *Opt-in Docker (local or remote), per-chat directory, path jail, optional GraalJS `run_js`; default has no isolation. The sandbox daemon speaks plain HTTP.* |
 | Approvals | Confirmation policies `AlwaysConfirm`, `NeverConfirm`, `ConfirmRisky`; a security analyzer rates actions LOW, MEDIUM, HIGH or UNKNOWN (default `LLMSecurityAnalyzer`; deterministic `PatternSecurityAnalyzer`, `PolicyRailSecurityAnalyzer` and an ensemble analyzer also exist). | Modes `plan`, default, `edit`, `auto`; regex deny/ask/allow rules; per-chat grants; fast-model classifier in `auto`. |
 | *Prompt-injection controls* | *Not found in the pages read (unknown).* | *Taint tracking of untrusted content with gating and an output sanitizer.* |
@@ -377,7 +377,7 @@ Basis: OpenHands (All Hands AI; GitHub organisation `OpenHands`) from its README
 | *Automations* | *Scheduled, polling and event-driven automations (event-driven needs a reachable host on a VM).* | *None (no scheduled tasks).* |
 | Models | "Use with any LLM"; named providers Anthropic, OpenAI, Google, local (LM Studio, llama.cpp, Ollama); custom model string with base URL. | Anthropic and OpenAI-compatible endpoints; no image input, no native Gemini, Bedrock or Vertex. |
 | *Identity* | *Shared identity in the open-source edition (pricing page); no authentication or RBAC in Agent Canvas.* | *Cookie sessions, local users, OIDC sign-in (one provider), local role files with one role per user, sign-in lockout.* |
-| Benchmarks | The SDK README shows a SWE-bench badge of 77.6 linked to a spreadsheet (no variant or date on the page); the OpenHands Index leaderboard (index.openhands.dev, Hugging Face dataset) lists a top average of 71.88 over 5 categories (snapshot dated 2026-05-28). | `core/jllm-eval` module; no published scores. |
+| Benchmarks | The SDK README shows a SWE-bench badge of 77.6 linked to a spreadsheet (no variant or date on the page); the OpenHands Index leaderboard (index.openhands.dev, Hugging Face dataset) lists a top average of 71.88 over 5 categories (snapshot dated 2026-05-28). | `eval/jllm-eval` module; no published scores. |
 | *Community* | *Main repository about 94.2k GitHub stars; SDK repository about 1.4k.* | *Small project, no star figure claimed.* |
 
 ## Enterprise editions vs jllm
@@ -389,7 +389,7 @@ OpenHands columns follow the vendor's own comparison page (docs.openhands.dev/en
 | Self-hosted | No (hosted) | Yes | Yes (Kubernetes, Helm; EKS, AKS, GKE guides; chart currently for select customers per one docs page) | unknown | partial (cloud sessions; local CLI) | Yes (JVM jar; Spring Boot starters for the web API and SQL stores; no Kubernetes packaging shipped) |
 | Multi-user organisations | Yes | Yes (1 organisation) | Yes (unlimited organisations) | unknown | unknown | partial (users and roles in one deployment; no organisation model documented here) |
 | RBAC | Yes | Yes | Yes (Keycloak) | unknown | unknown | Yes (local role files, one role per user; no IdP group mapping) |
-| SSO | Yes | Yes (SSO / SAML) | SAML/SSO; Keycloak login. OIDC: not mentioned in the pages read | SSO (console) | unknown | One OIDC provider; no SAML (use an OIDC bridge); no group mapping |
+| SSO | Yes | Yes (SSO / SAML) | SAML/SSO; Keycloak login. OIDC: not mentioned in the pages read | SSO (console) | unknown | One OIDC provider; no SAML (use an OIDC bridge); IdP group to role mapping |
 | SCIM | unknown | unknown | unknown | Yes (console) | unknown | No |
 | Audit log | unknown | unknown | "Centralized audit logs" (no detail given) | unknown | unknown | No (known gap) |
 | Observability | unknown | unknown | Laminar (listed) | unknown | unknown | No health or metrics endpoints; `HarnessMetrics` callbacks and estimated cost per chat (Micrometer/OTel are recipes, not shipped) |
@@ -397,7 +397,7 @@ OpenHands columns follow the vendor's own comparison page (docs.openhands.dev/en
 | Custom runtime images | No | unknown | Yes | unknown | unknown | Docker sandbox image configurable (see [sandbox guide](../guides/sandbox.md)) |
 | Source integrations | GitHub, GitLab, Slack (one-click) | Built-in integrations | GitHub Enterprise, GitLab (SaaS and self-hosted), Azure Repos, Bitbucket Data Center, Jira Data Center, Azure Boards, Slack | unknown | Slack, CI | None built in; MCP and OpenAPI tools |
 | Data residency | Vendor-hosted | Self-hosted | "All code and conversations stay on your infrastructure" | unknown | unknown | Self-hosted; sessions stay in the deployer's stores; prompts go to the configured model provider (local models possible) |
-| Database | unknown | unknown | Bundled PostgreSQL (evaluation only, no supported migration to external); external PostgreSQL supported; Redis | n/a | n/a | SQLite; MySQL and PostgreSQL experimental |
+| Database | unknown | unknown | Bundled PostgreSQL (evaluation only, no supported migration to external); external PostgreSQL supported; Redis | n/a | n/a | SQLite, MySQL, PostgreSQL |
 | Pricing | Commercial SaaS; amount unknown | $500/month with 10 users, +$50 per extra seat, 5,000 sessions per month cap | Custom pricing; unlimited seats and sessions; BYOK | unknown | Per-developer usage (about $13 per active day quoted by Anthropic) | Apache-2.0, free |
 | Support | unknown | Best-effort email | Standard or Premium SLA | unknown | unknown | None |
 | Assurance | unknown | unknown | Dedicated customer engineer; certifications unknown | unknown | unknown | No external security audit, no certification |
@@ -416,4 +416,4 @@ OpenHands columns follow the vendor's own comparison page (docs.openhands.dev/en
 ## Where jllm leads or differs
 
 - Java embedding, Apache-2.0 licence with no commercial tier, permission modes with a classifier, taint tracking, OpenAPI tools with per-user OAuth, three context strategies, own OIDC and role model without a separate Keycloak.
-- Gaps against the enterprise tier: no audit log, no per-user rate limits or spend caps (only a 30 s sign-in lockout), no health or metrics endpoints, no TLS termination in jllm-web (use a reverse proxy), plain-HTTP sandbox daemon, MySQL and PostgreSQL stores experimental, no SAML or SCIM, no Kubernetes packaging, no support organisation.
+- Gaps against the enterprise tier: no audit log, no per-user rate limits or spend caps (only a 30 s sign-in lockout), no health or metrics endpoints, no TLS termination in jllm-web (use a reverse proxy), plain-HTTP sandbox daemon, no SAML or SCIM, no Kubernetes packaging, no support organisation.

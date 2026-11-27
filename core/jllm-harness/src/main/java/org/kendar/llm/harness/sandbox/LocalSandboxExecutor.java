@@ -25,9 +25,28 @@ public class LocalSandboxExecutor implements SandboxExecutor {
     private final Layout layout;
     private volatile LocalShell shell = LocalShell.osDefault();
     private final AtomicBoolean warned = new AtomicBoolean();
+    private final boolean confinesPaths;
 
     public LocalSandboxExecutor(Layout layout) {
+        this(layout, true);
+    }
+
+    private LocalSandboxExecutor(Layout layout, boolean confinesPaths) {
         this.layout = layout;
+        this.confinesPaths = confinesPaths;
+    }
+
+    /**
+     * The local runner without the path jail: the file tools take any host path and shell command lines are not
+     * checked. Only for a disposable environment (a benchmark container) that is itself the sandbox.
+     */
+    public static LocalSandboxExecutor unconfined(Layout layout) {
+        return new LocalSandboxExecutor(layout, false);
+    }
+
+    @Override
+    public boolean confinesPaths() {
+        return confinesPaths;
     }
 
     /** The runner over the default {@link DirLayout} of the configuration ({@code sandbox.baseDir}). */
@@ -76,7 +95,9 @@ public class LocalSandboxExecutor implements SandboxExecutor {
 
     @Override
     public String sandboxStatus(String chatId) {
-        return "runner: local (no isolation: commands run on this machine as this user; testing and trusted use only)"
+        return (confinesPaths
+                ? "runner: local (no isolation: commands run on this machine as this user; testing and trusted use only)"
+                : "runner: none (no isolation and no path jail: every tool reaches any path of this machine)")
                 + " | work dir: " + workDir(chatId) + " | run_js storage: host";
     }
 

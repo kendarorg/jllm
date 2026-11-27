@@ -31,6 +31,8 @@ final class LoopRun {
     boolean turnHadThinking;
     /** History was rewritten mid-turn: their signatures are void, stop thinking. */
     boolean thinkingOff;
+    /** The agent is stuck and gets its last turn with tool use off; the run then ends as STUCK. */
+    boolean wrapUp;
 
     LoopRun(LoopRequest request, String contextKey, LoopRunScope scope, ToolContext toolContext, String turnExtra,
             CancelToken token, StuckDetector stuck, String agentName, RunBudget budget) {

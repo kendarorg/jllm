@@ -1,5 +1,8 @@
 package org.kendar.llm.harness;
 
+import org.kendar.llm.harness.hooks.HookContext;
+import org.kendar.llm.harness.hooks.Hooks;
+
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import org.kendar.llm.harness.agent.ActiveSubAgent;
 import org.kendar.llm.harness.agent.AgentEvent;
@@ -63,6 +66,7 @@ public final class AgentHarness {
     private final StorageQuota quota;
     private final ServiceRegistry services;
     private final HarnessAuth auth;
+    private final Hooks hooks;
     private final SlashCommands commands = new SlashCommands(this);
 
     AgentHarness(HarnessParts parts) {
@@ -85,6 +89,7 @@ public final class AgentHarness {
         this.quota = parts.quota();
         this.services = parts.services();
         this.auth = parts.auth();
+        this.hooks = parts.hooks();
         service.onTurnStart(this::beginTurn);
         // a login started from the web ended: tell the chat it was started from
         commands.onLoginFinished((chatId, msg) -> service.notify(chatId, "login",
@@ -309,6 +314,14 @@ public final class AgentHarness {
     /** Estimated cost in USD of the tokens used so far by a chat (0 when no prices are configured). */
     public double cost(ChatSessionData s) {
         return pricing.estimate(s.inputTokens(), s.outputTokens(), s.cacheReadTokens(), s.cacheCreationTokens());
+    }
+
+    /**
+     * Runs the hooks of an event the host raises outside a chat ({@link org.kendar.llm.harness.hooks.HookEvent#ROLE_CHANGED}):
+     * observation only, a failing hook is logged and ignored.
+     */
+    public void runHooks(HookContext ctx) {
+        hooks.run(ctx);
     }
 
     public ChatSessionService sessions() {

@@ -98,12 +98,34 @@ class DialectTest {
     }
 
     @Test
-    void schemaVersionRowIsOneInEveryDialect() {
+    void schemaVersionTableWithoutRowInEveryDialect() {
+        // the version row is written by the code (Schema.VERSION), never by the script
         for (Dialect d : Dialect.values()) {
             List<String> st = Schema.statements(Schema.read(d));
             assertTrue(st.stream().anyMatch(s -> s.matches("(?s)CREATE TABLE (IF NOT EXISTS )?schema_version \\(version INT(EGER)? NOT NULL PRIMARY KEY\\)")), d.name());
-            assertTrue(st.stream().anyMatch(s -> s.matches("INSERT (OR IGNORE )?INTO schema_version \\(version\\) VALUES \\(1\\)")), d.name());
+            assertTrue(st.stream().noneMatch(s -> s.contains("INTO schema_version")), d.name());
         }
+    }
+
+    @Test
+    void scriptCreatesTheLastVersionInEveryDialect() {
+        // the columns of the last migration step are in the script
+        for (Dialect d : Dialect.values()) {
+            for (String table : List.of("roles", "users")) {
+                String create = Schema.statements(Schema.read(d)).stream()
+                        .filter(s -> s.matches("(?s)CREATE TABLE (IF NOT EXISTS )?" + table + " .*")).findFirst().orElseThrow();
+                assertTrue(create.matches("(?s).*\\bsettings\\s+TEXT.*"), d + " " + table + ": " + create);
+            }
+        }
+        assertEquals(Schema.STEPS.get(Schema.STEPS.size() - 1).version(), Schema.VERSION);
+    }
+
+    @Test
+    void settingsSectionTableInEveryDialect() {
+        for (Dialect d : Dialect.values()) {
+            assertTrue(tables(d).contains("settings_section"), d.name());
+        }
+        assertTrue(Schema.VERSION >= 3);
     }
 
     @Test

@@ -289,8 +289,11 @@ function handleEvent(ev) {
     case 'text_delta': streamDelta(d.block ?? 0, d.text || ''); break;
     case 'text_reset': streamDrop(); break;
     case 'stuck':
-      addMsg('notice', (d.action === 'stop' ? 'Stopped, the agent was stuck: ' : d.action === 'continue'
-        ? 'Continuing although the agent seems stuck: ' : 'The agent seems stuck, told to change approach: ') + (d.message || d.pattern));
+      addMsg('notice', (d.action === 'stop' ? 'Stopped, the agent was stuck: '
+        : d.action === 'wrap_up' ? 'Stopping, the agent was stuck; asking for a final answer without tools: '
+        : d.action === 'continue' ? 'Continuing although the agent seems stuck: '
+        : d.action === 'dismissed' ? 'Repetition judged as progress' + (d.reason ? ' (' + d.reason + ')' : '') + ': '
+        : 'The agent seems stuck, told to change approach: ') + (d.message || d.pattern));
       break;
     case 'verify_failed':
       addMsg('notice', 'Stop check failed (attempt ' + d.attempt + '), the agent goes on:\n' + (d.message || ''));

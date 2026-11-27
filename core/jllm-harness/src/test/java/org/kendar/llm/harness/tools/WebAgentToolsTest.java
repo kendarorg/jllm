@@ -185,6 +185,111 @@ class WebAgentToolsTest {
         assertTrue(e.getMessage().contains("169.254.169.254"), e.getMessage());
     }
 
+    private String allowed(String address) throws Exception {
+        return tool("web_allowed").execute(ctx, json("{'address':'" + address + "'}"));
+    }
+
+    @Test
+    void webAllowedAnswersAllowedWhenNothingIsBlocked() throws Exception {
+        assertEquals("ALLOWED", allowed("http://127.0.0.1:8080/admin"));
+    }
+
+    @Test
+    void webAllowedIgnoresProtocolPortPathAndParameters() throws Exception {
+        web = new WebAgentTools(config, MAPPER, StorageQuota.UNLIMITED, 0, new AddressPolicy(true, java.util.List.of()));
+
+        for (String a : new String[]{"127.0.0.1", "http://127.0.0.1:8080/admin?x=1#f", "https://user:pw@127.0.0.1/",
+                "localhost:9000/a/b", "[::1]:80/x", "::1", "  HTTP://LocalHost  ", "169.254.169.254/latest/meta-data"}) {
+            String r = allowed(a);
+            assertTrue(r.startsWith("NOT_ALLOWED"), a + " -> " + r);
+            assertTrue(r.contains("refused"), r);
+        }
+        assertEquals("ALLOWED", allowed("https://93.184.216.34:8443/a?b=c"));
+    }
+
+    @Test
+    void webAllowedFollowsTheExtraAddresses() throws Exception {
+        web = new WebAgentTools(config, MAPPER, StorageQuota.UNLIMITED, 0,
+                new AddressPolicy(false, java.util.List.of("10.0.0.0/8", "internal.example")));
+
+        assertTrue(allowed("http://10.1.2.3:81/x").startsWith("NOT_ALLOWED"));
+        assertTrue(allowed("internal.example/admin").startsWith("NOT_ALLOWED"));
+        assertEquals("ALLOWED", allowed("93.184.216.34"));
+    }
+
+    @Test
+    void webAllowedRefusesAnAddressWithoutHost() throws Exception {
+        web = new WebAgentTools(config, MAPPER, StorageQuota.UNLIMITED, 0, new AddressPolicy(true, java.util.List.of()));
+
+        for (String a : new String[]{"", "http://", ":8080/x", "///"}) {
+            assertTrue(allowed(a).startsWith("NOT_ALLOWED"), a);
+        }
+    }
+
+    @Test
+    void hostOnlyKeepsJustTheHost() {
+        assertEquals("example.com", WebAgentTools.hostOnly("https://u@example.com:8443/a?b#c").getHost());
+        assertEquals("example.com", WebAgentTools.hostOnly("example.com").getHost());
+        assertEquals("[::1]", WebAgentTools.hostOnly("[::1]:80").getHost());
+        assertEquals("[::1]", WebAgentTools.hostOnly("::1").getHost());
+        assertThrows(IllegalArgumentException.class, () -> WebAgentTools.hostOnly("http:///x"));
+    }
+
+    private static java.net.InetAddress loopback() throws Exception {
+        return java.net.InetAddress.getByAddress(new byte[]{127, 0, 0, 1});
+    }
+
+    private String fetchUrl(String url) throws Exception {
+        return tool("web_fetch").execute(ctx, json("{'url':'" + url + "'}"));
+    }
+
+    @Test
+    void connectUsesThePinnedAddress() throws Exception {
+        // The name exists only in the policy's lookup: the fetch works only when the connect uses the pinned answer.
+        String host = "pinned-" + System.nanoTime() + ".jllm.test";
+        java.net.InetAddress lo = loopback();
+        web = new WebAgentTools(config, MAPPER, StorageQuota.UNLIMITED, 0,
+                new AddressPolicy(false, java.util.List.of("10.0.0.0/8"), h -> new java.net.InetAddress[]{lo}));
+
+        assertEquals("HTTP 200\njust plain text", fetchUrl("http://" + host + ":" + server.getAddress().getPort() + "/plain"));
+        assertFalse(GuardedResolverProvider.isPinned(host), "released after the request");
+    }
+
+    @Test
+    void rebindingAnswerIsNotFollowed() throws Exception {
+        String host = "rebind-" + System.nanoTime() + ".jllm.test";
+        java.net.InetAddress lo = loopback();
+        java.net.InetAddress internal = java.net.InetAddress.getByAddress(new byte[]{10, 9, 9, 9});
+        java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
+        web = new WebAgentTools(config, MAPPER, StorageQuota.UNLIMITED, 0,
+                new AddressPolicy(false, java.util.List.of("10.0.0.0/8"),
+                        h -> new java.net.InetAddress[]{calls.getAndIncrement() == 0 ? lo : internal}));
+
+        IllegalStateException e = assertThrows(IllegalStateException.class,
+                () -> fetchUrl("http://" + host + ":" + server.getAddress().getPort() + "/plain"));
+        assertTrue(e.getMessage().contains("10.9.9.9"), e.getMessage());
+    }
+
+    @Test
+    void redirectHopToARebindingNameIsRefused() throws Exception {
+        String host = "hop-" + System.nanoTime() + ".jllm.test";
+        int port = server.getAddress().getPort();
+        server.createContext("/to-rebind", ex -> {
+            ex.getResponseHeaders().add("Location", "http://" + host + ":" + port + "/plain");
+            ex.sendResponseHeaders(302, -1);
+            ex.close();
+        });
+        java.net.InetAddress lo = loopback();
+        java.net.InetAddress internal = java.net.InetAddress.getByAddress(new byte[]{10, 9, 9, 9});
+        java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
+        web = new WebAgentTools(config, MAPPER, StorageQuota.UNLIMITED, 0,
+                new AddressPolicy(false, java.util.List.of("10.0.0.0/8"),
+                        h -> new java.net.InetAddress[]{calls.getAndIncrement() == 0 ? lo : internal}));
+
+        IllegalStateException e = assertThrows(IllegalStateException.class, () -> fetch("/to-rebind"));
+        assertTrue(e.getMessage().contains(host) && e.getMessage().contains("10.9.9.9"), e.getMessage());
+    }
+
     @Test
     void unreachableHostSurfacesAsException() {
         server.stop(0);

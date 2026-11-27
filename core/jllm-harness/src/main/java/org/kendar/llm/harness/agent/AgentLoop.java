@@ -85,7 +85,7 @@ public class AgentLoop {
                        HarnessMetrics metrics, String systemPrompt, Hooks hooks, ToolClassifier classifier,
                        Identity identity, Collection<HarnessTool> harnessTools,
                        Collection<HarnessTool> builtinFileTools, ScopedInstructions scopedInstructions,
-                       ToolInputValidator inputValidator, NoiseCommandPruner noisePruner) {
+                       ToolInputValidator inputValidator, NoiseCommandPruner noisePruner, StuckJudge stuckJudge) {
         public Deps {
             systemPrompt = systemPrompt == null ? "" : systemPrompt;
             hooks = hooks == null ? Hooks.NONE : hooks;
@@ -271,6 +271,7 @@ public class AgentLoop {
         ToolContext tctx = new ToolContext(chatId, sandbox.workDir(chatId), sandbox.scratchDir(chatId, scratchId),
                 req.mode() == PermissionMode.PLAN, null, req.mode(), new AgentRun(sink, cancelled, contextKey),
                 sandbox.files(chatId, scratchId)).withScope(scope).withLinks(deps.config().externalLinks())
+                .withUnconfined(!sandbox.confinesPaths())
                 .withHosts(new ChatHostApprover(deps.approvals(), deps.metrics(), deps.mapper(), chatId, sink,
                         cancelled, req.interactive(), req.label()));
         // the mode goes after the cached system prefix, so switching modes does not invalidate the prompt cache

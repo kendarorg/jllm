@@ -25,9 +25,12 @@ import java.security.MessageDigest;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.function.UnaryOperator;
 
 /**
@@ -36,8 +39,87 @@ import java.util.function.UnaryOperator;
  */
 public final class OidcClient {
 
-    /** What the application needs from a verified ID token. */
-    public record Identity(String issuer, String subject, String email, boolean emailVerified, String name) {
+    /**
+     * What the application needs from a verified ID token.
+     *
+     * @param groups the group claim, read only when the role mapping asks for it
+     */
+    public record Identity(String issuer, String subject, String email, boolean emailVerified, String name,
+                           Groups groups) {
+    }
+
+    /** Most groups a token may carry; more makes the claim unusable rather than cut. */
+    public static final int MAX_GROUPS = 200;
+    /** Longest group name; a longer one makes the claim unusable. */
+    public static final int MAX_GROUP_LENGTH = 256;
+
+    /**
+     * The group claim of a verified ID token.
+     *
+     * @param status    whether the claim could be used
+     * @param values    the groups, in token order without duplicates; empty unless {@link Status#PRESENT}
+     * @param claimKeys the top-level claim names of the token, for the log when the claim is missing
+     */
+    public record Groups(Status status, List<String> values, List<String> claimKeys) {
+
+        public enum Status {
+            /** Not asked for: the role mapping is off. */
+            NOT_READ,
+            PRESENT,
+            /** No such claim in the token. */
+            MISSING,
+            /** Entra ID overage: {@code _claim_names}/{@code _claim_sources} instead of the groups. Never fetched. */
+            OVERAGE,
+            /** Over {@value #MAX_GROUPS} groups, or a name over {@value #MAX_GROUP_LENGTH} characters. */
+            OVERSIZED,
+            /** Neither a string array nor a string. */
+            INVALID
+        }
+
+        public static final Groups NOT_READ = new Groups(Status.NOT_READ, List.of(), List.of());
+
+        public Groups {
+            values = values == null ? List.of() : List.copyOf(values);
+            claimKeys = claimKeys == null ? List.of() : List.copyOf(claimKeys);
+        }
+    }
+
+    /**
+     * The groups at {@code path} in the claims: the claim of that exact name, else the path split at dots through
+     * nested objects ({@code realm_access.roles}). A string array, or a string of space or comma separated groups.
+     */
+    public static Groups groups(Map<String, Object> claims, String path) {
+        List<String> keys = new ArrayList<>(new TreeSet<>(claims.keySet()));
+        Object v = claims.get(path);
+        if (v == null && path.contains(".")) {
+            Object at = claims;
+            for (String part : path.split("\\.", -1)) {
+                at = at instanceof Map<?, ?> m ? m.get(part) : null;
+                if (at == null) break;
+            }
+            v = at;
+        }
+        if (v == null) {
+            boolean overage = claims.containsKey("_claim_names") || claims.containsKey("_claim_sources");
+            return new Groups(overage ? Groups.Status.OVERAGE : Groups.Status.MISSING, List.of(), keys);
+        }
+        List<String> out = new ArrayList<>();
+        if (v instanceof List<?> list) {
+            if (list.size() > MAX_GROUPS) return new Groups(Groups.Status.OVERSIZED, List.of(), keys);
+            for (Object o : list) {
+                if (!(o instanceof String s)) return new Groups(Groups.Status.INVALID, List.of(), keys);
+                out.add(s);
+            }
+        } else if (v instanceof String s) {
+            for (String g : s.split("[\\s,]+")) if (!g.isEmpty()) out.add(g);
+        } else {
+            return new Groups(Groups.Status.INVALID, List.of(), keys);
+        }
+        List<String> distinct = out.stream().map(String::strip).filter(g -> !g.isEmpty()).distinct().toList();
+        if (distinct.size() > MAX_GROUPS || distinct.stream().anyMatch(g -> g.length() > MAX_GROUP_LENGTH)) {
+            return new Groups(Groups.Status.OVERSIZED, List.of(), keys);
+        }
+        return new Groups(Groups.Status.PRESENT, distinct, keys);
     }
 
     private record Discovery(String authorization, String token, String jwksUri) {
@@ -113,8 +195,12 @@ public final class OidcClient {
                 + "&code_challenge_method=S256";
     }
 
-    /** Exchanges the code, verifies the ID token and returns who signed in. */
-    public Identity exchange(String code, String verifier, String nonce) throws OidcException {
+    /**
+     * Exchanges the code, verifies the ID token and returns who signed in.
+     *
+     * @param groupClaim the claim path of the groups; null = not read ({@link Groups#NOT_READ})
+     */
+    public Identity exchange(String code, String verifier, String nonce, String groupClaim) throws OidcException {
         String idToken;
         try {
             String form = "grant_type=authorization_code&code=" + enc(code) + "&redirect_uri=" + enc(redirectUri)
@@ -135,10 +221,10 @@ public final class OidcClient {
             throw new OidcException("invalid_token", "Interrupted");
         }
         if (idToken.isBlank()) throw new OidcException("invalid_token", "No id_token in the token response");
-        return verify(idToken, nonce);
+        return verify(idToken, nonce, groupClaim);
     }
 
-    Identity verify(String idToken, String nonce) throws OidcException {
+    Identity verify(String idToken, String nonce, String groupClaim) throws OidcException {
         try {
             SignedJWT jwt = SignedJWT.parse(idToken);
             JWSAlgorithm alg = jwt.getHeader().getAlgorithm();
@@ -170,7 +256,9 @@ public final class OidcClient {
             if (sub == null || sub.isBlank()) throw new OidcException("invalid_token", "No subject");
             Object verified = c.getClaim("email_verified");
             boolean emailVerified = Boolean.TRUE.equals(verified) || "true".equals(verified);
-            return new Identity(issuer(), sub, c.getStringClaim("email"), emailVerified, c.getStringClaim("name"));
+            Groups groups = groupClaim == null ? Groups.NOT_READ : groups(c.getClaims(), groupClaim);
+            return new Identity(issuer(), sub, c.getStringClaim("email"), emailVerified, c.getStringClaim("name"),
+                    groups);
         } catch (OidcException e) {
             throw e;
         } catch (Exception e) { // boundary: any unreadable or unverifiable token is an invalid token

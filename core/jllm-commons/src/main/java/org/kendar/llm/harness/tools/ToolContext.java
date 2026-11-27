@@ -21,10 +21,12 @@ import java.nio.file.Path;
  *                     model-driven call
  * @param links        what the file tools do with a link that leaves the work dir ({@code files.externalLinks});
  *                     null = {@link ExternalLinks#NONE}
+ * @param unconfined   true when the runner confines nothing (the CLI's {@code --sandbox none}): the file tools take
+ *                     any path of the host and the shell command line is not checked for paths leaving the work dir
  */
 public record ToolContext(String chatId, Path workDir, Path scratchDir, boolean readOnlyWork, String toolUseId,
                           PermissionMode mode, AgentRun run, FileBackend files, String parent, RunScope scope,
-                          HostApprover hosts, ExternalLinks links) {
+                          HostApprover hosts, ExternalLinks links, boolean unconfined) {
 
     public ToolContext {
         if (mode == null) mode = PermissionMode.DEFAULT;
@@ -33,12 +35,12 @@ public record ToolContext(String chatId, Path workDir, Path scratchDir, boolean 
 
     public ToolContext(String chatId, Path workDir, Path scratchDir, boolean readOnlyWork, String toolUseId,
                        PermissionMode mode, AgentRun run, FileBackend files) {
-        this(chatId, workDir, scratchDir, readOnlyWork, toolUseId, mode, run, files, null, null, null, null);
+        this(chatId, workDir, scratchDir, readOnlyWork, toolUseId, mode, run, files, null, null, null, null, false);
     }
 
     public ToolContext(String chatId, Path workDir, Path scratchDir, boolean readOnlyWork, String toolUseId,
                        PermissionMode mode, AgentRun run, FileBackend files, String parent, RunScope scope) {
-        this(chatId, workDir, scratchDir, readOnlyWork, toolUseId, mode, run, files, parent, scope, null, null);
+        this(chatId, workDir, scratchDir, readOnlyWork, toolUseId, mode, run, files, parent, scope, null, null, false);
     }
 
     public ToolContext(String chatId, Path workDir, Path scratchDir, boolean readOnlyWork, String toolUseId,
@@ -60,38 +62,47 @@ public record ToolContext(String chatId, Path workDir, Path scratchDir, boolean 
 
     public ToolContext withHosts(HostApprover hosts) {
         return new ToolContext(chatId, workDir, scratchDir, readOnlyWork, toolUseId, mode, run, files, parent, scope,
-                hosts, links);
+                hosts, links, unconfined);
     }
 
     public ToolContext withToolUseId(String toolUseId) {
         return new ToolContext(chatId, workDir, scratchDir, readOnlyWork, toolUseId, mode, run, files, parent, scope,
-                hosts, links);
+                hosts, links, unconfined);
     }
 
     public ToolContext withFiles(FileBackend files) {
         return new ToolContext(chatId, workDir, scratchDir, readOnlyWork, toolUseId, mode, run, files, parent, scope,
-                hosts, links);
+                hosts, links, unconfined);
     }
 
     public ToolContext withParent(String parent) {
         return new ToolContext(chatId, workDir, scratchDir, readOnlyWork, toolUseId, mode, run, files, parent, scope,
-                hosts, links);
+                hosts, links, unconfined);
     }
 
     public ToolContext withScope(RunScope scope) {
         return new ToolContext(chatId, workDir, scratchDir, readOnlyWork, toolUseId, mode, run, files, parent, scope,
-                hosts, links);
+                hosts, links, unconfined);
     }
 
     /** The same context with the given policy for links that leave the work dir. */
     public ToolContext withLinks(ExternalLinks links) {
         return new ToolContext(chatId, workDir, scratchDir, readOnlyWork, toolUseId, mode, run, files, parent, scope,
-                hosts, links);
+                hosts, links, unconfined);
     }
 
-    /** The same context with both {@code workDir} and {@code scratchDir} set to {@code root} (the file jail). */
+    /** The same context with the given {@code unconfined} flag. */
+    public ToolContext withUnconfined(boolean unconfined) {
+        return new ToolContext(chatId, workDir, scratchDir, readOnlyWork, toolUseId, mode, run, files, parent, scope,
+                hosts, links, unconfined);
+    }
+
+    /**
+     * The same context with both {@code workDir} and {@code scratchDir} set to {@code root} (the file jail); always
+     * confined.
+     */
     public ToolContext withRoot(Path root) {
         return new ToolContext(chatId, root, root, readOnlyWork, toolUseId, mode, run, files, parent, scope, hosts,
-                links);
+                links, false);
     }
 }

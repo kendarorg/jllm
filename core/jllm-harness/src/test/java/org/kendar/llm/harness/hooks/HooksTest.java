@@ -47,6 +47,20 @@ class HooksTest {
     }
 
     @Test
+    void hostRaisesRoleChangedOutsideAChat() throws Exception {
+        List<HookContext> seen = Collections.synchronizedList(new ArrayList<>());
+        AgentHarness h = builder(new ScriptedModel())
+                .hook(HookEvent.ROLE_CHANGED, ctx -> { seen.add(ctx); return HookResult.allow(); })
+                .hook(HookEvent.ROLE_CHANGED, ctx -> { throw new IllegalStateException("ignored"); })
+                .build();
+        h.runHooks(HookContext.roleChanged(json("{'user':'ann','from':'reader','to':'dev','group':'eng'}"), "summary"));
+        assertEquals(1, seen.size());
+        assertEquals(HookEvent.ROLE_CHANGED, seen.get(0).event());
+        assertEquals("dev", seen.get(0).input().path("to").asText());
+        assertEquals("summary", seen.get(0).text());
+    }
+
+    @Test
     void preToolHookDeniesAndToolDoesNotRun() throws Exception {
         List<String> ran = Collections.synchronizedList(new ArrayList<>());
         ScriptedModel model = new ScriptedModel().enqueue(toolUse("t1", "act", "{}"), text("ok"));

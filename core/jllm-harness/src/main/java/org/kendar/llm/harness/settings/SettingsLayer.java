@@ -19,6 +19,11 @@ public record SettingsLayer(Kind kind, String origin, JsonNode tree) {
         /** The project's settings ({@code <project>/.jllm/settings.json}): shared, untrusted. */
         PROJECT,
         /** Settings named explicitly by whoever starts the harness ({@code --settings}, {@code jllm.settings}). */
-        EXPLICIT
+        EXPLICIT,
+        /**
+         * The sections an administrator stored at runtime through a {@link SettingsSink}: last, so a stored value wins
+         * over the settings files. Trusted like the global layer.
+         */
+        STORED
     }
 }

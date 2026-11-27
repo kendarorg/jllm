@@ -58,7 +58,7 @@ It does not protect against code already inside the container, and the daemon it
 - `web_fetch` and `web_download` ask before contacting a host. The user may grant a host
   and its subdomains for one chat. `web_download` writes a file, so it is also gated like `write_file` (approval,
   plan-mode scratch copy), and a `write_file` permission rule covers it too. A redirect to another host asks again; https to http redirects are refused.
-- `web.blockLocalHost=true` (settings; the web release template sets it) refuses loopback, link-local (cloud metadata), private and any-local addresses on the first URL and on every redirect, before the host question; `web.blockExtraAddresses` adds IPs, CIDRs, hosts and `*.suffix` entries. Default `false` for the CLI. The name is resolved by the guard and again by the HTTP client, so DNS rebinding is not covered.
+- `web.blockLocalHost=true` (settings; the web release template sets it) refuses loopback, link-local (cloud metadata), private and any-local addresses on the first URL and on every redirect, before the host question; `web.blockExtraAddresses` adds IPs, CIDRs, hosts and `*.suffix` entries. Default `false` for the CLI. A name that cannot be resolved is refused, and the checked addresses are pinned for the connection, so DNS rebinding is not followed. Only these two tools are guarded.
 - An invalid TLS certificate asks separately, for that one call and host only.
 - `web_search` and `wikipedia_search` call fixed hosts.
 - MCP servers and REST APIs are reachable only if listed in the settings.
@@ -106,12 +106,14 @@ ownership is checked on the id the framework matched (not on the raw URI), and t
   user (never stored nor sent to the model), but the file is **loaded anyway**: the scan is a heuristic warning, not
   a filter ([Suspicious content](../reference/usage.md#suspicious-content-in-loaded-files)). Review shared skills and
   project instruction files like code.
-- MCP stdio servers run as child processes of the JVM user, outside any sandbox.
+- On the CLI, MCP stdio servers run as child processes of the JVM user, outside any sandbox. The web host ignores
+  them (warning in the log); only streamable-HTTP servers are used there.
 - Model providers receive whatever is in the context. Choose the provider and its data terms yourself, or use a local
   OpenAI-compatible endpoint.
 - Chat history is not encrypted at rest (files under `.jllm/history`, or the `messages` column with the SQL store). Use
   disk or database encryption, or your own `ChatSessionStore`.
-- No IdP role mapping yet ([limits](roadmap-and-limits.md)).
+- IdP role mapping is off by default and evaluated at sign-in only: a group removed at the provider applies at the
+  next sign-in, bounded by `role-mapping.max-age` ([IdP role mapping](idp-role-mapping.md)).
 - There has been no external security audit.
 
 Step-by-step hardening and enterprise setup: [Securing a jllm-web deployment](securing-and-enterprise-setup.md).

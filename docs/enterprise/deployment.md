@@ -23,9 +23,9 @@ only for the Docker sandbox.
 - [ ] With the sample password mode, set `jllm.web.use-real-password=true` so no user keeps the default password; the admin password is in the startup log (WARN, once).
 - [ ] The web app sends a `Content-Security-Policy` (same-origin only, no framing), `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`. Tighten or replace the policy with `jllm.web.content-security-policy`; `off` removes the CSP header (do not do this when exposed). A reverse proxy must not strip these headers.
 - [ ] Set `jllm.web.enforce-password-change-on-loopback=true` when anything on the host forwards remote traffic (reverse proxy, SSH or cloud tunnel, sidecar, port forward). The loopback exemption of the default-password enforcement is off when a forwarding header is present or `server.address` is unset, `0.0.0.0` or `::`; a proxy, tunnel or sidecar that adds no forwarding header makes remote requests look local, so the exemption must not be relied on there.
-- [ ] Set `web.blockLocalHost=true` (settings file) so `web_fetch` and `web_download` cannot reach loopback, link-local or private addresses; add `web.blockExtraAddresses` for internal hosts. DNS rebinding is not covered.
+- [ ] Set `web.blockLocalHost=true` (settings file) so `web_fetch` and `web_download` cannot reach loopback, link-local or private addresses; add `web.blockExtraAddresses` for internal hosts.
 - [ ] Give the roles that need files or `bash` a `docker-isolated` or `docker-open` sandbox (daemon mode); the default is `none`, and `local` has no isolation. Run the JVM as an
-      unprivileged user: MCP stdio servers inherit it.
+      unprivileged user. MCP servers must be streamable HTTP: the web ignores stdio servers (warning in the log).
 - [ ] Set `JLLM_TOKEN_KEY` (`openssl rand -base64 32`) so OAuth tokens are encrypted at rest. Without it the server
       refuses to start when `jllm.web.use-real-password=true` or `server.address` is not loopback (unset, `0.0.0.0`
       and `::` count as non-loopback), unless you set `jllm.web.allow-unencrypted-tokens=true`; on a local-only server
@@ -45,11 +45,11 @@ files and sessions in memory, so a restart signs everyone out). That fits one in
 - Chat, sub-agent and state stores are ports (`ChatSessionStore`, `SubAgentRunLog`, `StateStore`).
 - Users, roles, skills and login sessions have repository interfaces in `jllm-harness`. `jllm-sql-spring-starter`
   ([README](../../web/jllm-sql-spring-starter/README.md)) implements them, and the chat, state, settings, trust and token
-  stores, in SQL: SQLite (default, bundled), MySQL or PostgreSQL (both **experimental** until run against a real server),
+  stores, in SQL: SQLite (default, bundled), MySQL or PostgreSQL,
   chosen by the scheme of `jllm.sql.url` alone; plain JDBC, no JPA/Hibernate/Spring Data. The release ships it in
   `lib-ext/sql` (SQL by default; `jllm.store=file` keeps the files). The MySQL (GPL) and PostgreSQL drivers are not
   bundled: `setup` / `fetch-sql-driver` download them with a pinned SHA-256. Set `JLLM_TOKEN_KEY` to encrypt stored tokens.
-  `schema_version` records the schema version; there is no migration runner, changing the schema means deleting the database. Plugin storage (workflows included) is in SQL too (files under `.jllm/plugin-data` with `jllm.store=file`); workspace files stay on disk.
+  The schema migrates itself: `schema_version` holds its version, and at start a server runs the missing steps in order under the schema lock; a database newer than the server is refused. Plugin storage (workflows included) is in SQL too (files under `.jllm/plugin-data` with `jllm.store=file`); workspace files stay on disk.
 - A `TokenStore` that reports `crossProcess()` can be shared between instances.
 - A running chat is a virtual thread and an event buffer in one process. Route a chat to one instance (sticky
   routing) unless you supply your own stores and accept that a run does not move.

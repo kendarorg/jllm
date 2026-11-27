@@ -103,26 +103,46 @@ public final class RunGuards {
         return null;
     }
 
+    /** What the loop does after the stuck detector fired. */
+    enum StuckAction {
+        /** Go on: dismissed by the confirming model, nudged, or the user let the agent continue. */
+        GO_ON,
+        /** One more turn with tool use off, then the run ends as {@code STUCK}. */
+        WRAP_UP,
+        /** The run ends as {@code STUCK} now. */
+        STOP
+    }
+
     /**
-     * The stuck detector fired. The first time the agent is nudged (a note appended to the tool results); after that
-     * an interactive run asks the user, a headless one stops.
+     * The stuck detector fired. With {@code confirm} the fast model may first judge the steps progress (the
+     * detection is then dropped). The first time the agent is nudged (a note appended to the tool results); after
+     * that an interactive run asks the user, a headless one stops. A stop is a wrap-up turn when {@code wrapUp} is on.
      *
-     * @return true when the run must end as {@code STUCK}
+     * @param messages the run's message log, read by the confirming model
      */
-    boolean onStuck(StuckDetector.Detection d, StuckDetector stuck, ArrayNode results, String chatId,
-                    EventSink sink, BooleanSupplier cancelled, boolean interactive, String label) {
+    StuckAction onStuck(StuckDetector.Detection d, StuckDetector stuck, ArrayNode results, JsonNode messages,
+                        String chatId, EventSink sink, BooleanSupplier cancelled, boolean interactive, String label) {
         var mapper = deps.mapper();
+        var cfg = deps.config().loop().stuck();
         Function<String, ObjectNode> event = action -> {
             ObjectNode ev = mapper.createObjectNode().put("pattern", d.pattern()).put("tool", d.tool())
                     .put("count", d.count()).put("action", action).put("message", d.what());
             if (label != null) ev.put("agent", label);
             return ev;
         };
+        if (cfg.confirm() && deps.stuckJudge() != null) {
+            StuckJudge.Verdict v = deps.stuckJudge().judge(d.what(), messages);
+            if (v.progress()) {
+                stuck.dismiss();
+                sink.emit("stuck", event.apply("dismissed").put("reason", v.reason()));
+                return StuckAction.GO_ON;
+            }
+        }
         if (stuck.detections() == 1) {
             results.addObject().put("type", "text")
                     .put("text", Prompts.load("stuck-note.md").replace("{what}", d.what()));
             sink.emit("stuck", event.apply("nudge"));
-            return false;
+            return StuckAction.GO_ON;
         }
         if (interactive && !cancelled.getAsBoolean()) {
             String title = (label == null ? "" : "[" + label + "] ") + "The agent seems stuck";
@@ -135,12 +155,20 @@ public final class RunGuards {
             deps.metrics().approval("stuck", a.approved());
             if (a.approved()) {
                 sink.emit("stuck", event.apply("continue"));
-                return false;
+                return StuckAction.GO_ON;
             }
+        }
+        if (cfg.wrapUp() && !cancelled.getAsBoolean()) {
+            results.addObject().put("type", "text")
+                    .put("text", Prompts.load("stuck-wrapup.md").replace("{what}", d.what()));
+            sink.emit("stuck", event.apply("wrap_up"));
+            sink.emit("warning", mapper.createObjectNode().put("message", "Stopping: " + d.what()
+                    + ". Asking for a final answer without tools."));
+            return StuckAction.WRAP_UP;
         }
         sink.emit("stuck", event.apply("stop"));
         sink.emit("warning", mapper.createObjectNode().put("message", "Stopped: " + d.what() + "."));
-        return true;
+        return StuckAction.STOP;
     }
 
     /**

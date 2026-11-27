@@ -2,7 +2,6 @@ package org.kendar.llm.web.sql;
 
 import org.kendar.llm.harness.identity.Role;
 import org.kendar.llm.harness.identity.RoleInUseException;
-import org.kendar.llm.harness.identity.RoleSandbox;
 import org.kendar.llm.harness.identity.User;
 import org.kendar.llm.harness.identity.RoleRepository;
 import org.kendar.llm.harness.permission.ToolPermission;
@@ -23,6 +22,7 @@ import java.util.regex.Pattern;
 public final class SqlRoleRepository implements RoleRepository {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(SqlRoleRepository.class);
     private static final Pattern NAME = Pattern.compile("[a-z0-9_-]{1,64}");
 
     private final Database db;
@@ -53,7 +53,7 @@ public final class SqlRoleRepository implements RoleRepository {
         if (!valid(role.name())) throw new IllegalArgumentException("Invalid role name: " + role.name());
         db.run(tx -> {
             tx.upsert("roles", List.of("name"), List.of("read_only", "approval", "settings"), role.name(),
-                    role.readOnly(), role.approval(), settingsJson(role.sandbox()));
+                    role.readOnly(), role.approval(), settingsJson(role));
             tx.update("DELETE FROM role_tools WHERE role = ?", role.name());
             tx.update("DELETE FROM role_permissions WHERE role = ?", role.name());
             int ord = 0;
@@ -81,26 +81,26 @@ public final class SqlRoleRepository implements RoleRepository {
         });
     }
 
-    /** {@code roles.settings}: free-text JSON, {@code {"sandbox": {"kind": ..., "scope": ..., "network": ...}}}. */
-    private static String settingsJson(RoleSandbox sb) {
+    /** {@code roles.settings}: the settings map as one JSON object; null when empty. */
+    private static String settingsJson(Role role) {
+        if (role.settings().isEmpty()) return null;
         ObjectNode root = MAPPER.createObjectNode();
-        ObjectNode n = root.putObject("sandbox");
-        n.put("kind", sb.kind().wire());
-        if (sb.scope() != null) n.put("scope", sb.scope());
-        if (sb.network() != null) n.put("network", sb.network());
+        role.settings().forEach(root::set);
         return root.toString();
     }
 
-    /** A missing, unreadable or invalid value is no sandbox: a bad row must not stop the server. */
-    private static RoleSandbox sandboxOf(String json) {
-        if (json == null || json.isBlank()) return RoleSandbox.NONE;
+    /** A missing or unreadable value is no settings: a bad row must not stop the server (logged). */
+    private static Map<String, JsonNode> settingsOf(String role, String json) {
+        Map<String, JsonNode> out = new LinkedHashMap<>();
+        if (json == null || json.isBlank()) return out;
         try {
-            JsonNode n = MAPPER.readTree(json).path("sandbox");
-            return RoleSandbox.of(n.path("kind").asText(null), n.path("scope").asText(null),
-                    n.path("network").asText(null));
-        } catch (IOException | RuntimeException e) {
-            return RoleSandbox.NONE;
+            JsonNode n = MAPPER.readTree(json);
+            if (n != null && n.isObject()) n.fields().forEachRemaining(e -> out.put(e.getKey(), e.getValue()));
+            else log.warn("Settings of role {} ignored: not a JSON object", role);
+        } catch (IOException e) {
+            log.warn("Settings of role {} ignored: {}", role, e.getMessage());
         }
+        return out;
     }
 
     private static boolean valid(String name) {
@@ -109,14 +109,19 @@ public final class SqlRoleRepository implements RoleRepository {
 
     private static Optional<Role> load(Tx tx, String name) {
         return tx.one("SELECT read_only, approval, settings FROM roles WHERE name = ?",
-                rs -> new Object[]{rs.getInt(1) != 0, rs.getString(2), sandboxOf(rs.getString(3))}, name).map(r -> {
+                rs -> new Object[]{rs.getInt(1) != 0, rs.getString(2), rs.getString(3)}, name).map(r -> {
             List<String> tools = tx.query("SELECT pattern FROM role_tools WHERE role = ? ORDER BY ord",
                     rs -> rs.getString(1), name);
             Map<String, ToolPermission> perms = new LinkedHashMap<>();
             tx.query("SELECT pattern, permission FROM role_permissions WHERE role = ? ORDER BY ord",
                     rs -> new String[]{rs.getString(1), rs.getString(2)}, name)
                     .forEach(p -> perms.put(p[0], ToolPermission.parse(p[1])));
-            return new Role(name, tools, (Boolean) r[0], (String) r[1], perms, (RoleSandbox) r[2]);
+            try {
+                return new Role(name, tools, (Boolean) r[0], (String) r[1], perms, settingsOf(name, (String) r[2]));
+            } catch (IllegalArgumentException e) { // stored settings over the caps: keep the role, drop them
+                log.warn("Settings of role {} ignored: {}", name, e.getMessage());
+                return new Role(name, tools, (Boolean) r[0], (String) r[1], perms, Map.of());
+            }
         });
     }
 }

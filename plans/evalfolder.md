@@ -7,8 +7,14 @@ Group the evaluation tooling under `eval/`: the existing in-process suite plus P
 CLI changes and benchmark flow: `plans/harborswe.md`.
 
 ## Status
-Nothing done. `eval/` does not exist; `jllm-eval` is still `core/jllm-eval` (root `pom.xml` profile `eval`, line ~152;
-`core/jllm-eval/scripts/run-smoke.sh` uses `-pl core/jllm-eval`). `.gitignore` already has `__pycache__/`.
+Tasks 1-5 and 7 done; 6 partly done.
+- 1-5: `eval/jllm-eval` moved (Maven module in the root `pom.xml`), references updated, `.gitignore` covers
+  `eval/results/**` (Markdown summaries tracked), `eval/**/.venv/`, `eval/**/*.egg-info/`, `eval/**/.pytest_cache/`.
+- 6: `eval/common` exists (pytest green on Windows, 22). `eval/jllm-swe` and `eval/jllm-harbor` removed on
+  2026-11-25; to redo with `plans/harborswe.md` tasks 4-5.
+- 7: `eval/README.md` describes `jllm-eval`, `common` and `results` only.
+- Open: task 6 (`eval/jllm-swe`, `eval/jllm-harbor`, with `plans/harborswe.md` tasks 4-5); Linux/macOS pytest runs;
+  `chmod +x` on `.sh` when committing.
 
 ## Design
 ```
@@ -27,11 +33,11 @@ eval/
 - Python tooling: `uv` (venv, deps, lockfile, running); no venv+pip path.
 - Scripts in bash and PowerShell; Python 3.10+; presets never hold keys; Python tests need no network, Docker or LLM.
 
-## Remaining tasks
-1. `git mv core/jllm-eval eval/jllm-eval`; `relativePath ../../pom.xml` stays valid; verify `REPO_ROOT` derivation in `scripts/run-smoke.*` and `docker/*`.
-2. Root `pom.xml`: `core/jllm-eval` -> `eval/jllm-eval` (module and the profile comment). `run-smoke.sh/.ps1`: `-pl eval/jllm-eval`.
-3. Update references: `CONTRIBUTING.md:37`, `docs/guides/extending.md:81`, `docs/reference/history.md`, `docs/comparisons/harnesses-*.md` (leave eval-results reports as history).
-4. `.gitignore`: add `eval/results/`, `eval/**/.venv/`, `eval/**/*.egg-info/`.
-5. Validate: `mvn -Peval -pl eval/jllm-eval validate` and unit-only run (`TEST_GROUPS=unit`); not during a model eval.
-6. After CLI contract (`plans/harborswe.md` task 1-2): create `eval/common`, then `eval/jllm-swe` (first benchmark), then `eval/jllm-harbor` (smoke first).
-7. Write `eval/README.md`.
+## Tasks
+1. (done) `git mv core/jllm-eval eval/jllm-eval`; `relativePath ../../pom.xml` stays valid; verify `REPO_ROOT` derivation in `scripts/run-smoke.*` and `docker/*`.
+2. (done) Root `pom.xml`: `core/jllm-eval` -> `eval/jllm-eval` (module and the profile comment). `run-smoke.sh/.ps1`: `-pl eval/jllm-eval`.
+3. (done) Update references: `CONTRIBUTING.md:37`, `docs/guides/extending.md:81`, `docs/reference/history.md`, `docs/comparisons/harnesses-*.md` (leave eval-results reports as history).
+4. (done) `.gitignore`: add `eval/results/`, `eval/**/.venv/`, `eval/**/*.egg-info/`.
+5. (done) Validate: `mvn -Peval -pl eval/jllm-eval validate` and unit-only run (`TEST_GROUPS=unit`); not during a model eval.
+6. (open; `eval/common` done) `eval/jllm-swe` (first benchmark), then `eval/jllm-harbor` (smoke first), with `plans/harborswe.md` tasks 4-5.
+7. (done) Write `eval/README.md`.

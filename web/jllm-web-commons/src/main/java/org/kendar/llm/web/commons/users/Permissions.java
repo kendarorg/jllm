@@ -42,7 +42,7 @@ public final class Permissions {
     /** The role, or empty when it has no valid record. {@code admin} always exists. */
     public Optional<Role> role(String name) {
         if (User.ADMIN_ROLE.equals(name)) {
-            return Optional.of(roles.find(name).map(r -> Role.admin(r.approval(), r.toolPermissions(), r.sandbox()))
+            return Optional.of(roles.find(name).map(r -> Role.admin(r.approval(), r.toolPermissions(), r.settings()))
                     .orElse(Role.ADMIN));
         }
         if (!validName(name)) return Optional.empty();
@@ -52,15 +52,15 @@ public final class Permissions {
     /** Every valid role, {@code admin} first. */
     public List<Role> roles() {
         List<Role> out = new ArrayList<>();
-        out.add(Role.ADMIN);
+        out.add(role(User.ADMIN_ROLE).orElseThrow()); // the stored approval, permissions and settings
         roles.all().stream().filter(r -> validName(r.name()) && !r.fixed()).forEach(out::add);
         return out;
     }
 
-    /** Stores a role (for {@code admin} only its approval). @throws IllegalArgumentException for an invalid name */
+    /** Stores a role (for {@code admin} its approval, permissions and settings; its tools are always all). @throws IllegalArgumentException for an invalid name */
     public Role save(Role role) {
-        if (role.fixed()) { // tools are always all of them; the approval, permissions and sandbox are kept
-            roles.save(Role.admin(role.approval(), role.toolPermissions(), role.sandbox()));
+        if (role.fixed()) { // tools are always all of them; the approval, permissions and settings are kept
+            roles.save(Role.admin(role.approval(), role.toolPermissions(), role.settings()));
             return role(role.name()).orElseThrow();
         }
         if (!validName(role.name())) throw new IllegalArgumentException("Invalid role name: " + role.name());

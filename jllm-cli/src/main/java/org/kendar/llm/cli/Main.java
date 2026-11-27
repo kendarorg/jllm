@@ -9,8 +9,10 @@ import org.kendar.llm.harness.HarnessConfig;
 import org.kendar.llm.harness.agent.AgentEvent;
 import org.kendar.llm.harness.commands.SlashCommands;
 import org.kendar.llm.harness.context.mnemonic.FileMnemonicStore;
+import org.kendar.llm.harness.llm.Usage;
 import org.kendar.llm.harness.permission.PermissionMode;
 import org.kendar.llm.harness.sandbox.CwdLayout;
+import org.kendar.llm.harness.session.ChatSessionData;
 import org.kendar.llm.harness.session.FileChatSessionStore;
 import org.kendar.llm.harness.session.FileHistorySubAgentRunLog;
 import org.kendar.llm.harness.session.HistoryRootLock;
@@ -39,8 +41,10 @@ import java.util.concurrent.TimeUnit;
  *     [--base-url U] [--api-key K] [--mode plan|edit|auto] [--workdir DIR] [--prompt TEXT]
  *     [--settings FILE] [--system-prompt TEXT] [--system-prompt-file FILE] [--system-prompt-replace FILE] [--max-turns N] [--context-tokens TOKENS]
  *     [--search-api-key BRAVE_KEY] [--context-strategy compaction|mnemonic|scope] [--max-tokens TOKENS] [--small-model]
- *     [--resume prompt|no|CHAT_ID]
+ *     [--resume prompt|no|CHAT_ID] [--timeout SECONDS] [--json-result FILE] [--sandbox local|docker|none]
  * </pre>
+ * With {@code --prompt} the process exits with the code of the run's outcome ({@link RunReport#exitCode(String)}),
+ * asks no approval (each is refused) and writes the {@code --json-result} file, also on failure.
  * {@code --max-tokens} is the output limit of one model response (default 32000);
  * {@code --context-tokens} the window. {@code --small-model} (no value) adds the stricter small-model rules to the
  * system prompt, like settings {@code "smallModel": true}.
@@ -89,18 +93,60 @@ public final class Main {
     /** Opens the terminal for the command names and the history file (null: plain input); tests replace it. */
     static java.util.function.BiFunction<List<String>, Path, Term> terminal = Term::open;
 
-    public static void main(String[] argv) throws Exception {
-        run(argv);
-        System.exit(0);
+    public static void main(String[] argv) {
+        System.exit(exitCode(argv));
     }
 
-    /** The whole command line session; returns when it ends (main then exits the process). */
-    static void run(String[] argv) throws Exception {
+    /** How long a run cancelled by {@code --timeout} may take to stop before the CLI stops waiting for it. */
+    static long timeoutGraceMillis = 30_000;
+
+    /**
+     * Runs the session and maps its end to the process exit code: the outcome of a {@code --prompt} run (see
+     * {@link RunReport#exitCode(String)}), 64 for a usage error, 1 for any other failure. A failure before or outside
+     * the run still writes the {@code --json-result} file.
+     */
+    static int exitCode(String[] argv) {
+        long start = System.currentTimeMillis();
+        int code;
+        String message;
+        try {
+            return run(argv, start);
+        } catch (IllegalArgumentException e) { // bad flags or values, NumberFormatException included
+            code = RunReport.EXIT_USAGE;
+            message = String.valueOf(e.getMessage());
+            System.err.println("error: " + message + " (use --help)");
+        } catch (Exception e) { // boundary: process top level: any failure ends the process with exit code 1
+            code = RunReport.EXIT_FAILED;
+            message = String.valueOf(e.getMessage());
+            System.err.println("error: " + e);
+        }
+        String file = CliArgs.rawValue(argv, "json-result");
+        if (file != null) {
+            RunReport report = new RunReport(new ObjectMapper(), start, 0);
+            report.fail(message);
+            try {
+                report.write(Path.of(file), Usage.ZERO, 0);
+            } catch (IOException | RuntimeException e) { // boundary: the exit code still tells the failure
+                System.err.println("error: cannot write " + file + ": " + e.getMessage());
+            }
+        }
+        return code;
+    }
+
+    /**
+     * The whole command line session; returns when it ends (main then exits the process).
+     *
+     * @param start when the process started, for the duration of a {@code --prompt} run
+     * @return the exit code: that of the {@code --prompt} outcome, 0 otherwise
+     */
+    static int run(String[] argv, long start) throws Exception {
         Map<String, String> a = CliArgs.parse(argv);
         if (a.containsKey("help")) {
             System.out.println(CliArgs.USAGE);
-            return;
+            return 0;
         }
+        CliArgs.checkHeadless(a);
+        boolean unconfined = SettingsOverrides.unconfined(a);
         if (ASK_TOKEN.equals(a.get("api-key"))) {
             String key = askToken();
             if (key.isEmpty()) throw new IllegalArgumentException("No API key given");
@@ -141,13 +187,14 @@ public final class Main {
 
         if (a.containsKey("sandbox-clean") || a.containsKey("sandbox-clean-all")) {
             cleanSandbox(config, projectDir, a.containsKey("sandbox-clean-all"));
-            return;
+            return 0;
         }
         CwdLayout cwdSandbox = new CwdLayout(config, projectDir);
         HistoryRootLock historyLock = HistoryRootLock.acquire(cwdSandbox.historyRoot()); // held until the process ends
         org.kendar.llm.harness.sandbox.SandboxExecutor sandbox = new org.kendar.llm.harness.sandbox.SandboxFactory()
                 .runner(new org.kendar.llm.harness.sandbox.ProcessDockerCommandRunner())
                 .onWarning(w -> System.err.println("warning: " + w))
+                .confinePaths(!unconfined)
                 .create(settings, config, cwdSandbox, org.kendar.llm.harness.sandbox.RemoteExecSandboxExecutor.Kind.CLI);
         ProviderChooser.ProviderChoice choice = ProviderChooser.choose(a, settings, mapper, config.maxTokens());
         AgentHarnessBuilder builder = new AgentHarnessBuilder();
@@ -180,6 +227,7 @@ public final class Main {
         say("project dir: " + harness.sandbox().location() + (settings.dockerSandbox()
                 ? " (shell commands run in a container from docker image " + config.sandbox().docker().image()
                 + ", project mounted at /workspace; /status shows the sandbox)"
+                : unconfined ? " (sandbox none: no isolation and no path jail, every tool reaches any path of this machine)"
                 : " (local runner, for testing only: no isolation, shell commands run as you, plan mode cannot stop them writing here)"));
         say("scratch dir: " + cwdSandbox.scratchRoot());
         say("history dir: " + cwdSandbox.historyRoot());
@@ -220,8 +268,7 @@ public final class Main {
         });
 
         if (a.containsKey("prompt")) {
-            runTurn(harness, chat.id, a.get("prompt"), events, in);
-            return;
+            return runHeadless(harness, chat.id, a, events, in, mapper, start);
         }
         say("agent-harness chat " + chat.id + " (type /help for commands, /exit to quit; /cancel or ctrl+c stops a run)");
         if (term != null) startTerminalUi(harness, chat, choice.name(), in);
@@ -251,15 +298,38 @@ public final class Main {
             // nothing to steer or follow up while idle: the text is a normal prompt, and the run is followed here
             String queued = LineCommands.idleQueuedText(line);
             if (queued != null) {
-                runTurn(harness, chat.id, queued, events, in);
+                runTurn(harness, chat.id, queued, events, in, null);
                 continue;
             }
             if (harness.commands().handles(line.strip())) {
                 command(harness, chat, line.strip(), events);
                 continue;
             }
-            runTurn(harness, chat.id, line, events, in);
+            runTurn(harness, chat.id, line, events, in, null);
         }
+        return 0;
+    }
+
+    /**
+     * The {@code --prompt} run: one turn, cancelled at {@code --timeout}; writes {@code --json-result} and returns the
+     * exit code of its outcome.
+     */
+    private static int runHeadless(AgentHarness harness, String chatId, Map<String, String> a,
+                                   BlockingQueue<AgentEvent> events, BlockingQueue<String> in, ObjectMapper mapper,
+                                   long start) throws Exception {
+        RunReport report = new RunReport(mapper, start, CliArgs.timeoutSeconds(a));
+        report.chatId(chatId);
+        ChatSessionData before = harness.sessions().get(chatId);
+        runTurn(harness, chatId, a.get("prompt"), events, in, report);
+        ChatSessionData after = harness.sessions().get(chatId);
+        if (a.containsKey("json-result")) {
+            // the chat's totals before and after: sub-agent tokens are included, a resumed chat's earlier turns are not
+            Usage used = new Usage(after.inputTokens() - before.inputTokens(),
+                    after.outputTokens() - before.outputTokens(), after.cacheReadTokens() - before.cacheReadTokens(),
+                    after.cacheCreationTokens() - before.cacheCreationTokens());
+            report.write(Path.of(a.get("json-result")), used, harness.cost(after) - harness.cost(before));
+        }
+        return report.exitCode();
     }
 
     /** Chat and id of the approval the CLI is asking about now, or null. */
@@ -403,15 +473,16 @@ public final class Main {
         if (r.output() != null && !r.output().isBlank()) say(r.output());
     }
 
+    /** @param report the result of a {@code --prompt} run, fed with every event; null in the interactive chat */
     private static void runTurn(AgentHarness harness, String chatId, String text, BlockingQueue<AgentEvent> events,
-                                BlockingQueue<String> in) throws InterruptedException {
+                                BlockingQueue<String> in, RunReport report) throws InterruptedException {
         events.clear();
         runStart = System.currentTimeMillis();
         running = true;
         scriptRunning = false;
         stopPending = false;
         try {
-            runLoop(harness, chatId, text, events, in);
+            runLoop(harness, chatId, text, events, in, report);
         } finally {
             running = false;
             scriptRunning = false;
@@ -420,11 +491,12 @@ public final class Main {
     }
 
     private static void runLoop(AgentHarness harness, String chatId, String text, BlockingQueue<AgentEvent> events,
-                                BlockingQueue<String> in) throws InterruptedException {
+                                BlockingQueue<String> in, RunReport report) throws InterruptedException {
         try {
             harness.start(chatId, text);
         } catch (org.kendar.llm.harness.agent.AgentService.RunAlreadyActiveException e) {
             sayErr(Renderer.RED + "[error] " + e.getMessage() + " (/cancel stops it)" + Renderer.RESET);
+            if (report != null) report.fail(e.getMessage());
             return;
         }
         int open = 0; // runs started and not finished: a late steer or follow-up can start the next one
@@ -456,19 +528,40 @@ public final class Main {
                 else if (harness.commands().handles(typed.strip())) menu(harness.commands().execute(chatId, typed.strip()));
                 else harness.steer(chatId, typed.strip());
             }
+            if (report != null) {
+                long now = System.currentTimeMillis();
+                if (report.expire(now)) {
+                    sayErr(Renderer.YELLOW + "[timeout] stopping the run" + Renderer.RESET);
+                    harness.cancel(chatId, true);
+                }
+                if (report.overdue(now, timeoutGraceMillis)) {
+                    sayErr(Renderer.RED + "[timeout] the run did not stop; giving up on it" + Renderer.RESET);
+                    return;
+                }
+            }
             if (stopPending && System.currentTimeMillis() - stopAsked > STOP_ANSWER_MILLIS) {
                 stopPending = false; // no answer: kill, with no further question
                 harness.cancel(chatId, true);
             }
             AgentEvent ev = events.poll(100, TimeUnit.MILLISECONDS);
             if (ev == null) continue;
+            if (report != null) report.observe(ev);
             JsonNode d = ev.data();
             if (!d.has("parent") && "run_js".equals(d.path("name").asText())) {
                 if (ev.type().equals("tool_call")) scriptRunning = true;
                 else if (ev.type().equals("tool_result")) scriptRunning = false;
             }
             switch (ev.type()) {
-                case "approval_request" -> approve(harness, chatId, d, in);
+                case "approval_request" -> {
+                    if (report == null) {
+                        approve(harness, chatId, d, in);
+                    } else { // --prompt: nobody to ask, every question is answered no (the turn limit stops the run)
+                        sayErr(Renderer.YELLOW + "[approval] " + Renderer.clean(d.path("type").asText()) + " "
+                                + Renderer.clean(d.path("title").asText()) + ": refused, a --prompt run asks no one"
+                                + Renderer.RESET);
+                        harness.resolveApproval(chatId, d.path("id").asText(), false, null, false, false);
+                    }
+                }
                 case "run_started" -> open++;
                 case "run_finished" -> {
                     open--;

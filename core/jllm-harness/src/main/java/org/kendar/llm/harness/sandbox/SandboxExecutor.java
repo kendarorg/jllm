@@ -14,6 +14,15 @@ import java.time.Duration;
  */
 public interface SandboxExecutor extends Layout, Exec, SandboxFiles, Lifecycle {
 
+    /**
+     * Whether the file tools are jailed to the work and scratch dirs and the host shell's command line is checked for
+     * paths leaving them. False only for the unconfined local runner ({@link LocalSandboxExecutor#unconfined}), meant
+     * for a disposable container that is itself the sandbox.
+     */
+    default boolean confinesPaths() {
+        return true;
+    }
+
     @Override
     default ExecutionResult execute(String chatId, Path scratchDir, boolean planMode, String command, Duration timeout) {
         return planMode ? execute(chatId, scratchDir, workDir(chatId), command, timeout) : execute(chatId, command, timeout);

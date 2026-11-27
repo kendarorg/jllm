@@ -32,6 +32,7 @@ Pick the path that matches your role.
 | [Deployment](enterprise/deployment.md) | shapes, hardening checklist, state and scaling |
 | [Securing a deployment](enterprise/securing-and-enterprise-setup.md) | hardening and enterprise setup, with a final checklist |
 | [Identity and access](enterprise/identity-and-access.md) | sign-in, roles, whose credentials a call uses |
+| [IdP role mapping](enterprise/idp-role-mapping.md) | roles from identity provider groups at sign-in (off by default) |
 | [Governance and audit](enterprise/governance-and-audit.md) | approvals, hooks, events, ports |
 | [Observability](enterprise/observability.md) | metrics, tracing, cost (Micrometer and OTel recipes) |
 | [Sandboxes](guides/sandbox.md) | local, Docker, daemon, remote |

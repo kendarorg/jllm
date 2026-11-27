@@ -1,6 +1,7 @@
 package org.kendar.llm.cli;
 
 import org.kendar.llm.harness.HarnessConfig;
+import org.kendar.llm.harness.permission.PermissionMode;
 import org.kendar.llm.harness.settings.HarnessSettings;
 import org.kendar.llm.harness.tools.ExternalLinks;
 
@@ -22,7 +23,8 @@ final class SettingsOverrides {
         }
         if (a.containsKey("context-strategy")) b.contextStrategy(a.get("context-strategy"));
         if (CliArgs.flag(a, "small-model")) b.smallModel(true);
-        if (a.containsKey("sandbox")) b.sandboxBackend(a.get("sandbox"));
+        // none is the local runner without its path jail (see unconfined)
+        if (a.containsKey("sandbox")) b.sandboxBackend(unconfined(a) ? "local" : a.get("sandbox"));
         if (a.containsKey("docker-image")) b.dockerImage(a.get("docker-image"));
         // container scope of this session: chat (default) or user; the profile: standard or hardened
         if (a.containsKey("sandbox-scope")) b.dockerScope(a.get("sandbox-scope"));
@@ -39,6 +41,20 @@ final class SettingsOverrides {
             if (e.getKey().startsWith("plugins.")) settings = settings.withPluginOption(e.getKey().substring(8), e.getValue());
         }
         return settings;
+    }
+
+    /**
+     * {@code --sandbox none}: the local runner without the path jail, for a disposable container that is itself the
+     * sandbox. Allowed only with {@code --mode auto}.
+     *
+     * @throws IllegalArgumentException for {@code --sandbox none} without {@code --mode auto}
+     */
+    static boolean unconfined(Map<String, String> a) {
+        if (!"none".equalsIgnoreCase(a.getOrDefault("sandbox", "").strip())) return false;
+        if (PermissionMode.parse(a.get("mode")) != PermissionMode.AUTO) {
+            throw new IllegalArgumentException("--sandbox none is allowed only with --mode auto");
+        }
+        return true;
     }
 
     /** @param envSearchKey the BRAVE_API_KEY of the environment, used when {@code --search-api-key} is absent */

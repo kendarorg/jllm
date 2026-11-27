@@ -9,7 +9,7 @@ Vue 3 chat UI. The Spring layer is a thin adapter; all agent logic lives in the 
 
 ```sh
 mvn -pl jllm-web -am package
-java -jar jllm-web/target/jllm-web-1.3.0-jllm.jar --provider anthropic --jllm.webauth-dir=runConfig/webauth
+java -jar jllm-web/target/jllm-web-1.4.0-jllm.jar --provider anthropic --jllm.webauth-dir=runConfig/webauth
 ```
 
 Then open <http://localhost:8080>. The UI is plain static files in `src/main/resources/static`: Vue 3 as an ES module
@@ -82,7 +82,7 @@ use, so changes (by hand or from the UI) apply without a restart.
 | Path | Content |
 |---|---|
 | `webauth/users/<id>.json` | `{name, role, email?, externalId?, password?, credentials, disabledTools?, disabledSkills?}` |
-| `webauth/permissions/<role>.json` | `{tools, readOnly?, approval?, toolPermissions?, sandbox?}` |
+| `webauth/permissions/<role>.json` | `{tools, readOnly?, approval?, toolPermissions?, <settings>...}`: every other top-level key is a role setting (free JSON per feature, e.g. `sandbox`; unknown keys kept) |
 | `webauth/global-skills/<name>.md` | skills written by the admin, offered to every user |
 | `webauth/user-skills/<id>/<name>.md` | a user's own skills |
 
@@ -121,11 +121,28 @@ jllm.auth.oidc.default-role=user                       # required (and must exis
   token has `email_verified=true`, an allowed domain, and the email equals the `email` of exactly one unlinked user
   (the admin sets it in the Users tab). Otherwise, with `auto-provision`, a user is created with `default-role`
   (id = the email local part, a number is added on a collision). Otherwise the sign-in is refused. The provider
-  never changes a role.
+  never changes a role, unless the role mapping is enabled (below).
 - A user with an `externalId` and no password cannot use `/api/login`, has no default password, and the page
   hides password changes for them.
 - Failures go to `/?authError=<code>` (`denied`, `invalid_token`, `unknown_user`, `domain_not_allowed`,
-  `email_not_verified`, `expired`). Five refused callbacks lock an address for 30 seconds.
+  `email_not_verified`, `expired`, `no_role`). Five refused callbacks lock an address for 30 seconds.
+- **Role mapping** (off by default): the groups of the ID token pick the role at each sign-in. Each role lists its
+  groups in its `idp` setting (`{"groups": ["engineering", "team-*"], "priority": 10}`, Roles tab > *Sign-in
+  mapping*); the global options are in the *Role mapping* tab, with a preview, or in properties:
+
+  ```properties
+  jllm.auth.oidc.role-mapping.enabled=false     # true: map at every sign-in
+  jllm.auth.oidc.role-mapping.claim=groups      # dotted path for nested claims (realm_access.roles)
+  jllm.auth.oidc.role-mapping.on-no-match=default   # default | keep | refuse (code no_role)
+  jllm.auth.oidc.role-mapping.allow-admin=false # true: a group may grant the admin role
+  jllm.auth.oidc.role-mapping.max-age=8h        # optional: a provider session older than this signs in again
+  ```
+
+  Options saved in the admin screen are stored (`stored-settings.json` or the `settings_section` table, section
+  `web.roleMapping`) and win over the properties. A linked user's role is set at each provider sign-in,
+  with or without a password; password sign-ins never change it, and the last admin is never demoted. The break-glass
+  admin should sign in with its password, or not be linked to the provider. Setup,
+  rules and troubleshooting: [IdP role mapping](../docs/enterprise/idp-role-mapping.md).
 - `GET /api/auth/config` (open): `{password, oidc?: {name, loginUrl}}`. Mode `oidc` answers 404 on `/api/login`; mode
   `password` answers 404 on `/auth/oidc/*`. `/api/logout` ends the local session only.
 
@@ -137,7 +154,7 @@ jllm.auth.oidc.default-role=user                       # required (and must exis
   server, also tools it adds later), `"billing__*"` (a REST API), `["*"]` (everything).
 - `readOnly`: optional; `true` keeps only read-only tools. `approval`: optional; `"off"` turns approval prompts off,
   `"ask"` (default) uses the harness policy. A role without a valid file gets no tools.
-- `admin` is fixed: it always has every tool; only its `approval` (default `ask`), `toolPermissions` and `sandbox` can be changed, and it cannot be deleted or recreated. At least
+- `admin` is fixed: it always has every tool; only its `approval` (default `ask`), `toolPermissions` and settings (`sandbox` included) can be changed, and it cannot be deleted or recreated. At least
   one admin user always remains, and an admin cannot delete their own account.
 - One role per user. Shipped: `guest` (`run_js` and the web tools), `reader` (`run_js` and read-only file tools), `poweru` (`run_js`, `bash`, file and web tools), `admin`. A role lists `run_js`, `bash`, both or neither.
 
@@ -236,9 +253,12 @@ Chat endpoints are under `/api/chat`; the other tables below list their own path
 | `GET /api/me/skills/{name}` | | `{name, description, source, content}` |
 | `PUT /api/me/skills/enabled` | `{disabled}` | 204 |
 | `POST /api/me/skills`, `PUT /api/me/skills/{name}`, `DELETE /api/me/skills/{name}` | `{name, description, content}` | own skills; 409 name taken, 413 too large, 403 not own |
-| `GET/POST /api/admin/users`, `PUT/DELETE /api/admin/users/{id}` | `{id, name, role, password?}` | admin only (403 otherwise) |
+| `GET/POST /api/admin/users`, `PUT/DELETE /api/admin/users/{id}` | `{id, name, role, password?}` | admin only (403 otherwise); rows have `roleManagedByIdp` |
 | `POST /api/admin/users/{id}/password` | `{password?}` | set, or reset to the default when absent |
-| `GET/POST /api/admin/roles`, `PUT/DELETE /api/admin/roles/{name}` | `{name, tools, readOnly, approval, toolPermissions?, sandbox?: {kind: none\|local\|docker-isolated\|docker-open, scope?, network?}}` | `admin` 403; delete 409 while held |
+| `GET/POST /api/admin/roles`, `PUT/DELETE /api/admin/roles/{name}` | `{name, tools, readOnly, approval, toolPermissions?, settings?: {<feature>: JSON}, sandbox?: {kind: none\|local\|docker-isolated\|docker-open, scope?, network?}}` | `admin` 403; delete 409 while held; absent `settings` keeps them, `sandbox` replaces that key; 400 invalid (`sandbox` and `idp` are checked) |
+| `GET /api/admin/roles/{name}/settings`, `PUT/DELETE /api/admin/roles/{name}/settings/{feature}` | any JSON (PUT) | the settings map; 404 unknown role or feature, 400 invalid key or value |
+| `GET/PUT/DELETE /api/admin/auth/role-mapping` | `{enabled?, claim?, onNoMatch?, allowAdmin?, maxAge?}` (PUT; absent keys kept) | the role mapping options in force plus `stored`, `editable`, `defaultRole`, `properties`; DELETE drops the stored ones; 400 invalid |
+| `POST /api/admin/auth/role-mapping/preview` | `{groups: [..] or "a, b"}` | the role those groups give and why (`role`, `matches`, `outcome`); works while the mapping is off |
 | `GET /api/admin/catalog` | | `{tools, mcp, api}`: everything a role can be granted |
 | `GET/POST /api/admin/skills`, `GET/PUT/DELETE /api/admin/skills/{name}` | `{name, description, content}` | global skills; settings-file skills read-only |
 
@@ -290,7 +310,8 @@ JavaScript objects with a `template` string, so nothing is compiled or transpile
 | `components/ChatComposer.js` | input, slash-command and `@file` completion |
 | `components/SignIn.js` | login and password |
 | `components/SettingsPanel.js` | the user's password, tools and skills |
-| `components/AdminPanel.js` | users, roles, global skills |
+| `components/AdminPanel.js` | users (with the *managed by IdP* marker), roles, role mapping |
+| `components/RoleMappingPanel.js` | the role mapping options and the preview |
 | `components/RoleEditor.js`, `components/ToolPicker.js` | the grouped tool / MCP / REST tree, shared by the role editor (grant) and the user settings (switch off) |
 | `components/SkillEditor.js` | name, description, markdown body of a skill |
 | `components/ApprovalDialog.js` | shows `approvals[0]`; approve, "Allow for this chat" (sends `remember: true`, tool approvals only), reject, edit a proposed context summary |
@@ -318,12 +339,14 @@ the reference stores: the file repositories, the sign-in sessions and the beans 
 The file repositories (`FileStoresAutoConfiguration`) are used when no other bean of the type exists: `jllm.store=file`, or
 no SQL starter. With `jllm-sql-spring-starter` on the class path (the release ships it in `lib-ext/sql`) SQL is the
 default; another store supplies its own `UserRepository`, `RoleRepository`, `SkillRepository` and `LoginSessionRepository` beans. The harness settings layers come from a
-`SettingsSource` bean (default: the settings files) and the project trust answers from a `ProjectMcpTrust` bean;
+`SettingsSource` bean (default: the settings files), the settings an administrator stores at runtime from a
+`SettingsSink` bean (default: `webauth/stored-settings.json`; SQL: table `settings_section`; a stored value wins, see
+[usage §5](../docs/reference/usage.md#5-settings-file)) and the project trust answers from a `ProjectMcpTrust` bean;
 a `TokenStore` bean (passed through `HarnessIdentity.tokenStore()`) can replace the OAuth token files. Chat history
 (`ChatSessionStore`, `SubAgentRunLog`, `MnemonicStore`, `StateStore`) is optional beans too; default: files under each
 chat's history root.
 
-Tests: `SampleUsersTest`, `LoginTest`, `MeControllerTest`, `AdminControllerTest`, `OAuthWebTest`, `OidcTest`, `JllmWebApplicationArgsTest`, `JllmWebBootTest`, `RealPasswordInitializerTest`, `DefaultPasswordEnforcementTest`, `ChatUriVariantsTest` (chat ownership over URI variants), `FileStoresAutoConfigurationTest`, `SqlBootTest`, `SqlIntegrationTest`
+Tests: `SampleUsersTest`, `LoginTest`, `MeControllerTest`, `AdminControllerTest`, `OAuthWebTest`, `OidcTest` (also the role mapping against the in-process provider), `RoleMappingAdminTest`, `JllmWebApplicationArgsTest`, `JllmWebBootTest`, `RealPasswordInitializerTest`, `DefaultPasswordEnforcementTest`, `ChatUriVariantsTest` (chat ownership over URI variants), `FileStoresAutoConfigurationTest`, `SqlBootTest`, `SqlIntegrationTest`
 (`mvn -pl jllm-web -am test`).
 
 ## SQL store
