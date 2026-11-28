@@ -24,7 +24,7 @@ class AgentOneShotModelTest {
     }
 
     private static OneShotModel.Call call(String agent) {
-        return new OneShotModel.Call(agent, "Sys", "Hi", "ann", "flow: t", Set.of(), null);
+        return new OneShotModel.Call(agent, "Sys", "Hi", "ann", "flow: t", Set.of(), null, false, null);
     }
 
     @Test

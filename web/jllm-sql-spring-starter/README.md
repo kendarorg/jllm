@@ -78,7 +78,7 @@ are created, before anything reads the roles.
 
 Workspace files (the chat directories, uploads, the sandbox) stay on disk by design. The plugin storage
 (`PluginStorages`: the workflows' flows and runs, and every other plugin's documents) is in SQL, table `plugin_docs`;
-with `jllm.store=file` it is files under `.jllm/plugin-data`. The tables are part of the initial schema: a development
+with `jllm.store=file` it is files under `<jllm.config-dir>/plugin-data`. The virtual configuration (`SqlConfigProvider`: the settings layer, tables `instructions` and `agents`, the skills) is in SQL too; the `mcp_trust` table is gone (the web host has no project folder to trust). The tables are part of the initial schema: a development
 database created before them must be deleted.
 
 ## Tests

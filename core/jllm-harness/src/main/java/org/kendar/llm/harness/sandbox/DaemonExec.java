@@ -26,13 +26,13 @@ final class DaemonExec {
             Map<String, Object> body = Map.of("command", command, "cwd", cwd, "logDir", logDir,
                     "timeoutSeconds", Math.max(1, timeout.toSeconds()), "logMaxBytes", Math.max(0, logLimit));
             DaemonClient.Response r = c.call("POST", "/exec", null, JSON.writeValueAsBytes(body),
-                    "application/json", CONTROL_TIMEOUT);
+                    "application/json", CONTROL_TIMEOUT, DaemonClient.MAX_CONTROL_RESPONSE);
             if (r.status() != 200) return new ExecutionResult("", "Sandbox error " + r.status() + ": " + r.text(), -1, false);
             id = JSON.readTree(r.body()).path("id").asText();
             long deadline = System.nanoTime() + timeout.plusSeconds(60).toNanos();
             while (true) {
                 DaemonClient.Response p = c.call("GET", "/exec/" + id, Map.of("wait", String.valueOf(POLL.toSeconds())),
-                        null, null, POLL.plusSeconds(20));
+                        null, null, POLL.plusSeconds(20), DaemonClient.MAX_CONTROL_RESPONSE);
                 if (p.status() != 200) return new ExecutionResult("", "Sandbox error " + p.status() + ": " + p.text(), -1, false);
                 JsonNode n = JSON.readTree(p.body());
                 if (!n.path("running").asBoolean(false)) {
@@ -55,7 +55,7 @@ final class DaemonExec {
     private static void release(DaemonClient c, String id) {
         boolean interrupted = Thread.interrupted();
         try {
-            c.call("DELETE", "/exec/" + id, null, null, null, CONTROL_TIMEOUT);
+            c.call("DELETE", "/exec/" + id, null, null, null, CONTROL_TIMEOUT, DaemonClient.MAX_CONTROL_RESPONSE);
         } catch (InterruptedException e) {
             interrupted = true;
         } catch (IOException ignored) {

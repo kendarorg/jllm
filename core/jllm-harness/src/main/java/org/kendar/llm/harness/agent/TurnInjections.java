@@ -3,6 +3,7 @@ package org.kendar.llm.harness.agent;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.kendar.llm.harness.auth.UserPolicy;
 import org.kendar.llm.harness.instructions.ScopedInstructions;
 import org.kendar.llm.harness.safety.ContentWarnings;
 import org.kendar.llm.harness.tools.HarnessTool;
@@ -74,6 +75,9 @@ public final class TurnInjections {
                 ToolContext ctx, EventSink sink, String label, String chatId) {
         ScopedInstructions scoped = deps.scopedInstructions();
         if (scoped == null || ctx.files() != null || toolUses.isEmpty()) return; // remote files: nothing on this disk
+        UserPolicy.Scoped scopedMode = deps.identity().policyOf(chatId).scoped();
+        if (scopedMode == UserPolicy.Scoped.OFF) return;
+        boolean userContent = scopedMode == UserPolicy.Scoped.USER_CONTENT;
         Set<String> failed = new HashSet<>();
         for (JsonNode r : results) {
             if (r.path("is_error").asBoolean(false)) failed.add(r.path("tool_use_id").asText());
@@ -95,7 +99,7 @@ public final class TurnInjections {
             return;
         }
         for (var b : added) {
-            results.addObject().put("type", "text").put("text", b.render());
+            results.addObject().put("type", "text").put("text", b.render(userContent));
             ObjectNode ev = deps.mapper().createObjectNode().put("file", b.file()).put("dir", b.dir());
             if (label != null) ev.put("agent", label);
             sink.emit("instructions_loaded", ev);

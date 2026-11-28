@@ -20,10 +20,11 @@ public final class WorkflowApiImpl implements WorkflowApi {
     }
 
     /** Builds the facade and the API together; the host's roles arrive with every call. */
-    public static WorkflowApiImpl create(Registry registry, RunStore runs, FlowStore flows, String adminRole) {
+    public static WorkflowApiImpl create(Registry registry, RunStore runs, FlowStore flows, String adminRole,
+                                         java.util.function.Predicate<Set<String>> mayRunUnattended) {
         ConcurrentHashMap<String, Set<String>> roles = new ConcurrentHashMap<>();
         return new WorkflowApiImpl(new Workflows(registry, runs, flows,
-                u -> roles.getOrDefault(u, Set.of()), adminRole), roles);
+                u -> roles.getOrDefault(u, Set.of()), adminRole, mayRunUnattended), roles);
     }
 
     public Workflows workflows() {

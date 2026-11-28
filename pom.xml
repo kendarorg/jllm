@@ -64,10 +64,15 @@
         <maven.compiler.target>21</maven.compiler.target>
         <maven.compiler.release>21</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <spring-boot.version>3.5.0</spring-boot.version>
+        <spring-boot.version>3.5.16</spring-boot.version>
         <spring-ai.version>1.0.0</spring-ai.version>
         <!-- 1.21.4+: tries Docker API 1.44 before 1.32; Docker 29 refuses 1.32 (the Spring Boot 3.5.0 BOM gives 1.21.0) -->
         <testcontainers.version>1.21.4</testcontainers.version>
+        <!-- CVE fixes ahead of the Spring Boot BOM (overrides of its version properties) -->
+        <tomcat.version>10.1.62</tomcat.version>
+        <log4j2.version>2.26.1</log4j2.version>
+        <sqlite-jdbc.version>3.54.1.0</sqlite-jdbc.version>
+        <httpcore5.version>5.4.4</httpcore5.version>
         <plugins.location>${maven.multiModuleProjectDirectory}/target/plugins</plugins.location>
     </properties>
 
@@ -83,6 +88,50 @@
 
     <dependencyManagement>
         <dependencies>
+            <!-- Direct entries: properties of this pom do not reach an imported BOM, so the CVE overrides must be managed here -->
+            <dependency>
+                <groupId>org.apache.tomcat.embed</groupId>
+                <artifactId>tomcat-embed-core</artifactId>
+                <version>${tomcat.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.tomcat.embed</groupId>
+                <artifactId>tomcat-embed-el</artifactId>
+                <version>${tomcat.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.tomcat.embed</groupId>
+                <artifactId>tomcat-embed-websocket</artifactId>
+                <version>${tomcat.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.mozilla</groupId>
+                <artifactId>rhino</artifactId>
+                <!-- transitive of swagger-parser (json-schema-core); fixes CVE-2025-66453 -->
+                <version>1.7.15.1</version>
+            </dependency>
+            <dependency>
+                <groupId>org.xerial</groupId>
+                <artifactId>sqlite-jdbc</artifactId>
+                <version>${sqlite-jdbc.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.httpcomponents.core5</groupId>
+                <artifactId>httpcore5</artifactId>
+                <version>${httpcore5.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.httpcomponents.core5</groupId>
+                <artifactId>httpcore5-h2</artifactId>
+                <version>${httpcore5.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.logging.log4j</groupId>
+                <artifactId>log4j-bom</artifactId>
+                <version>${log4j2.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
             <!-- before spring-boot-dependencies: the first imported BOM wins -->
             <dependency>
                 <groupId>org.testcontainers</groupId>
@@ -161,6 +210,71 @@
             <modules>
                 <module>eval/jllm-eval</module>
             </modules>
+        </profile>
+        <!-- Dependency scan, never part of the default build. Use: mvn -Powasp verify (see CONTRIBUTING.md).
+             Order: package = scan without failing (JSON report) then convert to docs/owasp_dc.md; verify = scan again and fail on CVSS >= 7 (cached database). The threshold runs last so the report is always produced. -->
+        <profile>
+            <id>owasp</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.owasp</groupId>
+                        <artifactId>dependency-check-maven</artifactId>
+                        <version>13.0.0</version>
+                        <inherited>false</inherited>
+                        <configuration>
+                            <nvdApiKeyEnvironmentVariable>NVD_API_KEY</nvdApiKeyEnvironmentVariable>
+                            <formats>
+                                <format>JSON</format>
+                            </formats>
+                            <outputDirectory>${project.build.directory}</outputDirectory>
+                            <suppressionFiles>
+                                <suppressionFile>${maven.multiModuleProjectDirectory}/owasp-suppressions.xml</suppressionFile>
+                            </suppressionFiles>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <id>owasp-report</id>
+                                <phase>package</phase>
+                                <goals><goal>aggregate</goal></goals>
+                                <configuration>
+                                    <failBuildOnCVSS>11</failBuildOnCVSS>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <id>owasp-threshold</id>
+                                <phase>verify</phase>
+                                <goals><goal>aggregate</goal></goals>
+                                <configuration>
+                                    <failBuildOnCVSS>7</failBuildOnCVSS>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <version>3.5.0</version>
+                        <inherited>false</inherited>
+                        <executions>
+                            <execution>
+                                <id>owasp-markdown</id>
+                                <phase>package</phase>
+                                <goals><goal>exec</goal></goals>
+                                <configuration>
+                                    <executable>${java.home}/bin/java</executable>
+                                    <workingDirectory>${maven.multiModuleProjectDirectory}</workingDirectory>
+                                    <arguments>
+                                        <argument>scripts/OwaspReport.java</argument>
+                                        <argument>${project.build.directory}/dependency-check-report.json</argument>
+                                        <argument>docs/owasp_dc.md</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
         </profile>
         <profile>
             <id>deploy</id>

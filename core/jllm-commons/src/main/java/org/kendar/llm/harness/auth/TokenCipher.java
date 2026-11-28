@@ -16,6 +16,8 @@ import java.util.function.Function;
  * AES-256-GCM for token files. The key is 32 bytes, base64, from {@code JLLM_TOKEN_KEY}; {@code JLLM_TOKEN_KEY_OLD}
  * (optional) still decrypts files written before a key rotation. Every encryption uses a fresh random nonce, and the
  * output carries the key id (first 8 bytes of the SHA-256 of the key, hex), so the reader picks the right key.
+ * Every value is bound to its context (the user id and the token source) as associated data: a sealed value copied
+ * to another user's or another source's record does not decrypt.
  */
 public final class TokenCipher {
 
@@ -90,13 +92,19 @@ public final class TokenCipher {
         return kid;
     }
 
-    public Sealed encrypt(String plain) {
+    /** The associated data of a token: user id and source, unambiguously joined. A null user is the shared record. */
+    public static String context(String principalId, String source) {
+        return (principalId == null ? "" : principalId) + "\u0000" + (source == null ? "" : source);
+    }
+
+    /** @param context who and what the value belongs to ({@link #context}); needed again to decrypt */
+    public Sealed encrypt(String plain, String context) {
         byte[] nonce = new byte[NONCE_BYTES];
         RANDOM.nextBytes(nonce);
         try {
             Cipher c = Cipher.getInstance("AES/GCM/NoPadding");
             c.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(key, "AES"), new GCMParameterSpec(TAG_BITS, nonce));
-            c.updateAAD(kid.getBytes(StandardCharsets.US_ASCII));
+            c.updateAAD(aad(kid, context));
             byte[] out = c.doFinal(plain.getBytes(StandardCharsets.UTF_8));
             Base64.Encoder b64 = Base64.getEncoder();
             return new Sealed(kid, b64.encodeToString(nonce), b64.encodeToString(out));
@@ -110,7 +118,7 @@ public final class TokenCipher {
         return oldKid != null && oldKid.equals(s.kid()) && !kid.equals(s.kid());
     }
 
-    public String decrypt(Sealed s) throws DecryptException {
+    public String decrypt(Sealed s, String context) throws DecryptException {
         byte[] k;
         if (kid.equals(s.kid())) k = key;
         else if (oldKid != null && oldKid.equals(s.kid())) k = oldKey;
@@ -119,13 +127,17 @@ public final class TokenCipher {
             Base64.Decoder b64 = Base64.getDecoder();
             Cipher c = Cipher.getInstance("AES/GCM/NoPadding");
             c.init(Cipher.DECRYPT_MODE, new SecretKeySpec(k, "AES"), new GCMParameterSpec(TAG_BITS, b64.decode(s.nonce())));
-            c.updateAAD(s.kid().getBytes(StandardCharsets.US_ASCII));
+            c.updateAAD(aad(s.kid(), context));
             return new String(c.doFinal(b64.decode(s.data())), StandardCharsets.UTF_8);
         } catch (AEADBadTagException e) {
             throw new DecryptException("tampered, or written with another key");
         } catch (IllegalArgumentException | GeneralSecurityException e) {
             throw new DecryptException("not a valid encrypted token file");
         }
+    }
+
+    private static byte[] aad(String kid, String context) {
+        return (kid + "\u0000" + context).getBytes(StandardCharsets.UTF_8);
     }
 
     private static String kid(byte[] key) {

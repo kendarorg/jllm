@@ -129,7 +129,7 @@ class UnconfinedSandboxTest {
                 assertEquals("ran", tr.get("content").asText());
             } else {
                 assertEquals(0, runs.get(), tr.toString());
-                assertTrue(tr.get("content").asText().contains("escapes the work dir"), tr.toString());
+                assertTrue(tr.get("content").asText().contains("climbs out of the work dir"), tr.toString());
             }
         }
     }

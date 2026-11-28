@@ -10,7 +10,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 
 /**
- * One runner per sandbox kind, chosen for each call by the chat's role: none, local or docker. A sandbox that cannot
+ * One runner per sandbox kind, chosen for each call by the chat's role: none, shared-local or docker. A sandbox that cannot
  * be resolved (chat without a user, unknown user or role, a lookup that fails) is {@link SandboxKind#NONE}: a failure
  * never opens a shell. The answer is cached for a couple of seconds because the layout methods are called very often.
  */
@@ -158,7 +158,7 @@ public final class RoutedSandboxExecutor implements SandboxExecutor {
     /** The tool description is not per chat: it names the shell of each runner that has one. */
     @Override
     public String shellDescription() {
-        SandboxExecutor local = runners.get(SandboxKind.LOCAL);
+        SandboxExecutor local = runners.get(SandboxKind.SHARED_LOCAL);
         SandboxExecutor docker = docker();
         String l = local == null ? "" : local.shellDescription();
         String d = docker == null ? "" : docker.shellDescription();
@@ -180,6 +180,11 @@ public final class RoutedSandboxExecutor implements SandboxExecutor {
     @Override
     public boolean allowLocalFallback(String chatId) {
         return of(chatId).allowLocalFallback(chatId);
+    }
+
+    @Override
+    public boolean localFallbackAllowed(String chatId) {
+        return of(chatId).localFallbackAllowed(chatId);
     }
 
     @Override
@@ -211,5 +216,10 @@ public final class RoutedSandboxExecutor implements SandboxExecutor {
     @Override
     public String sandboxStatus(String chatId) {
         return of(chatId).sandboxStatus(chatId);
+    }
+
+    @Override
+    public boolean networkAccess(String chatId) {
+        return of(chatId).networkAccess(chatId);
     }
 }

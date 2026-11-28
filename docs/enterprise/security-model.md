@@ -29,6 +29,7 @@ Every tool call goes through one pipeline ([FLOW](../reference/flow.md), [TOOLS]
 | Tool kind `READ_ONLY` / `FILE_EDIT` / `OTHER` | `OTHER` (shell, network writes) asks except in `auto`. The kind is a promise made by the tool author: mark custom tools honestly |
 | Modes `default`, `plan`, `edit`, `auto` | what runs without asking. `plan` confines writes to a scratch directory |
 | `permissions.deny` regex rules | apply in **every** mode and cannot be overridden by a chat grant; the model sees the rule that fired |
+| unattended runs (CLI `--prompt`, piped input, CI; web role `unattended`; flows `"unattended": true`) | every permission question is denied (`denied: unattended run, no one can approve <tool>`), `allow` rules still run; flagged tool output is rejected. Role `allowed-modes` limit the modes a user can select. The CLI-only `--dangerously-skip-permissions` allows every question except explicit `deny` rules; the web has no such switch |
 | Visibility lists (`allowList`/`denyList`, `allowedPaths`/`denyPaths`) | hidden MCP tools and REST operations never reach the model and cannot be called |
 | `auto`-mode classifier | a fast model judges non-read-only calls; anything not judged safe asks |
 | Tool grants | per chat, given by the user. A host that was not granted still asks, even after the chat has read untrusted output |
@@ -42,7 +43,7 @@ For your own tools, validate inside the tool as you would any user-supplied inpu
 |---|---|---|
 | File tools | path jail, always on | `read_file`, `write_file`, `edit_file`, `glob`, `grep` run in the JVM and cannot leave the chat's working directory (`..` rejected; a symlink or junction that leaves the directory follows `files.externalLinks`: the CLI default is read-only follow, the web app always refuses, see [tools](../guides/tools.md#links-that-leave-the-work-dir-filesexternallinks)) |
 | no files, no `bash` | role sandbox `none` (web default) | every file tool and `bash` fails with an error the model sees |
-| `bash` on the host | `local` sandbox (CLI default; on the web a role setting) | **none**: commands run as the user of the JVM |
+| `bash` on the host | `local` sandbox (CLI default); on the web `shared-local` | `local`: **none**, commands run as the user of the JVM. `shared-local`: minimal environment, `bwrap` on Linux, none elsewhere |
 | `bash` in a container | `docker` (CLI) or `docker-isolated` / `docker-open` (web role) (`RemoteExecSandboxExecutor`), optionally remote | one long-running container per chat (`chat` scope) or per user (`user` scope), `standard` or `hardened` profile; file tools go through it too, so no host path is used |
 | Scripting | [`jllm-js`](../guides/js.md) | GraalJS with no host access; reaches the world only through the tools you allow |
 
@@ -58,7 +59,7 @@ It does not protect against code already inside the container, and the daemon it
 - `web_fetch` and `web_download` ask before contacting a host. The user may grant a host
   and its subdomains for one chat. `web_download` writes a file, so it is also gated like `write_file` (approval,
   plan-mode scratch copy), and a `write_file` permission rule covers it too. A redirect to another host asks again; https to http redirects are refused.
-- `web.blockLocalHost=true` (settings; the web release template sets it) refuses loopback, link-local (cloud metadata), private and any-local addresses on the first URL and on every redirect, before the host question; `web.blockExtraAddresses` adds IPs, CIDRs, hosts and `*.suffix` entries. Default `false` for the CLI. A name that cannot be resolved is refused, and the checked addresses are pinned for the connection, so DNS rebinding is not followed. Only these two tools are guarded.
+- `web.blockLocalHost` (default `true`; set `false` to reach local services) refuses loopback, link-local (cloud metadata), private and any-local addresses on the first URL and on every redirect, before the host question; `web.blockExtraAddresses` adds IPs, CIDRs, hosts and `*.suffix` entries. A name that cannot be resolved is refused, and the checked addresses are pinned for the connection, so DNS rebinding is not followed. Only these two tools are guarded.
 - An invalid TLS certificate asks separately, for that one call and host only.
 - `web_search` and `wikipedia_search` call fixed hosts.
 - MCP servers and REST APIs are reachable only if listed in the settings.
@@ -96,6 +97,13 @@ to loopback, no forwarding header is present and `jllm.web.enforce-password-chan
 `Content-Security-Policy` (`jllm.web.content-security-policy`), `X-Content-Type-Options` and `Referrer-Policy`; chat
 ownership is checked on the id the framework matched (not on the raw URI), and the chat list is filtered in the store. See
 [Identity and access](identity-and-access.md) and [Deployment](deployment.md).
+
+Web sign-in hardening (see `jllm-web/README.md`): admin-made passwords are checked or one-time generated; 3 failed
+sign-ins lock a login for 30 minutes (admin unlock), atomic and bounded; `X-Forwarded-For` only from `jllm.web.trusted-proxies`;
+`Origin`/`Sec-Fetch-Site` check on state-changing requests; absolute session lifetime; stored tokens bound to user and source;
+OIDC never links admin or unattended accounts by email (set `allowed-domains`); MCP OAuth discovery needs HTTPS and a matching
+issuer; MCP, sandbox-daemon and backup answers are size-capped; each standard container has its own network; `run_js` needs the
+isolate (no silent fallback).
 
 ## 6. What it does not cover
 

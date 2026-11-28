@@ -31,8 +31,8 @@ class SampleUsersTest {
 
     /** The shipped permission files, copied into a temp folder so the test reads what the sample ships. */
     private static Permissions shipped(Path dir) throws Exception {
-        Path src = Path.of("..", "runConfig", "webauth", "permissions");
-        if (!Files.isDirectory(src)) src = Path.of("runConfig", "webauth", "permissions");
+        Path src = Path.of("..", "runConfigs", "unsafe", "webauth", "permissions");
+        if (!Files.isDirectory(src)) src = Path.of("runConfigs", "unsafe", "webauth", "permissions");
         for (String role : List.of("guest", "reader", "poweru", "admin")) {
             Files.copy(src.resolve(role + ".json"), dir.resolve(role + ".json"));
         }
@@ -101,7 +101,7 @@ class SampleUsersTest {
     void roleSandboxIsStoredInTheRoleFileAndDefaultsToNone(@TempDir Path dir) {
         Permissions perms = new Permissions(new FileRoleRepository(dir, new ObjectMapper()));
         perms.save(new org.kendar.llm.harness.identity.Role("ops", List.of("*"), false, "ask", Map.of(),
-                Map.of("sandbox", org.kendar.llm.harness.identity.RoleSandbox.of("docker-isolated", null, "default").toJson())));
+                Map.of("sandbox", org.kendar.llm.harness.identity.RoleSandbox.of("docker-isolated", null, "default", false).toJson())));
         var sb = perms.role("ops").orElseThrow().sandbox();
         assertEquals(org.kendar.llm.harness.sandbox.SandboxKind.DOCKER_ISOLATED, sb.kind());
         assertEquals("hardened", sb.profile());
@@ -115,16 +115,16 @@ class SampleUsersTest {
     @Test
     void roleSettingsAreTopLevelKeysOfTheRoleFileAndUnknownOnesSurviveASave(@TempDir Path dir) throws Exception {
         Files.writeString(dir.resolve("ops.json"), "{\"tools\":[\"*\"],\"approval\":\"off\","
-                + "\"sandbox\":{\"kind\":\"local\"},\"idp\":{\"groups\":[\"g1\"],\"deep\":{\"x\":1}},\"flag\":true,"
+                + "\"sandbox\":{\"kind\":\"shared-local\"},\"idp\":{\"groups\":[\"g1\"],\"deep\":{\"x\":1}},\"flag\":true,"
                 + "\"Bad Key\":1,\"name\":\"ignored\"}");
         FileRoleRepository repo = new FileRoleRepository(dir, mapper);
         var ops = repo.find("ops").orElseThrow();
         assertEquals(List.of("sandbox", "idp", "flag"), List.copyOf(ops.settings().keySet()),
                 "invalid and reserved keys are not settings");
-        assertEquals(org.kendar.llm.harness.sandbox.SandboxKind.LOCAL, ops.sandbox().kind());
+        assertEquals(org.kendar.llm.harness.sandbox.SandboxKind.SHARED_LOCAL, ops.sandbox().kind());
         assertEquals("off", ops.approval());
 
-        repo.save(ops.withSetting("sandbox", org.kendar.llm.harness.identity.RoleSandbox.of("docker-open", "user", null).toJson()));
+        repo.save(ops.withSetting("sandbox", org.kendar.llm.harness.identity.RoleSandbox.of("docker-open", "user", null, false).toJson()));
         var saved = repo.find("ops").orElseThrow();
         assertEquals(ops.setting("idp"), saved.setting("idp"));
         assertTrue(saved.setting("flag").asBoolean());

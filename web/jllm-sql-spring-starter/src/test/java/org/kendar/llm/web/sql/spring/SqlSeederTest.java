@@ -24,14 +24,14 @@ import static org.junit.jupiter.api.Assertions.*;
 class SqlSeederTest {
 
     private static final ObjectMapper JSON = new ObjectMapper();
-    private static final Path TEMPLATE = Path.of("../../release/template/webauth");
+    private static final Path TEMPLATE = Path.of("../../release/template/configs/unsafe/webauth");
 
     private static SqlStores open(Path dir) {
         String url = "jdbc:sqlite:" + dir.resolve("seed.db").toString().replace(File.separatorChar, '/');
         return SqlStores.open(SqlConfig.fromProperties(k -> k.equals("jllm.sql.url") ? url : null, dir), null);
     }
 
-    /** The seeded roles must equal release/template/webauth/permissions: a drift in either place fails here. */
+    /** The seeded roles must equal release/template/configs/unsafe/webauth/permissions: a drift in either place fails here. */
     @Test
     void seededRolesEqualTheReleaseTemplate(@TempDir Path dir) throws Exception {
         assertTrue(Files.isDirectory(TEMPLATE), "template not found from " + Path.of("").toAbsolutePath());

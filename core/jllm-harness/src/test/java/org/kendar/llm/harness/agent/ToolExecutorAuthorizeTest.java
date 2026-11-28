@@ -65,7 +65,7 @@ class ToolExecutorAuthorizeTest {
                 for (Kind rule : rules) for (boolean grant : B) for (boolean tainted : B) for (boolean hook : B)
                     for (boolean cls : B) for (Verdict v : Verdict.values()) for (boolean inter : B) {
                         AuthorizeInput in = new AuthorizeInput(free, ro, admin, mode, gate, rule, grant, tainted,
-                                hook, cls, v, inter);
+                                hook, cls, v, inter, false);
                         assertEquals(legacy(in), ToolExecutor.decide(in), in.toString());
                         n++;
                     }
@@ -79,14 +79,33 @@ class ToolExecutorAuthorizeTest {
     }
 
     @Test
+    void protectedWriteAsksInEveryModeAndIsDeniedWhenNobodyCanAnswer() {
+        for (PermissionMode mode : PermissionMode.values()) {
+            for (Kind rule : new Kind[]{null, Kind.ALLOW}) {
+                for (boolean grant : B) {
+                    AuthorizeInput in = new AuthorizeInput(false, false, null, mode, Decision.ALLOW, rule, grant,
+                            false, false, false, null, true, true);
+                    assertEquals(Decision.ASK, ToolExecutor.decide(in).decision(), in.toString());
+                    AuthorizeInput un = new AuthorizeInput(false, false, null, mode, Decision.ALLOW, rule, grant,
+                            false, false, false, null, false, true);
+                    assertEquals(Decision.DENY, ToolExecutor.decide(un).decision(), un.toString());
+                }
+            }
+        }
+        AuthorizeInput admin = new AuthorizeInput(false, false, ToolPermission.ALLOW, PermissionMode.AUTO,
+                Decision.ALLOW, null, false, false, false, false, null, true, true);
+        assertEquals(Decision.ASK, ToolExecutor.decide(admin).decision());
+    }
+
+    @Test
     void classifierIsConsultedOnlyForSideEffectsInAutoModeAllowedByTheGate() {
         AuthorizeInput base = new AuthorizeInput(false, false, null, PermissionMode.AUTO, Decision.ALLOW, null, false,
-                false, false, true, null, true);
+                false, false, true, null, true, false);
         assertTrue(base.consultsClassifier());
         assertTrue(!new AuthorizeInput(false, true, null, PermissionMode.AUTO, Decision.ALLOW, null, false,
-                false, false, true, null, true).consultsClassifier());
+                false, false, true, null, true, false).consultsClassifier());
         assertTrue(!new AuthorizeInput(false, false, null, PermissionMode.AUTO, Decision.ASK, null, false,
-                false, false, true, null, true).consultsClassifier());
+                false, false, true, null, true, false).consultsClassifier());
         assertEquals(Decision.ASK, ToolExecutor.decide(base.withClassifier(Verdict.UNSURE)).decision());
         assertEquals(Decision.ALLOW, ToolExecutor.decide(base.withClassifier(Verdict.SAFE)).decision());
     }

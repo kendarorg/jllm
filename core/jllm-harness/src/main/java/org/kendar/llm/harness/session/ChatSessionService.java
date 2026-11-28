@@ -16,6 +16,19 @@ public class ChatSessionService {
     private final ChatSessionStore store;
     private final String agentId;
     private final ObjectMapper mapper;
+    /** The policy of a chat's user: which modes it may select. Every mode until the harness sets the identity. */
+    private volatile java.util.function.Function<String, org.kendar.llm.harness.auth.UserPolicy> policies =
+            id -> org.kendar.llm.harness.auth.UserPolicy.ALL;
+
+    /** The mode a role may not select. */
+    public static final class ModeNotAllowedException extends IllegalArgumentException {
+        public ModeNotAllowedException(PermissionMode mode, org.kendar.llm.harness.auth.UserPolicy policy) {
+            super("Mode " + mode.name().toLowerCase(Locale.ROOT) + " is not allowed for this user's role (allowed: "
+                    + java.util.Arrays.stream(PermissionMode.values()).filter(policy::allowsMode)
+                    .map(m -> m.name().toLowerCase(Locale.ROOT)).collect(java.util.stream.Collectors.joining(", "))
+                    + ")");
+        }
+    }
 
     public ChatSessionService(ChatSessionStore store, String agentId, ObjectMapper mapper) {
         this.store = store;
@@ -204,7 +217,15 @@ public class ChatSessionService {
                 u.cacheCreationTokens()));
     }
 
+    /** Where {@link #setMode} asks which modes the chat's user may select. */
+    public void policies(java.util.function.Function<String, org.kendar.llm.harness.auth.UserPolicy> policies) {
+        this.policies = policies;
+    }
+
+    /** @throws ModeNotAllowedException when the user's role does not allow the mode */
     public synchronized void setMode(String chatId, PermissionMode mode) {
+        var policy = policies.apply(chatId);
+        if (!policy.allowsMode(mode)) throw new ModeNotAllowedException(mode, policy);
         store.save(get(chatId).withMode(mode.name()));
     }
 

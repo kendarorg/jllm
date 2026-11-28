@@ -257,6 +257,31 @@ class ApprovalGateTest {
     }
 
     @Test
+    void aGrantNeverCoversAWriteToProtectedConfiguration() throws Exception {
+        rig.register(new FileSystemAgentTools().tools().toArray(new org.kendar.llm.harness.tools.HarnessTool[0]));
+        rig.requiresApproval.put("write_file", true);
+        rig.approvals.grant(chatId, "write_file");
+        rig.approvals.grantDir(chatId, ".jllm");
+        rig.approvals.grantDir(chatId, ".git/hooks");
+        Path work = rig.sandbox.workDir(chatId);
+        Files.createDirectories(work.resolve(".jllm"));
+        Files.createDirectories(work.resolve(".git/hooks"));
+        for (String rel : new String[]{".jllm/settings.json", ".git/hooks/pre-commit", "AGENTS.md"}) {
+            rig.model.enqueue(toolUse("w-" + rel, "write_file", "{\"path\":\"" + rel + "\",\"content\":\"x\"}"), text("b"));
+            Events ev = answering(false, null);
+            rig.loop.run(chatId, "write", ev, () -> false, null);
+            assertEquals(1, ev.ofType("approval_request").size(), rel + " is asked even though it is granted");
+            assertFalse(Files.exists(work.resolve(rel)), rel);
+        }
+        // an ordinary file is covered by the grant: no question
+        rig.model.enqueue(toolUse("w-ok", "write_file", "{\"path\":\"note.txt\",\"content\":\"x\"}"), text("c"));
+        Events ev = answering(false, null);
+        rig.loop.run(chatId, "write", ev, () -> false, null);
+        assertEquals(0, ev.ofType("approval_request").size());
+        assertTrue(Files.exists(work.resolve("note.txt")));
+    }
+
+    @Test
     void jailEscapeInsideAnApprovedToolIsAnErrorNotAWrite() throws Exception {
         rig.register(new FileSystemAgentTools().tools().toArray(new org.kendar.llm.harness.tools.HarnessTool[0]));
         rig.requiresApproval.put("write_file", true);

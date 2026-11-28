@@ -14,6 +14,7 @@ import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
 
+import org.kendar.llm.harness.auth.SecureUrl;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
@@ -315,21 +316,13 @@ public final class OidcClient {
         return v;
     }
 
-    /** HTTPS only; plain http is accepted for a loopback host, which tests use. */
+    /** HTTPS only; plain http is accepted for a loopback host, which tests use ({@link SecureUrl}). */
     static void requireSecure(String url, String what) throws IOException {
-        URI u;
         try {
-            u = URI.create(url);
+            SecureUrl.require(url, what);
         } catch (IllegalArgumentException e) {
-            throw new IOException(what + " is not a URL");
+            throw new IOException(e.getMessage());
         }
-        if ("https".equalsIgnoreCase(u.getScheme())) return;
-        String host = u.getHost();
-        if ("http".equalsIgnoreCase(u.getScheme()) && host != null
-                && (host.equals("localhost") || host.equals("127.0.0.1") || host.equals("[::1]"))) {
-            return;
-        }
-        throw new IOException(what + " must use https");
     }
 
     private static String enc(String s) {

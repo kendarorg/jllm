@@ -32,7 +32,7 @@ class SampleFlowsTest {
     void setUp() {
         SampleFlows.install(dir);
         api = WorkflowApiImpl.create(ActionProvider.load(getClass().getClassLoader()),
-                new RunStore.Files(dir.resolve("runs")), new FlowStore.Files(dir.resolve("flows")), "admin");
+                new RunStore.Files(dir.resolve("runs")), new FlowStore.Files(dir.resolve("flows")), "admin", null);
     }
 
     private List<String> executions() {

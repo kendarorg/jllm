@@ -11,7 +11,7 @@
 | Integrations | no Spring Boot starter for the harness itself (`jllm-web-spring-starter` covers only the web REST and SSE API) and no Micrometer or OpenTelemetry module: [recipes](../getting-started/spring-boot.md) only |
 | Model credentials | one global API key per provider; per-user credentials are [in development](#planned-per-user-model-credentials) |
 | Flows | the `who` label of a question is shown, not enforced |
-| Isolation | the web gives a role no sandbox by default (no files, no shell); the `local` sandbox has none; on the CLI, MCP stdio servers run as the JVM user (the web ignores them) |
+| Isolation | the web gives a role no sandbox by default (no files, no shell); the `shared-local` sandbox is confined only on Linux with `bwrap`; on the CLI, MCP stdio servers run as the JVM user (the web ignores them) |
 | Path jail | on Windows, and on file systems without secure directory streams, a junction swapped in between check and use is a residual race (accepted: creating one needs a host shell, which has no jail); the shell tools are not covered ([tools guide](../guides/tools.md#links-that-leave-the-work-dir-filesexternallinks)) |
 | `run_js` | the limits are guesses to tune with eval data (`maxInnerCalls` 200, `loop.innerCallsPerTurn` 10); GraalJS is not shipped in the jars and must be fetched ([JS guide](../guides/js.md)) |
 | Assurance | no external security audit, no certification ([security model](security-model.md#6-what-it-does-not-cover)) |

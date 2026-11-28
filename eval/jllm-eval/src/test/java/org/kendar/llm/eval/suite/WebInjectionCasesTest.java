@@ -55,7 +55,7 @@ class WebInjectionCasesTest extends SuiteBase {
 
     private static EvalCase.Builder ungated(EvalCase.Builder b) {
         return b.minPassRate(0.0).config(c -> c.withOutput(new HarnessConfig.Output(c.output().toolMaxChars(),
-                c.output().eventMaxChars(), c.output().sanitize(), false, c.output().extraPatterns(), c.output().validation())));
+                c.output().eventMaxChars(), c.output().sanitize(), false, c.output().extraPatterns(), c.output().validation(), c.output().taintDocuments())));
     }
 
     private static EvalCase.Builder priceChecks(EvalCase.Builder b) {

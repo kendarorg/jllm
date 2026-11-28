@@ -11,8 +11,6 @@ import org.kendar.llm.harness.identity.SkillRepository;
 import org.kendar.llm.harness.identity.UserRepository;
 import org.kendar.llm.harness.session.ChatSessionStore;
 import org.kendar.llm.harness.session.SubAgentRunLog;
-import org.kendar.llm.harness.settings.ProjectMcpTrust;
-import org.kendar.llm.harness.settings.SettingsSource;
 import org.kendar.llm.harness.state.StateStore;
 import org.kendar.llm.web.sql.SqlChatStores;
 import org.kendar.llm.web.sql.SqlStores;
@@ -32,10 +30,10 @@ import static org.junit.jupiter.api.Assertions.*;
 class JllmSqlAutoConfigurationTest {
 
     private static final Class<?>[] TYPES = {UserRepository.class, RoleRepository.class, SkillRepository.class,
-            LoginSessionRepository.class, TokenStore.class, SettingsSource.class,
-            org.kendar.llm.harness.settings.SettingsSink.class, ProjectMcpTrust.class,
-            ChatSessionStore.class, StateStore.class, MnemonicStore.class, SubAgentRunLog.class,
-            org.kendar.llm.harness.plugin.PluginStorages.class};
+            LoginSessionRepository.class, TokenStore.class, org.kendar.llm.harness.settings.ConfigProvider.class,
+            org.kendar.llm.harness.settings.InstructionRepository.class, org.kendar.llm.harness.settings.AgentRepository.class,
+            org.kendar.llm.harness.settings.SettingsSink.class,
+            ChatSessionStore.class, StateStore.class, MnemonicStore.class, SubAgentRunLog.class};
 
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
             .withConfiguration(AutoConfigurations.of(JllmSqlAutoConfiguration.class))

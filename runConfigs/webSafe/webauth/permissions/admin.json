@@ -1,0 +1,10 @@
+{
+  "tools" : [ "*" ],
+  "approval" : "ask",
+  "readOnly" : false,
+  "sandbox" : {
+    "kind" : "docker-isolated",
+    "scope" : "user",
+    "network" : "none"
+  }
+}

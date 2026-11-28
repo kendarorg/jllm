@@ -366,7 +366,8 @@ final class StepRunner {
         while (true) {
             try {
                 return gw.complete(new Registry.ModelCall(task.path("agent").asText(), task.path("system").asText(""),
-                        prompt, rec.user, title, Set.copyOf(approved), taskTools(task)));
+                        prompt, rec.user, title, Set.copyOf(approved), taskTools(task), unattended(),
+                        tool -> deniedUnattended(id, tool)));
             } catch (Registry.ApprovalNeededException e) {
                 approve(id, key, step, e, approved);
             } catch (FlowException | WaitSignal e) {
@@ -401,15 +402,25 @@ final class StepRunner {
         return out;
     }
 
+    /** Whether nobody can answer a question of this flow: its tasks run with every approval denied. */
+    boolean unattended() {
+        return flow.doc().path("unattended").asBoolean(false);
+    }
+
     /**
-     * A tool of the task's agent needs an approval. An unattended flow fails; otherwise the user is asked once
-     * per tool, the run waits for the answer, and the task is run again with the allowed tools.
+     * A tool call of an unattended task was denied (the model got the denial as the tool result and the step went on):
+     * counted in the journal.
+     */
+    void deniedUnattended(String step, String tool) {
+        log(step, "denied", "unattended run, no one can approve " + tool, Json.M.createObjectNode().put("tool", tool));
+    }
+
+    /**
+     * A tool of the task's attended agent needs an approval: the user is asked once per tool, the run waits for the
+     * answer, and the task is run again with the allowed tools. (An unattended flow never gets here: the host denies the
+     * call and the task goes on.)
      */
     void approve(String id, String key, JsonNode step, Registry.ApprovalNeededException e, Set<String> approved) {
-        if (flow.doc().path("unattended").asBoolean(false)) {
-            throw new FlowException(FlowException.Kind.PERMISSION, e.getMessage()
-                    + " (the flow is unattended, nobody can approve)", e);
-        }
         boolean asked = false;
         for (String tool : e.tools()) {
             if (approved.contains(tool)) continue;
@@ -456,7 +467,7 @@ final class StepRunner {
                 + "\nAnswer with exactly one of these words and nothing else: " + names(s.path("outcomes"));
         try {
             return gw.complete(new Registry.ModelCall(s.path("agent").asText(), "You choose one option from a closed list.",
-                    prompt, rec.user, null, Set.of(), List.of()));
+                    prompt, rec.user, null, Set.of(), List.of(), unattended(), null));
         } catch (FlowException e) {
             throw e;
         } catch (Exception e) { // boundary: chooser boundary: any failure is a FlowException

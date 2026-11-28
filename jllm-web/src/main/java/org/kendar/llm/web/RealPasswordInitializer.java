@@ -9,8 +9,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 
-import java.security.SecureRandom;
-
 /**
  * With {@code jllm.web.use-real-password=true}: every user still on the default password gets a random one at startup.
  * Only the administrators' passwords are logged, once; other users are told to ask an administrator for a reset.
@@ -19,10 +17,6 @@ import java.security.SecureRandom;
 public class RealPasswordInitializer implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(RealPasswordInitializer.class);
-    private static final String ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
-    static final int LENGTH = 24;
-    private static final SecureRandom RANDOM = new SecureRandom();
-
     private final UserRepository users;
     private final boolean enabled;
 
@@ -31,18 +25,12 @@ public class RealPasswordInitializer implements ApplicationRunner {
         this.enabled = jllm.web() != null && jllm.web().realPasswords();
     }
 
-    static String generate() {
-        StringBuilder sb = new StringBuilder(LENGTH);
-        for (int i = 0; i < LENGTH; i++) sb.append(ALPHABET.charAt(RANDOM.nextInt(ALPHABET.length())));
-        return sb.toString();
-    }
-
     @Override
     public void run(ApplicationArguments args) {
         if (!enabled) return;
         for (User u : users.all()) {
             if (!u.usesDefaultPassword()) continue;
-            String password = generate();
+            String password = PasswordHasher.generate();
             users.setPassword(u.id(), PasswordHasher.hash(password));
             if (u.admin()) {
                 log.warn("Generated password for administrator '{}': {} (shown once; change it after signing in)",

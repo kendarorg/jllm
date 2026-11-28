@@ -17,12 +17,15 @@ import java.util.zip.ZipOutputStream;
  * The zip format of the exec daemon's {@code GET /backup} and {@code POST /setup}: the workspace as regular files and
  * directories (symbolic links are skipped), plus a {@value #EXEC_MANIFEST} entry listing the executable files, because
  * a zip written by the JDK cannot carry permissions. {@code .jllm/scratchpad} and {@code .jllm/history} are never
- * packed or unpacked: the scratchpad is disposable and the history stays on the host.
+ * packed: the scratchpad is disposable and the history stays on the host. {@link #unpack} skips everything under
+ * {@code .jllm/} and {@code .git/}: a container cannot write host configuration back.
  */
 public final class WorkspaceArchive {
 
     static final String EXEC_MANIFEST = ".jllm-exec";
     private static final List<String> EXCLUDED = List.of(".jllm/scratchpad", ".jllm/history");
+    /** Never written to the host: configuration the host reads or executes ({@code .jllm/**}, {@code .git/**}). */
+    private static final List<String> HOST_PROTECTED = List.of(".jllm", ".git");
 
     private WorkspaceArchive() {
     }
@@ -30,6 +33,37 @@ public final class WorkspaceArchive {
     static boolean excluded(String rel) {
         for (String e : EXCLUDED) if (rel.equals(e) || rel.startsWith(e + "/")) return true;
         return false;
+    }
+
+    /** True for {@code .jllm/**} and {@code .git/**}: content that comes back to the host must not carry them. */
+    static boolean hostProtected(String rel) {
+        for (String e : HOST_PROTECTED) if (rel.equals(e) || rel.startsWith(e + "/")) return true;
+        return false;
+    }
+
+    /** {@code zip} without the entries under {@code .jllm/} and {@code .git/} (the executables manifest is trimmed). */
+    public static byte[] withoutHostProtected(byte[] zipBytes) throws IOException {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (ZipInputStream in = new ZipInputStream(new ByteArrayInputStream(zipBytes));
+             ZipOutputStream out = new ZipOutputStream(bytes)) {
+            for (ZipEntry e; (e = in.getNextEntry()) != null; ) {
+                String name = e.getName();
+                if (name.equals(EXEC_MANIFEST)) {
+                    List<String> keep = new ArrayList<>();
+                    for (String l : new String(in.readAllBytes(), StandardCharsets.UTF_8).split("\n")) {
+                        if (!l.isBlank() && !hostProtected(l.strip())) keep.add(l.strip());
+                    }
+                    out.putNextEntry(new ZipEntry(EXEC_MANIFEST));
+                    out.write(String.join("\n", keep).getBytes(StandardCharsets.UTF_8));
+                    out.closeEntry();
+                } else if (!hostProtected(name.replaceAll("/$", ""))) {
+                    out.putNextEntry(new ZipEntry(name));
+                    in.transferTo(out);
+                    out.closeEntry();
+                }
+            }
+        }
+        return bytes.toByteArray();
     }
 
     /** True when {@code dir} holds anything worth uploading (more than the harness's own excluded data). */
@@ -121,9 +155,11 @@ public final class WorkspaceArchive {
                     continue;
                 }
                 Path target = root.resolve(name).normalize();
-                if (name.startsWith("/") || !target.startsWith(root) || excluded(name.replaceAll("/$", ""))) {
+                if (name.startsWith("/") || !target.startsWith(root)) {
                     throw new IOException("Refusing archive entry " + name);
                 }
+                // what the host reads or executes as configuration is never taken from a container
+                if (hostProtected(name.replaceAll("/$", ""))) continue;
                 if (e.isDirectory()) {
                     makeDirs(root, target, name);
                     continue;

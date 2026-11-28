@@ -19,12 +19,13 @@ import java.util.function.Supplier;
  * @param agent       agent name, as hooks see it
  * @param client      model of this agent
  * @param inherited   [0] = leading messages that are a copy of the parent's context (0 for the main agent)
+ * @param attendance  who can answer permission questions in this run
  * @param label       names a sub-agent in its approval requests; null for the main agent
  * @param inbox       messages typed while the run is active; null = none
  * @param frame       request prefix of a sub-agent that continues its parent's (context stack); null otherwise
  */
 record LoopRequest(String chatId, ArrayNode messages, Supplier<List<HarnessTool>> toolSource, String pinned,
                    String extra, PermissionMode mode, EventSink sink, BooleanSupplier cancelled, boolean persist,
-                   boolean interactive, String agent, ModelClient client, int[] inherited, String label,
+                   RunAttendance attendance, String agent, ModelClient client, int[] inherited, String label,
                    AgentLoop.Inbox inbox, StackFrame frame) {
 }

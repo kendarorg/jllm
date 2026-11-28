@@ -101,7 +101,7 @@ class LocalSandboxExecutorTest {
 
     @Test
     void bashToolFormatsResultAndTimeout() throws Exception {
-        ShellAgentTools shell = new ShellAgentTools(sandbox, config(base));
+        ShellAgentTools shell = new ShellAgentTools(sandbox, config(base), org.kendar.llm.harness.tools.AddressPolicy.OPEN);
         var bash = shell.tools().get(0);
         ToolContext ctx = new ToolContext("c1", sandbox.workDir("c1"));
 

@@ -1,0 +1,12 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Web Safe Apple" type="Application" factoryName="Application">
+    <option name="INCLUDE_PROVIDED_SCOPE" value="true" />
+    <option name="MAIN_CLASS_NAME" value="org.kendar.llm.web.JllmWebApplication" />
+    <module name="jllm-web" />
+    <option name="PROGRAM_PARAMETERS" value="--spring.config.additional-location=file:$PROJECT_DIR$/runConfigs/webSafe/ --jllm.webauth-dir=$PROJECT_DIR$/runConfigs/webSafe/webauth --jllm.config-dir=$PROJECT_DIR$/runConfigs/webSafe/config --jllm.chats-dir=$PROJECT_DIR$/runConfigs/webSafe/tmp/chats --jllm.context-strategy=compaction --jllm.small-model=true --jllm.provider=llamacpp --jllm.base-url=http://localhost:11434/v1 --jllm.model=qwen3:8b --jllm.context-tokens=6000 --jllm.plugin-dir=$PROJECT_DIR$/target/plugins --jllm.plugins.pdf.enabled=true --jllm.plugins.docs.enabled=true --jllm.plugins.js.enabled=true --jllm.plugins.jllm-workflows.enabled=true --jllm.plugins.jllm-workflow-web.enabled=true" />
+    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/runConfigs/webSafe/tmp" />
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>

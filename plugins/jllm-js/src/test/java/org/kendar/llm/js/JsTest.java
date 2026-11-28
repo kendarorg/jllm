@@ -36,6 +36,11 @@ final class JsTest {
         return GraalProbe.probe().isolate();
     }
 
+    /** The isolate where the runtime has one, else the constrained engine: for tests of the lifecycle, not of isolation. */
+    static String anyEngine() {
+        return isolateAvailable() ? "isolated" : "constrained";
+    }
+
     static JsSandbox box(String engine, String... keyAndJsonValue) {
         return JsSandbox.open(settingsFor(engine, keyAndJsonValue));
     }

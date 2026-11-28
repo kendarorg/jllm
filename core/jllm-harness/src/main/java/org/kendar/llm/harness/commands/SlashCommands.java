@@ -548,7 +548,11 @@ public final class SlashCommands {
 
     private Result setMode(String chatId, String mode) {
         PermissionMode m = PermissionMode.parse(mode);
-        harness.sessions().setMode(chatId, m);
+        try {
+            harness.sessions().setMode(chatId, m);
+        } catch (org.kendar.llm.harness.session.ChatSessionService.ModeNotAllowedException e) {
+            return Result.text("error: " + e.getMessage());
+        }
         return new Result("Mode: " + m.name(), null, true);
     }
 

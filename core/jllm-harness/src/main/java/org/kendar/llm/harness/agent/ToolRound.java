@@ -45,7 +45,7 @@ final class ToolRound {
         List<Future<ObjectNode>> futures = new ArrayList<>();
         for (JsonNode use : toolUses) {
             futures.add(threads.submit(() -> executor.execute(use, byName, refused, run.toolContext, req.mode(),
-                    req.sink(), req.cancelled(), req.interactive(), intent, req.label())));
+                    req.sink(), req.cancelled(), req.attendance(), intent, req.label())));
         }
         // cancel interrupts the running tool threads; every tool_use still gets a tool_result below
         Runnable unhook = run.token.onCancel(() -> futures.forEach(f -> f.cancel(true)));
@@ -74,7 +74,7 @@ final class ToolRound {
         StuckDetector.Detection loopSeen = run.stuck.record(toolUses, results);
         RunGuards.StuckAction action = loopSeen == null ? RunGuards.StuckAction.GO_ON
                 : guards.onStuck(loopSeen, run.stuck, results, messages, req.chatId(), req.sink(), req.cancelled(),
-                req.interactive(), req.label());
+                req.attendance().asks(), req.label());
         if (action == RunGuards.StuckAction.STOP) {
             if (req.persist()) deps.sessions().saveMessages(req.chatId(), messages);
             return new AgentLoop.LoopResult(run.finalText, AgentLoop.Outcome.STUCK);

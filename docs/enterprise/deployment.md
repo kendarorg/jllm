@@ -24,7 +24,7 @@ only for the Docker sandbox.
 - [ ] The web app sends a `Content-Security-Policy` (same-origin only, no framing), `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`. Tighten or replace the policy with `jllm.web.content-security-policy`; `off` removes the CSP header (do not do this when exposed). A reverse proxy must not strip these headers.
 - [ ] Set `jllm.web.enforce-password-change-on-loopback=true` when anything on the host forwards remote traffic (reverse proxy, SSH or cloud tunnel, sidecar, port forward). The loopback exemption of the default-password enforcement is off when a forwarding header is present or `server.address` is unset, `0.0.0.0` or `::`; a proxy, tunnel or sidecar that adds no forwarding header makes remote requests look local, so the exemption must not be relied on there.
 - [ ] Set `web.blockLocalHost=true` (settings file) so `web_fetch` and `web_download` cannot reach loopback, link-local or private addresses; add `web.blockExtraAddresses` for internal hosts.
-- [ ] Give the roles that need files or `bash` a `docker-isolated` or `docker-open` sandbox (daemon mode); the default is `none`, and `local` has no isolation. Run the JVM as an
+- [ ] Give the roles that need files or `bash` a `docker-isolated` or `docker-open` sandbox (daemon mode); the default is `none`, and the web has no plain `local` kind (`shared-local` is bwrap-confined on Linux only). Run the JVM as an
       unprivileged user. MCP servers must be streamable HTTP: the web ignores stdio servers (warning in the log).
 - [ ] Set `JLLM_TOKEN_KEY` (`openssl rand -base64 32`) so OAuth tokens are encrypted at rest. Without it the server
       refuses to start when `jllm.web.use-real-password=true` or `server.address` is not loopback (unset, `0.0.0.0`

@@ -46,7 +46,7 @@
         <dependency>
             <groupId>org.jline</groupId>
             <artifactId>jline</artifactId>
-            <version>3.26.3</version>
+            <version>3.30.17</version>
         </dependency>
         <!-- the log binding of the CLI; src/main/resources/simplelogger.properties keeps it quiet -->
         <dependency>

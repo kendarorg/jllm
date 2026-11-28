@@ -42,7 +42,12 @@ public final class McpOAuthLogin implements OAuthLogin {
     public record Metadata(String authorizationEndpoint, String tokenEndpoint, String registrationEndpoint) {
     }
 
+    /**
+     * @throws OAuthException {@code discovery_failed} when the server URL, the authorization server or any endpoint it
+     *                        names is not HTTPS, or its metadata names another issuer than the one it was fetched from
+     */
     public Metadata discover() {
+        secure(url, "MCP server URL");
         URI u = URI.create(url);
         String origin = u.getScheme() + "://" + u.getAuthority();
         String issuer = origin;
@@ -51,14 +56,30 @@ public final class McpOAuthLogin implements OAuthLogin {
                 && !resource.get("authorization_servers").isEmpty()) {
             issuer = resource.get("authorization_servers").get(0).asText().replaceAll("/+$", "");
         }
+        secure(issuer, "authorization server");
         JsonNode m = getJson(issuer + "/.well-known/oauth-authorization-server");
         if (m == null) throw new OAuthException("discovery_failed", "No authorization server metadata at " + issuer);
+        if (!issuer.equals(m.path("issuer").asText("").replaceAll("/+$", ""))) {
+            throw new OAuthException("discovery_failed", "The metadata at " + issuer + " names another issuer");
+        }
         String auth = m.path("authorization_endpoint").asText("");
         String token = m.path("token_endpoint").asText("");
         if (auth.isEmpty() || token.isEmpty()) {
             throw new OAuthException("discovery_failed", "Incomplete authorization server metadata at " + issuer);
         }
-        return new Metadata(auth, token, m.path("registration_endpoint").asText(null));
+        secure(auth, "authorization_endpoint");
+        secure(token, "token_endpoint");
+        String registration = m.path("registration_endpoint").asText(null);
+        if (registration != null) secure(registration, "registration_endpoint");
+        return new Metadata(auth, token, registration);
+    }
+
+    private static void secure(String target, String what) {
+        try {
+            SecureUrl.require(target, what);
+        } catch (IllegalArgumentException e) {
+            throw new OAuthException("discovery_failed", e.getMessage());
+        }
     }
 
     /** Registers a public client for {@code redirectUri}. @return the client id */

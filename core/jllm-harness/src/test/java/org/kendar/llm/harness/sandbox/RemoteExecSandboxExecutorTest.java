@@ -111,13 +111,69 @@ class RemoteExecSandboxExecutorTest {
         box.execute("c1", "true", Duration.ofSeconds(30));
         String create = String.join(" ", docker.first("create"));
         for (String flag : List.of("--read-only", "--cap-drop ALL", "no-new-privileges", "-p 127.0.0.1::8080",
-                "--label jllm=1", "--label jllm.kind=cli", "-e JLLM_TOKEN=", ":/agent:ro", ":/workspace")) {
+                "--label jllm=1", "--label jllm.kind=cli", "-e JLLM_TOKEN=", "-e JLLM_AGENT_B64=", ":/workspace")) {
             assertTrue(create.contains(flag), flag + " in " + create);
         }
-        assertFalse(create.contains("--network"), "docker's default network");
+        assertFalse(create.contains(":/agent"), "no host directory of the daemon script is mounted: " + create);
+        assertTrue(create.contains("--network jllm-cli-"), "a network of its own, not docker's default: " + create);
         assertEquals(64, docker.token.length());
         ExecutionResult env = box.execute("c1", "env", Duration.ofSeconds(30));
         assertFalse(env.stdout().contains(docker.token));
+    }
+
+    @Test
+    void cliContainerMountsTheProtectedPartsOfTheProjectReadOnlyAfterTheProjectMount() throws Exception {
+        Path project = Files.createDirectories(tmp.resolve("project"));
+        Files.createDirectories(project.resolve(".git/hooks"));
+        Files.writeString(project.resolve(".git/config"), "[core]");
+        Files.createDirectories(project.resolve(".jllm/scratchpad"));
+        cli(project).execute("c1", "true", Duration.ofSeconds(30));
+        List<String> create = docker.first("create");
+        String projectMount = DockerHosts.mountSource(project) + ":" + RemoteExecSandboxExecutor.WORKSPACE;
+        int at = create.indexOf(projectMount);
+        assertTrue(at > 0, projectMount + " in " + create);
+        assertEquals("-v", create.get(at - 1));
+        for (String dst : List.of("/workspace/.git/hooks", "/workspace/.git/config", "/workspace/.jllm")) {
+            int m = -1;
+            for (int i = 0; i < create.size(); i++) {
+                if (create.get(i).startsWith("type=bind,") && create.get(i).contains(",dst=" + dst + ",readonly")) m = i;
+            }
+            assertTrue(m > at, dst + " read-only mount after the project mount: " + create);
+            assertEquals("--mount", create.get(m - 1));
+        }
+        assertTrue(create.stream().anyMatch(a -> a.contains(",dst=/workspace/.jllm/scratchpad")
+                && !a.endsWith("readonly")), "scratchpad stays writable: " + create);
+    }
+
+    @Test
+    void aCliCommandThatChangesProtectedProjectFilesIsUndoneAndWarnedAbout() throws Exception {
+        Path project = Files.createDirectories(tmp.resolve("project"));
+        Path hook = Files.createDirectories(project.resolve(".git/hooks")).resolve("pre-commit");
+        Files.writeString(hook, "original");
+        Files.writeString(project.resolve(".git/config"), "[core]");
+        List<String> warnings = new CopyOnWriteArrayList<>();
+        RemoteExecSandboxExecutor box = cli(project).onWarning(warnings::add);
+        String target = hook.toAbsolutePath().toString().replace('\\', '/');
+        ExecutionResult r = box.execute("c1", "echo evil > '" + target + "'", Duration.ofSeconds(30));
+        assertEquals(0, r.exitCode(), r.stderr());
+        assertEquals("original", Files.readString(hook), "restored");
+        assertTrue(warnings.stream().anyMatch(w -> w.contains("protected project files") && w.contains("pre-commit")),
+                warnings.toString());
+    }
+
+    @Test
+    void theDefaultFallbackRunnerIsTheSharedLocalSandboxNeverThePlainHost() throws Exception {
+        allowFallback(true);
+        RemoteExecSandboxExecutor box = cli(Files.createDirectories(tmp.resolve("project")));
+        boolean linux = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("linux");
+        if (!box.allowLocalFallback("c1")) {
+            assertTrue(linux, "only a Linux without a working bwrap refuses");
+            assertFalse(box.localFallbackActive("c1"));
+            return;
+        }
+        var f = RemoteExecSandboxExecutor.class.getDeclaredField("local");
+        f.setAccessible(true);
+        assertInstanceOf(SharedLocalSandbox.class, f.get(box));
     }
 
     @Test
@@ -220,10 +276,16 @@ class RemoteExecSandboxExecutorTest {
                 new FileBackend.Target(FileBackend.Root.WORKSPACE, "x")));
     }
 
+    private void allowFallback(boolean allowed) {
+        config = config.withLocalDirSandboxAllowed(allowed);
+    }
+
     @Test
-    void afterTheUserAgreesTheChatRunsOnTheHost() throws Exception {
+    void afterTheUserAgreesTheChatRunsInTheFallbackRunner() throws Exception {
         docker.versionFails = true;
-        RemoteExecSandboxExecutor box = cli(Files.createDirectories(tmp.resolve("project")));
+        allowFallback(true);
+        Path project = Files.createDirectories(tmp.resolve("project"));
+        RemoteExecSandboxExecutor box = cli(project).fallbackRunner(() -> new LocalSandboxExecutor(new CwdLayout(config, project)));
         assertFalse(box.localFallbackActive("c1"));
         assertTrue(box.allowLocalFallback("c1"));
         assertNull(box.files("c1", "main"), "the file tools use the host");
@@ -234,10 +296,45 @@ class RemoteExecSandboxExecutorTest {
     }
 
     @Test
+    void fallbackIsOffByDefault() {
+        docker.versionFails = true;
+        RemoteExecSandboxExecutor box = cli(tmp);
+
+        assertFalse(box.localFallbackAllowed("c1"));
+        assertFalse(box.allowLocalFallback("c1"));
+        assertFalse(box.localFallbackActive("c1"));
+        assertThrows(SandboxUnavailableException.class, () -> box.execute("c1", "true", Duration.ofSeconds(5)));
+    }
+
+    @Test
     void fallbackIsRefusedWhenTheConfigForbidsIt() {
-        config = config.withSandbox(new HarnessConfig.Sandbox(config.sandbox().baseDir(), 120, false,
-                config.sandbox().docker()));
+        allowFallback(false);
         assertFalse(cli(tmp).allowLocalFallback("c1"));
+    }
+
+    @Test
+    void theRoleDecidesTheFallbackOfItsChats() {
+        allowFallback(false);
+        RemoteExecSandboxExecutor box = web(tmp).fallbackAllowed(chat -> chat.equals("allowed"))
+                .fallbackRunner(() -> new LocalSandboxExecutor(new ChatDirLayout(tmp)));
+
+        assertTrue(box.allowLocalFallback("allowed"));
+        assertFalse(box.allowLocalFallback("other"));
+
+        allowFallback(true);
+        RemoteExecSandboxExecutor strict = web(tmp).fallbackAllowed(chat -> false);
+        assertFalse(strict.allowLocalFallback("c1"), "the role beats the configuration");
+    }
+
+    @Test
+    void fallbackNeverStartsWhenTheSharedLocalSandboxCannot() {
+        allowFallback(true);
+        RemoteExecSandboxExecutor box = cli(tmp).fallbackRunner(() -> {
+            throw new SandboxUnavailableException("no bwrap");
+        });
+
+        assertFalse(box.allowLocalFallback("c1"));
+        assertFalse(box.localFallbackActive("c1"));
     }
 
     @Test
@@ -365,6 +462,66 @@ class RemoteExecSandboxExecutorTest {
         assertEquals(2, docker.count("create"));
     }
 
+    private static byte[] zipOf(String... namesAndContents) throws IOException {
+        var out = new java.io.ByteArrayOutputStream();
+        try (var z = new java.util.zip.ZipOutputStream(out)) {
+            for (int i = 0; i < namesAndContents.length; i += 2) {
+                z.putNextEntry(new java.util.zip.ZipEntry(namesAndContents[i]));
+                z.write(namesAndContents[i + 1].getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                z.closeEntry();
+            }
+        }
+        return out.toByteArray();
+    }
+
+    private static List<String> entriesOf(byte[] zip) throws IOException {
+        List<String> names = new ArrayList<>();
+        try (var z = new java.util.zip.ZipInputStream(new java.io.ByteArrayInputStream(zip))) {
+            for (var e = z.getNextEntry(); e != null; e = z.getNextEntry()) names.add(e.getName());
+        }
+        return names;
+    }
+
+    @Test
+    void unpackNeverWritesGitOrJllmContentToTheHost() throws Exception {
+        byte[] zip = zipOf("ok.txt", "ok", ".git/hooks/pre-commit", "evil", ".git/config", "evil", ".git/", "",
+                ".jllm/settings.json", "evil", "sub/.git/x", "kept", WorkspaceArchive.EXEC_MANIFEST,
+                ".git/hooks/pre-commit\nok.txt");
+        Path dst = tmp.resolve("dst");
+        assertEquals(2, WorkspaceArchive.unpack(zip, dst));
+        assertTrue(Files.isRegularFile(dst.resolve("ok.txt")));
+        assertFalse(Files.exists(dst.resolve(".git")), "no .git comes back");
+        assertFalse(Files.exists(dst.resolve(".jllm")));
+        assertTrue(Files.isRegularFile(dst.resolve("sub/.git/x")), "only the project's own .git is protected");
+    }
+
+    @Test
+    void withoutHostProtectedDropsGitAndJllmEntriesAndTrimsTheManifest() throws Exception {
+        byte[] zip = zipOf("ok.txt", "ok", ".git/hooks/pre-commit", "evil", ".git/", "", ".jllm/a", "evil",
+                WorkspaceArchive.EXEC_MANIFEST, ".git/hooks/pre-commit\nok.txt\n.jllm/a");
+        byte[] clean = WorkspaceArchive.withoutHostProtected(zip);
+        assertEquals(List.of("ok.txt", WorkspaceArchive.EXEC_MANIFEST), entriesOf(clean));
+        try (var z = new java.util.zip.ZipInputStream(new java.io.ByteArrayInputStream(clean))) {
+            z.getNextEntry();
+            z.getNextEntry();
+            assertEquals("ok.txt", new String(z.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8));
+        }
+    }
+
+    @Test
+    void webBackupKeepsNoGitOrJllmContent() throws Exception {
+        remoteConfig();
+        Path base = Files.createDirectories(tmp.resolve("web"));
+        RemoteExecSandboxExecutor box = web(base);
+        box.execute("chat-1", "mkdir -p .git/hooks .jllm && echo x > .git/hooks/pre-commit && echo y > .jllm/s.json"
+                + " && echo kept > keep.txt", Duration.ofSeconds(30));
+        box.close();
+        byte[] zip = Files.readAllBytes(base.resolve("chat-1/.jllm/workspace-backup.zip"));
+        List<String> names = entriesOf(zip);
+        assertTrue(names.contains("keep.txt"), names.toString());
+        assertTrue(names.stream().noneMatch(n -> n.startsWith(".git/") || n.startsWith(".jllm/")), names.toString());
+    }
+
     @Test
     void remoteDockerNeedsTheSetting() {
         RemoteExecSandboxExecutor box = withHost("tcp://10.1.2.3:2375", tmp);
@@ -387,9 +544,9 @@ class RemoteExecSandboxExecutorTest {
         Files.writeString(src.resolve(".jllm/checkpoints/c/k"), "k");
         byte[] zip = WorkspaceArchive.pack(src);
         Path dst = tmp.resolve("dst");
-        assertEquals(2, WorkspaceArchive.unpack(zip, dst));
+        assertEquals(1, WorkspaceArchive.unpack(zip, dst));
         assertTrue(Files.exists(dst.resolve("a/b/f.txt")));
-        assertTrue(Files.exists(dst.resolve(".jllm/checkpoints/c/k")));
+        assertFalse(Files.exists(dst.resolve(".jllm")), "nothing under .jllm comes back to the host");
         assertFalse(Files.exists(dst.resolve(".jllm/history")));
         assertFalse(Files.exists(dst.resolve(".jllm/scratchpad")));
         assertTrue(WorkspaceArchive.hasContent(src));
@@ -415,6 +572,7 @@ class RemoteExecSandboxExecutorTest {
         String env = "";
         boolean exists;
         final java.util.Set<String> volumes = new java.util.HashSet<>();
+        final java.util.Set<String> networks = new java.util.HashSet<>();
         int port;
         Process daemon;
         String agentDir;
@@ -486,6 +644,14 @@ class RemoteExecSandboxExecutorTest {
                                 : new Result("", "No such volume", 1, false);
                     }
                     if (argv.get(2).equals("rm")) volumes.remove(argv.get(argv.size() - 1));
+                    return new Result("", "", 0, false);
+                case "network":
+                    if (argv.get(2).equals("inspect")) {
+                        return networks.contains(argv.get(3)) ? new Result("[]", "", 0, false)
+                                : new Result("", "No such network", 1, false);
+                    }
+                    if (argv.get(2).equals("create")) networks.add(argv.get(argv.size() - 1));
+                    if (argv.get(2).equals("rm")) networks.remove(argv.get(argv.size() - 1));
                     return new Result("", "", 0, false);
                 default:
                     return new Result("", "", 0, false);

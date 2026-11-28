@@ -55,9 +55,12 @@ class AdminControllerTest {
     void usersAreCreatedEditedResetAndDeleted() throws Exception {
         WebauthFixture f = new WebauthFixture(dir);
         Cookie admin = f.signIn("admin");
-        f.send(admin, "POST", "/api/admin/users", Map.of("id", "nora", "name", "Nora", "role", "guest"))
-                .andExpect(status().isCreated());
-        f.signIn("nora"); // default password
+        String temp = WebauthFixture.json(f.send(admin, "POST", "/api/admin/users",
+                Map.of("id", "nora", "name", "Nora", "role", "guest")).andExpect(status().isCreated()))
+                .path("temporaryPassword").asText();
+        assertFalse(temp.isEmpty(), "no default password: a one-time one is generated");
+        f.login("nora", "nora").andExpect(status().isUnauthorized());
+        f.signIn("nora", temp);
         f.send(admin, "POST", "/api/admin/users", Map.of("id", "nora", "role", "guest")).andExpect(status().isConflict());
         f.send(admin, "POST", "/api/admin/users", Map.of("id", "x", "role", "wizard")).andExpect(status().isBadRequest());
         f.send(admin, "POST", "/api/admin/users", Map.of("id", "../x", "role", "guest")).andExpect(status().isBadRequest());
@@ -72,13 +75,15 @@ class AdminControllerTest {
         assertEquals("env:X", nora.credentials().get("mcp:docs").get("Authorization"));
         assertEquals(List.of("web_fetch"), nora.disabledTools());
 
-        Cookie noraSession = f.signIn("nora");
+        f.users.setPassword("nora", org.kendar.llm.web.commons.auth.PasswordHasher.hash("nora-initial-pw")); // the file rewrite above dropped it
+        Cookie noraSession = f.signIn("nora", "nora-initial-pw");
         f.send(admin, "POST", "/api/admin/users/nora/password", Map.of("password", "set by admin"))
-                .andExpect(status().isNoContent());
+                .andExpect(status().isOk());
         f.get(noraSession, "/api/chat").andExpect(status().isUnauthorized());
         f.signIn("nora", "set by admin");
-        f.send(admin, "POST", "/api/admin/users/nora/password", Map.of()).andExpect(status().isNoContent());
-        f.signIn("nora");
+        String again = WebauthFixture.json(f.send(admin, "POST", "/api/admin/users/nora/password", Map.of())
+                .andExpect(status().isOk())).path("temporaryPassword").asText();
+        f.signIn("nora", again);
 
         f.skills.writeOwn("nora", "mine", "", "m");
         f.send(admin, "DELETE", "/api/admin/users/nora", null).andExpect(status().isNoContent());
@@ -155,25 +160,28 @@ class AdminControllerTest {
         assertEquals("docker-isolated", s.path("sandbox").path("kind").asText(), "the sandbox is stored normalized");
         assertEquals("none", s.path("sandbox").path("network").asText());
 
+        f.send(admin, "PUT", "/api/admin/roles/ops", Map.of("tools", List.of("grep"), "sandbox", Map.of("kind", "local")))
+                .andExpect(status().isBadRequest());
+
         // a save without settings keeps them; a save with a sandbox only replaces that key
         f.send(admin, "PUT", "/api/admin/roles/ops", Map.of("tools", List.of("grep"))).andExpect(status().isOk());
-        f.send(admin, "PUT", "/api/admin/roles/ops", Map.of("tools", List.of("grep"), "sandbox", Map.of("kind", "local")))
+        f.send(admin, "PUT", "/api/admin/roles/ops", Map.of("tools", List.of("grep"), "sandbox", Map.of("kind", "shared-local")))
                 .andExpect(status().isOk());
         var ops = f.permissions.role("ops").orElseThrow();
         assertEquals("g1", ops.setting("idp").path("groups").path(0).asText());
-        assertEquals(org.kendar.llm.harness.sandbox.SandboxKind.LOCAL, ops.sandbox().kind());
+        assertEquals(org.kendar.llm.harness.sandbox.SandboxKind.SHARED_LOCAL, ops.sandbox().kind());
         JsonNode row = null;
         for (JsonNode r : json(f.get(admin, "/api/admin/roles"))) if ("ops".equals(r.path("name").asText())) row = r;
         assertNotNull(row);
         assertEquals("g1", row.path("settings").path("idp").path("groups").path(0).asText());
-        assertEquals("local", row.path("sandbox").path("kind").asText());
+        assertEquals("shared-local", row.path("sandbox").path("kind").asText());
 
         // one feature at a time
         s = json(f.send(admin, "PUT", "/api/admin/roles/ops/settings/future", Map.of("a", List.of(1, 2)))
                 .andExpect(status().isOk()));
         assertEquals(2, s.path("future").path("a").path(1).asInt());
         assertEquals("g1", s.path("idp").path("groups").path(0).asText());
-        assertEquals("local", s.path("sandbox").path("kind").asText());
+        assertEquals("shared-local", s.path("sandbox").path("kind").asText());
         f.send(admin, "PUT", "/api/admin/roles/ops/settings/sandbox", Map.of("kind", "spaceship"))
                 .andExpect(status().isBadRequest());
         f.send(admin, "PUT", "/api/admin/roles/ops/settings/sandbox", List.of(1)).andExpect(status().isBadRequest());
@@ -183,7 +191,7 @@ class AdminControllerTest {
                 .andExpect(status().isBadRequest());
         f.send(admin, "PUT", "/api/admin/roles/ops/settings/tools", Map.of()).andExpect(status().isBadRequest());
         f.send(admin, "PUT", "/api/admin/roles/ops/settings/Bad", Map.of()).andExpect(status().isBadRequest());
-        assertEquals(org.kendar.llm.harness.sandbox.SandboxKind.LOCAL, f.permissions.role("ops").orElseThrow().sandbox().kind(),
+        assertEquals(org.kendar.llm.harness.sandbox.SandboxKind.SHARED_LOCAL, f.permissions.role("ops").orElseThrow().sandbox().kind(),
                 "a refused change stores nothing");
 
         s = json(f.send(admin, "DELETE", "/api/admin/roles/ops/settings/idp", null).andExpect(status().isOk()));

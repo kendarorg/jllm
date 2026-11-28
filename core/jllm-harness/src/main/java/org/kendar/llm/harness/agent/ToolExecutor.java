@@ -16,7 +16,6 @@ import org.kendar.llm.harness.permission.ToolPermission;
 import org.kendar.llm.harness.safety.ToolOutputSanitizer;
 import org.kendar.llm.harness.sandbox.SandboxUnavailableException;
 import org.kendar.llm.harness.sandbox.ShellPaths;
-import org.kendar.llm.harness.tools.FileSystemAgentTools;
 import org.kendar.llm.harness.tools.HarnessTool;
 import org.kendar.llm.harness.tools.ToolContext;
 import org.kendar.llm.harness.tools.ToolInputValidator;
@@ -76,9 +75,9 @@ public final class ToolExecutor {
     }
 
     /** The view of one running agent that a script uses. */
-    LoopRunScope scope(PermissionMode mode, EventSink sink, BooleanSupplier cancelled, boolean interactive,
+    LoopRunScope scope(PermissionMode mode, EventSink sink, BooleanSupplier cancelled, RunAttendance attendance,
                        String label, RunBudget budget) {
-        return new LoopRunScope(this, mode, sink, cancelled, interactive, label, budget);
+        return new LoopRunScope(this, mode, sink, cancelled, attendance, label, budget);
     }
 
     ObjectNode result(String id, String content, boolean isError) {
@@ -86,7 +85,7 @@ public final class ToolExecutor {
     }
 
     ObjectNode execute(JsonNode use, Map<String, HarnessTool> byName, Set<String> refused, ToolContext ctx,
-                       PermissionMode mode, EventSink sink, BooleanSupplier cancelled, boolean interactive,
+                       PermissionMode mode, EventSink sink, BooleanSupplier cancelled, RunAttendance attendance,
                        String intent, String label) {
         var mapper = deps.mapper();
         String id = use.path("id").asText();
@@ -114,16 +113,17 @@ public final class ToolExecutor {
                         + ". Expected input schema: " + tool.inputSchema(), true);
             } else {
                 input = check.input();
-                Authz az = authorize(tool, name, input, ctx, mode, sink, cancelled, interactive, intent, label, false);
+                Authz az = authorize(tool, name, input, ctx, mode, sink, cancelled, attendance, intent, label, false);
                 input = az.input();
                 if (az.denial() != null) {
                     result = result(id, az.denial(), true);
                 } else {
                     if (tool.kind() != ToolKind.READ_ONLY) guards.markChanged(ctx.chatId(), label);
                     try {
-                        result = runTool(tool, input, ctx.withToolUseId(id), id, false);
+                        result = runTool(tool, input, ctx.withToolUseId(id), id, false,
+                                new Attend(ctx.chatId(), attendance, sink, cancelled, label));
                     } catch (SandboxUnavailableException e) {
-                        result = sandboxUnavailable(e, tool, input, ctx, id, sink, cancelled, interactive, label);
+                        result = sandboxUnavailable(e, tool, input, ctx, id, sink, cancelled, attendance, label);
                     }
                     result = withHookContext(result, az.pre().addedContext(),
                             deps.hooks().run(HookContext.postTool(ctx.chatId(), name, input,
@@ -165,6 +165,11 @@ public final class ToolExecutor {
                 + "user instead.";
     }
 
+    /** The result a call gets when nobody can approve it. */
+    public static String unattendedDenial(String tool) {
+        return "denied: unattended run, no one can approve " + tool;
+    }
+
     /** Outcome of {@link #authorize}: {@code denial} is null when the call may run. */
     record Authz(String denial, HookResult pre, JsonNode input) {
     }
@@ -178,7 +183,7 @@ public final class ToolExecutor {
      *             denies it). Deny rules, hook denials and plan confinement apply in every case.
      */
     Authz authorize(HarnessTool tool, String name, JsonNode input, ToolContext ctx, PermissionMode mode,
-                    EventSink sink, BooleanSupplier cancelled, boolean interactive, String intent,
+                    EventSink sink, BooleanSupplier cancelled, RunAttendance attendance, String intent,
                     String label, boolean free) {
         var mapper = deps.mapper();
         var approvals = deps.approvals();
@@ -201,7 +206,9 @@ public final class ToolExecutor {
         if (adminPermission == ToolPermission.DENY) {
             return new Authz("Denied by the administrator for this user's role: " + name, pre, input);
         }
-        PermissionGate userGate = policy.approval() == null ? gate : new PermissionGate(policy.approval(), gate.rules());
+        PermissionGate userGate = policy.approval() == null && !policy.alwaysAsk() ? gate
+                : new PermissionGate(policy.approval() == null ? gate.policy() : policy.approval(), gate.rules(),
+                policy.alwaysAsk());
         boolean readOnly = tool.kind() == ToolKind.READ_ONLY;
         PermissionRules.Match rule = gate.rules().match(name, input, ctx.workDir());
         boolean grant = approvals.granted(ctx.chatId(), name)
@@ -209,20 +216,25 @@ public final class ToolExecutor {
                 || approvals.dirGranted(ctx.chatId(), writeDirOf(tool, input, ctx));
         AuthorizeInput in = new AuthorizeInput(free, readOnly, adminPermission, mode, userGate.check(mode, tool),
                 rule == null ? null : rule.kind(), grant, taint.isTainted(ctx.chatId()), pre.denied(),
-                deps.classifier() != null, null, interactive);
+                deps.classifier() != null, null, true, protectedWrite(tool, input, ctx));
         if (in.consultsClassifier()) {
             // auto mode: the fast model may wave the call through; anything else goes to the user
             ToolClassifier.Verdict v = deps.classifier().classify(name, input, ctx.workDir(), intent);
             sink.emit("classifier", mapper.createObjectNode().put("tool", name).put("verdict", v.name()));
             in = in.withClassifier(v);
         }
+        // asked here, answered below: the unattended / skip decisions need to know that the call would have asked
         AuthorizeOutcome out = decide(in);
         Decision decision = out.decision();
+        boolean skip = deps.runPolicy().skipPermissions();
+        if (decision == Decision.ASK && skip) decision = Decision.ALLOW; // deny rules and hooks are checked below
+        boolean unavailable = decision == Decision.ASK && !attendance.asks();
+        if (unavailable) decision = Decision.DENY;
         if (out.taintWarning()) {
             sink.emit("warning", mapper.createObjectNode().put("message", "Confirming '" + name
                     + "': the conversation holds untrusted tool output that could contain injected instructions"));
         }
-        if (out.approvalUnavailable()) {
+        if (unavailable && attendance == RunAttendance.COLLECT) {
             sink.emit("approval_unavailable", mapper.createObjectNode().put("tool", name));
         }
         if (pre.denied()) {
@@ -237,8 +249,13 @@ public final class ToolExecutor {
             Path cwd = ctx.readOnlyWork() && ctx.scratchDir() != null ? ctx.scratchDir() : ctx.workDir();
             String escaping = ShellPaths.escapingPath(command, cwd, ctx.workDir(), ctx.scratchDir());
             if (escaping != null) {
-                return new Authz(FileSystemAgentTools.escapes(escaping).getMessage(), pre, input);
+                return new Authz(ShellPaths.escapeMessage(escaping), pre, input);
             }
+        }
+        if (decision == Decision.DENY && attendance == RunAttendance.UNATTENDED) {
+            log.info("Unattended run: {} denied, no one can approve it", name);
+            sink.emit("permission_denied", mapper.createObjectNode().put("tool", name).put("reason", "unattended"));
+            return new Authz(unattendedDenial(name), pre, input);
         }
         if (decision == Decision.DENY) return new Authz("Denied by permission policy (mode " + mode + ")", pre, input);
         if (decision == Decision.ASK) {
@@ -249,7 +266,6 @@ public final class ToolExecutor {
                 guards.reject(ctx.chatId(), label, call);
                 return new Authz(AgentLoop.REJECTED, pre, input);
             }
-            approvals.grantCommand(ctx.chatId(), name, commandOf(name, input));
         }
         return new Authz(null, pre, input);
     }
@@ -264,10 +280,14 @@ public final class ToolExecutor {
      * @param grant          a tool, command or directory grant of the chat covers the call
      * @param classifierAvailable an auto-mode classifier is configured
      * @param classifier     its verdict, null when not consulted
+     * @param protectedWrite the call writes configuration ({@code .jllm/**}, {@code .git/**}, instruction files):
+     *                       always asked, in every mode, over grants, allow rules and the classifier; denied when no one
+     *                       can answer
      */
     record AuthorizeInput(boolean free, boolean readOnly, ToolPermission admin, PermissionMode mode, Decision gate,
                           PermissionRules.Kind rule, boolean grant, boolean tainted, boolean hookDenied,
-                          boolean classifierAvailable, ToolClassifier.Verdict classifier, boolean interactive) {
+                          boolean classifierAvailable, ToolClassifier.Verdict classifier, boolean interactive,
+                          boolean protectedWrite) {
         boolean effectiveFree() {
             return free && (readOnly || !tainted);
         }
@@ -284,7 +304,7 @@ public final class ToolExecutor {
 
         AuthorizeInput withClassifier(ToolClassifier.Verdict v) {
             return new AuthorizeInput(free, readOnly, admin, mode, gate, rule, grant, tainted, hookDenied,
-                    classifierAvailable, v, interactive);
+                    classifierAvailable, v, interactive, protectedWrite);
         }
     }
 
@@ -319,6 +339,8 @@ public final class ToolExecutor {
             decision = Decision.ASK;
             taintWarning = true;
         }
+        // configuration the host reads or executes: an explicit yes in every mode, whatever allowed it before
+        if (in.protectedWrite() && decision == Decision.ALLOW) decision = Decision.ASK;
         boolean unavailable = false;
         if (decision == Decision.ASK && !in.interactive()) {
             decision = Decision.DENY;
@@ -336,6 +358,12 @@ public final class ToolExecutor {
             log.debug("Input validator failed, the call goes on: {}", e.toString());
             return ToolInputValidator.Outcome.ok(input);
         }
+    }
+
+    /** True for a file-writing call whose target (after canonicalisation) is configuration, see {@link ApprovalService#isProtectedPath}. */
+    private static boolean protectedWrite(HarnessTool tool, JsonNode input, ToolContext ctx) {
+        return tool.kind() == ToolKind.FILE_EDIT && input != null
+                && ApprovalService.isProtectedPath(ctx.workDir(), input.path("path").asText(null));
     }
 
     /** The work-dir-relative directory a file-writing call targets, or null when none can be offered or granted. */
@@ -362,12 +390,13 @@ public final class ToolExecutor {
         String title = label == null ? tool.name() : "[" + label + "] " + tool.name();
         if (ctx.parent() != null) title += " (from " + ctx.parent().replaceFirst(":.*", "") + ")";
         String writeDir = writeDirOf(tool, input, ctx);
+        boolean protectedWrite = protectedWrite(tool, input, ctx);
         ApprovalService.ApprovalDecision d = approvals.await(ctx.chatId(), "tool", title, preview, null, a -> {
             ObjectNode ev = deps.mapper().valueToTree(a);
             if (label != null) ev.put("agent", label);
             if (writeDir != null) ev.put("writeDir", writeDir);
             sink.emit("approval_request", ev);
-        }, cancelled, () -> !taint.isTainted(ctx.chatId()) && (approvals.granted(ctx.chatId(), tool.name())
+        }, cancelled, () -> !protectedWrite && !taint.isTainted(ctx.chatId()) && (approvals.granted(ctx.chatId(), tool.name())
                 || approvals.dirGranted(ctx.chatId(), writeDir)));
         boolean ok = d.approved();
         if (ok && d.rememberDir()) {
@@ -383,7 +412,11 @@ public final class ToolExecutor {
                 approvals.grantDir(ctx.chatId(), dir);
             }
         }
-        if (ok && d.remember()) approvals.grant(ctx.chatId(), tool.name());
+        // nothing is stored unless the user asked to remember: an approved command is asked again next time
+        if (ok && d.remember()) {
+            approvals.grant(ctx.chatId(), tool.name());
+            approvals.grantCommand(ctx.chatId(), tool.name(), commandOf(tool.name(), input));
+        }
         deps.metrics().approval("tool", ok);
         return ok;
     }
@@ -397,29 +430,31 @@ public final class ToolExecutor {
     }
 
     /**
-     * The container sandbox cannot be used: ask the user whether to continue without isolation, instead of failing.
-     * Once agreed, the chat stays on the host sandbox and the tool is retried with host paths.
+     * The container sandbox cannot be used: when the role or configuration allows it, ask the user whether to continue
+     * in the shared-local sandbox (never a plain host shell), instead of failing. Once agreed, the chat stays there and
+     * the tool is retried with host paths.
      */
     private ObjectNode sandboxUnavailable(SandboxUnavailableException e, HarnessTool tool, JsonNode input,
                                           ToolContext ctx, String id, EventSink sink, BooleanSupplier cancelled,
-                                          boolean interactive, String label) {
+                                          RunAttendance attendance, String label) {
         var sandbox = deps.sandbox();
         String chatId = ctx.chatId();
         if (!sandbox.localFallbackActive(chatId)) {
-            if (!interactive || !deps.config().sandbox().localDirSandboxAllowed()) {
+            if (!attendance.asks() || !sandbox.localFallbackAllowed(chatId)) {
                 return result(id, "Error: " + e.getMessage(), true);
             }
-            String preview = e.getMessage() + "\n\nContinue WITHOUT isolation? Commands would run as your user "
-                    + "directly on this machine, in " + sandbox.location() + ".";
+            String preview = e.getMessage() + "\n\nContinue in the shared-local sandbox? Commands would run on this "
+                    + "machine in " + sandbox.location() + " with a minimal environment (confined to the chat directory "
+                    + "on Linux), not as a full host shell.";
             ApprovalService.ApprovalDecision d = deps.approvals().await(chatId, "sandbox",
-                    "Docker is unavailable: run without isolation?", preview, null, a -> {
+                    "Docker is unavailable: use the shared-local sandbox?", preview, null, a -> {
                         ObjectNode ev = deps.mapper().valueToTree(a);
                         if (label != null) ev.put("agent", label);
                         sink.emit("approval_request", ev);
                     }, cancelled);
             deps.metrics().approval("sandbox", d.approved());
             if (!d.approved() || !sandbox.allowLocalFallback(chatId)) {
-                return result(id, "Error: " + e.getMessage() + " (the user declined to run without isolation)", true);
+                return result(id, "Error: " + e.getMessage() + " (the shared-local sandbox was declined or cannot start)", true);
             }
         }
         String scratchId = ctx.scratchDir() == null || ctx.scratchDir().getFileName() == null ? "main"
@@ -427,19 +462,31 @@ public final class ToolExecutor {
         ToolContext local = new ToolContext(chatId, sandbox.workDir(chatId), sandbox.scratchDir(chatId, scratchId),
                 ctx.readOnlyWork(), id, ctx.mode(), ctx.run(), sandbox.files(chatId, scratchId), ctx.parent(),
                 ctx.scope()).withHosts(ctx.hosts()).withLinks(ctx.links());
-        ObjectNode r = runTool(tool, input, local, id, false);
-        r.put("content", "[running without isolation on the host: " + sandbox.workDir(chatId) + "]\n"
+        ObjectNode r = runTool(tool, input, local, id, false, new Attend(chatId, attendance, sink, cancelled, label));
+        r.put("content", "[running in the shared-local sandbox on the host: " + sandbox.workDir(chatId) + "]\n"
                 + r.path("content").asText(""));
         return r;
     }
 
-    /** @param raw the caller wants the full output: no truncation, no sanitizing (taint is still decided) */
-    ObjectNode runTool(HarnessTool tool, JsonNode input, ToolContext ctx, String id, boolean raw) {
+    /**
+     * Who can answer a question about the output of a tool, and where it is shown.
+     *
+     * @param label names a sub-agent in the approval request; null for the main agent
+     */
+    record Attend(String chatId, RunAttendance attendance, EventSink sink, BooleanSupplier cancelled, String label) {
+    }
+
+    /**
+     * @param raw    the caller wants the full output: no truncation, no sanitizing (taint is still decided)
+     * @param attend who can answer a question about flagged output; null: nobody is asked and the output goes on (a
+     *               script's inner call, whose output stays with the script)
+     */
+    ObjectNode runTool(HarnessTool tool, JsonNode input, ToolContext ctx, String id, boolean raw, Attend attend) {
         try {
             String out = tool.execute(ctx, input);
             if (out == null) out = "";
             if (raw) {
-                sanitizeOutput(tool, ctx, out); // taint decision only
+                sanitizeOutput(tool, input, ctx, out, null); // taint decision only
                 return result(id, out, false);
             }
             int max = deps.config().output().toolMaxChars();
@@ -448,7 +495,8 @@ public final class ToolExecutor {
                         ? "…[truncated " + (out.length() - max) + " chars]\n" + out.substring(out.length() - max)
                         : out.substring(0, max) + "\n…[truncated " + (out.length() - max) + " chars]";
             }
-            return result(id, sanitizeOutput(tool, ctx, out), false);
+            Sanitized s = sanitizeOutput(tool, input, ctx, out, attend);
+            return result(id, s.text(), s.rejected());
         } catch (SandboxUnavailableException e) {
             throw e;
         } catch (LoginRequiredException e) {
@@ -476,16 +524,68 @@ public final class ToolExecutor {
         }
     }
 
-    /** Cleans and wraps the output of a tool; marks the chat tainted when it may carry outside instructions. */
-    private String sanitizeOutput(HarnessTool tool, ToolContext ctx, String out) {
-        if (sanitizer.mode() == ToolOutputSanitizer.Mode.OFF || INTERNAL_GROUPS.contains(tool.group())) return out;
-        ToolOutputSanitizer.Trust trust = LOCAL_GROUPS.contains(tool.group())
+    /** The text that goes to the model; {@code rejected} when the output was refused and the text says why. */
+    private record Sanitized(String text, boolean rejected) {
+    }
+
+    /** True for a read of a file that a document reader turns into text. */
+    private boolean documentRead(HarnessTool tool, JsonNode input) {
+        if (!"read_file".equals(tool.name()) || input == null) return false;
+        String path = input.path("path").asText("").strip().toLowerCase(java.util.Locale.ROOT);
+        int dot = path.lastIndexOf('.');
+        if (dot < 0 || dot == path.length() - 1) return false;
+        String ext = path.substring(dot + 1);
+        return deps.documentExtensions().get().stream().anyMatch(e -> e.equalsIgnoreCase(ext));
+    }
+
+    /**
+     * Cleans and wraps the output of a tool; marks the chat tainted when it may carry outside instructions. Shell
+     * output counts as outside content when the sandbox has network access, and the text of a document reader when
+     * {@code output.taintDocuments} is on. Output with instruction-like text (a tainted object) goes to the model only
+     * if a person says so: they choose it as it is or cleaned; with nobody to ask it is rejected.
+     */
+    private Sanitized sanitizeOutput(HarnessTool tool, JsonNode input, ToolContext ctx, String out, Attend attend) {
+        if (sanitizer.mode() == ToolOutputSanitizer.Mode.OFF || INTERNAL_GROUPS.contains(tool.group())) {
+            return new Sanitized(out, false);
+        }
+        boolean networkShell = "Shell".equals(tool.group()) && deps.sandbox().networkAccess(ctx.chatId());
+        boolean document = deps.config().output().taintDocuments() && documentRead(tool, input);
+        ToolOutputSanitizer.Trust trust = LOCAL_GROUPS.contains(tool.group()) && !networkShell && !document
                 ? ToolOutputSanitizer.Trust.LOW : ToolOutputSanitizer.Trust.UNTRUSTED;
         ToolOutputSanitizer.Result r = sanitizer.sanitize(tool.name(), trust, out);
         if (r.tainted() && deps.config().output().taintGating()) taint.taint(ctx.chatId(), ctx.toolUseId());
         if (r.flagged()) {
             log.warn("Tool '{}' output flagged as possible prompt injection: {}", tool.name(), r.findings());
         }
-        return r.text();
+        if (!r.flagged() || r.blocked() || attend == null) return new Sanitized(r.text(), false);
+        return taintedObject(tool, r, attend);
+    }
+
+    private Sanitized taintedObject(HarnessTool tool, ToolOutputSanitizer.Result r, Attend at) {
+        String why = String.join("; ", r.findings());
+        if (!at.attendance().asks()) {
+            at.sink().emit("permission_denied", deps.mapper().createObjectNode().put("tool", tool.name())
+                    .put("reason", "tainted"));
+            return new Sanitized("[output of " + tool.name() + " rejected: it contained instruction-like text (" + why
+                    + ") and " + (at.attendance() == RunAttendance.UNATTENDED
+                    ? "this is an unattended run, no one can approve using it"
+                    : "no one can be asked about it now") + ". Do not retry; tell the user what was rejected.]", true);
+        }
+        String shown = r.text().length() > 2000 ? r.text().substring(0, 2000) + "…" : r.text();
+        String title = "Flagged output of " + tool.name() + ": use it?";
+        String preview = "The output contains text that looks like instructions to the assistant (" + why + ").\n"
+                + "y = pass it on as it is (still marked as data), c = pass it on cleaned (those lines removed), "
+                + "n = reject it.\n\n" + shown;
+        ApprovalService.ApprovalDecision d = deps.approvals().await(at.chatId(), "tainted", title, preview, null, a -> {
+            ObjectNode ev = deps.mapper().valueToTree(a);
+            if (at.label() != null) ev.put("agent", at.label());
+            at.sink().emit("approval_request", ev);
+        }, at.cancelled());
+        deps.metrics().approval("tainted", d.approved());
+        if (!d.approved()) {
+            return new Sanitized("[output of " + tool.name() + " rejected by the user: it contained instruction-like text ("
+                    + why + "). Do not retry; tell the user what was rejected.]", true);
+        }
+        return new Sanitized("cleaned".equalsIgnoreCase(d.edited()) ? r.cleaned() : r.text(), false);
     }
 }

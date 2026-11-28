@@ -34,13 +34,15 @@ import java.util.List;
  *                         absent = unlimited (default)
  * @param whitelistedEnvVars environment variables of the harness process that shell commands (bash) may inherit;
  *                         patterns with * (any run of characters, case-insensitive: "*key*", "PATH"); default
- *                         ["*"] = all, [] = none
+ *                         PATH, HOME, LANG, TERM; [] = none; JLLM_*, *KEY*, *SECRET*, *PASSWORD* never pass
  * @param toolsWhitelistedEnvVars the same for the processes of tools (MCP stdio servers); the {@code env} of a server
  *                         in the settings is always added on top
  * @param loop             optional stuck detection and verify-on-stop settings
  * @param hooks            optional command hooks ({@code stop}); from the project file only when trusted
  * @param tokenStore       where OAuth tokens are kept; from the user settings and {@code --settings} only (a project
  *                         file's section is ignored)
+ * @param trustedProjects  project folders (canonical paths) that count as trusted without asking, for unattended
+ *                         runs; from the user settings and {@code --settings} only
  */
 public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSettings> restApis,
                               List<SkillSettings> skills, List<String> instructionFiles,
@@ -51,7 +53,7 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
                               Integer chatRetentionLimit, JsonNode plugins, StorageSettings storage,
                               List<String> whitelistedEnvVars, List<String> toolsWhitelistedEnvVars,
                               FileLimits files, WebLimits web, LoopSettings loop, HookSettings hooks,
-                              TokenStoreSettings tokenStore) {
+                              TokenStoreSettings tokenStore, List<String> trustedProjects) {
 
     /** Default of {@code files.maxReadBytes}. */
     public static final long DEFAULT_FILES_MAX_READ_BYTES = 1_000_000;
@@ -69,8 +71,9 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
         instructionFiles = instructionFiles == null ? DEFAULT_INSTRUCTION_FILES : List.copyOf(instructionFiles);
         agents = agents == null ? List.of() : List.copyOf(agents);
         providers = providers == null ? List.of() : List.copyOf(providers);
-        whitelistedEnvVars = EnvWhitelist.orAll(whitelistedEnvVars);
-        toolsWhitelistedEnvVars = EnvWhitelist.orAll(toolsWhitelistedEnvVars);
+        trustedProjects = trustedProjects == null ? List.of() : List.copyOf(trustedProjects);
+        whitelistedEnvVars = EnvWhitelist.orDefault(whitelistedEnvVars);
+        toolsWhitelistedEnvVars = EnvWhitelist.orDefault(toolsWhitelistedEnvVars);
         if (permissions != null) {
             PermissionRules.parse(permissions.deny(), permissions.ask(), permissions.allow()); // fail at startup
         }
@@ -167,9 +170,9 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
                 ? DEFAULT_WEB_FETCH_MAX_BYTES : web.fetchMaxBytes();
     }
 
-    /** {@code web.blockLocalHost}, default false. */
+    /** {@code web.blockLocalHost}, default true: only an explicit {@code false} lets web_fetch reach local addresses. */
     public boolean webBlockLocalHost() {
-        return web != null && Boolean.TRUE.equals(web.blockLocalHost());
+        return web == null || !Boolean.FALSE.equals(web.blockLocalHost());
     }
 
     /** {@code web.blockExtraAddresses}, default none. */
@@ -202,6 +205,11 @@ public record HarnessSettings(List<McpServerSettings> mcpServers, List<RestApiSe
     /** True when the settings select the docker backend: the container runner ({@code RemoteExecSandboxExecutor}). */
     public boolean dockerSandbox() {
         return sandbox != null && sandbox.backend() != null && sandbox.backend().strip().equalsIgnoreCase("docker");
+    }
+
+    /** True when the settings select the {@code shared-local} backend ({@code SharedLocalSandbox}). */
+    public boolean sharedLocalSandbox() {
+        return sandbox != null && sandbox.backend() != null && sandbox.backend().strip().equalsIgnoreCase("shared-local");
     }
 
     /** The scope strategy options: {@code defaults} with the {@code context.scope} settings on top. */

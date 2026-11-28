@@ -9,6 +9,9 @@ import org.kendar.llm.web.commons.CookieOut;
 import org.kendar.llm.web.commons.Cookies;
 import org.kendar.llm.web.commons.Reply;
 
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
@@ -21,10 +24,18 @@ public class AuthApi {
     private final LoginSessionRepository sessions;
     private final LoginThrottle throttle;
     private final OidcProperties auth;
+    private final Duration sessionMaxAge;
+    private final Clock clock;
 
+    /**
+     * @param sessionMaxAge the absolute lifetime of a session: it ends then whatever its use ({@link
+     *                      LoginSessionRepository#TTL} only slides while it is used)
+     */
     public AuthApi(UserRepository users, CookieAuthentication authentication, LoginSessionRepository sessions,
-                   LoginThrottle throttle, OidcProperties auth) {
+                   LoginThrottle throttle, OidcProperties auth, Duration sessionMaxAge, Clock clock) {
         this.auth = auth;
+        this.sessionMaxAge = sessionMaxAge;
+        this.clock = clock;
         this.users = users;
         this.authentication = authentication;
         this.sessions = sessions;
@@ -37,20 +48,23 @@ public class AuthApi {
     }
 
     /**
-     * Unknown id and wrong password answer the same 401, after the same work. Five failures for an id or an address
-     * lock it for 30 seconds (429).
+     * Unknown id and wrong password answer the same 401, after the same work. Three failures for a login from one address lock
+     * that login for that address for 30 minutes, and an address that tries too often is locked too (429); the check and the count are one atomic
+     * step ({@link LoginThrottle#begin}). The session ends {@code sessionMaxAge} after sign-in at the latest.
      *
-     * @param remoteAddress the caller's address, for the lock
+     * @param remoteAddress the caller's address (see {@link org.kendar.llm.web.commons.ClientAddress}), for the lock
      * @param secure        whether the request came over HTTPS: the cookie is then {@code Secure}
      */
     public Reply<Map<String, Object>> login(Map<String, Object> body, String remoteAddress, boolean secure) {
         if (!auth.passwordEnabled()) throw new ApiException(404, "Password sign-in is off");
         String id = Api.text(body, "id");
         String password = Api.text(body, "password");
-        String idKey = "id:" + id;
         String addressKey = "ip:" + remoteAddress;
-        long locked = Math.max(throttle.lockedFor(idKey), throttle.lockedFor(addressKey));
-        if (locked > 0) throw new ApiException(429, "Too many failed sign-ins; retry in " + locked + " s");
+        String idKey = LoginThrottle.userKey(id, remoteAddress); // per login and address: no lock-out by a stranger
+        // the address first: a locked address must not use up the attempts of the login it names
+        long locked = throttle.begin(addressKey);
+        if (locked == 0) locked = throttle.begin(idKey);
+        if (locked > 0) throw new ApiException(429, "Too many sign-in attempts; retry in " + locked + " s");
         Optional<User> user = users.find(id);
         boolean ok;
         if (user.isPresent()) {
@@ -70,10 +84,11 @@ public class AuthApi {
             throw new ApiException(401, "Invalid credentials");
         }
         throttle.success(idKey);
-        throttle.success(addressKey);
-        String token = sessions.create(user.get().id(), null);
+        Instant notAfter = clock.instant().plus(sessionMaxAge);
+        String token = sessions.create(user.get().id(), notAfter);
         return Reply.status(200, visible(user.get()))
-                .cookie(sessionCookie(token, LoginSessionRepository.TTL.toSeconds(), secure));
+                .cookie(sessionCookie(token, Math.min(LoginSessionRepository.TTL.toSeconds(), sessionMaxAge.toSeconds()),
+                        secure));
     }
 
     /** Ends the session of the request (204) and clears the cookie. */
@@ -92,7 +107,7 @@ public class AuthApi {
         out.put("id", u.id());
         out.put("name", u.name() == null ? u.id() : u.name());
         out.put("role", String.valueOf(u.role()));
-        out.put("defaultPassword", u.usesDefaultPassword());
+        out.put("defaultPassword", u.mustChangePassword()); // default or one-time password: the UI asks for a new one
         out.put("source", u.external() ? "oidc" : "password");
         out.put("email", u.email() == null ? "" : u.email());
         return out;

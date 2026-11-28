@@ -7,6 +7,7 @@ import org.kendar.llm.web.commons.ApiException;
 import org.kendar.llm.web.commons.Reply;
 import org.kendar.llm.web.commons.auth.AuthApi;
 import org.kendar.llm.web.commons.auth.IdpSetting;
+import org.kendar.llm.web.commons.auth.LoginThrottle;
 import org.kendar.llm.web.commons.auth.PasswordHasher;
 import org.kendar.llm.web.commons.auth.RoleMapper;
 import org.kendar.llm.web.commons.auth.RoleMappingOptions;
@@ -49,10 +50,16 @@ public class AdminApi {
     private final AgentHarness harness;
     private final ToolCatalogView catalog;
     private final RoleMappingSettings roleMapping;
+    private final LoginThrottle throttle;
 
-    /** @param roleMapping the options of the identity provider role mapping */
+    /**
+     * @param roleMapping the options of the identity provider role mapping
+     * @param throttle    the sign-in throttle, whose locks an administrator can lift
+     */
     public AdminApi(UserRepository users, Permissions permissions, SkillRepository skills, LoginSessionRepository sessions,
-                    AgentHarness harness, ToolCatalogView catalog, RoleMappingSettings roleMapping) {
+                    AgentHarness harness, ToolCatalogView catalog, RoleMappingSettings roleMapping,
+                    LoginThrottle throttle) {
+        this.throttle = throttle;
         this.users = users;
         this.permissions = permissions;
         this.skills = skills;
@@ -74,6 +81,7 @@ public class AdminApi {
         m.put("ownSkills", skills.own(u.id()).size());
         m.put("disabledTools", u.disabledTools());
         m.put("disabledSkills", u.disabledSkills());
+        m.put("lockedFor", throttle.lockedForUser(u.id())); // seconds; 0 = not locked
         return m;
     }
 
@@ -90,6 +98,10 @@ public class AdminApi {
         return users.all().stream().map(this::row).toList();
     }
 
+    /**
+     * Creates a user. With a {@code password} it is the user's password; without one a random one-time password is
+     * generated, returned once as {@code temporaryPassword}, and the user must change it at the first sign-in.
+     */
     public Reply<Map<String, Object>> createUser(Map<String, Object> body) {
         String id = Api.text(body, "id");
         String role = Api.text(body, "role");
@@ -99,14 +111,20 @@ public class AdminApi {
         if (permissions.role(role).isEmpty()) throw new ApiException(400, "Unknown role " + role);
         if (users.exists(id)) throw new ApiException(409, "User " + id + " exists");
         if (emailTaken(email, null)) throw new ApiException(409, "Email " + email + " belongs to another user");
-        String hash = null;
+        String hash;
+        String generated = null;
         if (password != null && !password.isEmpty()) {
             String invalid = MeApi.invalidPassword(id, password);
             if (invalid != null) throw new ApiException(400, invalid);
             hash = PasswordHasher.hash(password);
+        } else {
+            generated = PasswordHasher.generate();
+            hash = PasswordHasher.hashTemporary(generated);
         }
         try {
-            return Reply.status(201, row(users.create(id, Api.text(body, "name"), role, hash, email)));
+            Map<String, Object> out = row(users.create(id, Api.text(body, "name"), role, hash, email));
+            if (generated != null) out.put("temporaryPassword", generated);
+            return Reply.status(201, out);
         } catch (UnknownRoleException e) {
             throw new ApiException(400, e.getMessage());
         } catch (IllegalStateException e) {
@@ -142,22 +160,40 @@ public class AdminApi {
         return row(updated);
     }
 
-    /** Sets a new password, or resets to the default one when none is given; signs the user out everywhere. */
-    public void setPassword(String id, Map<String, Object> body) {
+    /**
+     * Sets a new password, or generates a one-time one when none is given (returned once as
+     * {@code temporaryPassword}; the user must change it at the first sign-in). Signs the user out everywhere.
+     */
+    public Map<String, Object> setPassword(String id, Map<String, Object> body) {
         Optional<User> target = users.find(id);
         if (target.isEmpty()) throw new ApiException(404, "Unknown user " + id);
         if (target.get().passwordless()) {
             throw new ApiException(409, "This account signs in through the identity provider");
         }
         String password = Api.text(body, "password");
-        String hash = null;
+        Map<String, Object> out = new LinkedHashMap<>();
+        String hash;
         if (password != null && !password.isEmpty()) {
             String invalid = MeApi.invalidPassword(id, password);
             if (invalid != null) throw new ApiException(400, invalid);
             hash = PasswordHasher.hash(password);
+        } else {
+            String generated = PasswordHasher.generate();
+            hash = PasswordHasher.hashTemporary(generated);
+            out.put("temporaryPassword", generated);
         }
         users.setPassword(id, hash);
         sessions.revokeUser(id, null);
+        throttle.resetUser(id);
+        return out;
+    }
+
+    /** {@code POST /api/admin/users/{id}/unlock}: lifts the sign-in lock of a login (the 30 minutes after 3 failures). */
+    public Map<String, Object> unlockUser(String id) {
+        if (users.find(id).isEmpty()) throw new ApiException(404, "Unknown user " + id);
+        boolean wasLocked = throttle.lockedForUser(id) > 0;
+        throttle.resetUser(id);
+        return Map.of("id", id, "wasLocked", wasLocked);
     }
 
     public void deleteUser(String id,
@@ -168,6 +204,7 @@ public class AdminApi {
         if (found.get().admin() && admins() <= 1) throw new ApiException(409, "The last admin cannot be deleted");
         users.delete(id);
         skills.deleteAllOwn(id);
+        permissions.instructionRepository().deleteOwned(org.kendar.llm.harness.settings.InstructionRepository.Scope.USER, id);
         sessions.revokeUser(id, null);
         harness.auth().forgetUser(id); // the user's OAuth tokens and MCP sessions
     }
@@ -187,6 +224,7 @@ public class AdminApi {
         sb.put("kind", r.sandbox().kind().wire());
         sb.put("scope", r.sandbox().scope());
         sb.put("network", r.sandbox().network());
+        sb.put("localFallback", r.sandbox().localFallback());
         m.put("sandbox", sb);
         m.put("settings", settingsView(r));
         m.put("fixed", r.fixed());
@@ -240,7 +278,7 @@ public class AdminApi {
 
     /**
      * The settings of a saved role. {@code settings}: the whole map (object of feature to JSON), absent keeps
-     * {@code current}; {@code sandbox}: {@code {kind: none|local|docker-isolated|docker-open, scope, network}}, absent
+     * {@code current}; {@code sandbox}: {@code {kind: none|shared-local|docker-isolated|docker-open, scope, network, localFallback}}, absent
      * keeps the sandbox of the map (a client that does not know a field must not take it away). Each known feature is
      * validated (400).
      */
@@ -254,7 +292,7 @@ public class AdminApi {
         }
         Object sb = body == null ? null : body.get("sandbox");
         if (sb != null) {
-            if (!(sb instanceof Map<?, ?>)) throw new IllegalArgumentException("'sandbox' must be an object {kind, scope, network}");
+            if (!(sb instanceof Map<?, ?>)) throw new IllegalArgumentException("'sandbox' must be an object {kind, scope, network, localFallback}");
             out.put(Role.SANDBOX, MAPPER.valueToTree(sb));
         }
         validate(out);
@@ -265,6 +303,12 @@ public class AdminApi {
     private static void validate(Map<String, JsonNode> settings) {
         JsonNode sb = settings.get(Role.SANDBOX);
         if (sb != null && !sb.isNull()) settings.put(Role.SANDBOX, RoleSandbox.parse(sb).toJson());
+        JsonNode modes = settings.get(Role.ALLOWED_MODES);
+        if (modes != null && !modes.isNull()) settings.put(Role.ALLOWED_MODES, Role.modesJson(Role.modes(modes)));
+        JsonNode unattended = settings.get(Role.UNATTENDED);
+        if (unattended != null && !unattended.isNull() && !unattended.isBoolean()) {
+            throw new IllegalArgumentException("'" + Role.UNATTENDED + "' must be true or false");
+        }
         JsonNode idp = settings.get(IdpSetting.KEY);
         if (idp != null && !idp.isNull()) settings.put(IdpSetting.KEY, IdpSetting.parse(idp).toJson());
     }
@@ -328,6 +372,7 @@ public class AdminApi {
         if (!holders.isEmpty()) throw new ApiException(409, new RoleInUseException(name, holders).getMessage());
         try {
             permissions.delete(name);
+            permissions.instructionRepository().deleteOwned(org.kendar.llm.harness.settings.InstructionRepository.Scope.ROLE, name);
         } catch (RoleInUseException e) { // a user got the role meanwhile
             throw new ApiException(409, e.getMessage());
         }

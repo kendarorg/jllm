@@ -168,12 +168,13 @@ final class WebauthFixture {
     MockMvc mvc(boolean onLoopback, boolean boundToLoopback) {
         return MockMvcBuilders.standaloneSetup(
                         new AuthController(new AuthApi(users, auth, sessions, throttle,
-                                new org.kendar.llm.web.commons.auth.OidcProperties(null, null))),
+                                new org.kendar.llm.web.commons.auth.OidcProperties(null, null),
+                                java.time.Duration.ofDays(30), clock), org.kendar.llm.web.commons.ClientAddress.direct()),
                         new MeController(new MeApi(users, permissions, skills, sessions, throttle, harness, catalog)),
-                        new AdminController(new AdminApi(users, permissions, skills, sessions, harness, catalog, roleMapping)),
+                        new AdminController(new AdminApi(users, permissions, skills, sessions, harness, catalog, roleMapping, throttle)),
                         new ChatController(new ChatApi(harness, MAPPER, new HarnessPricing(0, 0, 0, 0), auth), auth))
                 .setControllerAdvice(new ApiExceptionAdvice())
-                .addInterceptors(new ApiInterceptor(gate, auth, MAPPER, onLoopback, boundToLoopback),
+                .addInterceptors(new ApiInterceptor(gate, auth, MAPPER, onLoopback, boundToLoopback, null),
                         new MappedInterceptor(new String[]{"/api/admin/**"}, new AdminInterceptor(gate, auth, MAPPER)))
                 .build();
     }

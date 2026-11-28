@@ -78,9 +78,9 @@ class LoginTest {
     }
 
     @Test
-    void fiveFailuresLockTheLogin() throws Exception {
+    void threeFailuresLockTheLogin() throws Exception {
         WebauthFixture f = new WebauthFixture(dir);
-        for (int i = 0; i < 5; i++) f.login("rita", "nope").andExpect(status().isUnauthorized());
+        for (int i = 0; i < 3; i++) f.login("rita", "nope").andExpect(status().isUnauthorized());
         f.login("rita", PasswordHasher.defaultPassword("rita")).andExpect(status().isTooManyRequests());
     }
 

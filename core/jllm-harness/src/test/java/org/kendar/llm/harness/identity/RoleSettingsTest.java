@@ -103,7 +103,7 @@ class RoleSettingsTest {
     @Test
     void withSettingReplacesAndRemoves() {
         Role r = role(Map.of("idp", TextNode.valueOf("a")));
-        Role sb = r.withSetting(Role.SANDBOX, RoleSandbox.of("docker-isolated", "user", "none").toJson());
+        Role sb = r.withSetting(Role.SANDBOX, RoleSandbox.of("docker-isolated", "user", "none", false).toJson());
         assertEquals(List.of("idp", "sandbox"), List.copyOf(sb.settings().keySet()));
         assertEquals(SandboxKind.DOCKER_ISOLATED, sb.sandbox().kind());
         assertEquals("user", sb.sandbox().scope());
@@ -121,9 +121,10 @@ class RoleSettingsTest {
 
     @Test
     void sandboxIsLenientOnBadValues() throws Exception {
-        for (String bad : List.of("\"local\"", "[1]", "{\"kind\":\"spaceship\"}",
+        for (String bad : List.of("\"local\"", "{\"kind\":\"local\"}", "[1]", "{\"kind\":\"spaceship\"}",
                 "{\"kind\":\"docker-open\",\"scope\":\"planet\"}",
-                "{\"kind\":\"docker-isolated\",\"network\":\"host\"}")) {
+                "{\"kind\":\"docker-isolated\",\"network\":\"host\"}",
+                "{\"kind\":\"docker-open\",\"localFallback\":\"yes\"}")) {
             Role r = role(Map.of(Role.SANDBOX, MAPPER.readTree(bad)));
             assertEquals(RoleSandbox.NONE, r.sandbox(), bad);
             assertEquals(MAPPER.readTree(bad), r.setting(Role.SANDBOX), "the stored value is kept: " + bad);
@@ -132,14 +133,29 @@ class RoleSettingsTest {
     }
 
     @Test
+    void sharedLocalNetworkAndFallbackFields() throws Exception {
+        assertFalse(RoleSandbox.of("shared-local", null, null, false).networkGranted());
+        assertTrue(RoleSandbox.parse(MAPPER.readTree("{\"kind\":\"shared-local\",\"network\":true}")).networkGranted());
+        assertTrue(RoleSandbox.of("shared-local", null, "default", false).networkGranted());
+        assertFalse(RoleSandbox.parse(MAPPER.readTree("{\"kind\":\"shared-local\",\"network\":false}")).networkGranted());
+        assertFalse(RoleSandbox.of("docker-open", null, "default", false).networkGranted());
+
+        RoleSandbox fb = RoleSandbox.parse(MAPPER.readTree("{\"kind\":\"docker-isolated\",\"localFallback\":true}"));
+        assertTrue(fb.localFallback());
+        assertEquals(fb, RoleSandbox.parse(fb.toJson()));
+        assertFalse(RoleSandbox.of("docker-open", null, null, false).localFallback(), "off by default");
+        assertFalse(RoleSandbox.of("shared-local", null, null, true).localFallback(), "only docker kinds fall back");
+    }
+
+    @Test
     void sandboxJsonRoundTrip() {
-        for (RoleSandbox sb : List.of(RoleSandbox.NONE, RoleSandbox.of("local", null, null),
-                RoleSandbox.of("docker-open", "chat", null), RoleSandbox.of("docker-isolated", "user", "default"))) {
+        for (RoleSandbox sb : List.of(RoleSandbox.NONE, RoleSandbox.of("shared-local", null, null, false),
+                RoleSandbox.of("docker-open", "chat", null, false), RoleSandbox.of("docker-isolated", "user", "default", false))) {
             assertEquals(sb, RoleSandbox.parse(sb.toJson()));
             assertEquals(sb, role(Map.of(Role.SANDBOX, sb.toJson())).sandbox());
         }
         assertEquals(RoleSandbox.NONE, RoleSandbox.parse(null));
-        assertFalse(RoleSandbox.of("docker-open", "chat", null).toJson().has("network"));
+        assertFalse(RoleSandbox.of("docker-open", "chat", null, false).toJson().has("network"));
     }
 
     @Test

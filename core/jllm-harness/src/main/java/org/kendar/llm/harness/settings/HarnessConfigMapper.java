@@ -47,7 +47,8 @@ public final class HarnessConfigMapper {
                     output.sanitize() != null ? output.sanitize() : o.sanitize(),
                     output.taintGating() != null ? output.taintGating() : o.taintGating(),
                     output.extraPatterns() != null ? output.extraPatterns() : o.extraPatterns(),
-                    output.validation() != null ? output.validation() : o.validation()));
+                    output.validation() != null ? output.validation() : o.validation(),
+                    output.taintDocuments() != null ? output.taintDocuments() : o.taintDocuments()));
         }
         c = c.withExternalLinks(settings.externalLinks());
         if (settings.loop() != null) c = c.withLoop(settings.loop().over(c.loop()));

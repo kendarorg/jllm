@@ -52,7 +52,7 @@ public class ProcessDockerCommandRunner implements DockerCommandRunner {
                 p.destroyForcibly();
                 p.waitFor(5, TimeUnit.SECONDS);
             }
-            Duration wait = finished ? LocalSandboxExecutor.READER_GRACE : Duration.ofSeconds(5);
+            Duration wait = finished ? ProcessRun.READER_GRACE : Duration.ofSeconds(5);
             out.await(outReader, stdout, wait);
             err.await(errReader, stderr, wait);
         } catch (InterruptedException e) {

@@ -82,12 +82,16 @@ CREATE TABLE settings_section (
     name TEXT PRIMARY KEY,
     doc  TEXT NOT NULL
 );
-CREATE TABLE mcp_trust (
-    project_key TEXT NOT NULL,
-    name        TEXT NOT NULL,
-    sha256      TEXT NOT NULL,
-    trusted     INTEGER NOT NULL,
-    PRIMARY KEY (project_key, name)
+CREATE TABLE instructions (
+    scope    TEXT NOT NULL,
+    owner_id TEXT NOT NULL,
+    name     TEXT NOT NULL,
+    content  TEXT NOT NULL,
+    PRIMARY KEY (scope, owner_id, name)
+);
+CREATE TABLE agents (
+    name TEXT NOT NULL PRIMARY KEY,
+    doc  TEXT NOT NULL
 );
 CREATE TABLE chats (
     chat_id                 TEXT PRIMARY KEY,

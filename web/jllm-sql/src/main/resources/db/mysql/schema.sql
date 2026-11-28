@@ -88,12 +88,16 @@ CREATE TABLE settings_section (
     name VARCHAR(128) NOT NULL PRIMARY KEY,
     doc  MEDIUMTEXT NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
-CREATE TABLE mcp_trust (
-    project_key VARCHAR(512) NOT NULL,
-    name        VARCHAR(128) NOT NULL,
-    sha256      CHAR(64) NOT NULL,
-    trusted     TINYINT(1) NOT NULL,
-    PRIMARY KEY (project_key, name)
+CREATE TABLE instructions (
+    scope    VARCHAR(16) NOT NULL,
+    owner_id VARCHAR(64) NOT NULL,
+    name     VARCHAR(64) NOT NULL,
+    content  MEDIUMTEXT NOT NULL,
+    PRIMARY KEY (scope, owner_id, name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+CREATE TABLE agents (
+    name VARCHAR(64) NOT NULL PRIMARY KEY,
+    doc  MEDIUMTEXT NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 CREATE TABLE chats (
     chat_id                 VARCHAR(255) NOT NULL PRIMARY KEY,

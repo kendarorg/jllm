@@ -30,12 +30,19 @@ final class FakeOAuthServer implements AutoCloseable {
     volatile String refreshError;
     volatile String validAccess = "";
     final List<String> mcpAuthHeaders = new ArrayList<>();
+    /** What the metadata says: the issuer (null = this server), the token endpoint (null = this server's), the authorization server the resource names. */
+    volatile String metadataIssuer;
+    volatile String metadataTokenEndpoint;
+    volatile String resourceAuthorizationServer;
 
     FakeOAuthServer() throws IOException {
         server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
-        server.createContext("/.well-known/oauth-protected-resource", ex -> json(ex, 200, "{\"authorization_servers\":[\"" + base() + "\"]}"));
-        server.createContext("/.well-known/oauth-authorization-server", ex -> json(ex, 200, "{\"authorization_endpoint\":\"" + base()
-                + "/authorize\",\"token_endpoint\":\"" + base() + "/token\",\"registration_endpoint\":\"" + base() + "/register\"}"));
+        server.createContext("/.well-known/oauth-protected-resource", ex -> json(ex, 200, "{\"authorization_servers\":[\""
+                + (resourceAuthorizationServer == null ? base() : resourceAuthorizationServer) + "\"]}"));
+        server.createContext("/.well-known/oauth-authorization-server", ex -> json(ex, 200, "{\"issuer\":\"" + (metadataIssuer == null ? base() : metadataIssuer)
+                + "\",\"authorization_endpoint\":\"" + base()
+                + "/authorize\",\"token_endpoint\":\"" + (metadataTokenEndpoint == null ? base() + "/token" : metadataTokenEndpoint)
+                + "\",\"registration_endpoint\":\"" + base() + "/register\"}"));
         server.createContext("/register", ex -> json(ex, 201, "{\"client_id\":\"client-1\"}"));
         server.createContext("/device", ex -> json(ex, 200, "{\"device_code\":\"dev1\",\"user_code\":\"ABCD\","
                 + "\"verification_uri\":\"" + base() + "/verify\",\"expires_in\":600,\"interval\":0}"));

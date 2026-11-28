@@ -12,8 +12,8 @@ import java.util.Set;
  * @param role           name of a role ({@link RoleRepository}); {@code admin} is the fixed administrator role
  * @param credentials    per call source ({@code mcp:<server>}, {@code api:<name>}) the headers to add; a value of the
  *                       form {@code env:NAME} is read from the environment at call time, anything else is ignored
- * @param password       stored password hash ({@code pbkdf2$...}); null = the default password (see
- *                       {@code PasswordHasher#defaultPassword})
+ * @param password       stored password hash ({@code pbkdf2$...}, or {@code temp$pbkdf2$...} for a one-time password);
+ *                       null = the default password (see {@code PasswordHasher#defaultPassword})
  * @param disabledTools  tool name patterns the user switched off for themselves (only narrows the role)
  * @param disabledSkills skill names the user switched off for themselves
  * @param externalId     {@code <issuer>#<sub>} of the identity provider account linked to the user; null = none
@@ -27,6 +27,12 @@ public record User(String id, String name, String role, Map<String, Map<String, 
         implements Principal {
 
     public static final String ADMIN_ROLE = "admin";
+
+    /**
+     * Prefix of a stored hash that is a one-time password (set by an administrator): it signs in, and the user must
+     * change it at once.
+     */
+    public static final String TEMPORARY_PREFIX = "temp$";
 
     public User {
         credentials = credentials == null ? Map.of() : credentials;
@@ -59,6 +65,16 @@ public record User(String id, String name, String role, Map<String, Map<String, 
     /** The default password applies only to users without an identity provider account. */
     public boolean usesDefaultPassword() {
         return !external() && (password == null || password.isBlank());
+    }
+
+    /** Whether the password is a one-time one ({@link #TEMPORARY_PREFIX}) that must be changed before anything else. */
+    public boolean temporaryPassword() {
+        return !external() && password != null && password.startsWith(TEMPORARY_PREFIX);
+    }
+
+    /** The user must set their own password before using the API: default or one-time password. */
+    public boolean mustChangePassword() {
+        return usesDefaultPassword() || temporaryPassword();
     }
 
     public HarnessPrincipal principal() {

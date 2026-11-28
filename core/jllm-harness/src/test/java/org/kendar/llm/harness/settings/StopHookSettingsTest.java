@@ -21,7 +21,7 @@ class StopHookSettingsTest {
     Path tmp;
     private Path home;
     private Path project;
-    private ProjectMcpTrust trust;
+    private FolderTrust trust;
     private final List<String> warnings = new ArrayList<>();
 
     private static final String HOOK = "{\"hooks\":{\"stop\":[{\"command\":\"mvn -q test\",\"timeoutSeconds\":60}]}}";
@@ -31,7 +31,7 @@ class StopHookSettingsTest {
         home = tmp.resolve("home");
         project = tmp.resolve("proj");
         System.setProperty("jllm.home", home.toString());
-        trust = new FileProjectMcpTrust(home.resolve(".jllm/trusted-mcp.json"));
+        trust = new FileFolderTrust(home.resolve(".jllm/trusted-mcp.json"));
     }
 
     @AfterEach
@@ -44,7 +44,7 @@ class StopHookSettingsTest {
         Files.writeString(f, s);
     }
 
-    private HarnessSettings load(ProjectMcpTrust.Prompt prompt) {
+    private HarnessSettings load(FolderTrust.Prompt prompt) {
         return HarnessSettingsLoader.loadLayered(new FileSettingsSource(null, project), project, k -> null, prompt, trust, warnings::add,
                 new org.kendar.llm.harness.safety.ContentWarnings());
     }
@@ -64,7 +64,7 @@ class StopHookSettingsTest {
     @Test
     void aProjectStopHookWithoutTrustIsRefused() throws Exception {
         write(project.resolve(".jllm/settings.json"), HOOK);
-        assertTrue(load(ProjectMcpTrust.Prompt.NONE).stopHooks().isEmpty());
+        assertTrue(load(FolderTrust.Prompt.NONE).stopHooks().isEmpty());
         assertTrue(warnings.stream().anyMatch(w -> w.contains("Stop hook 'mvn -q test'")), warnings.toString());
         assertTrue(load((d, n, l) -> false).stopHooks().isEmpty());
     }
@@ -79,17 +79,17 @@ class StopHookSettingsTest {
             assertEquals("mvn -q test", l);
             return true;
         }).stopHooks().size());
-        assertEquals(1, load(ProjectMcpTrust.Prompt.NONE).stopHooks().size());
+        assertEquals(1, load(FolderTrust.Prompt.NONE).stopHooks().size());
         assertEquals(1, asked.get());
         write(project.resolve(".jllm/settings.json"), HOOK.replace("60", "61"));
-        assertTrue(load(ProjectMcpTrust.Prompt.NONE).stopHooks().isEmpty());
+        assertTrue(load(FolderTrust.Prompt.NONE).stopHooks().isEmpty());
     }
 
     @Test
     void loopSettingsOverrideTheDefaults() throws Exception {
         write(home.resolve(".jllm/settings.json"),
                 "{\"loop\":{\"stuck\":{\"enabled\":false,\"repeat\":5},\"verify\":{\"maxReentries\":1}}}");
-        HarnessConfig c = HarnessConfigMapper.apply(load(ProjectMcpTrust.Prompt.NONE), HarnessConfig.defaults());
+        HarnessConfig c = HarnessConfigMapper.apply(load(FolderTrust.Prompt.NONE), HarnessConfig.defaults());
         assertFalse(c.loop().stuck().enabled());
         assertEquals(5, c.loop().stuck().repeat());
         assertEquals(3, c.loop().stuck().alternationCycles());

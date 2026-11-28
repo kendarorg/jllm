@@ -259,7 +259,7 @@ Web users, roles, skills, login sessions and harness settings now go through int
 SQL, can be plugged in without touching controllers or the harness. File implementations stay the default
 (`jllm.store=file`).
 - **Core:** `SettingsSource` / `SettingsLayer` (global, then project, then explicit; a later layer wins) with
-  `FileSettingsSource`; `ProjectMcpTrust` as an interface, with answers tied to a SHA-256 hash of the definition;
+  `FileSettingsSource`; `FolderTrust` as an interface, with answers tied to a SHA-256 hash of the definition;
   `UserSkill` and `SkillText` for skills whose text is read on every load.
 - **`jllm-web-commons`:** `UserRepository`, `RoleRepository`, `SkillRepository`, `LoginSessionRepository`, the `Role`
   record, and an optional token store supplied by `HarnessIdentity`.

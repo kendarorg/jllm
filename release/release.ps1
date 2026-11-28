@@ -1,4 +1,4 @@
-# Builds target\release\jllm-<version>.zip: cli + web + plugins + settings + users + runners + an empty lib-ext, and
+# Builds target\release\jllm-<version>.zip: cli + web + plugins + configs (unsafe, webSafe, cliSafe) + runners + an empty lib-ext, and
 # copies setup.sh / setup.ps1 (release\setup) next to the zip as separate release files.
 # Usage: release\release.ps1 [-Build] [-Out DIR]
 # No GraalJS jar is shipped: lib-ext\manifests\ holds the manifests of both editions (resolved with release\graaljs) and
@@ -58,6 +58,13 @@ $plugins = @(Get-ChildItem target\plugins\*.jar)
 if ($plugins.Count -lt 5) { throw "expected 5 plugin jars in target\plugins, found $($plugins.Count)" }
 Copy-Item $plugins.FullName (Join-Path $stage 'plugins')
 Copy-Item release\template\* $stage -Recurse -Force
+# safe configurations: the same folders the runners use (runConfigs), without tmp; unsafe comes from the template
+foreach ($c in 'webSafe', 'cliSafe') {
+  $dst = Join-Path $stage "configs\$c"
+  New-Item -ItemType Directory -Force $dst | Out-Null
+  Copy-Item "runConfigs\$c\*" $dst -Recurse -Force
+  Remove-Item -Recurse -Force (Join-Path $dst 'tmp') -ErrorAction SilentlyContinue
+}
 # SQL store: the starter and its jars go to lib-ext\sql (fetch-graaljs empties lib-ext\*.jar, not lib-ext\sql); the JDBC
 # drivers (MySQL GPL, PostgreSQL BSD) are never shipped: fetch-sql-driver downloads them into lib-ext and checks the manifests
 New-Item -ItemType Directory -Force (Join-Path $stage 'lib-ext\sql') | Out-Null

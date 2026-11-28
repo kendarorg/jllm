@@ -2,8 +2,10 @@ package org.kendar.llm.harness.settings;
 
 /**
  * @param tempDir            root of the per chat and agent scratch directories; default {@code java.io.tmpdir/agent-harness}
- * @param backend            {@code local} (default, no isolation) or {@code docker}
- * @param localFallback      with the docker backend: run locally when docker is unavailable (default true)
+ * @param backend            {@code local} (default, no isolation), {@code shared-local} (minimal environment, bwrap
+ *                           on Linux) or {@code docker}
+ * @param localFallback      with the docker backend: continue in a shared-local sandbox (never on the plain host) when
+ *                           docker is unavailable (default false; the web decides per role)
  * @param docker             docker backend settings; unset values keep the defaults
  * @param outputLogMaxBytes  cap of the spill log of a long shell output; default 51200, 0 = unlimited
  * @param shell              local backend: the shell the bash tool runs ({@code cmd}, {@code powershell},

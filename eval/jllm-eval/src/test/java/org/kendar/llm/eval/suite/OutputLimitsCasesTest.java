@@ -17,7 +17,7 @@ class OutputLimitsCasesTest extends SuiteBase {
 
     private static UnaryOperator<HarnessConfig> toolMaxChars(int max) {
         return c -> c.withOutput(new HarnessConfig.Output(max, c.output().eventMaxChars(), c.output().sanitize(),
-                c.output().taintGating(), c.output().extraPatterns(), c.output().validation()));
+                c.output().taintGating(), c.output().extraPatterns(), c.output().validation(), c.output().taintDocuments()));
     }
 
     @Override

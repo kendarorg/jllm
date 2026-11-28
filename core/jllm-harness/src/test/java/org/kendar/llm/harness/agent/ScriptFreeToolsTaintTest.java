@@ -54,7 +54,7 @@ class ScriptFreeToolsTaintTest {
     private ToolExecutor.Authz authorize(HarnessTool tool, boolean interactive, Events events) {
         JsonNode input = MAPPER.createObjectNode();
         return rig.loop.toolExecutor().authorize(tool, tool.name(), input, ctx, PermissionMode.DEFAULT, events,
-                () -> false, interactive, "", null, true);
+                () -> false, interactive ? RunAttendance.ATTENDED : RunAttendance.COLLECT, "", null, true);
     }
 
     private Events approving() {

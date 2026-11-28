@@ -16,10 +16,15 @@ import java.nio.file.Path;
  */
 public record SystemPromptFiles(String replace, String append) {
 
-    public static SystemPromptFiles load(Path projectDir) {
+    /**
+     * @param projectDir    the project; null = global files only
+     * @param projectSystem false: the project's {@code SYSTEM.md} is not read (it replaces the system prompt, so it
+     *                      applies only once the user approved it for the folder)
+     */
+    public static SystemPromptFiles load(Path projectDir, boolean projectSystem) {
         Path global = Path.of(System.getProperty("jllm.home", System.getProperty("user.home")), ".jllm");
         Path project = projectDir == null ? null : projectDir.resolve(".jllm");
-        String replace = read(project, "SYSTEM.md");
+        String replace = projectSystem ? read(project, "SYSTEM.md") : null;
         if (replace == null) replace = read(global, "SYSTEM.md");
         String g = read(global, "APPEND_SYSTEM.md");
         String p = read(project, "APPEND_SYSTEM.md");

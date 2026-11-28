@@ -154,27 +154,47 @@ public final class Main {
         }
         ObjectMapper mapper = new ObjectMapper();
         Path projectDir = Path.of(a.getOrDefault("workdir", "")).toAbsolutePath().normalize();
+        // nobody can answer with --prompt, piped input or a CI environment
+        boolean canAsk = !Attendance.unattended(a);
+        boolean skipPermissions = CliArgs.skipPermissions(a);
+        var trust = org.kendar.llm.harness.settings.FileFolderTrust.user();
+        // before anything of the folder is read: its .jllm, instruction files, MCP servers, hooks, git
+        Path explicitSettings = a.containsKey("settings") ? Path.of(a.get("settings")) : null;
+        HarnessSettings user = HarnessSettingsLoader.loadLayered(
+                FileConfigProvider.userOnly(explicitSettings, mapper).settings(),
+                null, System::getenv, null, trust, w -> { }, new org.kendar.llm.harness.safety.ContentWarnings());
+        if (!FolderTrustGate.allow(projectDir, a, user.trustedProjects(), trust, canAsk, Main::askYesNo,
+                w -> System.err.println("warning: " + w))) {
+            return RunReport.EXIT_FAILED;
+        }
+        boolean projectSystem = FolderTrustGate.projectSystemPrompt(projectDir, trust, canAsk, Main::askYesNo,
+                w -> System.err.println("warning: " + w));
         // global ~/.jllm/settings.json, then project .jllm/settings.json, then --settings; later wins
-        // a stdio MCP server defined only by the project file starts a local process: ask once (answer remembered)
-        boolean canAsk = !a.containsKey("prompt") && System.in.available() == 0;
         // suspicious content in the loaded files: logged, and printed once the terminal is open
         var contentWarnings = new org.kendar.llm.harness.safety.ContentWarnings();
+        // from here the folder is trusted: its files are read
+        var provider = FileConfigProvider.trusted(projectDir, explicitSettings, projectSystem, mapper);
         HarnessSettings settings = HarnessSettingsLoader.loadLayered(
-                new org.kendar.llm.harness.settings.FileSettingsSource(
-                        a.containsKey("settings") ? Path.of(a.get("settings")) : null, projectDir),
+                provider.settings(),
                 projectDir, System::getenv,
-                (dir, server, cmd) -> canAsk ? askYesNo("The project settings of " + dir + " define "
-                        + (server.startsWith(ProjectTrustFilter.STOP_HOOK_TRUST_PREFIX) ? "a stop hook"
-                        : "the MCP server '" + server + "'") + ", which runs the local command:\n  " + cmd
-                        + "\nRun it?") : null,
-                org.kendar.llm.harness.settings.FileProjectMcpTrust.user(),
-                org.slf4j.LoggerFactory.getLogger(Main.class)::warn, contentWarnings);
-        var promptFiles = org.kendar.llm.harness.instructions.SystemPromptFiles.load(projectDir);
+                (dir, server, cmd) -> {
+                    if (!canAsk) return null;
+                    if (server.startsWith(ProjectTrustFilter.LOOSEN_TRUST_PREFIX)) {
+                        return askYesNo("The project settings of " + dir + " loosen your settings:\n  " + cmd
+                                + "\nApply it?");
+                    }
+                    return askYesNo("The project settings of " + dir + " define "
+                            + (server.startsWith(ProjectTrustFilter.STOP_HOOK_TRUST_PREFIX) ? "a stop hook"
+                            : "the MCP server '" + server + "'") + ", which runs the local command:\n  " + cmd
+                            + "\nRun it?");
+                },
+                trust, org.slf4j.LoggerFactory.getLogger(Main.class)::warn, contentWarnings);
+        var instructions = provider.instructions();
         String promptReplace = a.containsKey("system-prompt-replace")
                 ? org.kendar.llm.harness.instructions.SystemPromptFiles.readFile(Path.of(a.get("system-prompt-replace")))
-                : promptFiles.replace();
+                : instructions.systemPromptReplace().orElse(null);
         String promptAppend = org.kendar.llm.harness.instructions.SystemPromptFiles.join(
-                org.kendar.llm.harness.instructions.SystemPromptFiles.join(promptFiles.append(),
+                org.kendar.llm.harness.instructions.SystemPromptFiles.join(instructions.systemPromptAppend(),
                         a.containsKey("system-prompt-file")
                                 ? org.kendar.llm.harness.instructions.SystemPromptFiles.readFile(Path.of(a.get("system-prompt-file")))
                                 : null),
@@ -219,7 +239,15 @@ public final class Main {
                 .objectMapper(mapper)
                 .contentWarnings(contentWarnings)
                 .discoverPlugins()
+                // nobody to answer: every question is denied (allow rules still run); the bypass allows them instead
+                .unattended(!canAsk)
+                .dangerouslySkipPermissions(skipPermissions)
                 .build();
+        if (skipPermissions) {
+            sayErr(Renderer.RED + Renderer.BOLD + "WARNING: --dangerously-skip-permissions: every permission question "
+                    + "is answered yes, including writes to .jllm, .git and instruction files, and shell commands. "
+                    + "Explicit deny rules still deny." + Renderer.RESET);
+        }
         List<String> names = new java.util.ArrayList<>(harness.commands().list().stream().map(SlashCommands.Info::name).toList());
         names.add("/expand");
         term = a.containsKey("prompt") ? null : terminal.apply(names, cwdSandbox.historyRoot().resolve("cli-history"));
@@ -239,7 +267,7 @@ public final class Main {
         BlockingQueue<AgentEvent> events = new LinkedBlockingQueue<>();
         Chat chat = new Chat();
         // piped input is the script, not an answer: ask only when nothing is waiting on stdin
-        boolean interactive = !a.containsKey("prompt") && System.in.available() == 0;
+        boolean interactive = canAsk;
         BlockingQueue<String> in = term == null ? stdin() : new LinkedBlockingQueue<>();
         Term.Tail tail = term == null ? null : new Term.Tail(term);
         String resumeId = ResumeChooser.choose(harness, a.get("resume"), interactive, () -> {
@@ -319,6 +347,7 @@ public final class Main {
                                    long start) throws Exception {
         RunReport report = new RunReport(mapper, start, CliArgs.timeoutSeconds(a));
         report.chatId(chatId);
+        report.skipPermissions(CliArgs.skipPermissions(a));
         ChatSessionData before = harness.sessions().get(chatId);
         runTurn(harness, chatId, a.get("prompt"), events, in, report);
         ChatSessionData after = harness.sessions().get(chatId);

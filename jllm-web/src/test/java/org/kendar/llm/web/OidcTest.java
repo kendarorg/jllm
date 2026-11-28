@@ -126,10 +126,11 @@ class OidcTest {
         OidcClient client = new OidcClient(p, "http://127.0.0.1:8080", env, WebauthFixture.MAPPER,
                 java.net.http.HttpClient.newHttpClient(), clock);
         OidcApi c = new OidcApi(p, client, f.users, f.sessions, f.throttle, f.roleMapping, f.permissions, events::add,
-                clock);
+                java.time.Duration.ofDays(30), clock);
         CookieAuthentication auth = new CookieAuthentication(f.users, f.sessions);
-        return MockMvcBuilders.standaloneSetup(new OidcController(c),
-                new AuthController(new AuthApi(f.users, auth, f.sessions, f.throttle, p)))
+        return MockMvcBuilders.standaloneSetup(new OidcController(c, org.kendar.llm.web.commons.ClientAddress.direct()),
+                new AuthController(new AuthApi(f.users, auth, f.sessions, f.throttle, p, java.time.Duration.ofDays(30), clock),
+                        org.kendar.llm.web.commons.ClientAddress.direct()))
                 .setControllerAdvice(new ApiExceptionAdvice()).build();
     }
 
@@ -137,7 +138,7 @@ class OidcTest {
     }
 
     private Started begin(MockMvc mvc) throws Exception {
-        f.throttle.success("oidc:127.0.0.1"); // these tests refuse more than five sign-ins in a row
+        f.throttle.reset("oidc:127.0.0.1"); // these tests refuse more than five sign-ins in a row
         MockHttpServletResponse r = mvc.perform(get("/auth/oidc/login")).andReturn().getResponse();
         assertEquals(302, r.getStatus());
         String loc = r.getHeader("Location");
@@ -223,6 +224,72 @@ class OidcTest {
 
         // second login: by issuer+sub, even with another email
         assertEquals("rita", signInAs(mvc, "sub-1", "other@elsewhere.org"));
+    }
+
+    @Test
+    void anAdministratorIsNeverLinkedByEmail() throws Exception {
+        f.users.setEmail("admin", "admin@example.com");
+        MockMvc mvc = mvc(props("both", false, List.of("example.com")));
+
+        Started s = begin(mvc);
+        idToken = sign(claims(s.nonce(), "sub-evil", "admin@example.com").build());
+        assertEquals("unknown_user", error(callback(mvc, s.state(), s.binding())),
+                "an account at the provider with the admin's email must not become the admin");
+
+        User admin = f.users.find("admin").orElseThrow();
+        assertFalse(admin.external(), "still not linked");
+        assertTrue(f.users.findByExternal(issuer, "sub-evil").isEmpty());
+        assertTrue(f.users.exists("admin"));
+    }
+
+    @Test
+    void anUnattendedRoleIsNeverLinkedByEmailEither() throws Exception {
+        f.permissions.save(new org.kendar.llm.harness.identity.Role("batch", List.of(), false, "ask", Map.of(),
+                Map.of(org.kendar.llm.harness.identity.Role.UNATTENDED,
+                        WebauthFixture.MAPPER.getNodeFactory().booleanNode(true))));
+        f.users.create("bot", "Bot", "batch", null, "bot@example.com");
+        MockMvc mvc = mvc(props("both", false, List.of("example.com")));
+
+        Started s = begin(mvc);
+        idToken = sign(claims(s.nonce(), "sub-bot", "bot@example.com").build());
+
+        assertEquals("unknown_user", error(callback(mvc, s.state(), s.binding())));
+        assertFalse(f.users.find("bot").orElseThrow().external());
+    }
+
+    @Test
+    void anAdministratorLinkedByAnAdministratorSignsInThroughTheProvider() throws Exception {
+        f.users.setExternalId("admin", issuer + "#sub-admin"); // an administrator does the linking
+        MockMvc mvc = mvc(props("both", false, List.of("example.com")));
+
+        assertEquals("admin", signInAs(mvc, "sub-admin", "whoever@example.com"));
+    }
+
+    @Test
+    void anOrdinaryUserIsStillLinkedByEmail() throws Exception {
+        f.users.setEmail("gus", "gus@example.com");
+        MockMvc mvc = mvc(props("both", false, List.of("example.com")));
+
+        assertEquals("gus", signInAs(mvc, "sub-gus", "gus@example.com"));
+        assertEquals(issuer + "#sub-gus", f.users.find("gus").orElseThrow().externalId());
+    }
+
+    @Test
+    void anOidcSessionHasTheAbsoluteLifetimeToo() throws Exception {
+        f.users.setEmail("rita", "rita@example.com");
+        MockMvc mvc = mvc(props("both", false, List.of("example.com")));
+        Started s = begin(mvc);
+        idToken = sign(claims(s.nonce(), "sub-1", "rita@example.com").build());
+        Cookie c = callback(mvc, s.state(), s.binding()).getCookie(CookieAuthentication.COOKIE);
+
+        assertNotNull(c);
+        assertTrue(f.sessions.find(c.getValue()).isPresent());
+        for (int d = 0; d < 29; d++) {
+            clock.now = clock.now.plus(Duration.ofDays(1));
+            assertTrue(f.sessions.find(c.getValue()).isPresent(), "day " + d);
+        }
+        clock.now = clock.now.plus(Duration.ofDays(2));
+        assertTrue(f.sessions.find(c.getValue()).isEmpty(), "the 30 days are over");
     }
 
     @Test
@@ -349,9 +416,11 @@ class OidcTest {
     }
 
     @Test
-    void fiveRefusedCallbacksLockTheAddress() throws Exception {
+    void tooManyRefusedCallbacksLockTheAddress() throws Exception {
         MockMvc mvc = mvc(props("both", false, List.of()));
-        for (int i = 0; i < 5; i++) assertEquals("expired", error(callback(mvc, "bad" + i, null)));
+        for (int i = 0; i < org.kendar.llm.web.commons.auth.LoginThrottle.ADDRESS_MAX_ATTEMPTS; i++) {
+            assertEquals("expired", error(callback(mvc, "bad" + i, null)));
+        }
         assertEquals(429, mvc.perform(get("/auth/oidc/login")).andReturn().getResponse().getStatus());
         assertEquals("denied", error(callback(mvc, "bad", null)));
     }
@@ -640,6 +709,7 @@ class OidcTest {
         String pass = "A-long-pass-phrase-1";
         f.users.setPassword("admin", org.kendar.llm.web.commons.auth.PasswordHasher.hash(pass));
         f.users.setEmail("admin", "admin@example.com");
+        f.users.setExternalId("admin", issuer + "#sub-a"); // an administrator is linked by an administrator, never by email
         idp("guest", "{\"groups\":[\"eng\"]}");
         mapping("{\"enabled\":true}");
         MockMvc mvc = mvc(props("both", false, List.of()));

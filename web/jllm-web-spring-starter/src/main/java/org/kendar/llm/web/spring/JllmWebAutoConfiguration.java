@@ -7,16 +7,16 @@ import org.kendar.llm.harness.context.mnemonic.MnemonicStore;
 import org.kendar.llm.harness.identity.ChatAccess;
 import org.kendar.llm.harness.identity.HarnessIdentity;
 import org.kendar.llm.harness.llm.ModelClient;
-import org.kendar.llm.harness.plugin.PluginStorages;
 import org.kendar.llm.harness.plugin.ServiceRegistry;
 import org.kendar.llm.harness.plugin.WebPluginHost;
 import org.kendar.llm.harness.session.ChatSessionStore;
 import org.kendar.llm.harness.session.SubAgentRunLog;
-import org.kendar.llm.harness.settings.ProjectMcpTrust;
 import org.kendar.llm.harness.settings.SettingsSink;
-import org.kendar.llm.harness.settings.SettingsSource;
+import org.kendar.llm.harness.settings.ConfigProvider;
 import org.kendar.llm.harness.state.StateStore;
 import org.kendar.llm.web.commons.ChatApi;
+import org.kendar.llm.web.commons.ClientAddress;
+import org.kendar.llm.web.commons.ChatsDirGuard;
 import org.kendar.llm.web.commons.FilesApi;
 import org.kendar.llm.web.commons.Gate;
 import org.kendar.llm.web.commons.HarnessFactory;
@@ -24,6 +24,7 @@ import org.kendar.llm.web.commons.JllmProperties;
 import org.kendar.llm.web.commons.OAuthApi;
 import org.kendar.llm.web.commons.WebAuthentication;
 import org.kendar.llm.web.commons.admin.AdminApi;
+import org.kendar.llm.web.commons.admin.ConfigAdminApi;
 import org.kendar.llm.web.commons.auth.AuthApi;
 import org.kendar.llm.web.commons.auth.OidcApi;
 import org.kendar.llm.web.commons.auth.OidcProperties;
@@ -87,26 +88,45 @@ public class JllmWebAutoConfiguration {
     }
 
     /**
-     * The harness. A bean of the application for the settings source, the stored settings ({@link SettingsSink}: their
-     * sections join the layers last), the project trust, the chat, sub-agent, mnemonic
-     * and state stores and the plugin storage replaces the file-based default.
+     * Refuses to start when a file the server keeps for itself (webauth, flows seed folder) is inside the chats
+     * directory, where the users' commands run. Created before the harness; the harness checks the configuration and
+     * plugin folders.
+     */
+    @Bean
+    public ChatsDirCheck chatsDirCheck(JllmProperties p, Environment env) {
+        java.util.Map<String, java.nio.file.Path> server = new java.util.LinkedHashMap<>();
+        String webauth = JllmProperties.blankToNull(env.getProperty("jllm.webauth-dir"));
+        server.put("jllm.webauth-dir", java.nio.file.Path.of(webauth == null ? "webauth" : webauth));
+        String flows = JllmProperties.blankToNull(env.getProperty("jllm.flows-seed-dir"));
+        if (flows != null) server.put("jllm.flows-seed-dir", java.nio.file.Path.of(flows));
+        ChatsDirGuard.check(p.chatsPath(), server);
+        return new ChatsDirCheck(p.chatsPath());
+    }
+
+    /** Marker: the chats directory was checked. */
+    public record ChatsDirCheck(java.nio.file.Path chatsDir) {
+    }
+
+    /**
+     * The harness. The configuration comes from the application's {@link ConfigProvider} bean, which must be a
+     * virtual one (SQL or server-only files): without it the start fails. A bean of the application for the stored
+     * settings ({@link SettingsSink}: their sections join the layers last), the chat, sub-agent, mnemonic and state
+     * stores replaces the file-based default.
      */
     @Bean
     public AgentHarness agentHarness(JllmProperties p, ModelClient modelClient, HarnessPricing pricing,
-                                     ObjectMapper mapper, HarnessIdentity identity,
-                                     ObjectProvider<SettingsSource> settingsSource,
+                                     ObjectMapper mapper, HarnessIdentity identity, ChatsDirCheck chatsDirCheck,
+                                     ObjectProvider<ConfigProvider> configProvider,
                                      ObjectProvider<SettingsSink> settingsSink,
-                                     ObjectProvider<ProjectMcpTrust> projectTrust,
                                      ObjectProvider<ChatSessionStore> sessionStore,
                                      ObjectProvider<SubAgentRunLog> subAgentRunLog,
                                      ObjectProvider<MnemonicStore> mnemonicStore,
                                      ObjectProvider<StateStore> stateStore,
-                                     ServiceRegistry services,
-                                     ObjectProvider<PluginStorages> pluginStorages) {
-        return HarnessFactory.harness(p, modelClient, pricing, mapper, identity, settingsSource.getIfAvailable(),
+                                     ServiceRegistry services) {
+        return HarnessFactory.harness(p, modelClient, pricing, mapper, identity, configProvider.getIfAvailable(),
                 settingsSink.getIfAvailable(),
-                projectTrust.getIfAvailable(), sessionStore.getIfAvailable(), subAgentRunLog.getIfAvailable(),
-                mnemonicStore.getIfAvailable(), stateStore.getIfAvailable(), services, pluginStorages.getIfAvailable());
+                sessionStore.getIfAvailable(), subAgentRunLog.getIfAvailable(),
+                mnemonicStore.getIfAvailable(), stateStore.getIfAvailable(), services);
     }
 
     /** Loads the web plugins; after the harness, whose plugins they may need. */
@@ -151,7 +171,14 @@ public class JllmWebAutoConfiguration {
     WebConfig jllmWebConfig(Gate gate, WebAuthentication authentication, ObjectMapper mapper, JllmProperties p,
                           Environment env) {
         return new WebConfig(gate, authentication, mapper, p.web() != null && p.web().enforceOnLoopback(),
-                ApiInterceptor.isLoopbackAddress(env.getProperty("server.address")));
+                ApiInterceptor.isLoopbackAddress(env.getProperty("server.address")),
+                p.web() == null ? null : p.web().publicUrl());
+    }
+
+    /** Who the throttle counts a caller as: the peer, or behind {@code jllm.web.trusted-proxies} the forwarded client. */
+    @Bean
+    ClientAddress jllmClientAddress(JllmProperties p) {
+        return new ClientAddress(p.trustedProxies());
     }
 
     @Bean
@@ -212,14 +239,14 @@ public class JllmWebAutoConfiguration {
 
         @Bean
         @ConditionalOnBean(AuthApi.class)
-        AuthController authController(AuthApi api) {
-            return new AuthController(api);
+        AuthController authController(AuthApi api, ClientAddress addresses) {
+            return new AuthController(api, addresses);
         }
 
         @Bean
         @ConditionalOnBean(OidcApi.class)
-        OidcController oidcController(OidcApi api) {
-            return new OidcController(api);
+        OidcController oidcController(OidcApi api, ClientAddress addresses) {
+            return new OidcController(api, addresses);
         }
 
         @Bean
@@ -232,6 +259,12 @@ public class JllmWebAutoConfiguration {
         @ConditionalOnBean(AdminApi.class)
         AdminController adminController(AdminApi api) {
             return new AdminController(api);
+        }
+
+        @Bean
+        @ConditionalOnBean(ConfigAdminApi.class)
+        ConfigAdminController configAdminController(ConfigAdminApi api) {
+            return new ConfigAdminController(api);
         }
     }
 }

@@ -1,4 +1,4 @@
-import {onMounted, ref} from './vendor/vue.esm-browser.prod.js';
+import {computed, onMounted, onUnmounted, ref} from './vendor/vue.esm-browser.prod.js';
 import {api, post} from './api.js';
 import {contentWarningText, continueOffer, dismissContentWarnings, dismissOffer, dismissToast, init, newChat, shortId,
   store, toast} from './store.js';
@@ -10,6 +10,7 @@ import ChatComposer from './components/ChatComposer.js';
 import ApprovalDialog from './components/ApprovalDialog.js';
 import FilesPanel from './components/FilesPanel.js';
 import HistoryPanel from './components/HistoryPanel.js';
+import ForcedPassword from './components/ForcedPassword.js';
 import SettingsPanel from './components/SettingsPanel.js';
 import AdminPanel from './components/AdminPanel.js';
 import WorkflowsPanel from './components/WorkflowsPanel.js';
@@ -20,7 +21,7 @@ import {initWorkflows, workflows} from './workflows.js';
 const TABS = [['chat', 'Chat'], ['files', 'Files'], ['history', 'History']];
 
 export default {
-  components: { SignIn, SessionList, ChatToolbar, MessageStream, ChatComposer, ApprovalDialog, FilesPanel, HistoryPanel,
+  components: { ForcedPassword, SignIn, SessionList, ChatToolbar, MessageStream, ChatComposer, ApprovalDialog, FilesPanel, HistoryPanel,
     SettingsPanel, AdminPanel, WorkflowsPanel, SkillsPanel, FlowsPanel },
   setup() {
     // undefined: checking; null: signed out (show the picker); otherwise the signed-in user
@@ -28,6 +29,11 @@ export default {
     // chat | settings | skills | flows | runs | admin; the chat view stays mounted underneath
     const view = ref('chat');
     const focusRun = ref(null);
+    // a default or one-time password: only the full-screen change form is reachable
+    const forced = computed(() => !!(me.value && me.value.defaultPassword));
+    const onRequired = () => { if (me.value) me.value = { ...me.value, defaultPassword: true }; };
+    onMounted(() => window.addEventListener('jllm-password-change-required', onRequired));
+    onUnmounted(() => window.removeEventListener('jllm-password-change-required', onRequired));
     onMounted(async () => {
       try {
         me.value = await api('/api/me');
@@ -43,7 +49,7 @@ export default {
     // A user on the default password is refused everything but the password change: send them there, load the
     // chats only once the password is changed.
     async function start() {
-      if (me.value && me.value.defaultPassword) { view.value = 'settings'; return; }
+      if (me.value && me.value.defaultPassword) return;
       await init();
       initWorkflows();
     }
@@ -70,12 +76,13 @@ export default {
       e.preventDefault();
     }
     return { contentWarningText, dismissContentWarnings, dismissToast, focusRun, onStarted, workflows, store, TABS, onKey, continueOffer, dismissOffer, newChat, shortId, me, onSignedIn, signOut, view, show,
-      onPasswordChanged };
+      onPasswordChanged, forced };
   },
   template: `
   <header>
     <h1><span class="logo">⬡</span> jllm</h1>
-    <span v-if="me" class="whoami">{{ me.name }} <small>({{ me.role }})</small>
+    <span v-if="forced" class="whoami">{{ me.name }} <button class="btn-sm" @click="signOut">Sign out</button></span>
+    <span v-else-if="me" class="whoami">{{ me.name }} <small>({{ me.role }})</small>
       <button v-if="view !== 'chat'" class="btn-sm" @click="view = 'chat'">Chats</button>
       <button class="btn-sm" :class="{ active: view === 'settings' }" @click="show('settings')">Settings</button>
       <button class="btn-sm" :class="{ active: view === 'skills' }" @click="show('skills')">Skills</button>
@@ -88,10 +95,8 @@ export default {
               @click="show('admin')">Administration</button>
       <button class="btn-sm" @click="signOut">Sign out</button></span>
   </header>
-  <div v-if="me && me.defaultPassword && view !== 'settings'" class="banner banner-info pw-banner" role="alert">
-    You are using the default password.
-    <button class="btn-sm" @click="view = 'settings'">Change it</button>
-  </div>
+  <ForcedPassword v-if="forced" @changed="onPasswordChanged" />
+  <template v-if="!forced">
   <div v-if="me && store.contentWarnings.length" class="banner banner-error content-warn-banner" role="alert">
     <pre v-for="w in store.contentWarnings" :key="w.file">{{ contentWarningText(w) }}</pre>
     <button class="btn-sm" @click="dismissContentWarnings">Dismiss</button>
@@ -133,6 +138,7 @@ export default {
     </section>
   </div>
   <ApprovalDialog />
+  </template>
   <div id="toast" role="alert" :class="store.toast.text ? ['show', store.toast.type] : ''">
     <span>{{ store.toast.text }}</span>
     <button v-if="store.toast.type === 'error'" class="btn-sm" @click="dismissToast">OK</button>

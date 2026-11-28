@@ -71,22 +71,26 @@ public class SubAgentRunner {
      * stays out of the chat log and goes to the run audit trail; its token usage is billed to the chat.
      */
     public String run(SubAgentRequest request) {
-        return runAgent(request, true, null);
+        return runAgent(request, deps.attendanceOf(request.chatId()), null, null);
     }
 
     /**
      * One task for an outside caller (a flow step) in the loop of the given agent type, with that agent's tools,
-     * permissions and approvals. With {@code interactive} false a call that would need an approval is not asked
-     * about and not run: the task fails with {@link OneShotModel.ApprovalRequiredException}.
+     * permissions and approvals. With {@code unattended} false a call that would need an approval is not asked
+     * about and not run: the task fails with {@link OneShotModel.ApprovalRequiredException}. With {@code unattended}
+     * true nobody can approve anything: the call is denied, the model gets {@code denied: unattended run, no one can
+     * approve <tool>} as its result, the task goes on, and each denied tool is reported to {@code onDenied}.
+     *
+     * @param onDenied receives the tool of every call denied in an unattended task; null = ignored
      */
-    public String runAgentTask(String chatId, String prompt, AgentDefinition agentType, boolean interactive,
-                               Set<String> approved) {
+    public String runAgentTask(String chatId, String prompt, AgentDefinition agentType, boolean unattended,
+                               Set<String> approved, java.util.function.Consumer<String> onDenied) {
         approved.forEach(t -> deps.approvals().grant(chatId, t));
         List<String> denied = new ArrayList<>();
         String answer;
         try {
             answer = runAgent(new SubAgentRequest(chatId, null, prompt, agentType, PermissionMode.DEFAULT, null,
-                    Uuids.v7String()), interactive, denied);
+                    Uuids.v7String()), unattended ? RunAttendance.UNATTENDED : RunAttendance.COLLECT, denied, onDenied);
         } catch (RuntimeException e) { // boundary: rethrown after reporting the denied tools
             if (!denied.isEmpty()) throw approvalRequired(denied);
             throw e;
@@ -101,7 +105,8 @@ public class SubAgentRunner {
                 "Approval needed for " + String.join(", ", tools) + " and no interactive approver is attached", tools);
     }
 
-    private String runAgent(SubAgentRequest request, boolean interactive, List<String> denied) {
+    private String runAgent(SubAgentRequest request, RunAttendance attendance, List<String> denied,
+                            java.util.function.Consumer<String> onDenied) {
         String chatId = request.chatId();
         String toolUseId = request.toolUseId();
         String prompt = request.prompt();
@@ -145,7 +150,7 @@ public class SubAgentRunner {
             ToolContext pctx = new ToolContext(chatId, sandbox.workDir(chatId), sandbox.scratchDir(chatId, scratch),
                     pm == PermissionMode.PLAN, null, pm, null, sandbox.files(chatId, scratch));
             tools = offer.chatTools(chatId, "");
-            extra = deps.systemPrompt() + modeNote.of(pm, pctx);
+            extra = deps.systemPromptFor(chatId) + modeNote.of(pm, pctx);
             pinned = sessions.pinnedPrefix(session);
             Set<String> contextTools = new HashSet<>();
             offer.fixedTools().forEach(t -> contextTools.add(t.name()));
@@ -168,7 +173,7 @@ public class SubAgentRunner {
             tools.removeIf(t -> !policy.allows(t));
             tools.removeIf(t -> !sessions.chatAllowsTool(chatId, t.name()));
             offer.chatSkills(chatId, tools, policy);
-            extra = deps.systemPrompt() + "\n\n" + roleNote;
+            extra = deps.systemPromptFor(chatId) + "\n\n" + roleNote;
             pinned = "chatId=" + chatId + "; subagent";
         }
         List<HarnessTool> subTools = tools;
@@ -181,6 +186,9 @@ public class SubAgentRunner {
         EventSink errors = (type, data) -> {
             if ("approval_unavailable".equals(type)) {
                 if (denied != null) denied.add(data.path("tool").asText("a tool"));
+            } else if ("permission_denied".equals(type)) {
+                if (onDenied != null) onDenied.accept(data.path("tool").asText("a tool"));
+                parentSink.emit(type, data);
             } else if ("approval_request".equals(type) || "login_required".equals(type)
                     || ContentWarnings.EVENT.equals(type)) parentSink.emit(type, data);
             else if ("error".equals(type)) failure[0] = data.path("message").asText("sub-agent failed");
@@ -199,7 +207,7 @@ public class SubAgentRunner {
         active.put(label, new ActiveSubAgent(label, chatId, prompt, System.currentTimeMillis()));
         try {
             result = loop.apply(new LoopRequest(chatId, messages, () -> subTools, pinned, extra, mode, errors,
-                    cancelled, false, interactive, agentName, client, inherited, label, null, frame));
+                    cancelled, false, attendance, agentName, client, inherited, label, null, frame));
             if (failure[0] == null) incomplete = incomplete(result, warning[0]);
         } catch (RuntimeException e) { // boundary: sub-agent boundary: remember the failure, rethrown unchanged
             if (failure[0] == null) failure[0] = String.valueOf(e.getMessage());

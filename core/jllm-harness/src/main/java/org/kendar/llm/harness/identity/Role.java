@@ -20,7 +20,8 @@ import java.util.regex.Pattern;
  *
  * @param tools    tool name patterns ({@code *} = any run of characters); ["*"] = all
  * @param readOnly only READ_ONLY tools
- * @param approval {@code off}: no approval prompts; {@code ask} (default): the harness policy
+ * @param approval {@code off}: no approval prompts; {@code ask} (default): the harness policy; {@code always}: the
+ *                 harness policy, and no mode (auto, edit) waives a question
  * @param toolPermissions tool name pattern ({@code *} = any run of characters) to {@code allow} (runs unattended,
  *                        no question ever), {@code ask} or {@code deny}; deny wins over ask over allow, then the
  *                        approval above applies
@@ -35,8 +36,14 @@ public record Role(String name, List<String> tools, boolean readOnly, String app
     public static final int MAX_SETTINGS_BYTES = 64 * 1024;
     /** Deepest nesting of a settings value (the value itself is level 1). */
     public static final int MAX_SETTINGS_DEPTH = 16;
+    /** Setting key: {@code true} lets the instruction files of a chat directory join the chats of the role (off by default). */
+    public static final String SCOPED_INSTRUCTIONS = "scoped-instructions";
     /** Setting key of the sandbox ({@link RoleSandbox}). */
     public static final String SANDBOX = "sandbox";
+    /** Setting key: the permission modes the role's users may select, an array of mode names (default: all). */
+    public static final String ALLOWED_MODES = "allowed-modes";
+    /** Setting key: {@code true} when nobody answers the permission questions of the role's chats (admin-only). */
+    public static final String UNATTENDED = "unattended";
 
     private static final Pattern KEY = Pattern.compile("[a-z0-9_-]{1,64}");
     /** The role's own fields: a file store keeps settings beside them, so a setting cannot take their name. */
@@ -54,8 +61,8 @@ public record Role(String name, List<String> tools, boolean readOnly, String app
     public Role {
         tools = tools == null ? List.of() : List.copyOf(tools);
         approval = approval == null ? "ask" : approval;
-        if (!"ask".equals(approval) && !"off".equals(approval)) {
-            throw new IllegalArgumentException("'approval' of role " + name + " must be \"ask\" or \"off\"");
+        if (!"ask".equals(approval) && !"off".equals(approval) && !"always".equals(approval)) {
+            throw new IllegalArgumentException("'approval' of role " + name + " must be \"ask\", \"always\" or \"off\"");
         }
         toolPermissions = toolPermissions == null ? Map.of() : java.util.Collections.unmodifiableMap(
                 new java.util.LinkedHashMap<>(toolPermissions));
@@ -124,6 +131,58 @@ public record Role(String name, List<String> tools, boolean readOnly, String app
         return RoleSandbox.of(settings.get(SANDBOX));
     }
 
+    /**
+     * The permission modes the role's users may select; null when every mode is allowed. A stored value that is not a
+     * valid list gives only {@code default}: a bad value must never allow more.
+     */
+    public java.util.Set<org.kendar.llm.harness.permission.PermissionMode> allowedModes() {
+        JsonNode n = settings.get(ALLOWED_MODES);
+        if (n == null || n.isNull()) return null;
+        try {
+            return modes(n);
+        } catch (IllegalArgumentException e) {
+            return java.util.Set.of(org.kendar.llm.harness.permission.PermissionMode.DEFAULT);
+        }
+    }
+
+    /**
+     * Strict read of an {@link #ALLOWED_MODES} value.
+     *
+     * @throws IllegalArgumentException when it is not a non-empty array of mode names (default, plan, edit, auto)
+     */
+    public static java.util.Set<org.kendar.llm.harness.permission.PermissionMode> modes(JsonNode n) {
+        if (n == null || !n.isArray() || n.isEmpty()) {
+            throw new IllegalArgumentException("'" + ALLOWED_MODES + "' must be a non-empty array of default, plan, edit, auto");
+        }
+        java.util.Set<org.kendar.llm.harness.permission.PermissionMode> out = new java.util.LinkedHashSet<>();
+        for (JsonNode m : n) {
+            String v = m.isTextual() ? m.asText().trim().toLowerCase(java.util.Locale.ROOT) : "";
+            switch (v) {
+                case "default" -> out.add(org.kendar.llm.harness.permission.PermissionMode.DEFAULT);
+                case "plan" -> out.add(org.kendar.llm.harness.permission.PermissionMode.PLAN);
+                case "edit" -> out.add(org.kendar.llm.harness.permission.PermissionMode.EDIT);
+                case "auto" -> out.add(org.kendar.llm.harness.permission.PermissionMode.AUTO);
+                default -> throw new IllegalArgumentException("'" + ALLOWED_MODES + "': unknown mode " + m
+                        + " (default, plan, edit, auto)");
+            }
+        }
+        return out;
+    }
+
+    /** The stored form of an allowed modes list: lower case names, once each, in the order default, plan, edit, auto. */
+    public static JsonNode modesJson(java.util.Set<org.kendar.llm.harness.permission.PermissionMode> modes) {
+        var a = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.arrayNode();
+        for (var m : org.kendar.llm.harness.permission.PermissionMode.values()) {
+            if (modes.contains(m)) a.add(m.name().toLowerCase(java.util.Locale.ROOT));
+        }
+        return a;
+    }
+
+    /** Whether nobody answers the permission questions of the role's chats ({@link #UNATTENDED}). */
+    public boolean unattended() {
+        return settings.containsKey(UNATTENDED) && settings.get(UNATTENDED).asBoolean(false);
+    }
+
     /** The decision for the tool: deny, then ask, then allow; the first list with a matching pattern wins. */
     public ToolPermission permissionOf(HarnessTool tool) {
         for (ToolPermission kind : new ToolPermission[]{ToolPermission.DENY, ToolPermission.ASK, ToolPermission.ALLOW}) {
@@ -132,6 +191,11 @@ public record Role(String name, List<String> tools, boolean readOnly, String app
             }
         }
         return null;
+    }
+
+    /** Role level "always ask" ({@code approval: always}). */
+    public boolean alwaysAsk() {
+        return "always".equals(approval);
     }
 
     public boolean fixed() {
@@ -147,8 +211,15 @@ public record Role(String name, List<String> tools, boolean readOnly, String app
         return Wildcard.matchesAny(tools, name);
     }
 
+    /** Whether chats of the role get the instruction files of their chat directory ({@link #SCOPED_INSTRUCTIONS}). */
+    public boolean scopedInstructions() {
+        return settings.containsKey(SCOPED_INSTRUCTIONS) && settings.get(SCOPED_INSTRUCTIONS).asBoolean(false);
+    }
+
     public UserPolicy policy() {
         ToolApprovalPolicy approvals = "off".equals(approval) ? tool -> false : null;
-        return new UserPolicy(this::allows, approvals, null, null, toolPermissions.isEmpty() ? null : this::permissionOf);
+        return new UserPolicy(this::allows, approvals, null, null, toolPermissions.isEmpty() ? null : this::permissionOf,
+                null, scopedInstructions() ? UserPolicy.Scoped.USER_CONTENT : UserPolicy.Scoped.OFF, allowedModes(),
+                unattended(), alwaysAsk());
     }
 }

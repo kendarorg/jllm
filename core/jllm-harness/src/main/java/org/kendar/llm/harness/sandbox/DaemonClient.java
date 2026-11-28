@@ -1,6 +1,7 @@
 package org.kendar.llm.harness.sandbox;
 
 import org.kendar.llm.harness.HarnessConfig;
+import org.kendar.llm.harness.util.BoundedBody;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -35,6 +36,11 @@ public final class DaemonClient {
     public static final String TOKEN_HEADER = "X-Jllm-Token";
     /** Header naming the chat whose directory is the file root of the request (user-scope containers). */
     public static final String CHAT_HEADER = "X-Jllm-Chat";
+
+    /** Largest answer of a control call (health, setup, exec start and poll): the daemon caps command output far below. */
+    public static final long MAX_CONTROL_RESPONSE = 16L * 1024 * 1024;
+    /** Largest answer of a file call (one file read through the sandbox). */
+    public static final long MAX_FILE_RESPONSE = 256L * 1024 * 1024;
 
     public record Response(int status, byte[] body) {
         public String text() {
@@ -129,9 +135,14 @@ public final class DaemonClient {
         }
     }
 
-    /** One request; {@code query} values are URL-encoded. */
+    /**
+     * One request; {@code query} values are URL-encoded.
+     *
+     * @param maxResponse most bytes of the answer read; a larger one is abandoned
+     * @throws BoundedBody.TooLargeException when the answer exceeds {@code maxResponse}
+     */
     public Response call(String method, String path, Map<String, String> query, byte[] body, String contentType,
-                         Duration timeout) throws IOException, InterruptedException {
+                         Duration timeout, long maxResponse) throws IOException, InterruptedException {
         StringBuilder url = new StringBuilder(base).append(path);
         if (query != null && !query.isEmpty()) {
             StringJoiner sj = new StringJoiner("&", "?", "");
@@ -146,7 +157,13 @@ public final class DaemonClient {
         HttpRequest.BodyPublisher pub = body == null ? HttpRequest.BodyPublishers.noBody()
                 : HttpRequest.BodyPublishers.ofByteArray(body);
         if (contentType != null) b.header("Content-Type", contentType);
-        HttpResponse<byte[]> r = http.send(b.method(method, pub).build(), HttpResponse.BodyHandlers.ofByteArray());
-        return new Response(r.statusCode(), r.body());
+        try {
+            HttpResponse<byte[]> r = http.send(b.method(method, pub).build(), BoundedBody.ofBytes(maxResponse));
+            return new Response(r.statusCode(), r.body());
+        } catch (IOException e) {
+            BoundedBody.TooLargeException tooLarge = BoundedBody.tooLarge(e);
+            if (tooLarge != null) throw tooLarge; // HttpClient wraps the handler's failure
+            throw e;
+        }
     }
 }

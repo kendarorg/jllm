@@ -2,7 +2,7 @@
 # jllm setup: unzips the distribution that sits next to this script, asks which GraalJS edition to use for run_js and
 # downloads it (Maven Central, SHA-256 verified) into the unzipped lib-ext/. Works on Linux and macOS.
 # Layout: next to this script jllm-<version>.zip; after setup, jllm-<version>/ holds the jars, run-*.sh/.cmd, plugins/,
-# settings/, webauth/ and lib-ext/ (filled with the chosen GraalJS edition; manifests/ lists the pinned jars).
+# configs/ (unsafe, webSafe, cliSafe) and lib-ext/ (filled with the chosen GraalJS edition; manifests/ lists the pinned jars).
 # Usage: ./setup.sh [--zip FILE] [--dir DIR] [--edition community|commercial] [--accept-license] [--repo URL]
 #        [--sql mysql|postgres|all|none]
 # - --zip: the distribution (default: the only jllm-*.zip next to this script)

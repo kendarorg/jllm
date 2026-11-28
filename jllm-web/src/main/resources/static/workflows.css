@@ -20,3 +20,4 @@
   color: #fff; font-size: 12px; text-align: center; }
 .wf-attach { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-top: 1px solid var(--border, #ddd);
   background: var(--hover, rgba(200, 136, 0, .12)); font-size: 13px; }
+.wf-history .wf-denied { color: var(--red); font-weight: 600; }

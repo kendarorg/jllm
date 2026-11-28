@@ -69,3 +69,10 @@ eval/results/**
 eval/**/.venv/
 eval/**/*.egg-info/
 eval/**/.pytest_cache/
+
+### jllm runtime state ###
+/.lock
+runConfigs/*/tmp/*
+!runConfigs/*/tmp/.gitignore
+!runConfigs/*/tmp/.gitkeep
+**/.jllm/plugin-data/

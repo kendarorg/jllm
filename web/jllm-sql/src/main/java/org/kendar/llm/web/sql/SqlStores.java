@@ -10,7 +10,6 @@ import org.kendar.llm.harness.identity.SkillRepository;
 import org.kendar.llm.harness.identity.UserRepository;
 import org.kendar.llm.harness.session.ChatSessionStore;
 import org.kendar.llm.harness.session.SubAgentRunLog;
-import org.kendar.llm.harness.settings.ProjectMcpTrust;
 import org.kendar.llm.harness.state.StateStore;
 
 /**
@@ -21,14 +20,33 @@ import org.kendar.llm.harness.state.StateStore;
 public record SqlStores(Database database, UserRepository users, RoleRepository roles, SkillRepository skills,
                         LoginSessionRepository sessions, TokenStore tokens, SqlSettingsSource settings,
                         SqlSettingsSink settingsSink,
-                        ProjectMcpTrust mcpTrust, ChatSessionStore chats, StateStore state, MnemonicStore mnemonic,
-                        SubAgentRunLog subAgentRuns, PluginStorages pluginStorages) implements AutoCloseable {
+                        ChatSessionStore chats, StateStore state, MnemonicStore mnemonic,
+                        SubAgentRunLog subAgentRuns, PluginStorages pluginStorages,
+                        SqlInstructionRepository instructions, SqlAgentRepository agents,
+                        SqlConfigProvider config) implements AutoCloseable {
 
     public static SqlStores of(Database db, TokenCipher tokenCipher) {
-        return new SqlStores(db, new SqlUserRepository(db), new SqlRoleRepository(db), new SqlSkillRepository(db),
-                new SqlLoginSessionRepository(db), new SqlTokenStore(db, tokenCipher), new SqlSettingsSource(db),
-                new SqlSettingsSink(db), new SqlProjectMcpTrust(db), new SqlChatStores.Sessions(db), new SqlChatStores.State(db),
-                new SqlChatStores.Mnemonic(db), new SqlChatStores.Runs(db), new SqlPluginStorage(db));
+        var skills = new SqlSkillRepository(db);
+        var settings = new SqlSettingsSource(db);
+        var plugins = new SqlPluginStorage(db);
+        var instructions = new SqlInstructionRepository(db);
+        var agents = new SqlAgentRepository(db);
+        return new SqlStores(db, new SqlUserRepository(db), new SqlRoleRepository(db), skills,
+                new SqlLoginSessionRepository(db), new SqlTokenStore(db, tokenCipher), settings,
+                new SqlSettingsSink(db), new SqlChatStores.Sessions(db), new SqlChatStores.State(db),
+                new SqlChatStores.Mnemonic(db), new SqlChatStores.Runs(db), plugins, instructions, agents,
+                new SqlConfigProvider(settings, instructions, agents, skills, plugins, sqliteFiles(db.config())));
+    }
+
+    /** The SQLite file and its directory (what the server keeps on disk); empty for another database or memory. */
+    private static java.util.List<java.nio.file.Path> sqliteFiles(SqlConfig config) {
+        String url = config.jdbcUrl();
+        String prefix = "jdbc:sqlite:";
+        if (!url.startsWith(prefix) || url.contains(":memory:")) return java.util.List.of();
+        String file = url.substring(prefix.length());
+        int q = file.indexOf('?');
+        if (q >= 0) file = file.substring(0, q);
+        return java.util.List.of(java.nio.file.Path.of(file).toAbsolutePath().normalize());
     }
 
     /** Opens the database (creating the schema when missing) and builds the stores. */

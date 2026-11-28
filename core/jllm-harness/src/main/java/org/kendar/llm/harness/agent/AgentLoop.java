@@ -77,6 +77,8 @@ public class AgentLoop {
      * @param scopedInstructions adds the instruction files of the directories the file tools work in; null = off
      * @param inputValidator    checks the arguments of tool calls
      * @param noisePruner       removes no-information shell commands from the context after each main-agent run
+     * @param runPolicy         process level switches (unattended, skip permissions); null = {@link RunPolicy#NORMAL}
+     * @param documentExtensions extensions of the files a document reader turns into text; null = none
      */
     public record Deps(HarnessConfig config, ModelClient model, ContextStrategy context, ToolSelector toolSelector,
                        PermissionGate gate, ApprovalService approvals, ChatSessionService sessions,
@@ -85,7 +87,8 @@ public class AgentLoop {
                        HarnessMetrics metrics, String systemPrompt, Hooks hooks, ToolClassifier classifier,
                        Identity identity, Collection<HarnessTool> harnessTools,
                        Collection<HarnessTool> builtinFileTools, ScopedInstructions scopedInstructions,
-                       ToolInputValidator inputValidator, NoiseCommandPruner noisePruner, StuckJudge stuckJudge) {
+                       ToolInputValidator inputValidator, NoiseCommandPruner noisePruner, StuckJudge stuckJudge,
+                       RunPolicy runPolicy, java.util.function.Supplier<List<String>> documentExtensions) {
         public Deps {
             systemPrompt = systemPrompt == null ? "" : systemPrompt;
             hooks = hooks == null ? Hooks.NONE : hooks;
@@ -95,6 +98,20 @@ public class AgentLoop {
             if (builtinFileTools != null) files.addAll(builtinFileTools);
             builtinFileTools = files;
             inputValidator = inputValidator == null ? new JsonSchemaToolInputValidator() : inputValidator;
+            runPolicy = runPolicy == null ? RunPolicy.NORMAL : runPolicy;
+            documentExtensions = documentExtensions == null ? List::of : documentExtensions;
+        }
+
+        /** Who can answer the permission questions of a chat: nobody when the process or the user's role is unattended. */
+        public RunAttendance attendanceOf(String chatId) {
+            return runPolicy.unattended() || identity.policyOf(chatId).unattended()
+                    ? RunAttendance.UNATTENDED : RunAttendance.ATTENDED;
+        }
+
+        /** The system text of a chat: the static one, then the instructions of the chat's role and user. */
+        public String systemPromptFor(String chatId) {
+            String own = identity.policyOf(chatId).instructionsText();
+            return own.isBlank() ? systemPrompt : systemPrompt + "\n\n" + own;
         }
     }
 
@@ -207,9 +224,12 @@ public class AgentLoop {
         boolean failed = true;
         Outcome outcome;
         try {
+            // the role's modes limit the run, whatever mode the chat holds
+            PermissionMode mode = deps.identity().policyOf(chatId).clampMode(PermissionMode.parse(session.mode()));
             LoopResult r = loop(new LoopRequest(chatId, messages, () -> offer.chatTools(chatId, userText),
-                    sessions.pinnedPrefix(session), deps.systemPrompt(), PermissionMode.parse(session.mode()), sink,
-                    cancelled, true, true, HookContext.MAIN, deps.model(), new int[]{0}, null, inbox, null));
+                    sessions.pinnedPrefix(session), deps.systemPromptFor(chatId), mode, sink,
+                    cancelled, true, deps.attendanceOf(chatId), HookContext.MAIN, deps.model(), new int[]{0}, null, inbox,
+                    null));
             answer = r.text();
             outcome = r.outcome();
             failed = false;
@@ -236,7 +256,7 @@ public class AgentLoop {
             String scratch = SubAgentRunner.scratchId(session.agentId());
             ToolContext t = new ToolContext(chatId, sandbox.workDir(chatId), sandbox.scratchDir(chatId, scratch),
                     mode == PermissionMode.PLAN, null, mode, null, sandbox.files(chatId, scratch));
-            String extra = deps.systemPrompt() + modeNote.of(mode, t);
+            String extra = deps.systemPromptFor(chatId) + modeNote.of(mode, t);
             prefix = new RequestPrefix(sessions.pinnedPrefix(session), extra, offer.chatTools(chatId, ""),
                     deps.model(), !deps.config().parallelToolUse());
         }
@@ -267,13 +287,13 @@ public class AgentLoop {
         var sandbox = deps.sandbox();
         String chatId = req.chatId();
         RunBudget budget = new RunBudget(deps.config().maxTurns(), deps.config().loop().innerCallsPerTurn());
-        LoopRunScope scope = toolExecutor.scope(req.mode(), sink, cancelled, req.interactive(), req.label(), budget);
+        LoopRunScope scope = toolExecutor.scope(req.mode(), sink, cancelled, req.attendance(), req.label(), budget);
         ToolContext tctx = new ToolContext(chatId, sandbox.workDir(chatId), sandbox.scratchDir(chatId, scratchId),
                 req.mode() == PermissionMode.PLAN, null, req.mode(), new AgentRun(sink, cancelled, contextKey),
                 sandbox.files(chatId, scratchId)).withScope(scope).withLinks(deps.config().externalLinks())
                 .withUnconfined(!sandbox.confinesPaths())
                 .withHosts(new ChatHostApprover(deps.approvals(), deps.metrics(), deps.mapper(), chatId, sink,
-                        cancelled, req.interactive(), req.label()));
+                        cancelled, req.attendance().asks(), req.label()));
         // the mode goes after the cached system prefix, so switching modes does not invalidate the prompt cache
         String turnExtra = req.frame() != null ? req.frame().turnExtra() : req.extra() + modeNote.of(req.mode(), tctx);
         String agentName = req.label() == null ? HookContext.MAIN : req.label();
@@ -281,7 +301,7 @@ public class AgentLoop {
                 cancelled instanceof CancelToken ct ? ct : CancelToken.NONE,
                 new StuckDetector(deps.config().loop().stuck()), agentName, budget);
         guards.clear(chatId, agentName);
-        while (!budget.exhausted() || guards.continueAfterLimit(budget, chatId, req.interactive(), sink, cancelled,
+        while (!budget.exhausted() || guards.continueAfterLimit(budget, chatId, req.attendance().asks(), sink, cancelled,
                 req.label())) {
             budget.startTurn();
             if (cancelled.getAsBoolean()) {

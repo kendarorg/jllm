@@ -1,0 +1,10 @@
+{
+  "tools" : [ "run_js", "bash", "read_file", "write_file", "edit_file", "ls", "glob", "grep", "grep_code" ],
+  "readOnly" : false,
+  "approval" : "ask",
+  "sandbox" : {
+    "kind" : "docker-isolated",
+    "scope" : "user",
+    "network" : "none"
+  }
+}

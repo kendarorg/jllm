@@ -32,8 +32,8 @@ public class JllmWebApplication {
 
     /** The flags the CLI takes too, spelled the same (CLI-only: --mode, --prompt, --sandbox-clean, --sandbox-clean-all). */
     static final String USAGE = "Usage: jllm-web [--provider anthropic|openai|openaiGpt62|gemini|grok|qwen|llamacpp|ollama] [--model M] "
-            + "[--base-url U] [--api-key K] [--workdir DIR] [--system-prompt TEXT] [--max-turns N] "
-            + "[--context-tokens TOKENS] [--search-api-key BRAVE_KEY] [--settings FILE] "
+            + "[--base-url U] [--api-key K] [--chats-dir DIR] [--system-prompt TEXT] [--max-turns N] "
+            + "[--context-tokens TOKENS] [--search-api-key BRAVE_KEY] [--import-config DIR] "
             + "[--context-strategy compaction|mnemonic|scope] [--max-tokens TOKENS] [--small-model] "
             + "[--docker-image IMAGE] [--docker-scope chat|user] "
             + "[--docker-remote] [--docker-remote-host ADDRESS]"
@@ -47,8 +47,45 @@ public class JllmWebApplication {
                 return;
             }
         }
+        String importDir = importConfig(args);
+        if (importDir != null) {
+            // one-time import: no key to ask for, no public port; the process ends when the import is done
+            args = withImport(args, importDir);
+            System.exit(SpringApplication.exit(SpringApplication.run(JllmWebApplication.class, args)));
+        }
         waitForApiKey(args);
         SpringApplication.run(JllmWebApplication.class, args);
+    }
+
+    /** The folder of {@code --import-config DIR} or {@code --import-config=DIR}; null when absent. */
+    static String importConfig(String[] args) {
+        for (int i = 0; i < args.length; i++) {
+            if (args[i].startsWith("--import-config=")) return args[i].substring("--import-config=".length());
+            if (args[i].equals("--import-config")) {
+                if (i + 1 >= args.length || args[i + 1].startsWith("--")) {
+                    throw new IllegalArgumentException("--import-config needs the folder to import");
+                }
+                return args[i + 1];
+            }
+        }
+        return null;
+    }
+
+    /** The arguments without the import flag, plus the properties that make the run an import on a private port. */
+    static String[] withImport(String[] args, String dir) {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        for (int i = 0; i < args.length; i++) {
+            if (args[i].startsWith("--import-config=")) continue;
+            if (args[i].equals("--import-config")) {
+                i++;
+                continue;
+            }
+            out.add(args[i]);
+        }
+        out.add("--jllm.import-config=" + dir);
+        out.add("--server.port=0");
+        out.add("--server.address=127.0.0.1");
+        return out.toArray(String[]::new);
     }
 
     /**

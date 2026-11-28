@@ -8,12 +8,12 @@ import org.kendar.llm.harness.identity.LoginSessionRepository;
 import org.kendar.llm.harness.identity.RoleRepository;
 import org.kendar.llm.harness.identity.SkillRepository;
 import org.kendar.llm.harness.identity.UserRepository;
-import org.kendar.llm.harness.plugin.PluginStorages;
 import org.kendar.llm.harness.session.ChatSessionStore;
 import org.kendar.llm.harness.session.SubAgentRunLog;
-import org.kendar.llm.harness.settings.ProjectMcpTrust;
+import org.kendar.llm.harness.settings.AgentRepository;
+import org.kendar.llm.harness.settings.ConfigProvider;
+import org.kendar.llm.harness.settings.InstructionRepository;
 import org.kendar.llm.harness.settings.SettingsSink;
-import org.kendar.llm.harness.settings.SettingsSource;
 import org.kendar.llm.harness.state.StateStore;
 import org.kendar.llm.web.sql.SqlConfig;
 import org.kendar.llm.web.sql.SqlStores;
@@ -98,20 +98,26 @@ public class JllmSqlAutoConfiguration {
         return s.tokens();
     }
 
+    /** The configuration of the web host: settings, instructions, agents, skills and plugin storage, all in SQL. */
     @Bean
-    public SettingsSource sqlSettingsSource(SqlStores s) {
-        return s.settings();
+    public ConfigProvider sqlConfigProvider(SqlStores s) {
+        return s.config();
+    }
+
+    @Bean
+    public InstructionRepository sqlInstructionRepository(SqlStores s) {
+        return s.instructions();
+    }
+
+    @Bean
+    public AgentRepository sqlAgentRepository(SqlStores s) {
+        return s.agents();
     }
 
     /** The settings an administrator edits at runtime: table {@code settings_section}. */
     @Bean
     public SettingsSink sqlSettingsSink(SqlStores s) {
         return s.settingsSink();
-    }
-
-    @Bean
-    public ProjectMcpTrust sqlProjectMcpTrust(SqlStores s) {
-        return s.mcpTrust();
     }
 
     @Bean
@@ -132,10 +138,5 @@ public class JllmSqlAutoConfiguration {
     @Bean
     public SubAgentRunLog sqlSubAgentRunLog(SqlStores s) {
         return s.subAgentRuns();
-    }
-
-    @Bean
-    public PluginStorages sqlPluginStorages(SqlStores s) {
-        return s.pluginStorages();
     }
 }

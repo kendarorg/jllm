@@ -38,14 +38,21 @@ class ToolOutputSafetyTest {
         }));
     }
 
+    /** Answers the tool questions with {@code approve}; the flagged output of {@code fetch} is always used as it is. */
     private Events answering(boolean approve) {
         Events ev = new Events();
         ev.also = (type, data) -> {
             if ("approval_request".equals(type)) {
-                assertTrue(rig.approvals.resolve(chatId, data.get("id").asText(), approve, null, false, false));
+                boolean ok = "tainted".equals(data.path("type").asText()) || approve;
+                assertTrue(rig.approvals.resolve(chatId, data.get("id").asText(), ok, null, false, false));
             }
         };
         return ev;
+    }
+
+    /** The questions about a tool call (not about flagged output). */
+    private static List<JsonNode> toolAsks(Events ev) {
+        return ev.ofType("approval_request").stream().filter(a -> "tool".equals(a.path("type").asText())).toList();
     }
 
     private static JsonNode toolResult(ArrayNode m) {
@@ -57,8 +64,10 @@ class ToolOutputSafetyTest {
         setUp("wrap", true);
         rig.model.enqueue(toolUse("t1", "fetch", "{}"), text("ok"));
 
-        rig.loop.run(chatId, "go", new Events(), () -> false, null);
+        Events ev = answering(true);
+        rig.loop.run(chatId, "go", ev, () -> false, null);
 
+        assertEquals("tainted", ev.ofType("approval_request").get(0).path("type").asText(), "flagged output asks");
         String content = toolResult(rig.model.requests.get(1).messages()).get("content").asText();
         assertTrue(content.startsWith("<tool_output source=\"fetch\" trust=\"untrusted\""), content);
         assertTrue(content.contains("[WARNING:"));
@@ -73,7 +82,7 @@ class ToolOutputSafetyTest {
 
         rig.loop.run(chatId, "go", ev, () -> false, null);
 
-        assertEquals(1, ev.ofType("approval_request").size());
+        assertEquals(1, toolAsks(ev).size());
         assertEquals(0, shellRuns.get());
     }
 
@@ -103,11 +112,11 @@ class ToolOutputSafetyTest {
     void gatingCanBeDisabled() {
         setUp("wrap", false);
         rig.model.enqueue(toolUse("t1", "fetch", "{}"), toolUse("t2", "shell", "{}"), text("done"));
-        Events ev = new Events();
+        Events ev = answering(true);
 
         rig.loop.run(chatId, "go", ev, () -> false, null);
 
-        assertTrue(ev.ofType("approval_request").isEmpty());
+        assertTrue(toolAsks(ev).isEmpty());
         assertEquals(1, shellRuns.get());
     }
 
@@ -125,13 +134,13 @@ class ToolOutputSafetyTest {
     void taintCarriesToTheNextRunWhileTheOutputIsInTheContext() {
         setUp("wrap", true);
         rig.model.enqueue(toolUse("t1", "fetch", "{}"), text("ok"), toolUse("t2", "shell", "{}"), text("done"));
-        rig.loop.run(chatId, "first", new Events(), () -> false, null);
+        rig.loop.run(chatId, "first", answering(true), () -> false, null);
         Events ev = answering(false);
 
         // "continue": the injected text is still in the conversation
         rig.loop.run(chatId, "second", ev, () -> false, null);
 
-        assertEquals(1, ev.ofType("approval_request").size());
+        assertEquals(1, toolAsks(ev).size());
         assertEquals(0, shellRuns.get());
     }
 
@@ -139,7 +148,7 @@ class ToolOutputSafetyTest {
     void taintEndsWhenTheOutputLeftTheContext() {
         setUp("wrap", true);
         rig.model.enqueue(toolUse("t1", "fetch", "{}"), text("ok"), toolUse("t2", "shell", "{}"), text("done"));
-        rig.loop.run(chatId, "first", new Events(), () -> false, null);
+        rig.loop.run(chatId, "first", answering(true), () -> false, null);
         // compaction cleared the untrusted result
         ArrayNode log = rig.sessions.messages(rig.sessions.get(chatId));
         for (JsonNode m : log) {
@@ -174,7 +183,7 @@ class ToolOutputSafetyTest {
 
         rig.loop.run(chatId, "go", ev, () -> false, null);
 
-        assertEquals(1, ev.ofType("approval_request").size());
+        assertEquals(1, toolAsks(ev).size());
         assertEquals(0, shellRuns.get());
     }
 }

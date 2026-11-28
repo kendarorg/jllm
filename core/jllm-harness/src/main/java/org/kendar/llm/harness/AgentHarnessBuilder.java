@@ -73,6 +73,7 @@ public final class AgentHarnessBuilder {
     private String systemPrompt = "";
     private String systemPromptReplace;
     private boolean smallModel;
+    private List<String> scopedInstructionFiles;
     private ObjectMapper mapper = new ObjectMapper();
     private HarnessSettings settings = HarnessSettings.empty();
     /** The file {@link #settings(Path)} read: scanned at {@link #build()}. */
@@ -196,6 +197,28 @@ public final class AgentHarnessBuilder {
     /** What {@link #build()} decided about plugins (null before). */
     public PluginLoader.Result pluginResult() {
         return pluginSummary;
+    }
+
+    private org.kendar.llm.harness.agent.RunPolicy runPolicy = org.kendar.llm.harness.agent.RunPolicy.NORMAL;
+
+    /**
+     * Nobody can answer a permission question of any chat of this harness (the command line with {@code --prompt},
+     * piped input or CI): every call that would ask is denied and the model gets the denial. Default false. The web
+     * host does not use it: its chats are unattended per role.
+     */
+    public AgentHarnessBuilder unattended(boolean unattended) {
+        runPolicy = new org.kendar.llm.harness.agent.RunPolicy(unattended, runPolicy.skipPermissions());
+        return this;
+    }
+
+    /**
+     * Command line {@code --dangerously-skip-permissions}: a call that would ask is allowed (explicit deny rules, hook
+     * denials and the administrator's deny still apply). Default false; only the command line calls this, the web host
+     * has no way to.
+     */
+    public AgentHarnessBuilder dangerouslySkipPermissions(boolean skip) {
+        runPolicy = new org.kendar.llm.harness.agent.RunPolicy(runPolicy.unattended(), skip);
+        return this;
     }
 
     /** Registers a reader that lets {@code read_file} extract text from a binary format. */
@@ -336,6 +359,15 @@ public final class AgentHarnessBuilder {
     }
 
     /**
+     * The file names the scoped instructions look for in the directories the file tools work in, when the settings'
+     * {@code instructionFiles} do not say (a host that loads no instruction file from disk). Null = the settings'.
+     */
+    public AgentHarnessBuilder scopedInstructionFiles(List<String> names) {
+        this.scopedInstructionFiles = names == null ? null : List.copyOf(names);
+        return this;
+    }
+
+    /**
      * Replaces the built-in {@code system-prompt.md}. Drops its tool-usage guidance; the small-model rules, the
      * addendum, instruction files and strategy notes still follow it.
      */
@@ -413,7 +445,8 @@ public final class AgentHarnessBuilder {
                     plugins.hooks, fastClient, subAgentRunLog, approvalPolicy, contentWarnings, plugins.services,
                     stateStore, contextStrategy, mnemonicStore, scopeOptions, systemPrompt, systemPromptReplace,
                     smallModel, inputValidators, defaultInputValidator, models, box, sessions, tools,
-                    auth.identity()));
+                    auth.identity(), scopedInstructionFiles, runPolicy, plugins.documentReaders::extensions));
+            sessions.policies(auth.identity()::policyOf);
             HarnessAuth facade = new HarnessAuth(auth.tokenStore(), auth.oauth(), auth.multiUser(),
                     AuthAssembler.logins(auth.oauth()), sources, wired.service());
             AgentHarness harness = new AgentHarness(new HarnessParts(wired.service(), sessions, tools.registry(),

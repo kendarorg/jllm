@@ -130,14 +130,16 @@ class OAuthWebTest {
         Gate gate = new Gate(auth, auth, harness.sessions());
         mvc = MockMvcBuilders.standaloneSetup(
                         new AuthController(new AuthApi(users, auth, sessions, new LoginThrottle(),
-                                new org.kendar.llm.web.commons.auth.OidcProperties(null, null))),
+                                new org.kendar.llm.web.commons.auth.OidcProperties(null, null),
+                                java.time.Duration.ofDays(30), java.time.Clock.systemUTC()),
+                                org.kendar.llm.web.commons.ClientAddress.direct()),
                         new AdminController(new AdminApi(users, permissions, skills, sessions, harness, catalog,
                                 new org.kendar.llm.web.commons.auth.RoleMappingSettings(
-                                        org.kendar.llm.web.commons.auth.RoleMappingProperties.NONE, null, null))),
+                                        org.kendar.llm.web.commons.auth.RoleMappingProperties.NONE, null, null), new LoginThrottle())),
                         new ChatController(new ChatApi(harness, MAPPER, new HarnessPricing(0, 0, 0, 0), auth), auth),
                         oauth)
                 .setControllerAdvice(new ApiExceptionAdvice())
-                .addInterceptors(new ApiInterceptor(gate, auth, MAPPER, false, true),
+                .addInterceptors(new ApiInterceptor(gate, auth, MAPPER, false, true, null),
                         new MappedInterceptor(new String[]{"/api/admin/**"}, new AdminInterceptor(gate, auth, MAPPER)))
                 .build();
     }
@@ -174,7 +176,7 @@ class OAuthWebTest {
 
     private static JllmProperties props(String publicUrl) {
         return new JllmProperties(null, null, null, null, null, null, null, null, null, null, null, null, null, null,
-                null, null, null, null, null, null, null, null, null, null, new JllmProperties.Web(publicUrl, null, null, null));
+                null, null, null, null, null, null, null, new JllmProperties.Web(publicUrl, null, null, null, null, null, null));
     }
 
     private Cookie signIn(String id) throws Exception {

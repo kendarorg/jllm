@@ -105,7 +105,8 @@ public final class RemoteFileBackend implements FileBackend {
     private DaemonClient.Response send(String method, String path, Map<String, String> query, byte[] body,
                                        String contentType) throws IOException {
         try {
-            DaemonClient.Response r = client.get().call(method, path, query, body, contentType, TIMEOUT);
+            DaemonClient.Response r = client.get().call(method, path, query, body, contentType, TIMEOUT,
+                    DaemonClient.MAX_FILE_RESPONSE);
             if (r.status() == 200) return r;
             String msg = errorOf(r);
             switch (r.status()) {

@@ -32,10 +32,12 @@ public record JsSettings(long statementLimit, int maxTimeoutSeconds, int gracefu
 
     /** The {@code engine} setting. */
     public enum EngineChoice {
-        /** Isolate if the runtime has one, else constrained. */
-        AUTO,
+        /**
+         * Explicit opt-in, trusted single-user setups only: GraalJS in the JVM's heap with the CONSTRAINED policy. It is
+         * not a security boundary against hostile scripts (the isolate is), and it is never picked automatically.
+         */
         CONSTRAINED,
-        /** Disables the tool, with a reason, when there is no isolate: never a silent downgrade. */
+        /** The default: the isolate. Disables the tool, with a reason, when there is none: fail closed, no downgrade. */
         ISOLATED
     }
 
@@ -50,7 +52,7 @@ public record JsSettings(long statementLimit, int maxTimeoutSeconds, int gracefu
     private static final long MIB = 1024L * 1024L;
 
     public static JsSettings defaults() {
-        return new JsSettings(1_000_000L, 120, 10, true, 300, 200, 4, EngineChoice.AUTO, Policy.ISOLATED,
+        return new JsSettings(1_000_000L, 120, 10, true, 300, 200, 4, EngineChoice.ISOLATED, Policy.ISOLATED,
                 256 * MIB, 1024 * MIB, 2000, 1000, 1024 * MIB, 0.85);
     }
 

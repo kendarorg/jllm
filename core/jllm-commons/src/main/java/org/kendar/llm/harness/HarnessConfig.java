@@ -13,10 +13,10 @@ public record HarnessConfig(String agentId, int maxTurns, int maxTokens, boolean
                             ContextStrategyKind contextStrategy, Mnemonic mnemonic, boolean useContextStack,
                             Loop loop, ExternalLinks externalLinks) {
 
-    /** @param localDirSandboxAllowed allow falling back to a plain local directory when docker is unavailable */
+    /** @param localDirSandboxAllowed allow falling back to the shared-local sandbox when docker is unavailable (default false) */
     public record Sandbox(String baseDir, int timeoutSeconds, boolean localDirSandboxAllowed, Docker docker) {
         public static Sandbox defaults() {
-            return new Sandbox(System.getProperty("java.io.tmpdir") + "/agent-harness", 120, true, Docker.defaults());
+            return new Sandbox(System.getProperty("java.io.tmpdir") + "/agent-harness", 120, false, Docker.defaults());
         }
     }
 
@@ -69,11 +69,16 @@ public record HarnessConfig(String agentId, int maxTurns, int maxTokens, boolean
      * @param action            {@code stop}, {@code backup-remove} (back the workspace up and commit an image, then
      *                          remove the container; both are restored on next use) or {@code remove}
      * @param retentionDays     days a backup (tarball and image) is kept; 0 = forever
-     * @param maxWorkspaceBytes largest workspace (volume) allowed; 0 = no limit. Checked at backup and by the sweep
+     * @param maxWorkspaceBytes largest workspace (volume) allowed, default {@link #DEFAULT_MAX_WORKSPACE_BYTES}; 0 = no
+     *                          limit on the workspace, but a backup download is still capped at that default. Checked at
+     *                          backup and by the sweep
      */
     public record Cleanup(int idleMinutes, String action, int retentionDays, long maxWorkspaceBytes) {
+        /** 1 GiB. */
+        public static final long DEFAULT_MAX_WORKSPACE_BYTES = 1024L * 1024 * 1024;
+
         public static Cleanup defaults() {
-            return new Cleanup(0, "stop", 0, 0);
+            return new Cleanup(0, "stop", 0, DEFAULT_MAX_WORKSPACE_BYTES);
         }
     }
 
@@ -120,9 +125,11 @@ public record HarnessConfig(String agentId, int maxTurns, int maxTokens, boolean
      * @param eventMaxChars tool output carried by the {@code tool_result} event sent to the front end
      * @param validation    check of tool-call arguments against the tool schema: {@code off}, {@code lenient}
      *                      (default: repairs "5" for 5 and the like) or {@code strict}; {@code /validation} overrides it per chat
+     * @param taintDocuments the text a document reader extracted ({@code read_file} on a pdf, docx...) taints the chat
+     *                      like outside content (default false)
      */
     public record Output(int toolMaxChars, int eventMaxChars, String sanitize, boolean taintGating,
-                         java.util.List<String> extraPatterns, String validation) {
+                         java.util.List<String> extraPatterns, String validation, boolean taintDocuments) {
         public Output {
             if (sanitize == null || sanitize.isBlank()) sanitize = "wrap";
             extraPatterns = extraPatterns == null ? java.util.List.of() : java.util.List.copyOf(extraPatterns);
@@ -131,11 +138,11 @@ public record HarnessConfig(String agentId, int maxTurns, int maxTokens, boolean
 
         public Output(int toolMaxChars, int eventMaxChars, String sanitize, boolean taintGating,
                       java.util.List<String> extraPatterns) {
-            this(toolMaxChars, eventMaxChars, sanitize, taintGating, extraPatterns, "lenient");
+            this(toolMaxChars, eventMaxChars, sanitize, taintGating, extraPatterns, "lenient", false);
         }
 
         public Output(int toolMaxChars, int eventMaxChars) {
-            this(toolMaxChars, eventMaxChars, "wrap", true, java.util.List.of(), "lenient");
+            this(toolMaxChars, eventMaxChars, "wrap", true, java.util.List.of(), "lenient", false);
         }
 
         public static Output defaults() {

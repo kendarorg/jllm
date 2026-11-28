@@ -56,7 +56,9 @@ final class LoopAssembler {
                 String systemPrompt, String systemPromptReplace, boolean smallModel,
                 List<ToolInputValidator> inputValidators, boolean defaultInputValidator,
                 ModelAssembler.Models models, SandboxExecutor box, ChatSessionService sessions,
-                ToolAssembler.Tools tools, Identity identity) {
+                ToolAssembler.Tools tools, Identity identity, List<String> scopedInstructionFiles,
+                org.kendar.llm.harness.agent.RunPolicy runPolicy,
+                java.util.function.Supplier<List<String>> documentExtensions) {
     }
 
     record Wired(AgentLoop loop, AgentService service, ContextStrategy context) {
@@ -110,14 +112,15 @@ final class LoopAssembler {
             noisePruner = new NoiseCommandPruner(sessions, new NoiseQualifier(summary), mapper);
         }
         ScopedInstructions scopedInstructions = settings.scopedInstructions()
-                ? new ScopedInstructions(settings.instructionFiles(), settings.scopedInstructionsDepth(),
+                ? new ScopedInstructions(s.scopedInstructionFiles() != null ? s.scopedInstructionFiles()
+                : settings.instructionFiles(), settings.scopedInstructionsDepth(),
                 instructionFiles) : null;
         AgentLoop loop = new AgentLoop(new AgentLoop.Deps(config, model, context, selector,
                 new PermissionGate(s.approvalPolicy(), s.tools().permissionRules()), approvals, sessions, s.box(),
                 registry, subAgentTool, requestToolGroup, s.subAgentRunLog(), mapper, s.metrics(), prompt, s.hooks(),
                 fast == null ? null : new ToolClassifier(fast, mapper), s.identity(), todoTools,
                 s.tools().fileTools(), scopedInstructions, inputValidator(s), noisePruner,
-                fast == null ? null : new StuckJudge(fast, mapper)));
+                fast == null ? null : new StuckJudge(fast, mapper), s.runPolicy(), s.documentExtensions()));
         ref[0] = loop;
         stopHooks(s, loop);
         AgentService service = new AgentService(loop, sessions, approvals, mapper, config, maxParallel);

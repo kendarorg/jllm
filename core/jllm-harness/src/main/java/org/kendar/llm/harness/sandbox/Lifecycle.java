@@ -5,10 +5,19 @@ public interface Lifecycle {
 
     /**
      * After the user agreed to run without isolation because the container sandbox is unavailable: from now on this chat
-     * uses the host directories and plain processes. Returns false when the runner has no such fallback or the
-     * configuration forbids it ({@code localDirSandboxAllowed}).
+     * runs its commands in a {@link SharedLocalSandbox} (minimal environment, confined where the OS allows it) in the host
+     * directories. Returns false when the runner has no such fallback, it is not {@link #localFallbackAllowed} or the
+     * shared-local sandbox cannot start (Linux without a working bwrap).
      */
     default boolean allowLocalFallback(String chatId) {
+        return false;
+    }
+
+    /**
+     * Whether the configuration (the CLI) or the role of the chat (the web, set by an administrator) lets the chat
+     * continue in a {@link SharedLocalSandbox} when the container sandbox is unavailable. Never the plain host.
+     */
+    default boolean localFallbackAllowed(String chatId) {
         return false;
     }
 
@@ -35,6 +44,15 @@ public interface Lifecycle {
 
     /** Releases resources held by the runner (web containers); a kept CLI container stays. */
     default void close() {
+    }
+
+    /**
+     * Whether commands of the chat can reach the network (and so fetch outside content, or send data out). A shell
+     * result is then treated like other outside content: it taints the chat. A plain host shell is not tracked here
+     * (false): it is not a sandbox, and each command asks in the default modes.
+     */
+    default boolean networkAccess(String chatId) {
+        return false;
     }
 
     /**

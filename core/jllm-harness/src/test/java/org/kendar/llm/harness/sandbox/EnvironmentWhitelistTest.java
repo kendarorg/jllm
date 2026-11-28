@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.kendar.llm.harness.settings.HarnessSettings;
 import org.kendar.llm.harness.settings.HarnessSettingsLoader;
+import org.kendar.llm.harness.util.EnvWhitelist;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -26,10 +27,13 @@ class EnvironmentWhitelistTest {
     }
 
     @Test
-    void allVariablesAreInheritedByDefault() {
+    void onlyTheDefaultVariablesAreInheritedByDefault() {
         LocalSandboxExecutor box = LocalSandboxExecutor.of(config(base));
 
-        assertTrue(names(box).size() > 3);
+        java.util.Set<String> allowed = new java.util.HashSet<>();
+        EnvWhitelist.defaults().forEach(n -> allowed.add(n.toUpperCase()));
+        allowed.addAll(java.util.Set.of("PWD", "_", "SHLVL", "OLDPWD", "PROMPT"));
+        assertTrue(names(box).stream().allMatch(n -> allowed.contains(n.toUpperCase())), names(box).toString());
     }
 
     @Test
@@ -57,9 +61,10 @@ class EnvironmentWhitelistTest {
     }
 
     @Test
-    void settingsDefaultToAllAndReadBothLists() throws Exception {
-        assertEquals(List.of("*"), HarnessSettings.empty().whitelistedEnvVars());
-        assertEquals(List.of("*"), HarnessSettings.empty().toolsWhitelistedEnvVars());
+    void settingsDefaultToTheMinimalSetAndReadBothLists() throws Exception {
+        assertEquals(EnvWhitelist.defaults(), HarnessSettings.empty().whitelistedEnvVars());
+        assertEquals(EnvWhitelist.defaults(), HarnessSettings.empty().toolsWhitelistedEnvVars());
+        assertTrue(EnvWhitelist.defaults().containsAll(List.of("PATH", "HOME", "LANG", "TERM")));
         Path f = base.resolve("s.json");
         Files.writeString(f, "{\"whitelistedEnvVars\":[\"PATH\",\"*key*test\"],\"toolsWhitelistedEnvVars\":[]}");
 

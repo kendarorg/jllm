@@ -6,6 +6,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.kendar.llm.harness.util.BoundedBody;
+
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -40,6 +42,8 @@ public final class McpHttpClient implements McpClient {
     static final String NO_PRINCIPAL = "";
     /** Most principal sessions kept; the least recently used beyond it is closed. */
     static final int MAX_SESSIONS = 256;
+    /** Largest response body read from an MCP server; a larger one fails the call. */
+    static final long MAX_RESPONSE_BYTES = 32L * 1024 * 1024;
     /** A principal session unused this long is closed. */
     static final long IDLE_NANOS = java.util.concurrent.TimeUnit.MINUTES.toNanos(15);
 
@@ -308,12 +312,17 @@ public final class McpHttpClient implements McpClient {
         }
         HttpRequest request = b.POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body))).build();
         try {
-            return http.send(request, HttpResponse.BodyHandlers.ofString());
+            return http.send(request, BoundedBody.ofString(MAX_RESPONSE_BYTES));
         } catch (HttpTimeoutException e) {
             // A request timeout may mean the server is still working on it: repeating it could run a tool twice.
             if (!(e instanceof HttpConnectTimeoutException)) throw e;
             throw new SessionLost("MCP " + url + " connection failed: " + e, session, e);
         } catch (IOException e) {
+            BoundedBody.TooLargeException tooLarge = BoundedBody.tooLarge(e);
+            if (tooLarge != null) { // not a lost session: repeating the call would read the same
+                throw new IOException("MCP " + url + " answered more than " + MAX_RESPONSE_BYTES / (1024 * 1024)
+                        + " MB: " + tooLarge.getMessage(), tooLarge);
+            }
             throw new SessionLost("MCP " + url + " connection failed: " + e, session, e);
         }
     }

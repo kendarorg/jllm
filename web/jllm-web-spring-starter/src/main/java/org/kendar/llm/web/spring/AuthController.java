@@ -1,6 +1,7 @@
 package org.kendar.llm.web.spring;
 
 import jakarta.servlet.http.HttpServletRequest;
+import org.kendar.llm.web.commons.ClientAddress;
 import org.kendar.llm.web.commons.auth.AuthApi;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -15,9 +16,11 @@ import java.util.Map;
 public class AuthController {
 
     private final AuthApi auth;
+    private final ClientAddress addresses;
 
-    public AuthController(AuthApi auth) {
+    public AuthController(AuthApi auth, ClientAddress addresses) {
         this.auth = auth;
+        this.addresses = addresses;
     }
 
     @GetMapping("/api/me")
@@ -28,7 +31,7 @@ public class AuthController {
     @PostMapping("/api/login")
     public ResponseEntity<Map<String, Object>> login(@RequestBody(required = false) Map<String, Object> body,
                                                      HttpServletRequest request) {
-        return Responses.entity(auth.login(body, request.getRemoteAddr(), request.isSecure()));
+        return Responses.entity(auth.login(body, Requests.clientAddress(request, addresses), request.isSecure()));
     }
 
     @PostMapping("/api/logout")

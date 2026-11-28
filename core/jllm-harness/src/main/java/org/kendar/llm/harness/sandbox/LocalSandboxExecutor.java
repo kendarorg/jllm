@@ -121,21 +121,12 @@ public class LocalSandboxExecutor implements SandboxExecutor {
         return run(runDir, command, timeout);
     }
 
-    /** Bytes of command output kept in memory; the complete output goes to a log file beyond this. */
-    static final int CAPTURE_LIMIT = 50 * 1024;
-
-    /**
-     * How long the output is still read after the command exited. A background child that inherited the output pipe
-     * keeps it open: past this the result is returned with the output read so far (the child keeps running).
-     */
-    static final Duration READER_GRACE = Duration.ofSeconds(2);
-
-    private volatile List<String> envWhitelist = org.kendar.llm.harness.util.EnvWhitelist.ALL;
+    private volatile List<String> envWhitelist = org.kendar.llm.harness.util.EnvWhitelist.defaults();
     private volatile long logLimit = TailCapture.DEFAULT_LOG_LIMIT;
 
     @Override
     public void environmentWhitelist(List<String> patterns) {
-        this.envWhitelist = org.kendar.llm.harness.util.EnvWhitelist.orAll(patterns);
+        this.envWhitelist = org.kendar.llm.harness.util.EnvWhitelist.orDefault(patterns);
     }
 
     @Override
@@ -154,36 +145,13 @@ public class LocalSandboxExecutor implements SandboxExecutor {
                     + "(work dirs under {}). Use RemoteExecSandboxExecutor (sandbox.backend=docker) for untrusted input.",
                     layout.location());
         }
-        List<String> cmd = shell.argv(command);
-        Process p = null;
-        TailCapture capture = new TailCapture(CAPTURE_LIMIT, logLimit);
-        try {
-            ProcessBuilder pb = new ProcessBuilder(cmd).directory(dir.toFile()).redirectErrorStream(true);
-            org.kendar.llm.harness.util.EnvWhitelist.apply(pb.environment(), envWhitelist);
-            p = pb.start();
-            p.getOutputStream().close();
-            InputStream stdout = p.getInputStream();
-            CompletableFuture<TailCapture> out = capture.start(stdout);
-            boolean finished = p.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
-            if (!finished) {
-                p.descendants().forEach(ProcessHandle::destroyForcibly);
-                p.destroyForcibly();
-                p.waitFor(5, TimeUnit.SECONDS);
-            }
-            capture.await(out, stdout, finished ? READER_GRACE : Duration.ofSeconds(5));
-            return new ExecutionResult(capture.text(), "", finished ? p.exitValue() : -1, !finished,
-                    capture.omittedLines(), capture.log());
-        } catch (InterruptedException e) {
-            if (p != null) { // cancelled: do not leave the command running
-                p.descendants().forEach(ProcessHandle::destroyForcibly);
-                p.destroyForcibly();
-            }
-            capture.detach();
-            Thread.currentThread().interrupt();
-            return new ExecutionResult("", "Interrupted", -1, false);
-        } catch (Exception e) { // boundary: sandbox boundary: detach, report the failure
-            capture.detach();
-            return new ExecutionResult("", "Execution failed: " + e.getMessage(), -1, false);
-        }
+        ProcessBuilder pb = new ProcessBuilder(shell.argv(command)).directory(dir.toFile()).redirectErrorStream(true);
+        org.kendar.llm.harness.util.EnvWhitelist.apply(pb.environment(), envWhitelist);
+        return ProcessRun.run(pb, timeout, logLimit);
+    }
+
+    /** The shell this runner runs commands with. */
+    LocalShell currentShell() {
+        return shell;
     }
 }

@@ -21,12 +21,13 @@ import org.kendar.llm.harness.session.HistoryRootLock;
 import org.kendar.llm.harness.session.FileHistorySubAgentRunLog;
 import org.kendar.llm.harness.session.InMemorySubAgentRunLog;
 import org.kendar.llm.harness.session.SubAgentRunLog;
-import org.kendar.llm.harness.settings.FileProjectMcpTrust;
-import org.kendar.llm.harness.settings.FileSettingsSource;
+import org.kendar.llm.harness.settings.ConfigProvider;
+import org.kendar.llm.harness.settings.PathSettings;
+import org.kendar.llm.harness.settings.VirtualConfigProvider;
 import org.kendar.llm.harness.settings.HarnessConfigMapper;
 import org.kendar.llm.harness.settings.HarnessSettings;
 import org.kendar.llm.harness.settings.HarnessSettingsLoader;
-import org.kendar.llm.harness.settings.ProjectMcpTrust;
+import org.kendar.llm.harness.settings.FolderTrust;
 import org.kendar.llm.harness.settings.SettingsSink;
 import org.kendar.llm.harness.settings.SettingsSource;
 import org.kendar.llm.harness.state.FileStateStore;
@@ -58,54 +59,61 @@ public final class HarnessFactory {
     }
 
     /**
-     * @param settingsSource where the settings layers are read (null: global, project and the settings file)
+     * @param provider       where the configuration comes from: a {@link VirtualConfigProvider} (database or
+     *                       server-only directory); anything else, or none, stops the start. No file of a working or chat
+     *                       directory is ever read
      * @param settingsSink   the settings an administrator stored at runtime: their sections join the layers last, so a
      *                       stored value wins (null: none). Read when the harness is built
-     * @param projectTrust   where the trust answers are remembered (null: a file)
      * @param sessionStore   the chats (null: files under each chat's history root)
-     * @param pluginStorages the plugins' storage (null: files)
      */
     public static AgentHarness harness(JllmProperties p, ModelClient modelClient, HarnessPricing pricing,
                                        ObjectMapper mapper, HarnessIdentity identity,
-                                       SettingsSource settingsSource,
+                                       ConfigProvider provider,
                                        SettingsSink settingsSink,
-                                       ProjectMcpTrust projectTrust,
                                        ChatSessionStore sessionStore,
                                        SubAgentRunLog subAgentRunLog,
                                        MnemonicStore mnemonicStore,
                                        StateStore stateStore,
-                                       org.kendar.llm.harness.plugin.ServiceRegistry services,
-                                       org.kendar.llm.harness.plugin.PluginStorages pluginStorages) {
-        String settingsFile = JllmProperties.blankToNull(p.settings());
-        Path projectDir = Path.of(p.workdir() == null ? "" : p.workdir()).toAbsolutePath().normalize();
-        // default: global ~/.jllm/settings.json, then project .jllm/settings.json, then the settings file; later wins.
-        // An application keeping the layers elsewhere (a database) supplies a SettingsSource bean, and where the trust
-        // answers are remembered with a ProjectMcpTrust bean.
-        SettingsSource source = settingsSource != null ? settingsSource
-                : new FileSettingsSource(settingsFile == null ? null : Path.of(settingsFile), projectDir);
+                                       org.kendar.llm.harness.plugin.ServiceRegistry services) {
+        if (!(provider instanceof VirtualConfigProvider virtual)) {
+            throw new IllegalStateException("The web host needs a virtual configuration: a SqlConfigProvider (jllm.store=sql) "
+                    + "or a RemoteFileConfigProvider (jllm.store=file), not "
+                    + (provider == null ? "none" : provider.getClass().getSimpleName()));
+        }
+        Path chatsDir = p.chatsPath();
+        java.util.Map<String, Path> serverPaths = new java.util.LinkedHashMap<>();
+        for (Path sp : virtual.serverPaths()) serverPaths.put("the configuration (" + virtual.describe() + ")", sp);
+        String pluginDirName = JllmProperties.blankToNull(p.pluginDir());
+        if (pluginDirName != null) serverPaths.put("jllm.plugin-dir", Path.of(pluginDirName));
+        ChatsDirGuard.check(chatsDir, serverPaths);
+        SettingsSource source = virtualOnly(virtual.settings());
         if (settingsSink != null) source = settingsSink.over(source);
-        // suspicious content in the loaded files: logged, and listed to the users by /api/content-warnings
+        SettingsSource layers = source;
+        SettingsSource checked = () -> {
+            var all = layers.layers();
+            for (var layer : all) PathSettings.check(layer.tree(), layer.origin());
+            return all;
+        };
+        // suspicious content in the settings: logged, and listed to the users by /api/content-warnings
         var contentWarnings = new org.kendar.llm.harness.safety.ContentWarnings();
-        HarnessSettings settings = HarnessSettingsLoader.loadLayered(source, projectDir, System::getenv,
-                ProjectMcpTrust.Prompt.NONE, projectTrust != null ? projectTrust : FileProjectMcpTrust.user(),
+        HarnessSettings settings = HarnessSettingsLoader.loadLayered(checked, null, System::getenv,
+                FolderTrust.Prompt.NONE, null,
                 org.slf4j.LoggerFactory.getLogger(HarnessFactory.class)::warn, contentWarnings);
-        var promptFiles = org.kendar.llm.harness.instructions.SystemPromptFiles.load(projectDir);
-        String promptReplace = JllmProperties.blankToNull(p.systemPromptReplace()) != null
-                ? org.kendar.llm.harness.instructions.SystemPromptFiles.readFile(Path.of(p.systemPromptReplace()))
-                : promptFiles.replace();
+        var instructions = virtual.instructions();
+        String promptReplace = instructions.systemPromptReplace().orElse(null);
         String promptAppend = org.kendar.llm.harness.instructions.SystemPromptFiles.join(
-                org.kendar.llm.harness.instructions.SystemPromptFiles.join(promptFiles.append(),
-                        JllmProperties.blankToNull(p.systemPromptFile()) != null
-                                ? org.kendar.llm.harness.instructions.SystemPromptFiles.readFile(Path.of(p.systemPromptFile()))
-                                : null),
+                org.kendar.llm.harness.instructions.SystemPromptFiles.join(instructions.systemPromptAppend(),
+                        instructions.renderGlobal()),
                 JllmProperties.blankToNull(p.systemPrompt()));
         // same precedence as the CLI: the property wins over the settings file
         var b = withoutStdioMcpServers(withoutExternalLinks(settings)).toBuilder();
+        b.instructionFiles(java.util.List.of()); // no instruction file is read from a disk of the server
+        b.agents(mergeAgents(settings.agents(), virtual.agents().all()));
         if (p.contextTokens() != null && p.contextTokens() > 0) b.maxTokens(p.contextTokens());
         if (JllmProperties.blankToNull(p.contextStrategy()) != null) b.contextStrategy(p.contextStrategy());
         if (Boolean.TRUE.equals(p.smallModel())) b.smallModel(true);
         if (JllmProperties.blankToNull(p.sandbox()) != null) {
-            LOG.warn("jllm.sandbox={} is ignored: on the web the sandbox (none, local, docker-isolated or docker-open) is set per role by an "
+            LOG.warn("jllm.sandbox={} is ignored: on the web the sandbox (none, shared-local, docker-isolated or docker-open) is set per role by an "
                     + "administrator; jllm.docker-* only set the defaults of the docker sandboxes", p.sandbox());
         }
         if (JllmProperties.blankToNull(p.dockerImage()) != null) b.dockerImage(p.dockerImage());
@@ -132,13 +140,14 @@ public final class HarnessFactory {
         if (p.maxTurns() != null && p.maxTurns() > 0) config = config.withMaxTurns(p.maxTurns());
         config = config.withMaxTokens(p.maxTokensOrDefault());
 
-        ChatDirLayout sandbox = new ChatDirLayout(projectDir);
+        ChatDirLayout sandbox = new ChatDirLayout(chatsDir);
         HistoryRootLock.acquire(sandbox.location()); // one process per base directory; held until the process ends
-        // plugins find the host's plugin storage in the shared registry (files unless the application supplies another)
-        services.publish(org.kendar.llm.harness.plugin.PluginStorages.class, pluginStorages != null ? pluginStorages
-                : new org.kendar.llm.harness.plugin.FilePluginStorage(
-                projectDir.resolve(".jllm").resolve("plugin-data"), mapper));
-        AgentHarnessBuilder builder = new AgentHarnessBuilder().services(services);
+        // plugins find the host's plugin storage in the shared registry: the provider's
+        services.publish(org.kendar.llm.harness.plugin.PluginStorages.class, virtual.pluginStorages());
+        // flows may be marked unattended only by administrators and by roles that have the flag
+        services.publish(org.kendar.llm.harness.workflows.UnattendedRoles.class, identity::mayRunUnattended);
+        AgentHarnessBuilder builder = new AgentHarnessBuilder().services(services)
+                .scopedInstructionFiles(HarnessSettings.DEFAULT_INSTRUCTION_FILES);
         if (JllmProperties.blankToNull(p.pluginDir()) != null) builder.pluginDir(Path.of(p.pluginDir()));
         else if (java.nio.file.Files.isDirectory(Path.of("plugins"))) builder.pluginDir(Path.of("plugins"));
         // the sandbox is built before the harness: it asks the chat store, later, whose chat a container belongs to
@@ -148,7 +157,9 @@ public final class HarnessFactory {
                 .config(config)
                 .systemPrompt(promptAppend)
                 .systemPromptReplace(promptReplace)
-                .sandbox(executor(identity, config, sandbox, harnessRef))
+                .sandbox(executor(identity, config, sandbox,
+                        sharedLocalRequired(p, settings.sharedLocalSandbox(), identity.usesSharedLocal()),
+                        p.allowMissingBwrap(), harnessRef))
                 // chat history: files under each chat's history root, unless the application supplies the beans
                 .sessionStore(sessionStore != null ? sessionStore
                         : new FileChatSessionStore(sandbox::historyRoot, () -> chatHistoryRoots(sandbox), mapper))
@@ -170,6 +181,29 @@ public final class HarnessFactory {
         harnessRef.set(harness);
         harness.enforceChatRetention(settings.chatRetentionLimit(), null);
         return harness;
+    }
+
+    /** The settings layers of a virtual provider: a project layer cannot exist (there is no project folder). */
+    private static SettingsSource virtualOnly(SettingsSource base) {
+        return () -> {
+            var all = base.layers();
+            for (var l : all) {
+                if (l.kind() == org.kendar.llm.harness.settings.SettingsLayer.Kind.PROJECT) {
+                    throw new IllegalStateException("Settings " + l.origin() + " is a project layer: the web host has no project folder");
+                }
+            }
+            return all;
+        };
+    }
+
+    /** The agents of the settings, the provider's agents replacing those of the same name. */
+    static java.util.List<org.kendar.llm.harness.settings.AgentSettings> mergeAgents(
+            java.util.List<org.kendar.llm.harness.settings.AgentSettings> fromSettings,
+            java.util.List<org.kendar.llm.harness.settings.AgentSettings> fromProvider) {
+        var out = new java.util.LinkedHashMap<String, org.kendar.llm.harness.settings.AgentSettings>();
+        if (fromSettings != null) fromSettings.forEach(a -> out.put(a.name(), a));
+        fromProvider.forEach(a -> out.put(a.name(), a));
+        return java.util.List.copyOf(out.values());
     }
 
     /** {@code <base>/<chatId>/.jllm/history} of every chat directory below the base; dot-directories (sandbox data) are not chats. */
@@ -194,6 +228,8 @@ public final class HarnessFactory {
      */
     private static org.kendar.llm.harness.sandbox.SandboxExecutor executor(HarnessIdentity identity, HarnessConfig config,
                                                                           ChatDirLayout layout,
+                                                                          boolean sharedLocalUsed,
+                                                                          boolean allowUnconfined,
                                                                           java.util.concurrent.atomic.AtomicReference<AgentHarness> harness) {
         java.util.function.Function<String, String> userOf = chatId -> {
             AgentHarness h = harness.get();
@@ -213,10 +249,27 @@ public final class HarnessFactory {
                             rs.network(), null, null);
                 }, null);
         docker.onWarning(LOG::warn);
-        return new RoutedSandboxExecutor(roleSandboxOf, java.util.Map.of(
-                SandboxKind.NONE, new DisabledSandboxExecutor(layout),
-                SandboxKind.LOCAL, new org.kendar.llm.harness.sandbox.LocalSandboxExecutor(layout),
-                SandboxKind.DOCKER_ISOLATED, docker, SandboxKind.DOCKER_OPEN, docker), layout);
+        // the role decides (admin-only); the web never falls back because of a setting
+        // outside Linux the fallback would run unconfined as the server user: only under the testing flag
+        boolean confinable = allowUnconfined || System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("linux");
+        docker.fallbackAllowed(chatId -> confinable && roleSandboxOf.apply(chatId).localFallback());
+        var runners = new java.util.HashMap<SandboxKind, org.kendar.llm.harness.sandbox.SandboxExecutor>();
+        runners.put(SandboxKind.NONE, new DisabledSandboxExecutor(layout));
+        runners.put(SandboxKind.DOCKER_ISOLATED, docker);
+        runners.put(SandboxKind.DOCKER_OPEN, docker);
+        // fail closed: when the backend or a role uses shared-local, no working bwrap on Linux stops the start
+        org.kendar.llm.harness.sandbox.SharedLocalSandbox.forHost(layout,
+                chatId -> roleSandboxOf.apply(chatId).networkGranted(), sharedLocalUsed)
+                .ifPresent(r -> runners.put(SandboxKind.SHARED_LOCAL, r));
+        return new RoutedSandboxExecutor(roleSandboxOf, runners, layout);
+    }
+
+    /**
+     * Whether a missing or broken bwrap (or a non-Linux host, which has none) stops the start: the shared-local sandbox is used (backend or a role) and
+     * {@code jllm.web.allow-missing-bwrap} is not true.
+     */
+    static boolean sharedLocalRequired(JllmProperties p, boolean backend, boolean anyRole) {
+        return (backend || anyRole) && !p.allowMissingBwrap();
     }
 
     private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(HarnessFactory.class);

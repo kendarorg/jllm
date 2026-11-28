@@ -88,9 +88,13 @@ public final class Registry {
      * @param title    names the chat the host keeps for the tasks of one run
      * @param approved tools the user has already allowed for this run
      * @param tools    tools the task may use: null = the agent's own, empty = none, {@code ["*"]} = all of the user's role
+     * @param unattended the flow is unattended: a tool call that would need an approval is denied, the model gets the
+     *                 denial as the tool result and the task goes on
+     * @param onDenied receives the tool of every call denied in an unattended task (journaled by the engine); may be null
      */
     public record ModelCall(String agent, String system, String user, String owner, String title,
-                            java.util.Set<String> approved, java.util.List<String> tools) {
+                            java.util.Set<String> approved, java.util.List<String> tools, boolean unattended,
+                            java.util.function.Consumer<String> onDenied) {
     }
 
     /** The agent behind a task step wanted to call tools that need an approval; none of them ran. */

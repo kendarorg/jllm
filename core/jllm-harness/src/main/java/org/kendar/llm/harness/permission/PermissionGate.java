@@ -13,14 +13,29 @@ public class PermissionGate {
 
     private final ToolApprovalPolicy policy;
     private final PermissionRules rules;
+    private final boolean alwaysAsk;
 
     public PermissionGate(ToolApprovalPolicy policy) {
         this(policy, PermissionRules.none());
     }
 
     public PermissionGate(ToolApprovalPolicy policy, PermissionRules rules) {
+        this(policy, rules, false);
+    }
+
+    /**
+     * @param alwaysAsk role level "always ask": the mode never waives a question, so auto and edit mode ask whatever the
+     *                  approval policy says is asked
+     */
+    public PermissionGate(ToolApprovalPolicy policy, PermissionRules rules, boolean alwaysAsk) {
         this.policy = policy;
         this.rules = rules == null ? PermissionRules.none() : rules;
+        this.alwaysAsk = alwaysAsk;
+    }
+
+    /** The approval policy this gate applies. */
+    public ToolApprovalPolicy policy() {
+        return policy;
     }
 
     public PermissionRules rules() {
@@ -28,6 +43,7 @@ public class PermissionGate {
     }
 
     public Decision check(PermissionMode mode, HarnessTool tool) {
+        if (alwaysAsk) return policy.requiresApproval(tool) ? Decision.ASK : Decision.ALLOW;
         if (mode == PermissionMode.AUTO) {
             return Decision.ALLOW;
         }

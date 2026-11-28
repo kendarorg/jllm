@@ -34,7 +34,7 @@ class JllmWebBootTest {
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry r) {
         r.add("jllm.provider", () -> "ollama");
-        r.add("jllm.workdir", () -> HOME.resolve("work").toString());
+        r.add("jllm.chats-dir", () -> HOME.resolve("work").toString());
         r.add("jllm.webauth-dir", () -> HOME.resolve("webauth").toString());
     }
 

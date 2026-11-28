@@ -185,7 +185,6 @@ final class ContainerRegistry {
     private Container create(Placement p, DockerEndpoint ep, String configHash) throws IOException {
         HarnessConfig.Docker d = p.docker();
         boolean remote = d.remote();
-        Path agentDir = remote ? null : installAgent();
         String token = Placement.hash(UUID.randomUUID().toString());
         String image = backups.usableImage(p, ep);
         if (image != null) log.info("Restoring {} from the image {}", p.name(), image);
@@ -207,27 +206,25 @@ final class ContainerRegistry {
         if (p.noNetwork()) {
             a.addAll(List.of("--network", "none"));
         } else {
+            // a network of its own per container (so per user or per chat): never the default bridge shared by all
+            ep.ensureNetwork(p.name(), p.key());
+            a.addAll(List.of("--network", p.name()));
             a.addAll(List.of("-p", (remote ? "0.0.0.0" : "127.0.0.1") + "::" + RemoteExecSandboxExecutor.DAEMON_PORT));
         }
-        if (remote) {
-            a.addAll(List.of("-e", "JLLM_AGENT_B64=" + agentPayload()));
-        } else {
-            a.addAll(List.of("-v", DockerHosts.mountSource(agentDir) + ":/agent:ro"));
-        }
+        // the daemon script travels in the environment, never as a file of the host the container could reach
+        a.addAll(List.of("-e", "JLLM_AGENT_B64=" + agentPayload()));
         if (kind == Kind.CLI && !remote) {
             a.addAll(List.of("-v", DockerHosts.mountSource(startupDir) + ":" + RemoteExecSandboxExecutor.WORKSPACE));
+            // after the parent: docker applies the mounts parent first, the child hides that part of it
+            a.addAll(ProjectMounts.args(startupDir, RemoteExecSandboxExecutor.WORKSPACE, DockerHosts::mountSource));
         } else if (p.volume() != null) {
             a.addAll(List.of("-v", p.volume() + ":" + RemoteExecSandboxExecutor.WORKSPACE));
         } else {
             a.addAll(List.of("-v", RemoteExecSandboxExecutor.WORKSPACE));
         }
         a.addAll(List.of("-w", RemoteExecSandboxExecutor.WORKSPACE, image != null ? image : d.image(), "python"));
-        if (remote) {
-            a.addAll(List.of("-c", "import base64,zlib,os;exec(compile(zlib.decompress(base64.b64decode("
-                    + "os.environ['JLLM_AGENT_B64'])),'sandbox-agent.py','exec'),{'__name__':'__main__'})"));
-        } else {
-            a.add("/agent/" + AGENT_RESOURCE);
-        }
+        a.addAll(List.of("-c", "import base64,zlib,os;exec(compile(zlib.decompress(base64.b64decode("
+                + "os.environ['JLLM_AGENT_B64'])),'sandbox-agent.py','exec'),{'__name__':'__main__'})"));
         ep.docker(a.toArray(String[]::new));
         try {
             if (kind == Kind.WEB || remote) {
@@ -264,7 +261,8 @@ final class ContainerRegistry {
         if (zip == null) return;
         log.info("Uploading the workspace ({} KB) to {}", zip.length / 1024, c.name);
         try {
-            DaemonClient.Response r = c.client.call("POST", "/setup", null, zip, "application/zip", TRANSFER_TIMEOUT);
+            DaemonClient.Response r = c.client.call("POST", "/setup", null, zip, "application/zip", TRANSFER_TIMEOUT,
+                    DaemonClient.MAX_CONTROL_RESPONSE);
             if (r.status() != 200) throw new IOException("Workspace upload failed: " + r.status() + " " + r.text());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -289,7 +287,8 @@ final class ContainerRegistry {
         long end = System.nanoTime() + max.toNanos();
         while (System.nanoTime() < end) {
             try {
-                if (c.client.call("GET", "/health", null, null, null, Duration.ofSeconds(3)).status() == 200) return true;
+                if (c.client.call("GET", "/health", null, null, null, Duration.ofSeconds(3),
+                        DaemonClient.MAX_CONTROL_RESPONSE).status() == 200) return true;
             } catch (IOException ignored) {
                 // not listening yet
             } catch (InterruptedException e) {
@@ -513,7 +512,10 @@ final class ContainerRegistry {
                 if (name.isBlank()) continue;
                 DockerCommandRunner.Result rm = runner.run(List.of(bin, "rm", "-f", "-v", name.strip()),
                         DockerEndpoint.CONTROL_TIMEOUT);
-                if (rm.exitCode() == 0) removed.add(name.strip());
+                if (rm.exitCode() == 0) {
+                    removed.add(name.strip());
+                    runner.run(List.of(bin, "network", "rm", name.strip()), DockerEndpoint.CONTROL_TIMEOUT);
+                }
             }
             return removed;
         } catch (InterruptedException e) {
@@ -534,7 +536,7 @@ final class ContainerRegistry {
         HarnessConfig.Docker d = p.docker();
         return Placement.hash(String.join("|", d.image(), d.memory(), d.cpus(), String.valueOf(d.pidsLimit()), d.user(),
                 "daemon", String.valueOf(d.remote()), externalLinks().settingValue(), agentHash(),
-                d.hardened() ? "hardened" : "standard", String.valueOf(p.noNetwork()))).substring(0, 12);
+                d.hardened() ? "hardened" : "standard", String.valueOf(p.noNetwork()), "own-network")).substring(0, 12);
     }
 
     private static volatile String agentHash;
@@ -557,21 +559,5 @@ final class ContainerRegistry {
             z.write(agentBytes());
         }
         return java.util.Base64.getEncoder().encodeToString(out.toByteArray());
-    }
-
-    /**
-     * Writes the daemon script to a stable per-version directory under the user's home (a reused container keeps
-     * bind-mounting it after this JVM is gone) and returns the directory.
-     */
-    static synchronized Path installAgent() throws IOException {
-        Path dir = Path.of(System.getProperty("jllm.home", System.getProperty("user.home")), ".jllm", "sandbox-agent",
-                agentHash().substring(0, 12));
-        Path file = dir.resolve(AGENT_RESOURCE);
-        byte[] bytes = agentBytes();
-        if (!Files.isRegularFile(file) || !Arrays.equals(Files.readAllBytes(file), bytes)) {
-            Files.createDirectories(dir);
-            Files.write(file, bytes);
-        }
-        return dir;
     }
 }

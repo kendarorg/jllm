@@ -15,6 +15,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 
 /**
  * The container runner: a long-running container with a small HTTP daemon inside ({@code sandbox-agent.py}). Every
@@ -51,7 +52,10 @@ public class RemoteExecSandboxExecutor implements SandboxExecutor {
     private final Layout layout;
     private final Kind kind;
     private final Path startupDir;
-    private final LocalSandboxExecutor local;
+    private volatile SandboxExecutor local;
+    private volatile LocalShell fallbackShell;
+    private volatile Function<String, Boolean> fallbackAllowedOf;
+    private volatile Supplier<SandboxExecutor> fallbackFactory;
     private final ContainerRegistry registry;
     private final WorkspaceBackups backups;
     private final Function<String, String> userOf;
@@ -81,7 +85,7 @@ public class RemoteExecSandboxExecutor implements SandboxExecutor {
         this.layout = layout;
         this.kind = kind;
         this.startupDir = startupDir == null ? layout.location() : startupDir.toAbsolutePath().normalize();
-        this.local = new LocalSandboxExecutor(layout);
+        this.fallbackFactory = () -> new SharedLocalSandbox(layout, this::fallbackNetwork, null);
         this.userOf = userOf;
         this.policyOf = policyOf;
         this.backups = new WorkspaceBackups(layout, kind, this.startupDir, store);
@@ -160,25 +164,75 @@ public class RemoteExecSandboxExecutor implements SandboxExecutor {
 
     @Override
     public boolean allowLocalFallback(String chatId) {
-        if (!config.sandbox().localDirSandboxAllowed()) return false;
+        if (!localFallbackAllowed(chatId)) return false;
+        try {
+            fallback();
+        } catch (SandboxUnavailableException e) { // Linux without a working bwrap: fail closed
+            warn.accept("Local fallback refused: " + e.getMessage());
+            return false;
+        }
         localChats.add(chatId);
         return true;
     }
 
+    /**
+     * Per chat: the role's {@code localFallback} when the front end gave one ({@link #fallbackAllowed}); else the
+     * configuration ({@code sandbox.localFallback}, default false).
+     */
+    @Override
+    public boolean localFallbackAllowed(String chatId) {
+        Function<String, Boolean> f = fallbackAllowedOf;
+        Boolean v = f == null ? null : f.apply(chatId);
+        return v != null ? v : config.sandbox().localDirSandboxAllowed();
+    }
+
+    /** The per chat decision on the fallback (the web: the role's {@code localFallback}); null result: the configuration. */
+    public RemoteExecSandboxExecutor fallbackAllowed(Function<String, Boolean> allowedOf) {
+        this.fallbackAllowedOf = allowedOf;
+        return this;
+    }
+
+    /** Replaces the runner used after a fallback (tests); the default is a {@link SharedLocalSandbox}. */
+    RemoteExecSandboxExecutor fallbackRunner(Supplier<SandboxExecutor> factory) {
+        this.fallbackFactory = factory;
+        return this;
+    }
+
+    /** The runner of the chats that fell back: created on first use, so a missing bwrap only matters then. */
+    private synchronized SandboxExecutor fallback() {
+        SandboxExecutor l = local;
+        if (l == null) {
+            l = fallbackFactory.get();
+            if (logLimit != TailCapture.DEFAULT_LOG_LIMIT) l.outputLogLimit(logLimit);
+            if (fallbackShell != null) l.shell(fallbackShell);
+            local = l;
+        }
+        return l;
+    }
+
+    /** Whether the role grants the network: a standard container has it, a hardened one only with network=default. */
+    private boolean fallbackNetwork(String chatId) {
+        HarnessConfig.Docker d = placement(chatId).docker();
+        return !d.hardened() || "default".equalsIgnoreCase(d.network());
+    }
+
     @Override
     public void environmentWhitelist(List<String> patterns) {
-        local.environmentWhitelist(patterns); // only the local fallback runs commands on the host
+        // the fallback has a fixed minimal environment; the container has its own
     }
 
     @Override
     public void outputLogLimit(long maxBytes) {
         this.logLimit = maxBytes;
-        local.outputLogLimit(maxBytes);
+        SandboxExecutor l = local;
+        if (l != null) l.outputLogLimit(maxBytes);
     }
 
     @Override
     public void shell(LocalShell shell) {
-        local.shell(shell); // only the local fallback runs commands on the host
+        this.fallbackShell = shell;
+        SandboxExecutor l = local;
+        if (l != null) l.shell(shell);
     }
 
     @Override
@@ -245,8 +299,14 @@ public class RemoteExecSandboxExecutor implements SandboxExecutor {
     }
 
     @Override
+    public boolean networkAccess(String chatId) {
+        if (localFallbackActive(chatId)) return fallback().networkAccess(chatId);
+        return !placement(chatId).noNetwork();
+    }
+
+    @Override
     public String sandboxStatus(String chatId) {
-        if (localFallbackActive(chatId)) return "runner: local fallback (no isolation, commands run on this machine)";
+        if (localFallbackActive(chatId)) return "runner: shared-local fallback | " + fallback().sandboxStatus(chatId);
         Placement p = placement(chatId);
         return "runner: container (" + p.docker().image() + ") | profile: " + (p.docker().hardened() ? "hardened" : "standard")
                 + (p.noNetwork() ? ", no network" : "") + " | scope: " + (p.userScope() ? "user" : "chat")
@@ -258,20 +318,20 @@ public class RemoteExecSandboxExecutor implements SandboxExecutor {
 
     @Override
     public ExecutionResult execute(String chatId, String command, Duration timeout) {
-        if (localFallbackActive(chatId)) return local.execute(chatId, command, timeout);
+        if (localFallbackActive(chatId)) return fallback().execute(chatId, command, timeout);
         Placement p = placement(chatId);
         return exec(chatId, p, workspace(p, chatId), scratchpad(p, chatId) + "/main", command, timeout);
     }
 
     @Override
     public ExecutionResult execute(String chatId, Path runDir, Path readOnlyDir, String command, Duration timeout) {
-        if (localFallbackActive(chatId)) return local.execute(chatId, runDir, readOnlyDir, command, timeout);
+        if (localFallbackActive(chatId)) return fallback().execute(chatId, runDir, readOnlyDir, command, timeout);
         return exec(chatId, placement(chatId), posix(runDir), posix(runDir), command, timeout);
     }
 
     @Override
     public ExecutionResult execute(String chatId, Path scratchDir, boolean planMode, String command, Duration timeout) {
-        if (localFallbackActive(chatId)) return local.execute(chatId, scratchDir, planMode, command, timeout);
+        if (localFallbackActive(chatId)) return fallback().execute(chatId, scratchDir, planMode, command, timeout);
         Placement p = placement(chatId);
         String scratch = scratchDir == null ? scratchpad(p, chatId) + "/main" : posix(scratchDir);
         return exec(chatId, p, planMode ? scratch : workspace(p, chatId), scratch, command, timeout);
@@ -280,7 +340,21 @@ public class RemoteExecSandboxExecutor implements SandboxExecutor {
     private ExecutionResult exec(String chatId, Placement p, String cwd, String logDir, String command, Duration timeout) {
         try {
             Container c = registry.acquire(p);
-            return DaemonExec.run(c.client, command, cwd, logDir, timeout, logLimit);
+            // CLI: the host project is what the container sees; what the host would run or read as configuration
+            // is put back when the command changed it (the nested read-only mounts are the first line)
+            ProjectGuard guard = kind == Kind.CLI ? ProjectGuard.snapshot(startupDir) : null;
+            try {
+                return DaemonExec.run(c.client, command, cwd, logDir, timeout, logLimit);
+            } finally {
+                if (guard != null) {
+                    List<String> changed = guard.restore();
+                    if (!changed.isEmpty()) {
+                        String msg = "A command changed protected project files (.git hooks and config, .jllm); "
+                                + "they were restored: " + String.join(", ", changed);
+                        warn.accept(msg);
+                    }
+                }
+            }
         } catch (IOException e) {
             registry.forget(p.key()); // the daemon may be gone: check the container again next time
             return new ExecutionResult("", "Sandbox unavailable: " + e.getMessage(), 127, false);

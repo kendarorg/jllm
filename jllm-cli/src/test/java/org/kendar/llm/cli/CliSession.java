@@ -31,6 +31,9 @@ final class CliSession implements AutoCloseable {
     private final String savedHome = System.getProperty("jllm.home");
     private final Consumer<Runnable> savedAtExit = Main.atExit;
     private final java.util.function.BiFunction<List<String>, Path, Term> savedTerminal = Main.terminal;
+    private final java.util.function.Function<String, String> savedEnv = Attendance.env;
+    private Path home;
+    private Path trusted;
     private Thread thread;
     private volatile Throwable failure;
     private volatile Integer exit;
@@ -38,6 +41,7 @@ final class CliSession implements AutoCloseable {
     private boolean restored;
 
     CliSession(Path home) {
+        this.home = home;
         System.setProperty("jllm.home", home.toString());
     }
 
@@ -57,7 +61,18 @@ final class CliSession implements AutoCloseable {
         return launch(() -> Main.exitCode(args));
     }
 
+    /** Records {@code project} as trusted in this session's home when the CLI starts (after its files are written). */
+    CliSession trusting(Path project) {
+        trusted = project;
+        return this;
+    }
+
     private CliSession launch(java.util.concurrent.Callable<Integer> body) {
+        Attendance.env = name -> null; // a CI machine must not turn the tests unattended
+        if (trusted != null) {
+            new org.kendar.llm.harness.settings.FileFolderTrust(home.resolve(".jllm").resolve("trusted.json"))
+                    .trust(trusted, java.util.Set.of());
+        }
         System.setIn(input);
         System.setOut(capture);
         System.setErr(capture);
@@ -139,6 +154,7 @@ final class CliSession implements AutoCloseable {
         System.setErr(savedErr);
         Main.atExit = savedAtExit;
         Main.terminal = savedTerminal;
+        Attendance.env = savedEnv;
         if (savedHome == null) System.clearProperty("jllm.home");
         else System.setProperty("jllm.home", savedHome);
     }

@@ -52,7 +52,8 @@ the provider's own; check them before choosing one.
 ## Supply chain
 
 Releases go to Maven Central under the verified namespace `org.kendar.llm`, with sources and javadoc jars and GPG
-signatures ([PUBLISHING](../reference/publishing.md)). The web application is not published as an artifact.
+signatures ([PUBLISHING](../reference/publishing.md)). The web application is not published as an artifact. Dependencies are scanned with OWASP dependency-check; the
+latest result is in [owasp_dc](../owasp_dc.md).
 
 ## Not provided
 

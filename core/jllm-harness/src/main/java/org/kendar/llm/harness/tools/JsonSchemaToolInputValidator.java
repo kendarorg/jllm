@@ -4,10 +4,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.networknt.schema.JsonSchema;
-import com.networknt.schema.JsonSchemaFactory;
-import com.networknt.schema.SpecVersion;
-import com.networknt.schema.ValidationMessage;
+import com.networknt.schema.Schema;
+import com.networknt.schema.SchemaRegistry;
+import com.networknt.schema.dialect.Dialects;
+import com.networknt.schema.Error;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -27,10 +27,10 @@ public final class JsonSchemaToolInputValidator implements ToolInputValidator {
 
     private static final Logger log = LoggerFactory.getLogger(JsonSchemaToolInputValidator.class);
 
-    private record Compiled(JsonNode source, JsonSchema schema) {
+    private record Compiled(JsonNode source, Schema schema) {
     }
 
-    private final JsonSchemaFactory factory = JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V7);
+    private final SchemaRegistry factory = SchemaRegistry.withDialect(Dialects.getDraft7());
     private final Map<String, Compiled> cache = new ConcurrentHashMap<>();
 
     @Override
@@ -38,22 +38,22 @@ public final class JsonSchemaToolInputValidator implements ToolInputValidator {
         if (mode == ValidationMode.OFF) return Outcome.ok(input);
         JsonNode schemaNode = tool.inputSchema();
         if (schemaNode == null || schemaNode.isNull() || schemaNode.isMissingNode()) return Outcome.ok(input);
-        JsonSchema schema = compile(tool.name(), schemaNode);
+        Schema schema = compile(tool.name(), schemaNode);
         if (schema == null) return Outcome.ok(input);
         JsonNode in = input == null || input.isMissingNode() || input.isNull()
                 ? JsonNodeFactory.instance.objectNode() : input;
         if (mode == ValidationMode.LENIENT) in = repair(schemaNode, in.deepCopy());
         List<String> errors = new ArrayList<>();
-        for (ValidationMessage m : schema.validate(in)) errors.add(m.getMessage());
+        for (Error m : schema.validate(in)) errors.add(m.getMessage());
         java.util.Collections.sort(errors);
         return new Outcome(in, errors);
     }
 
-    private JsonSchema compile(String name, JsonNode schemaNode) {
+    private Schema compile(String name, JsonNode schemaNode) {
         Compiled c = cache.get(name);
         if (c != null && c.source().equals(schemaNode)) return c.schema();
         try {
-            JsonSchema s = factory.getSchema(schemaNode);
+            Schema s = factory.getSchema(schemaNode);
             cache.put(name, new Compiled(schemaNode.deepCopy(), s));
             return s;
         } catch (RuntimeException e) { // boundary: schema library boundary: an unusable schema is skipped

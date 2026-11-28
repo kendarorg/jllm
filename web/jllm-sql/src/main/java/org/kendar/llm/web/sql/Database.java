@@ -15,9 +15,11 @@ public final class Database implements AutoCloseable {
 
     private final HikariDataSource pool;
     private final Dialect dialect;
+    private final SqlConfig config;
 
     private Database(SqlConfig config) {
         this.dialect = config.dialect();
+        this.config = config;
         DriverLoader.ensure(config);
         HikariConfig h = new HikariConfig();
         h.setJdbcUrl(config.jdbcUrl());
@@ -52,6 +54,10 @@ public final class Database implements AutoCloseable {
     /** Opens the pool and creates the schema when missing. */
     public static Database open(SqlConfig config) {
         return new Database(config);
+    }
+
+    public SqlConfig config() {
+        return config;
     }
 
     public Dialect dialect() {

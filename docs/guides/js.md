@@ -95,7 +95,7 @@ Put the jar (`jllm-js-*.jar`, a thin jar copied to the plugin directory by `mvn 
 directory and enable it in the settings file:
 
 ```json
-{ "plugins": { "js": { "enabled": true, "settings": { "engine": "auto", "maxTimeoutSeconds": 120,
+{ "plugins": { "js": { "enabled": true, "settings": { "engine": "isolated", "maxTimeoutSeconds": 120,
                                                       "maxWallSeconds": 300, "maxInnerCalls": 200 } } } }
 ```
 
@@ -103,7 +103,7 @@ or in code: `new AgentHarnessBuilder().plugin(new JsPlugin())`.
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `engine` | `auto` | `auto` (isolate if the runtime has one, else constrained), `constrained`, `isolated` (the tool is disabled, with a reason, when there is no isolate: never a silent downgrade) |
+| `engine` | `isolated` | `isolated`: the GraalJS isolate (`SandboxPolicy.ISOLATED`); without one the tool is disabled with a message naming the artifact of the installed edition (Community `js-isolate-community`, Oracle `js-isolate`): fail closed, never a silent downgrade. `constrained`: explicit opt-in for trusted single-user setups, logs a WARN, no security boundary. Both editions work; the release fetches the matching isolate |
 | `policy` | `isolated` | sandbox policy of the isolated profile: `isolated` or `untrusted` (the web application defaults to `untrusted`) |
 | `statementLimit` | 1000000 | statements per run (constrained profile; the isolate relies on the CPU limit) |
 | `maxTimeoutSeconds` | 120 | ceiling of the per-call `timeoutSeconds` (default 30); the clock stands still during tool calls |

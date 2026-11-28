@@ -27,10 +27,10 @@ import java.util.stream.Stream;
  *   "approval": "off",                         no approval prompts (optional; default "ask" = the harness policy)
  *   "toolPermissions": {"send_mail": "allow",  per tool pattern: allow = runs unattended, never asked;
  *                       "bash": "deny"},       ask = always asked; deny = never runs (deny, ask, allow order)
- *   "sandbox": {"kind": "docker-isolated",     none (default: no files, no shell), local, docker-isolated
+ *   "sandbox": {"kind": "docker-isolated",     none (default: no files, no shell), shared-local, docker-isolated
  *                                              (hardened container) or docker-open (standard container)
  *               "scope": "user",               docker: chat or user (optional)
- *               "network": "none"},            docker-isolated: none or default (optional)
+ *               "network": "none"},            docker-isolated, shared-local: none or default (optional)
  *   "idp": {...}                               every other key is a role setting (free JSON per feature)
  * }
  * </pre>

@@ -19,7 +19,7 @@ import java.util.stream.Stream;
 
 /**
  * Global flows kept as files in the folder {@code jllm.flows-seed-dir} (the sample run configurations use
- * {@code runConfig/flows}). At startup each {@code *.json} is added to the global flows of the flows plugin when no
+ * {@code runConfigs/unsafe/flows}). At startup each {@code *.json} is added to the global flows of the flows plugin when no
  * flow of that name exists; nothing is overwritten. Not set: nothing happens.
  */
 @Component

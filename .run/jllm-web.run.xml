@@ -4,8 +4,8 @@
     <option name="INCLUDE_PROVIDED_SCOPE" value="true" />
     <option name="MAIN_CLASS_NAME" value="org.kendar.llm.web.JllmWebApplication" />
     <module name="jllm-web" />
-    <option name="PROGRAM_PARAMETERS" value="--jllm.webauth-dir=$PROJECT_DIR$/runConfig/webauth --jllm.plugin-dir=$PROJECT_DIR$/target/plugins --jllm.plugins.js.enabled=true" />
-    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/runConfig/tmp" />
+    <option name="PROGRAM_PARAMETERS" value="--jllm.webauth-dir=$PROJECT_DIR$/runConfigs/unsafe/webauth --jllm.plugin-dir=$PROJECT_DIR$/target/plugins --jllm.plugins.js.enabled=true" />
+    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/runConfigs/unsafe/tmp" />
     <method v="2">
       <option name="Make" enabled="true" />
     </method>

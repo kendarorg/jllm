@@ -50,10 +50,10 @@ class LayeredSettingsTest {
         try {
             write(home.resolve(".jllm/SYSTEM.md"), "global");
             write(home.resolve(".jllm/APPEND_SYSTEM.md"), "ga");
-            assertEquals("global", SystemPromptFiles.load(project).replace());
+            assertEquals("global", SystemPromptFiles.load(project, true).replace());
             write(project.resolve(".jllm/SYSTEM.md"), "project");
             write(project.resolve(".jllm/APPEND_SYSTEM.md"), "pa");
-            SystemPromptFiles f = SystemPromptFiles.load(project);
+            SystemPromptFiles f = SystemPromptFiles.load(project, true);
             assertEquals("project", f.replace());
             assertEquals("ga\n\npa", f.append());
         } finally {
@@ -63,7 +63,7 @@ class LayeredSettingsTest {
 
     private static HarnessSettings load(Path explicit, Path project) {
         return HarnessSettingsLoader.loadLayered(new FileSettingsSource(explicit, project), project, k -> null, null,
-                new FileProjectMcpTrust(project.resolve("trust.json")), w -> { },
+                new FileFolderTrust(project.resolve("trust.json")), w -> { },
                 new org.kendar.llm.harness.safety.ContentWarnings());
     }
 }

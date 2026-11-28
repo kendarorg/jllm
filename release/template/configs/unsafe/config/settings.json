@@ -1,0 +1,10 @@
+{
+  "web": { "blockLocalHost": true },
+  "plugins": {
+    "js":                { "enabled": true },
+    "pdf":               { "enabled": true },
+    "docs":              { "enabled": true },
+    "jllm-workflows":    { "enabled": true, "settings": { "adminRole": "admin" } },
+    "jllm-workflow-web": { "enabled": true }
+  }
+}

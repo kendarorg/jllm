@@ -41,7 +41,9 @@ import java.util.regex.Pattern;
  * </ul>
  * Writes are atomic (temp file and move), files are owner-only, and a lock file per file serializes threads and
  * processes ({@link #crossProcess()} is true). With a {@link TokenCipher} the files are AES-GCM encrypted; a file that
- * cannot be decrypted (tampered, wrong key) is reported once and read as empty, so its users log in again. A file
+ * cannot be decrypted (tampered, wrong key) is reported once and read as empty, so its users log in again. Each token is
+ * sealed separately with the user id and the source as associated data, so a token copied into another user's file or
+ * under another source name is rejected. A file
  * written with {@code JLLM_TOKEN_KEY_OLD} is rewritten with the current key when read. With a cipher, a plain file
  * is not trusted: it is reported and read as empty. Token contents are never logged.
  */
@@ -113,16 +115,16 @@ public final class FileTokenStore implements TokenStore {
     @Override
     public Optional<OAuthToken> get(String principalId, String name) {
         Path f = fileOf(principalId);
-        return withFile(f, () -> Optional.ofNullable(readAll(f).get(name)));
+        return withFile(f, () -> Optional.ofNullable(readAll(f, principalId).get(name)));
     }
 
     @Override
     public void put(String principalId, String name, OAuthToken token) {
         Path f = fileOf(principalId);
         withFile(f, () -> {
-            Map<String, OAuthToken> all = readAll(f);
+            Map<String, OAuthToken> all = readAll(f, principalId);
             all.put(name, token);
-            writeAll(f, all);
+            writeAll(f, all, principalId);
             return null;
         });
     }
@@ -131,9 +133,9 @@ public final class FileTokenStore implements TokenStore {
     public boolean remove(String principalId, String name) {
         Path f = fileOf(principalId);
         return withFile(f, () -> {
-            Map<String, OAuthToken> all = readAll(f);
+            Map<String, OAuthToken> all = readAll(f, principalId);
             boolean had = all.remove(name) != null;
-            if (had) writeAll(f, all);
+            if (had) writeAll(f, all, principalId);
             return had;
         });
     }
@@ -141,7 +143,7 @@ public final class FileTokenStore implements TokenStore {
     @Override
     public List<String> names(String principalId) {
         Path f = fileOf(principalId);
-        return withFile(f, () -> readAll(f).keySet().stream().sorted().toList());
+        return withFile(f, () -> readAll(f, principalId).keySet().stream().sorted().toList());
     }
 
     /** Deletes the user's file. */
@@ -201,7 +203,7 @@ public final class FileTokenStore implements TokenStore {
         }
     }
 
-    private Map<String, OAuthToken> readAll(Path file) {
+    private Map<String, OAuthToken> readAll(Path file, String principalId) {
         Map<String, OAuthToken> out = new HashMap<>();
         if (!Files.isRegularFile(file)) return out;
         JsonNode root;
@@ -217,17 +219,28 @@ public final class FileTokenStore implements TokenStore {
                 report(file, "encrypted, but no " + TokenCipher.KEY_ENV + " is set");
                 return out;
             }
-            TokenCipher.Sealed sealed = new TokenCipher.Sealed(root.path("kid").asText(""),
-                    root.path("nonce").asText(""), root.path("data").asText(""));
-            try {
-                root = mapper.readTree(cipher.decrypt(sealed));
-            } catch (TokenCipher.DecryptException | IOException e) {
-                report(file, e instanceof TokenCipher.DecryptException ? e.getMessage() : "not valid after decryption");
+            if (!root.has("entries")) {
+                report(file, "written by an older version, without per-token binding");
                 return out;
             }
-            parse(root, out);
-            if (cipher.isOldKey(sealed)) {
-                writeAll(file, out); // key rotation: rewrite with the current key
+            boolean rewrite = false;
+            JsonNode entries = root.path("entries");
+            for (var it = entries.fields(); it.hasNext(); ) {
+                var e = it.next();
+                JsonNode v = e.getValue();
+                TokenCipher.Sealed sealed = new TokenCipher.Sealed(v.path("kid").asText(""),
+                        v.path("nonce").asText(""), v.path("data").asText(""));
+                try {
+                    JsonNode plain = mapper.readTree(cipher.decrypt(sealed, TokenCipher.context(principalId, e.getKey())));
+                    parseOne(e.getKey(), plain, out);
+                    rewrite |= cipher.isOldKey(sealed);
+                } catch (TokenCipher.DecryptException | IOException ex) {
+                    report(file, e.getKey() + ": " + (ex instanceof TokenCipher.DecryptException ? ex.getMessage()
+                            : "not valid after decryption"));
+                }
+            }
+            if (rewrite) {
+                writeAll(file, out, principalId); // key rotation: rewrite with the current key
                 log.info("Token file {} re-encrypted with the current key", file);
             }
             return out;
@@ -245,37 +258,36 @@ public final class FileTokenStore implements TokenStore {
     }
 
     private static void parse(JsonNode root, Map<String, OAuthToken> out) {
-        root.fields().forEachRemaining(e -> {
-            JsonNode n = e.getValue();
-            Map<String, String> extra = new HashMap<>();
-            n.path("extra").fields().forEachRemaining(x -> extra.put(x.getKey(), x.getValue().asText()));
-            out.put(e.getKey(), new OAuthToken(n.path("access").asText(), n.hasNonNull("refresh")
-                    ? n.get("refresh").asText() : null, n.path("expiresAt").asLong(0), extra));
-        });
+        root.fields().forEachRemaining(e -> parseOne(e.getKey(), e.getValue(), out));
     }
 
-    private void writeAll(Path file, Map<String, OAuthToken> all) {
+    private static void parseOne(String name, JsonNode n, Map<String, OAuthToken> out) {
+        Map<String, String> extra = new HashMap<>();
+        n.path("extra").fields().forEachRemaining(x -> extra.put(x.getKey(), x.getValue().asText()));
+        out.put(name, new OAuthToken(n.path("access").asText(), n.hasNonNull("refresh")
+                ? n.get("refresh").asText() : null, n.path("expiresAt").asLong(0), extra));
+    }
+
+    private void writeAll(Path file, Map<String, OAuthToken> all, String principalId) {
         ObjectNode root = mapper.createObjectNode();
-        all.entrySet().stream().sorted(Map.Entry.comparingByKey()).forEach(en -> {
-            OAuthToken t = en.getValue();
-            ObjectNode n = root.putObject(en.getKey());
-            n.put("access", t.access());
-            if (t.refresh() != null) n.put("refresh", t.refresh());
-            n.put("expiresAt", t.expiresAt());
-            ObjectNode x = n.putObject("extra");
-            t.extra().forEach(x::put);
-        });
+        ObjectNode entries = cipher == null ? null : root.putObject("entries");
         try {
-            String text = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(root);
-            if (cipher != null) {
-                TokenCipher.Sealed s = cipher.encrypt(text);
-                ObjectNode env = mapper.createObjectNode();
-                env.put(ENVELOPE, 1);
-                env.put("kid", s.kid());
-                env.put("nonce", s.nonce());
-                env.put("data", s.data());
-                text = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(env);
+            for (Map.Entry<String, OAuthToken> en : all.entrySet().stream().sorted(Map.Entry.comparingByKey()).toList()) {
+                OAuthToken t = en.getValue();
+                ObjectNode n = cipher == null ? root.putObject(en.getKey()) : mapper.createObjectNode();
+                n.put("access", t.access());
+                if (t.refresh() != null) n.put("refresh", t.refresh());
+                n.put("expiresAt", t.expiresAt());
+                ObjectNode x = n.putObject("extra");
+                t.extra().forEach(x::put);
+                if (cipher != null) { // each token is sealed on its own, bound to the user and the source
+                    TokenCipher.Sealed s = cipher.encrypt(mapper.writeValueAsString(n),
+                            TokenCipher.context(principalId, en.getKey()));
+                    entries.putObject(en.getKey()).put("kid", s.kid()).put("nonce", s.nonce()).put("data", s.data());
+                }
             }
+            if (cipher != null) root.put(ENVELOPE, 2);
+            String text = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(root);
             Files.createDirectories(file.getParent());
             Path tmp = Files.createTempFile(file.getParent(), "auth", ".tmp");
             restrict(tmp);

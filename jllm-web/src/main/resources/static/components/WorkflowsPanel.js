@@ -1,4 +1,4 @@
-import {onMounted, onUnmounted, ref} from '../vendor/vue.esm-browser.prod.js';
+import {computed, onMounted, onUnmounted, ref} from '../vendor/vue.esm-browser.prod.js';
 import {onRunChanged, refreshWaiting, wf} from '../workflows.js';
 import {toast} from '../store.js';
 import QuestionForm from './QuestionForm.js';
@@ -59,7 +59,8 @@ export default {
       return s < 60 ? s + 's' : s < 3600 ? Math.floor(s / 60) + 'm ' + (s % 60) + 's' : Math.floor(s / 3600) + 'h ' + Math.floor(s % 3600 / 60) + 'm';
     };
     const errText = r => (r && r.error ? pretty(r.error.message || r.error) : '');
-    return {runs, busy, open, load, show, answer, cancel, canCancel, pretty, when, took, errText};
+    const deniedCount = computed(() => ((open.value && open.value.history) || []).filter(e => e.kind === 'denied').length);
+    return {deniedCount, runs, busy, open, load, show, answer, cancel, canCancel, pretty, when, took, errText};
   },
   template: `
   <section class="wf" aria-label="Runs">
@@ -92,9 +93,11 @@ export default {
                       :busy="busy" @answer="answer" />
         <div v-if="open.run.result" class="wf-result"><b>Result</b> <code>{{ pretty(open.run.result) }}</code></div>
         <div v-if="open.run.error" class="banner banner-error">{{ pretty(open.run.error.message || open.run.error) }}</div>
+        <p v-if="deniedCount" class="banner banner-error" role="status">{{ deniedCount }} tool call{{ deniedCount === 1 ? '' : 's' }}
+          denied (unattended run, nobody could approve): see the history.</p>
         <h5>History</h5>
         <ol class="wf-history">
-          <li v-for="(e, i) in open.history" :key="i">
+          <li v-for="(e, i) in open.history" :key="i" :class="{ 'wf-denied': e.kind === 'denied' }">
             <b>{{ e.step || 'flow' }}</b> <span>{{ e.kind }}</span> <span>{{ e.detail }}</span>
           </li>
         </ol>

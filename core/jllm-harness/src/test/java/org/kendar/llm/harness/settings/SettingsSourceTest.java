@@ -24,19 +24,32 @@ class SettingsSourceTest {
     private final List<String> warnings = new ArrayList<>();
 
     /** Answers kept in memory, as a database would keep them. */
-    private static final class MemoryTrust implements ProjectMcpTrust {
+    private static final class MemoryTrust implements FolderTrust {
         final Map<String, Boolean> answers = new HashMap<>();
 
         @Override
         public Boolean lookup(Path projectDir, String server, JsonNode definition) {
-            return answers.get(ProjectMcpTrust.projectKey(projectDir) + "|" + server + "|"
-                    + ProjectMcpTrust.fingerprint(definition));
+            return answers.get(FolderTrust.projectKey(projectDir) + "|" + server + "|"
+                    + FolderTrust.fingerprint(definition));
         }
 
         @Override
         public void remember(Path projectDir, String server, JsonNode definition, boolean trusted) {
-            answers.put(ProjectMcpTrust.projectKey(projectDir) + "|" + server + "|"
-                    + ProjectMcpTrust.fingerprint(definition), trusted);
+            answers.put(FolderTrust.projectKey(projectDir) + "|" + server + "|"
+                    + FolderTrust.fingerprint(definition), trusted);
+        }
+
+        @Override
+        public java.util.Optional<Record> record(Path projectDir) {
+            return java.util.Optional.empty();
+        }
+
+        @Override
+        public void trust(Path projectDir, java.util.Set<String> loosenings) {
+        }
+
+        @Override
+        public void approveLoosening(Path projectDir, String key) {
         }
     }
 
@@ -49,7 +62,7 @@ class SettingsSourceTest {
         List<SettingsLayer> layers = List.of(
                 layer(SettingsLayer.Kind.GLOBAL, "{\"smallModel\":true,\"permissions\":{\"deny\":[\"a\"]}}"),
                 layer(SettingsLayer.Kind.PROJECT, "{\"smallModel\":false,\"permissions\":{\"deny\":[\"b\"]}}"));
-        HarnessSettings s = HarnessSettingsLoader.loadLayered(() -> layers, project, k -> null, ProjectMcpTrust.Prompt.NONE,
+        HarnessSettings s = HarnessSettingsLoader.loadLayered(() -> layers, project, k -> null, FolderTrust.Prompt.NONE,
                 new MemoryTrust(), warnings::add,
                 new org.kendar.llm.harness.safety.ContentWarnings());
         assertFalse(s.isSmallModel());
@@ -63,7 +76,7 @@ class SettingsSourceTest {
         MemoryTrust trust = new MemoryTrust();
 
         HarnessSettings refused = HarnessSettingsLoader.loadLayered(() -> layers, project, k -> null,
-                ProjectMcpTrust.Prompt.NONE, trust, warnings::add,
+                FolderTrust.Prompt.NONE, trust, warnings::add,
                 new org.kendar.llm.harness.safety.ContentWarnings());
         assertTrue(refused.mcpServers() == null || refused.mcpServers().isEmpty());
 
@@ -74,7 +87,7 @@ class SettingsSourceTest {
         assertEquals(1, trust.answers.size(), "the answer is remembered in the given store");
 
         HarnessSettings remembered = HarnessSettingsLoader.loadLayered(() -> layers, project, k -> null,
-                ProjectMcpTrust.Prompt.NONE, trust, warnings::add,
+                FolderTrust.Prompt.NONE, trust, warnings::add,
                 new org.kendar.llm.harness.safety.ContentWarnings());
         assertEquals(1, remembered.mcpServers().size());
     }
@@ -84,7 +97,7 @@ class SettingsSourceTest {
         String server = "{\"mcpServers\":[{\"name\":\"x\",\"command\":\"run-me\"}]}";
         List<SettingsLayer> layers = List.of(layer(SettingsLayer.Kind.EXPLICIT, server));
         HarnessSettings s = HarnessSettingsLoader.loadLayered(() -> layers, project, k -> null,
-                ProjectMcpTrust.Prompt.NONE, new MemoryTrust(), warnings::add,
+                FolderTrust.Prompt.NONE, new MemoryTrust(), warnings::add,
                 new org.kendar.llm.harness.safety.ContentWarnings());
         assertEquals(1, s.mcpServers().size());
     }
@@ -93,7 +106,7 @@ class SettingsSourceTest {
     void projectLayerWithoutProjectIsRefused() throws Exception {
         List<SettingsLayer> layers = List.of(layer(SettingsLayer.Kind.PROJECT, "{\"smallModel\":true}"));
         assertThrows(IllegalArgumentException.class, () -> HarnessSettingsLoader.loadLayered(() -> layers, null,
-                k -> null, ProjectMcpTrust.Prompt.NONE, new MemoryTrust(), warnings::add,
+                k -> null, FolderTrust.Prompt.NONE, new MemoryTrust(), warnings::add,
                 new org.kendar.llm.harness.safety.ContentWarnings()));
     }
 
@@ -102,7 +115,7 @@ class SettingsSourceTest {
         List<SettingsLayer> layers = List.of(layer(SettingsLayer.Kind.GLOBAL, "[1]"),
                 layer(SettingsLayer.Kind.EXPLICIT, "{\"smallModel\":true}"));
         HarnessSettings s = HarnessSettingsLoader.loadLayered(() -> layers, project, k -> null,
-                ProjectMcpTrust.Prompt.NONE, new MemoryTrust(), warnings::add,
+                FolderTrust.Prompt.NONE, new MemoryTrust(), warnings::add,
                 new org.kendar.llm.harness.safety.ContentWarnings());
         assertTrue(s.isSmallModel());
         assertTrue(warnings.stream().anyMatch(w -> w.contains("db:GLOBAL") && w.contains("ignored")), warnings.toString());

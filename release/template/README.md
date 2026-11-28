@@ -9,14 +9,32 @@ Requirements: Java 21 or newer (`java -version`).
 | Terminal | `./run-cli.sh` | `run-cli.cmd` |
 | Browser (http://localhost:8080) | `./run-web.sh` | `run-web.cmd` |
 
-Sign in to the web app with `admin/admin`, `poweru/poweru` or `guest/guest`. The password of each user is its login
-until the user picks another one. The app listens on `127.0.0.1` only (`server.address` in `application.properties`).
-To expose it: `server.address=0.0.0.0`, `jllm.web.use-real-password=true` (random passwords, the admin's is in the
-startup log) and a TLS reverse proxy. Meanwhile a user on the default password can only change it: the API answers
-`403 password_change_required` (requests from the local machine are exempt unless
-`jllm.web.enforce-password-change-on-loopback=true`).
+Both scripts take the configuration name as an optional first argument (`./run-web.sh unsafe`, `run-cli.cmd unsafe`).
+Without it the safe one runs: `webSafe` for the web app, `cliSafe` for the terminal. See [Configurations](#configurations).
 
-| User | Can use |
+Safe web app (`webSafe`): there are no default passwords. Every user gets a random one at start and the administrator's is
+in the startup log, shown once (`Generated password for administrator 'admin': ...`): copy it and change it after signing
+in. The app listens on `127.0.0.1` only (`server.address` in `configs/webSafe/application.properties`) and each role runs in a
+Docker sandbox, so Docker must be installed. To expose it you still need a TLS reverse proxy.
+
+## Configurations
+
+| Name | For | Summary |
+|---|---|---|
+| `webSafe` | web, real use (default of `run-web`) | loopback, random passwords, Docker sandbox per role (roles `admin`, `user`) |
+| `cliSafe` | terminal, real use (default of `run-cli`) | `--mode default` (asks before writes and commands), Docker sandbox, no fallback to the host shell |
+| `unsafe` | development and testing only | see below |
+
+**`unsafe` is for development and testing only.** No folder trust, a local shell with full host access, default
+passwords (`admin/admin`, `poweru/poweru`, `guest/guest`, the password is the login until the user picks another one;
+requests from the local machine are exempt from the password change) and everything allowed. The model can read, change or
+destroy anything your user account can. Never expose it on a network and never run it on data you care about. It must be
+named explicitly: `./run-web.sh unsafe`, `run-cli.cmd unsafe`.
+
+Features not released yet (folder trust for the CLI, the virtual configuration provider, the shared-local sandbox,
+`jllm.chats-dir`) are applied to the safe configurations when they land.
+
+| `unsafe` user | Can use |
 |---|---|
 | `admin` | every tool; manages global flows and users |
 | `poweru` | files, shell, web and scripts |
@@ -50,7 +68,7 @@ Never in a file you share or commit. Best first:
 ### CLI: settings file
 
 So you do not retype it. Create `~/.jllm/settings.json` (Windows: `%USERPROFILE%\.jllm\settings.json`). It applies to
-every start; `settings/settings.json` of this folder is merged on top and only enables the plugins.
+every start; `configs/<name>/settings.json` is merged on top and only enables the plugins.
 
 ```json
 {
@@ -78,7 +96,7 @@ The web app reads properties, not the `providers` list. Either pass arguments:
 ./run-web.sh --jllm.provider=ollama --jllm.model=qwen3:8b --jllm.base-url=http://localhost:11434/v1
 ```
 
-or edit `application.properties` in this folder (read at every start, no rebuild):
+or edit `configs/<name>/application.properties` (read at every start, no rebuild):
 
 ```properties
 jllm.provider=anthropic
@@ -114,10 +132,9 @@ setup.sh, setup.ps1                        ├── fetch-graaljs.sh/.cmd/.ps1,
                                            │   ├── sql/            the SQL store jars (shipped)
                                            │   └── manifests/      graaljs-community / graaljs-oracle, mysql, postgres
                                            ├── plugins/            js, pdf, docs, workflows, workflow-web
-                                           ├── settings/settings.json
-                                           ├── webauth/            users/, permissions/
+                                           ├── configs/            unsafe/, webSafe/, cliSafe/ (settings.json, README, webauth, application.properties)
                                            ├── examples/flows/
-                                           └── application.properties, README.md, LICENSE, NOTICE
+                                           └── README.md, LICENSE, NOTICE
 ```
 
 | Path | What |
@@ -125,12 +142,13 @@ setup.sh, setup.ps1                        ├── fetch-graaljs.sh/.cmd/.ps1,
 | `jllm-cli.jar`, `jllm-web.jar` | the two front ends (they do not contain GraalJS) |
 | `lib-ext/` | the GraalJS libraries of `run_js`: empty in the zip, filled by `setup` / `fetch-graaljs`; holds the manifests of both editions |
 | `fetch-sql-driver.sh`, `.cmd`, `.ps1` | download the MySQL / PostgreSQL JDBC driver into `lib-ext/` (SHA-256 checked; MySQL is GPL and asks to accept). SQLite is bundled. `setup --sql mysql\|postgres\|all\|none` does it too (default all) |
-| `lib-ext/sql/` | the SQL store jars (shipped): with them users, chats and tokens live in SQL (SQLite file under `webauth/` by default); `jllm.store=file` keeps the files; see `application.properties` |
+| `lib-ext/sql/` | the SQL store jars (shipped): with them users, chats and tokens live in SQL (SQLite file under the configuration's `webauth/` by default); `jllm.store=file` keeps the files; see `configs/<name>/application.properties` |
 | `fetch-graaljs.sh`, `.cmd`, `.ps1` | fill or replace `lib-ext/` with the `community` or `oracle` (commercial) set from Maven Central |
 | `plugins/` | `js` (`run_js`), `pdf` and `docs` (document readers), `jllm-workflows`, `jllm-workflow-web` |
-| `settings/settings.json` | enables the plugins above (remove an entry to disable one) and sets `web.blockLocalHost=true`: `web_fetch` / `web_download` refuse loopback, link-local and private addresses (`false` to reach local services; `web.blockExtraAddresses` adds more) |
-| `application.properties` | web app properties (provider, model, key); all commented out |
-| `webauth/` | web users and roles (`users/<id>.json`, `permissions/<role>.json`); edit freely, no restart |
+| `configs/<name>/config/settings.json` | web (`unsafe`, `webSafe`; the CLI one is `configs/cliSafe/settings.json`): enables the plugins above (remove an entry to disable one) and sets `web.blockLocalHost=true`: `web_fetch` / `web_download` refuse loopback, link-local and private addresses (`false` to reach local services; `web.blockExtraAddresses` adds more) |
+| `configs/<name>/application.properties` | web app properties (`unsafe`: provider, model, key, all commented out) |
+| `configs/<name>/config/` | the web configuration as files when `jllm.store=file` (settings, instructions, agents); with SQL it is in the database, import it once with `java -jar jllm-web.jar --import-config <dir>`. Never inside the chats folder (`chats/<name>`) |
+| `configs/<name>/webauth/` | web users and roles (`users/<id>.json`, `permissions/<role>.json`); edit freely, no restart |
 | `examples/flows/writing-helper.json` | a first workflow with choices (see below) |
 
 ## JavaScript (`run_js`)

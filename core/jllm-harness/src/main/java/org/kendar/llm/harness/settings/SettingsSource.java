@@ -4,7 +4,7 @@ import java.util.List;
 
 /**
  * Where the settings layers are kept. {@link HarnessSettings#loadLayered(SettingsSource, java.nio.file.Path,
- * java.util.function.Function, ProjectMcpTrust.Prompt, ProjectMcpTrust, java.util.function.Consumer)} merges them;
+ * java.util.function.Function, FolderTrust.Prompt, FolderTrust, java.util.function.Consumer)} merges them;
  * {@link FileSettingsSource} reads the settings files. What an administrator stores at runtime is kept by a
  * {@link SettingsSink}, whose sections join the layers last ({@link SettingsSink#over}).
  */

@@ -19,7 +19,8 @@ import java.util.Map;
  * written as the {@code --json-result} file.
  * <pre>
  * {"chatId", "outcome", "turns", "durationMs", "usage": {"input", "output", "cacheRead", "cacheCreation"},
- *  "costUsd", "toolCalls": [{"name", "input", "isError"}], "error"}
+ *  "costUsd", "toolCalls": [{"name", "input", "isError"}], "dangerouslySkipPermissions",
+ *  "denied": [{"tool", "reason"}], "deniedCount", "error"}
  * </pre>
  */
 final class RunReport {
@@ -44,6 +45,8 @@ final class RunReport {
     private int turns;
     private String error;
     private boolean timedOut;
+    private boolean skipPermissions;
+    private final java.util.List<ObjectNode> denied = new java.util.ArrayList<>();
 
     /**
      * @param timeoutSeconds {@code --timeout}; 0: none
@@ -69,6 +72,16 @@ final class RunReport {
 
     int exitCode() {
         return exitCode(outcome());
+    }
+
+    /** Records that {@code --dangerously-skip-permissions} was on for the run. */
+    void skipPermissions(boolean on) {
+        this.skipPermissions = on;
+    }
+
+    /** The calls and outputs denied because nobody could approve them, in order: {@code {tool, reason}}. */
+    java.util.List<ObjectNode> denied() {
+        return java.util.List.copyOf(denied);
     }
 
     void chatId(String chatId) {
@@ -107,6 +120,8 @@ final class RunReport {
             case "error" -> {
                 if (!timedOut) error = d.path("message").asText("error");
             }
+            case "permission_denied" -> denied.add(mapper.createObjectNode().put("tool", d.path("tool").asText())
+                    .put("reason", d.path("reason").asText("unattended")));
             case "tool_call" -> {
                 ObjectNode c = mapper.createObjectNode().put("name", d.path("name").asText());
                 c.set("input", d.path("input").deepCopy());
@@ -140,6 +155,10 @@ final class RunReport {
         r.put("costUsd", cost);
         ArrayNode calls = r.putArray("toolCalls");
         toolCalls.values().forEach(calls::add);
+        r.put("dangerouslySkipPermissions", skipPermissions);
+        ArrayNode den = r.putArray("denied");
+        denied.forEach(den::add);
+        r.put("deniedCount", denied.size());
         r.put("error", error);
         return r;
     }

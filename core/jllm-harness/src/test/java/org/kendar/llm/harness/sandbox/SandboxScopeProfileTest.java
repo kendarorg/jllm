@@ -211,11 +211,38 @@ class SandboxScopeProfileTest {
     // ── profiles ──────────────────────────────────────────────────────────────
 
     @Test
-    void standardProfileKeepsDockersDefaultNetwork() throws Exception {
-        web(Files.createDirectories(tmp.resolve("web")), null, null, null).execute("c1", "true", T);
+    void standardProfileGetsANetworkOfItsOwnPerChat() throws Exception {
+        Path base = Files.createDirectories(tmp.resolve("web"));
+        RemoteExecSandboxExecutor box = web(base, null, null, null);
+        box.execute("c1", "true", T);
         String create = String.join(" ", docker.first("create"));
-        assertFalse(create.contains("--network"), create);
+        assertTrue(create.contains("--network jllm-web-c1"), "not docker's shared default bridge: " + create);
         assertTrue(create.contains("-p 127.0.0.1::8080"), create);
+        assertEquals(java.util.Set.of("jllm-web-c1"), docker.networks);
+        List<String> made = docker.calls.stream().filter(c -> c.size() > 2 && c.get(1).equals("network")
+                && c.get(2).equals("create")).findFirst().orElseThrow();
+        assertTrue(String.join(" ", made).contains("--label jllm=1"), made.toString());
+        assertTrue(docker.calls.indexOf(made) < docker.calls.indexOf(docker.first("create")), "network before container");
+
+        docker.stopDaemon(); // the fake docker knows one container: forget it so the next chat makes its own
+        box.execute("c2", "true", T);
+        assertEquals(java.util.Set.of("jllm-web-c1", "jllm-web-c2"), docker.networks, "another chat, another network");
+
+        box.deleteWorkDir("c1");
+        assertEquals(java.util.Set.of("jllm-web-c2"), docker.networks, "removed with its container");
+    }
+
+    @Test
+    void userScopeSharesOneNetworkPerUserAndUsersNeverShareOne() throws Exception {
+        config = config.withDockerScope("user");
+        Path base = Files.createDirectories(tmp.resolve("web"));
+        RemoteExecSandboxExecutor box = web(base, c -> c.startsWith("a") ? "alice" : "bob", null, null);
+        box.execute("a1", "true", T);
+        box.execute("a2", "true", T);
+        assertEquals(java.util.Set.of("jllm-web-user-alice"), docker.networks, "one network for all of alice's chats");
+        docker.stopDaemon(); // the fake docker knows one container: forget it so the next user makes their own
+        box.execute("b1", "true", T);
+        assertEquals(java.util.Set.of("jllm-web-user-alice", "jllm-web-user-bob"), docker.networks);
     }
 
     @Test
@@ -248,7 +275,7 @@ class SandboxScopeProfileTest {
                 c -> new SandboxPolicy(null, null, null, null, null, "default", null, null), null);
         assertEquals(0, box.execute("c1", "true", T).exitCode());
         String create = String.join(" ", docker.first("create"));
-        assertFalse(create.contains("--network"), create);
+        assertTrue(create.contains("--network jllm-web-c1"), "granted a network: its own, not the default bridge: " + create);
         assertTrue(create.contains("-p 127.0.0.1::8080"), create);
         assertEquals(0, docker.count("exec"));
     }
@@ -317,6 +344,18 @@ class SandboxScopeProfileTest {
         box.close();
         assertEquals(removed, docker.count("rm"), "container kept so the files are not lost");
         assertTrue(warnings.stream().anyMatch(w -> w.contains("was kept")), warnings.toString());
+    }
+
+    @Test
+    void aBackupBiggerThanTheQuotaIsNeverDownloadedWhole() throws Exception {
+        // random data does not compress: the archive is over quota + 1 MiB, so the download stops at the cap
+        config = withCleanup(cleanup(0, "stop", 0, 1000));
+        Path base = Files.createDirectories(tmp.resolve("web"));
+        RemoteExecSandboxExecutor box = web(base, null, null, null);
+        assertEquals(0, box.execute("chat-1", "head -c 3000000 /dev/urandom > big.bin", T).exitCode());
+        String msg = box.backup("chat-1");
+        assertTrue(msg.startsWith("Backup refused") && msg.contains("over the limit"), msg);
+        assertFalse(Files.exists(base.resolve("chat-1/.jllm/workspace-backup.zip")));
     }
 
     @Test

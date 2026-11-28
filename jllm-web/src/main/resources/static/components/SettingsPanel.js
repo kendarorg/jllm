@@ -76,8 +76,6 @@ export default {
       select(TABS[(n + TABS.length) % TABS.length][0]);
       e.preventDefault();
     }
-    onMounted(() => { if (props.me.defaultPassword) tab.value = 'password'; });
-
     return {TABS, tab, select, onKey, pw, changePassword, catalog, disabled, toolsDirty, onTools, saveTools,
       connections, loadConnections, connect, disconnect, expires, me: props.me};
   },
@@ -93,7 +91,6 @@ export default {
       </div>
       <div v-if="tab === 'password' && me.source !== 'oidc'" role="tabpanel">
         <form class="card narrow" @submit.prevent="changePassword">
-          <p v-if="me.defaultPassword" class="banner banner-info">You still have the default password. Choose your own.</p>
           <label for="pw-current">Current password</label>
           <input id="pw-current" type="password" v-model="pw.current" autocomplete="current-password" required />
           <label for="pw-next">New password (at least 8 characters)</label>

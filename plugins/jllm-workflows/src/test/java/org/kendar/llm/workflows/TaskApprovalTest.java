@@ -51,11 +51,35 @@ class TaskApprovalTest {
     }
 
     @Test
-    void unattendedFlowFailsWithoutAsking() {
-        var e = FlowEngine.simple(payer(new ArrayList<>(), new ArrayList<>()));
+    void unattendedFlowGetsADeniedResultAndGoesOn() {
+        List<Boolean> flags = new ArrayList<>();
+        var e = FlowEngine.simple(new Registry().model(c -> {
+            flags.add(c.unattended());
+            if (!c.approved().contains("pay")) { // the host denies the call, the model sees the denial and answers
+                c.onDenied().accept("pay");
+                return "could not pay: denied: unattended run, no one can approve pay";
+            }
+            return "paid";
+        }));
         var r = e.run(flow("{'name':'p','unattended':true,'start':'a'," + TASK), j("{}"), "ann");
-        assertEquals(FlowEngine.Status.FAILED, r.status());
-        assertEquals("PERMISSION", r.error().path("kind").asText());
+        assertEquals(FlowEngine.Status.COMPLETED, r.status(), "no question, the flow is not failed");
+        assertTrue(r.result().path("r").asText().startsWith("could not pay"));
+        assertEquals(List.of(true), flags);
+        var denied = r.history().stream().filter(ev -> ev.kind().equals("denied")).toList();
+        assertEquals(1, denied.size(), "counted in the journal");
+        assertEquals("pay", denied.get(0).data().path("tool").asText());
+        assertTrue(denied.get(0).detail().contains("no one can approve pay"));
+    }
+
+    @Test
+    void anAttendedFlowIsNotMarkedUnattended() {
+        List<Boolean> flags = new ArrayList<>();
+        var e = FlowEngine.simple(new Registry().model(c -> {
+            flags.add(c.unattended());
+            return "ok";
+        }));
+        e.run(flow("{'name':'p','start':'a'," + TASK), j("{}"), "ann");
+        assertEquals(List.of(false), flags);
     }
 
     private static com.fasterxml.jackson.databind.JsonNode j(String s) {

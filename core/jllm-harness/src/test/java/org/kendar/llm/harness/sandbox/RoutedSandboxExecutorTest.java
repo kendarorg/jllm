@@ -20,7 +20,7 @@ class RoutedSandboxExecutorTest {
         var layout = new ChatDirLayout(tmp);
         return new RoutedSandboxExecutor(of, Map.of(
                 SandboxKind.NONE, new DisabledSandboxExecutor(layout),
-                SandboxKind.LOCAL, new LocalSandboxExecutor(layout)), layout);
+                SandboxKind.SHARED_LOCAL, new LocalSandboxExecutor(layout)), layout);
     }
 
     @Test
@@ -37,7 +37,7 @@ class RoutedSandboxExecutorTest {
 
     @Test
     void localKindUsesTheHostRunner() throws IOException {
-        var box = routed(chat -> RoleSandbox.of("local", null, null));
+        var box = routed(chat -> RoleSandbox.of("shared-local", null, null, false));
         assertInstanceOf(LocalSandboxExecutor.class, box.of("c1"));
         assertNull(box.files("c1", "main")); // host file system
     }
@@ -55,7 +55,7 @@ class RoutedSandboxExecutorTest {
 
     @Test
     void kindWithoutARunnerBehavesAsNone() {
-        var box = routed(chat -> RoleSandbox.of("docker-open", null, null)); // no docker runner registered
+        var box = routed(chat -> RoleSandbox.of("docker-open", null, null, false)); // no docker runner registered
         assertInstanceOf(DisabledSandboxExecutor.class, box.of("c1"));
     }
 
@@ -64,12 +64,12 @@ class RoutedSandboxExecutorTest {
         assertEquals(SandboxKind.NONE, SandboxKind.parse(null));
         assertEquals(SandboxKind.DOCKER_ISOLATED, SandboxKind.parse(" Docker-Isolated "));
         assertEquals(SandboxKind.DOCKER_OPEN, SandboxKind.parse("docker_open"));
-        assertEquals("hardened", RoleSandbox.of("docker-isolated", null, null).profile());
-        assertEquals("standard", RoleSandbox.of("docker-open", null, null).profile());
-        assertNull(RoleSandbox.of("local", "user", "none").scope()); // container fields only apply to docker kinds
-        assertNull(RoleSandbox.of("docker-open", null, "none").network()); // network only applies to isolated
+        assertEquals("hardened", RoleSandbox.of("docker-isolated", null, null, false).profile());
+        assertEquals("standard", RoleSandbox.of("docker-open", null, null, false).profile());
+        assertNull(RoleSandbox.of("shared-local", "user", "none", false).scope()); // container fields only apply to docker kinds
+        assertNull(RoleSandbox.of("docker-open", null, "none", false).network()); // network only applies to isolated
         assertThrows(IllegalArgumentException.class, () -> SandboxKind.parse("vm"));
         assertThrows(IllegalArgumentException.class, () -> SandboxKind.parse("docker"));
-        assertThrows(IllegalArgumentException.class, () -> RoleSandbox.of("docker-open", "weird", null));
+        assertThrows(IllegalArgumentException.class, () -> RoleSandbox.of("docker-open", "weird", null, false));
     }
 }

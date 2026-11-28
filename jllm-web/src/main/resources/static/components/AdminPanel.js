@@ -3,8 +3,9 @@ import {api, del, post, put} from '../api.js';
 import {toast} from '../store.js';
 import RoleEditor from './RoleEditor.js';
 import RoleMappingPanel from './RoleMappingPanel.js';
+import ConfigPanel from './ConfigPanel.js';
 
-const TABS = [['users', 'Users'], ['roles', 'Roles'], ['mapping', 'Role mapping']];
+const TABS = [['users', 'Users'], ['roles', 'Roles'], ['mapping', 'Role mapping'], ['config', 'Instructions and agents']];
 const enc = encodeURIComponent;
 
 /**
@@ -12,7 +13,7 @@ const enc = encodeURIComponent;
  * (skills live in the Skills screen).
  */
 export default {
-  components: {RoleEditor, RoleMappingPanel},
+  components: {RoleEditor, RoleMappingPanel, ConfigPanel},
   props: {me: {type: Object, required: true}},
   setup(props) {
     const tab = ref('users');
@@ -31,8 +32,9 @@ export default {
     const nu = reactive({id: '', name: '', role: '', password: ''});
     const admins = computed(() => users.value.filter(u => u.role === 'admin').length);
     const createUser = guard(async () => {
-      await post('/api/admin/users', {...nu, id: nu.id.trim()});
-      toast('User ' + nu.id + ' created' + (nu.password ? '' : ' with the default password'), 'success');
+      const made = await post('/api/admin/users', {...nu, id: nu.id.trim()});
+      if (made && made.temporaryPassword) showTemp(nu.id, made.temporaryPassword);
+      else toast('User ' + nu.id + ' created', 'success');
       Object.assign(nu, {id: '', name: '', password: ''});
       await loadUsers();
     });
@@ -51,11 +53,19 @@ export default {
       await put('/api/admin/users/' + enc(u.id), {email: email.trim()});
       await loadUsers();
     });
+    const temp = ref(null);   // {id, password}: a one-time password, shown once
+    const showTemp = (id, password) => { temp.value = {id, password}; };
+    const unlock = guard(async u => {
+      await post('/api/admin/users/' + enc(u.id) + '/unlock', {});
+      toast('Sign-in unlocked for ' + u.id, 'success');
+      await loadUsers();
+    });
     const pwFor = ref(null);   // user id whose password row is open
     const pwValue = ref('');
     const setPassword = guard(async u => {
-      await post('/api/admin/users/' + enc(u.id) + '/password', pwValue.value ? {password: pwValue.value} : {});
-      toast(pwValue.value ? 'Password set' : 'Password reset to the default', 'success');
+      const r = await post('/api/admin/users/' + enc(u.id) + '/password', pwValue.value ? {password: pwValue.value} : {});
+      if (r && r.temporaryPassword) showTemp(u.id, r.temporaryPassword);
+      else toast('Password set', 'success');
       pwFor.value = null; pwValue.value = '';
       await loadUsers();
     });
@@ -105,7 +115,7 @@ export default {
     onMounted(() => select('users'));
 
     return {TABS, tab, select, onKey, users, roles, catalog, nu, createUser, setRole, rename, setEmail,
-      pwFor, pwValue, setPassword, removeUser, lastAdmin, current, newRole, selectedRole, pick, createRole, saveRole,
+      pwFor, pwValue, setPassword, temp, unlock, removeUser, lastAdmin, current, newRole, selectedRole, pick, createRole, saveRole,
       deleteRole, mappingEnabled, loadMapping};
   },
   template: `
@@ -117,6 +127,9 @@ export default {
     <div class="panel-body">
 
       <div v-if="tab === 'users'" role="tabpanel">
+        <p v-if="temp" class="banner banner-info" role="status">One-time password of <code>{{ temp.id }}</code>:
+          <code>{{ temp.password }}</code> (shown once; the user must change it at the first sign-in)
+          <button class="btn-sm" @click="temp = null">Dismiss</button></p>
         <table class="grid">
           <thead><tr><th>Login</th><th>Name</th><th>Email</th><th>Role</th><th>Sign-in</th><th>Own skills</th><th></th></tr></thead>
           <tbody>
@@ -140,6 +153,8 @@ export default {
                   <small v-if="u.disabledSkills.length" class="muted" :title="u.disabledSkills.join(', ')">
                     · {{ u.disabledSkills.length }} skill(s) off</small></td>
                 <td class="row-actions">
+                  <button v-if="u.lockedFor > 0" class="btn-sm" @click="unlock(u)"
+                          :title="'Locked after failed sign-ins for ' + Math.ceil(u.lockedFor / 60) + ' more minute(s)'">Unlock</button>
                   <button v-if="u.source !== 'oidc'" class="btn-sm" @click="pwFor = pwFor === u.id ? null : u.id; pwValue = ''">Password</button>
                   <button class="btn-danger" @click="removeUser(u)" :disabled="u.id === me.id || lastAdmin(u)"
                           :title="u.id === me.id ? 'You cannot delete your own account' : ''">Delete</button>
@@ -148,9 +163,9 @@ export default {
               <tr v-if="pwFor === u.id" class="subrow">
                 <td colspan="7">
                   <form class="inline-form" @submit.prevent="setPassword(u)">
-                    <input type="password" v-model="pwValue" placeholder="New password; empty = reset to the default"
+                    <input type="password" v-model="pwValue" placeholder="New password; empty = generate a one-time password"
                            autocomplete="new-password" :aria-label="'New password of ' + u.id" />
-                    <button type="submit">{{ pwValue ? 'Set password' : 'Reset to default' }}</button>
+                    <button type="submit">{{ pwValue ? 'Set password' : 'Generate one-time password' }}</button>
                   </form>
                 </td>
               </tr>
@@ -171,11 +186,11 @@ export default {
                 <option v-for="r in roles" :key="r.name" :value="r.name">{{ r.name }}</option>
               </select></div>
             <div class="field"><label for="nu-pw">Password</label>
-              <input id="nu-pw" type="password" v-model="nu.password" placeholder="empty = default"
+              <input id="nu-pw" type="password" v-model="nu.password" placeholder="empty = generate a one-time password"
                      autocomplete="new-password" /></div>
             <button class="btn-primary" type="submit" :disabled="!nu.id || !nu.role">Create</button>
           </div>
-          <p class="muted small">The default password is the SHA-256 (lowercase hex) of the login.</p>
+          <p class="muted small">Without a password a one-time one is generated and shown once; the user must change it at the first sign-in.</p>
         </form>
       </div>
 
@@ -203,6 +218,9 @@ export default {
 
       <div v-if="tab === 'mapping'" role="tabpanel">
         <RoleMappingPanel @changed="loadMapping" />
+      </div>
+      <div v-if="tab === 'config'" role="tabpanel">
+        <ConfigPanel />
       </div>
     </div>
   </section>

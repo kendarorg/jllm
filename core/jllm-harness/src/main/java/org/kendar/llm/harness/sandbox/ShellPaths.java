@@ -38,6 +38,16 @@ public final class ShellPaths {
         return null;
     }
 
+    /**
+     * The refusal of a command line that names a path climbing out of the work dir. It states what was checked: only
+     * paths written with {@code ..} are caught, the shell is not otherwise confined here (that is the sandbox's job),
+     * so the text does not promise more than that.
+     */
+    public static String escapeMessage(String token) {
+        return "Command refused: it names the path " + token + ", which climbs out of the work dir with '..'. Use paths "
+                + "inside the work dir only, and do not try another way to reach that path; tell the user if you need it.";
+    }
+
     private static boolean climbs(String token) {
         for (String seg : token.split("[/\\\\]")) {
             if (seg.equals("..")) return true;
