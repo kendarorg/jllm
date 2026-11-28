@@ -291,7 +291,7 @@ Every permission request is denied automatically. Nothing is asked, nothing is u
 - `nimbus-jose-jwt` >= 9.37.4, Spring Boot latest 3.5.x, `json-schema-validator` latest.
 - OWASP dependency-check as a Maven plugin (`dependency-check-maven`) in a Maven profile `owasp` (`mvn -Powasp verify`),
   not active by default. The report is always generated; the build fails on CVSS >= 7 (high). NVD API key from an
-  environment variable. No CI for now: run locally. The JSON report is converted to `docs/OWASP_DC.md` by a
+  environment variable. No CI for now: run locally. The JSON report is converted to `docs/owasp_dc.md` by a
   single-file Java program (`scripts/OwaspReport.java`, run by `exec-maven-plugin` in the same profile), written even
   when the threshold fails the build (check with `failBuildOnCVSS` after the conversion, e.g. plugin `check` goal
   run after the exec step, with the `analyze`-style goal producing the JSON first).

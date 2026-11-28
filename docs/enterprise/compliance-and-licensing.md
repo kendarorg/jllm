@@ -53,7 +53,7 @@ the provider's own; check them before choosing one.
 
 Releases go to Maven Central under the verified namespace `org.kendar.llm`, with sources and javadoc jars and GPG
 signatures ([PUBLISHING](../reference/publishing.md)). The web application is not published as an artifact. Dependencies are scanned with OWASP dependency-check; the
-latest result is in [OWASP_DC](../OWASP_DC.md).
+latest result is in [owasp_dc](../owasp_dc.md).
 
 ## Not provided
 

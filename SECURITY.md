@@ -13,7 +13,7 @@ Only the latest release receives security fixes.
 
 ## Dependency scan
 
-The latest OWASP dependency-check result is in [docs/OWASP_DC.md](docs/OWASP_DC.md); reviewed suppressions are in
+The latest OWASP dependency-check result is in [docs/owasp_dc.md](docs/owasp_dc.md); reviewed suppressions are in
 [owasp-suppressions.xml](owasp-suppressions.xml).
 
 ## Scope

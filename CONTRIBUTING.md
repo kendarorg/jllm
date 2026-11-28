@@ -48,10 +48,10 @@ mvn -Powasp verify -DskipTests
 - The key comes from the environment variable `NVD_API_KEY` (free, request one at https://nvd.nist.gov/developers/request-an-api-key).
   Without it the first database download is very slow and can be rate limited.
 - The scan always writes `target/dependency-check-report.json`; `scripts/OwaspReport.java` (JDK 21 source launcher, run
-  by `exec-maven-plugin`) converts it to [docs/OWASP_DC.md](docs/OWASP_DC.md), which is committed.
+  by `exec-maven-plugin`) converts it to [docs/owasp_dc.md](docs/owasp_dc.md), which is committed.
 - The build fails when a vulnerability has CVSS 7.0 or higher. The Markdown file is written before that check, so it is
   up to date even when the build fails.
 - False positives go in [owasp-suppressions.xml](owasp-suppressions.xml): one entry per package and CVE, with the
   review notes and an expiry date. Review it at every release.
 - Run the profile on the build server for every release.
-- Convert a report by hand: `java scripts/OwaspReport.java target/dependency-check-report.json docs/OWASP_DC.md`.
+- Convert a report by hand: `java scripts/OwaspReport.java target/dependency-check-report.json docs/owasp_dc.md`.

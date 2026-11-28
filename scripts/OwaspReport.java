@@ -10,14 +10,14 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Converts the JSON report of OWASP dependency-check into docs/OWASP_DC.md.
+ * Converts the JSON report of OWASP dependency-check into docs/owasp_dc.md.
  * Run: java scripts/OwaspReport.java [report.json] [out.md]  (JDK 21 source launcher, no dependencies).
  */
 public class OwaspReport {
 
     public static void main(String[] args) throws Exception {
         Path in = Path.of(args.length > 0 ? args[0] : "target/dependency-check-report.json");
-        Path out = Path.of(args.length > 1 ? args[1] : "docs/OWASP_DC.md");
+        Path out = Path.of(args.length > 1 ? args[1] : "docs/owasp_dc.md");
         if (!Files.exists(in)) {
             System.err.println("OwaspReport: no report at " + in + ", nothing written");
             return;
